@@ -71,7 +71,13 @@ The main writer owns the body's free prose. It rewrites paragraphs to address va
 
 Dispatcher reads the section body from `result/<file>` and grafts it into the H1 section the writer owns. Dispatcher emits the H1 heading and ownership tag itself; the agent never authors them, and any leading H1 / tag line inside the result file is stripped on reapply. No frontmatter overlay accepted from this mode.
 
-The validator does not talk to the operator. Its job is to deliver a **verdict** on the document — name the problems, the contradictions, and the information missing for further work to proceed. Output is the verdict itself: a list of concrete findings, each one short, declarative, and self-contained. The next consumer of this section is the `mode=main` writer (another expert, not a human) — it reads the validator's verdict via the `concerns` payload field and decides what to surface to the operator.
+The validator does not talk to the operator. Its job is to deliver a **verdict** on the document — name the problems, the contradictions, and the information missing for further work to proceed. Output is the verdict itself: a list of concrete findings, each one short, declarative, and self-contained.
+
+**Findings only (MANDATORY).** A finding names one problem: what is wrong, missing, or contradictory, and where in the document. The section carries nothing else: no statement that the document is sound or that a plan, design, or review can proceed, no confirmation that a part matches the approved documents or the repository, no retelling of what the document says, no summary or overall assessment. A sentence that names no problem is noise, and any non-empty section sends the document back to the `mode=main` writer as `concerns`.
+
+**No findings is an empty section (MANDATORY).** When the validator finds no problem, it returns `outcome=edited` with an empty `result` file. The dispatcher then empties the owned section, so a finding from an earlier round does not survive, and no `concerns` are sent. `outcome=empty` is not this case: it leaves the section's previous content in place.
+
+The next consumer of this section is the `mode=main` writer (another expert, not a human) — it reads the validator's verdict via the `concerns` payload field and decides what to surface to the operator.
 
 Plain text is the medium: no operator-facing block belongs inside a validator's section body. Callouts are operator-facing markdown; here there is no operator to render for. Findings go as bullet points or short paragraphs.
 
@@ -132,7 +138,7 @@ Review is the one chain with no language of its own. Write every line of prose �
 
 Where the document itself is empty or gives no signal, follow the language of the brief or source material the job carries. Never retranslate existing prose, and never translate the parts `lazy-core.markdown-style` keeps as identifiers: frontmatter keys and values, callout type tokens, `#review/…` tags, canonical section headings, paths, and wikilink targets.
 
-The banner callouts and the `# History` explainer line are not yours — the entry verb and the banner primitive render those from their own per-language tables, keyed by the repository's `language`. A banner's title is excluded from that lookup: it names the state in English in every vault, exactly like the `#review/…` tag beside it, and the language reaches only the body prose under it.
+The banner callouts and the `# History` explainer line are not yours — the entry verb and the banner primitive render those from the plugin's lockit, keyed by the repository's `language`. A banner's title is excluded from that lookup: it names the state in English in every vault, exactly like the `#review/…` tag beside it, and the language reaches only the body prose under it.
 
 ## Attachments
 

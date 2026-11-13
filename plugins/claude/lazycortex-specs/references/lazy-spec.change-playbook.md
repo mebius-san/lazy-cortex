@@ -21,7 +21,7 @@ The definition flow of a change is the same as a feature's, PLUS the cascade int
 - `design` (`design.md`) — mandatory. Never `cancelled`: the stage primitive refuses it exactly as it refuses a cancelled `bug.md`.
 - `vision` (`vision.md`), `use-cases` (`use-cases.md`), `ui-design` (`ui-design.md`) — opt-in, below.
 - `test-plan` (`test-plan.md`) — opt-in; the change's OWN test cases, covering the change's own modifications and never duplicating a target's. A definition document: reviewed and approved like `design.md`, in no gate of this note, read by the release's tester.
-- A change carries no `architecture.md` and no plans or reports: the product's root `architecture.md` is revised by the architect at the start of each release build, and `code-plan.md`, `code-report.md`, `test-report.md` are the release's.
+- A change carries no `architecture.md` and no plans or reports: the product's root `architecture.md` is brought up to date with the approved designs on the product note, by the `Revise architecture` row, never inside a release build, and `code-plan.md`, `code-report.md`, `test-report.md` are the release's.
 - `decisions.md` — the registry of recorded decisions, written only by the `lazy-spec.record-decision` primitive. It carries no stage and takes no part in any gate.
 
 ## Use-cases and ui-design
@@ -73,7 +73,7 @@ No `Publish`, no `Start …`, no `Write code-plan` and no `Write architecture` r
 
 **The one difference from a feature on this table, and it is hard:** the change's OWN `Write test-plan` does NOT hang until the phase-II cascade has converged. Every target's test cases must reflect the delta before the change writes its own — otherwise the change's own cases are written against a contract that is about to change.
 
-Ticking is the operator's gesture and only theirs; the coordinator never ticks a checkbox under any circumstance. Every ticked `Write` row is enacted through seed-then-start above, never a job bundle. `dispatch-job` mechanics belong to the cascade folds below and to the release's build jobs, where dispatch stays deduplicated by key — the status note's path relative to `spec_path` plus the label.
+Ticking is the operator's gesture and only theirs; the coordinator never ticks a checkbox under any circumstance. Every ticked `Write` row is enacted through seed-then-start above, never a job bundle. `dispatch-job` mechanics belong to the cascade folds below and to the release's `Build` and `Test` jobs, where dispatch stays deduplicated by key — the status note's path relative to `spec_path` plus the label.
 
 `spec_halted: true` overrides this table unconditionally: no checkbox hangs, and any un-ticked one comes down. A ticked one (`- [x]`) stays — the operator's tick has already happened.
 

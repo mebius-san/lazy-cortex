@@ -13,7 +13,7 @@ spec_source_requests: []
 spec_source_docs: []
 ---
 # {{product}} — architecture
-<!-- The shape of the product's code: module boundaries, dependency direction, public contracts versus internals, and the cost of changing existing callers. It is the standing document every release's plan is written against, and the architect revises it when a release's delta needs a structural change. What the product does lives in the sibling design, and the technologies it is built with live in the sibling tech. -->
+<!-- The shape of the product's code: module boundaries, dependency direction, public contracts versus internals, and the cost of changing existing callers. It is the standing document every release's plan is written against, kept current with the approved designs before a release starts. What the product does lives in the sibling design, and the technologies it is built with live in the sibling tech. -->
 
 ## Overview
 <!-- The parts of the codebase the product owns and the shape they form together. A few sentences of prose. What the product does lives in the sibling design. -->
@@ -34,7 +34,7 @@ spec_source_docs: []
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The migrations the current structure still owes and the cost a change of structure imposes on existing callers. One bullet per migration or breaking point: what breaks, and what must move with it. A new dependency lives in Dependencies. -->
 
 ## Proposed assets
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The assets the product is missing, found while revising this document for a release build. One `[!asset-proposal]` callout per asset; once this document is approved the coordinator materializes each one, and the new asset ships in a later release, never in the build that proposed it. An existing asset merely worth mentioning is prose in the section it concerns, never a proposal. -->
+<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The assets the product is missing, found while writing or revising this document. One `[!asset-proposal]` callout per asset; once this document is approved the coordinator materializes each one, and the new asset enters a release like any other, once its own start document is approved. An existing asset merely worth mentioning is prose in the section it concerns, never a proposal. -->
 
 # Sources
 #protected/spec/sources

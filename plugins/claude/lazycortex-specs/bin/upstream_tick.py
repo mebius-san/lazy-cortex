@@ -65,6 +65,9 @@ from spec_keys import (  # noqa: E402
     Gate, HistoryEvent, LangId, SpecKey, SpecValue, UPSTREAM_ACTION_LABELS, UPSTREAM_FROZEN_STATUSES, UpstreamAction,
     UpstreamKey, UpstreamRole, UpstreamSourceKey, UpstreamSourceStatus, UpstreamStatus,
 )
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_lockit import Lockit  # noqa: E402
 
 
 # Known forge hosts mapped to the path segment their blob-view URL puts before the revision.
@@ -89,11 +92,8 @@ _GATE_HOLD_STATUSES = (UpstreamStatus.NEW, UpstreamStatus.DRIFTED, UpstreamStatu
 # Cursor-file field name.
 _CURSOR_KEY = "cursor"
 
-# One-line description under the root catalog note's title, per vault authoring language.
-_ROOT_NOTE_EXPLAINERS: dict[str, str] = {
-    LangId.EN: "_Mirrored external sources — one folder per configured source repo._",
-    LangId.RU: "_Зеркала внешних источников — по папке на каждый настроенный репозиторий._",
-}
+# Lockit key of the one-line description under the root catalog note's title.
+_ROOT_NOTE_KEY = "upstream-root-note"
 
 
 class _K:
@@ -524,41 +524,24 @@ class GlobMatcher:
     return re.compile("^" + regex + "$")
 
 
-# italic one-liners rendered under every generated section heading, per vault language —
+# the lockit key of the one-liner rendered under each generated section heading, by heading —
 # the bot note documents itself so the operator never has to guess what a section means
-_EXPLAINERS: dict[tuple[str, str], str] = {
-    (_K.ACTIONS_H1, LangId.EN): "Operator decisions for this unit: tick one box — the next tick acts on it.",
-    (_K.ACTIONS_H1, LangId.RU):
-        "Решения оператора по юниту: отметьте один чекбокс — следующий тик его исполнит.",
-    (_K.SKIPPED_CURRENT_H1, LangId.EN):
-        "Source files left out of the current mirror (source/): too large or not text. "
-        "Judge the unit knowing these are absent.",
-    (_K.SKIPPED_CURRENT_H1, LangId.RU):
-        "Файлы источника, не попавшие в текущее зеркало (source/): слишком большие или нетекстовые. "
-        "Оценивайте юнит с учётом того, чего здесь нет.",
-    (_K.SKIPPED_PROCESSED_H1, LangId.EN):
-        "Files that were absent from the last accepted snapshot (processed/) — "
-        "the baseline drift is measured against.",
-    (_K.SKIPPED_PROCESSED_H1, LangId.RU):
-        "Файлы, отсутствовавшие в последнем принятом снапшоте (processed/) — базе, от которой меряется дрейф.",
-    (_K.HISTORY_H1, LangId.EN): "Closed requests of this unit; lines are appended by the tick.",
-    (_K.HISTORY_H1, LangId.RU): "Закрытые реквесты юнита; строки дописывает рутина.",
-    (_K.SOURCE_NOTE_H1, LangId.EN): "Result of the last scheduled fetch of this source repository.",
-    (_K.SOURCE_NOTE_H1, LangId.RU): "Итог последнего планового фетча репозитория-источника.",
-    (_K.SOURCE_INVALID_H1, LangId.EN):
-        "Source directories whose names are unsafe for the vault — no unit is created for them.",
-    (_K.SOURCE_INVALID_H1, LangId.RU):
-        "Каталоги источника с именами, небезопасными для вольта — юниты по ним не создаются.",
-    (_K.SOURCE_UNITS_H1, LangId.EN): "Live summary of this source's units (Dataview).",
-    (_K.SOURCE_UNITS_H1, LangId.RU): "Живая сводка юнитов источника (Dataview).",
+_EXPLAINER_KEYS: dict[str, str] = {
+    _K.ACTIONS_H1: "upstream-explainer.actions",
+    _K.SKIPPED_CURRENT_H1: "upstream-explainer.not-mirrored-current",
+    _K.SKIPPED_PROCESSED_H1: "upstream-explainer.not-mirrored-processed",
+    _K.HISTORY_H1: "upstream-explainer.history",
+    _K.SOURCE_NOTE_H1: "upstream-explainer.fetch-status",
+    _K.SOURCE_INVALID_H1: "upstream-explainer.invalid-names",
+    _K.SOURCE_UNITS_H1: "upstream-explainer.units",
 }
 
 
 def _with_explainer(section: str, lang: str) -> str:
   """
-  Insert the section's italic explainer line right under its heading.
+  Insert the section's comment explainer line right under its heading.
 
-  Idempotent: an explainer already present under the heading (any language, from a prior
+  Idempotent: an explainer already present under the heading (any language or form, from a prior
   render) is replaced rather than stacked.
 
   Args:
@@ -569,7 +552,7 @@ def _with_explainer(section: str, lang: str) -> str:
     The section with exactly one explainer line under the heading, or unchanged when no
     explainer is defined for its heading.
   """
-  return note_explainers.with_explainer(section, lang, _EXPLAINERS)
+  return note_explainers.with_explainer(section, lang, _EXPLAINER_KEYS)
 
 
 def _load_upstream_config(repo: Path) -> dict:
@@ -2501,6 +2484,8 @@ def _ensure_root_note(repo: Path) -> Path | None:
   """
   Seed the root upstream catalog folder-note once, so the `upstream/` folder carries its icon.
 
+  The seeded note carries a one-line description in the repository's authoring language.
+
   Args:
     repo: Repository root.
 
@@ -2515,9 +2500,7 @@ def _ensure_root_note(repo: Path) -> Path | None:
     return None
 
   # seed the icon frontmatter plus a one-line description in the vault's authoring language
-  explainer = _ROOT_NOTE_EXPLAINERS.get(
-      resolve_language.resolve_repo_language(repo), _ROOT_NOTE_EXPLAINERS[LangId.EN],
-  )
+  explainer = Lockit.text(_ROOT_NOTE_KEY, resolve_language.resolve_repo_language(repo))
   note_path.parent.mkdir(parents = True, exist_ok = True)
   spec_paths.write_text_atomic(note_path,
       "---\n"

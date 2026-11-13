@@ -13,7 +13,7 @@ execution-discipline-waiver: "Documents a pure script (bin/gate_tick.py) dispatc
 
 **Active-job polling.** When the runtime sidecar tracks an `active_job` for the asset, the worker checks that job's bundle for a terminal marker (`DONE` / `DEAD` / `CANCELLED`) before doing anything else. No marker yet → falls through to the structural check below untouched, and so does an asset that tracks no job at all.
 
-- `DONE` clears the key and writes nothing into the folder-note. The worker opens no review itself: for a release's build jobs (`Revise architecture`, `Build`, `Test`), the coordinator opens the review on the document the job just wrote (the product's `architecture.md`, the release's `code-report.md` / `test-report.md`) on the `job-done` wake this same poll raises.
+- `DONE` clears the key and writes nothing into the folder-note. The worker opens no review itself: for a release's jobs (`Build`, `Test`), the coordinator opens the review on the document the job just wrote (the release's `code-report.md` / `test-report.md`) on the `job-done` wake this same poll raises.
 - `CANCELLED` clears the key and writes nothing into the folder-note; no further follow-up.
 - `DEAD` clears the key, sets `spec_halted: true`, and appends a persistent `[!failure]` callout to `# Gates` — un-halting is a manual operator act, out of scope for this worker. It does NOT drop any launch checkbox; the coordinator owns the checkbox layer entirely and reconciles it on its next wake.
 

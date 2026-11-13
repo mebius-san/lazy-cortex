@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-11-12
+last_regen: 2026-11-13
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: d87a299e3d354b9cf3ae8f1383512a1374b8efc7
-surface_sha: d7336d9d046ab72ea22ef0514fdb23002570e64a2794edc6fefa960d71a0e94f
+source_sha: 854c86a8ab2345d3e23b1f7139f14d715d5435ad
+surface_sha: b0f67b91cfa13ec3deb370696dd9ea3af0f89854fc1d68b00929ac304188506e
 ---
 # Troubleshooting
 
@@ -666,7 +666,7 @@ surface_sha: d7336d9d046ab72ea22ef0514fdb23002570e64a2794edc6fefa960d71a0e94f
 
 **Likely cause**: `spec_plan_done` doesn't read `true` yet. The skill checks this itself before proposing (`/lazy-spec.flip-gate` no longer double-checks a gate's readiness on its own — see "I flipped a gate out of order" above), so an unmet plan gate silently withholds the proposal rather than surfacing one that would land wrong. A design-only asset never gets this proposal: it has no `spec_develop_done` of its own, and the sync reports its landed code as implemented outside a release instead.
 
-**Fix**: Settle the release's plan — the build's architecture revision must be settled and the release's `code-plan.md`, if one was ever authored, must reach `spec_stage: approved` (or absence itself satisfies the gate) — then flip the release's `spec_plan_done` yourself via `/lazy-spec.flip-gate`, or let `spec.coordinator` derive and flip it on its next wake. Re-run `/lazy-spec.sync-with-code` afterward.
+**Fix**: Settle the release's plan — the build's architecture revision must be settled, and the release's `code-plan.md` must reach `spec_stage: approved` or `cancelled`, or the owner's `# Coordinator rules` must waive the code plan. A missing `code-plan.md` does not settle the plan on its own; without that waiver the gate stays open (and `/lazy-spec.audit` reports a true `spec_plan_done` over an absent code plan as a FAIL). Then flip the release's `spec_plan_done` yourself via `/lazy-spec.flip-gate`, or let `spec.coordinator` derive and flip it on its next wake. Re-run `/lazy-spec.sync-with-code` afterward.
 
 ---
 

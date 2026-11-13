@@ -76,6 +76,8 @@ _SUB_MIGRATE_REQUESTS = "migrate-requests"
 _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
 _SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
+_SUB_LOCKIT_TEXT = "lockit-text"
+_SUB_LOCKIT_KEYS = "lockit-keys"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -84,6 +86,10 @@ _USAGE = (
     "  resolve-product <by-key|by-path|effective|effective-by-path> ...\n"
     "                                  resolve a product from settings, raw or with inheritance merged\n"
     "  resolve-language <relpath>     resolve a doc's effective language\n"
+    "  lockit-text <key> [--lang CODE] [--note PATH] [--cwd DIR]\n"
+    "                                  print one fixed text of the plugin, in the given language, else the\n"
+    "                                  note's resolved language, else the repo's\n"
+    "  lockit-keys                    list the keys of every fixed text the plugin carries\n"
     "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate; spec_cancelled --off also\n"
     "                                  returns the asset's cancelled documents to draft\n"
     "  gate-tick <asset_note> [--today YYYY-MM-DD]   clear finished job markers, run structural note-check\n"
@@ -261,6 +267,8 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_SOURCE_LINKS: ( "source_link_migrate", _MAIN ),
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
     _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),
+    _SUB_LOCKIT_TEXT: ( "note_explainers", "main_lockit_text" ),
+    _SUB_LOCKIT_KEYS: ( "note_explainers", "main_lockit_keys" ),
 }
 
 

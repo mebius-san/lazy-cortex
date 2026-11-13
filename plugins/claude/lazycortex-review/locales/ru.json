@@ -1,0 +1,13 @@
+{
+  "autorun.running-line": "> Идёт автопрогон: пройдено кругов без остановок: {cycles}.\n",
+  "autorun.stop-line": "> Автопрогон остановлен после {cycles} круг(ов): {reason}\n",
+  "autorun.stop-reason.cap": "достигнут потолок кругов",
+  "autorun.stop-reason.clean": "валидаторы не подняли замечаний",
+  "autorun.stop-reason.question": "эксперт задал вопрос",
+  "banner.action-needed": "> [!caution] Action needed #review/action-needed\n> Ответьте на открытый вопрос или кандидат решения ниже, отметив вариант, и закоммитьте.\n",
+  "banner.finalizing": "> [!hint] Waiting: finalize #review/finalizing\n",
+  "banner.in-process": "> [!hint] {title} #review/in-process\n{autorun}> Чтобы вмешаться или разбудить застрявший документ, напишите указание в коллауте `[!todo] #review/command`.\n",
+  "banner.ready-single": "> [!success] Ready to approve #review/ready\n{autorun}> Отметьте галочку ниже, чтобы утвердить документ целиком.\n> Чтобы отправить на доработку, поправьте текст и закоммитьте или напишите указание в коллауте `[!todo] #review/command`.\n> - [{tick}] утвердить документ целиком\n",
+  "banner.ready-triple": "> [!success] Ready to approve #review/ready\n{autorun}> Отметьте ОДНУ галочку: утвердить и отдать валидаторам, утвердить и дать циклу дойти до конца, или утвердить и финализировать без ещё одного круга валидации.\n> Чтобы отправить на доработку, поправьте текст и закоммитьте или напишите указание в коллауте `[!todo] #review/command`.\n> - [{tick}] утвердить этот и предыдущие раунды\n> - [ ] утвердить и догнать до конца без остановок\n> - [ ] утвердить без дальнейшей валидации\n",
+  "history.explainer": "Журнал изменений документа за время ревью. Ведётся автоматически — руками не править."
+}

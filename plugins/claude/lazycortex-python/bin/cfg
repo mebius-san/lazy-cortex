@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# cfg — project venv configurator for the lazycortex-python plugin (`cfg-py`).
+#
+# Creates AND updates the project venv to the project's requirements, all read from
+# pyproject.toml (+ .python-version): the interpreter from `requires-python`, every
+# `[project].dependencies` entry, every extra, every `[dependency-groups]` group, plus the
+# plugin's checker tools (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar) on top.
+# An existing venv whose interpreter does not satisfy the project's Python requirement is
+# recreated; otherwise its packages are updated in place. The target venv is
+# `[tool.lazy-python].venv` when set, else <project>/.venv. The logic is shared with
+# chk / tst (bin/_cfg_venv.sh), which run it automatically when the venv is missing or
+# stale unless protected mode or `bootstrap-fallback = false` forbids it.
+#
+# Protected mode (LAZYCORTEX_PROTECTED set to anything but empty or `0`) installs
+# nothing: cfg refuses with a non-zero exit. Run it from an interactive session or a
+# console instead.
+#
+# Usage:
+#   cfg            # create / update the project venv
+#   cfg --help     # print this usage
+set -e
+set -u
+set -o pipefail
+
+# directory containing the script
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+
+function print_help() {
+  echo "create or update the project venv from pyproject.toml"
+  echo "usage: cfg"
+  echo
+  echo "  installs the interpreter requires-python asks for, every project dependency,"
+  echo "  extra and dependency group, plus the lazy-python checker tools"
+  echo
+  echo "  -q         accepted as no-op (lazy-python.style.md compat)"
+  echo "  --help     this help"
+  echo
+}
+
+# help shortcut
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  print_help
+  exit 0
+fi
+
+# parse args: only -q is accepted
+while [ -n "${1-}" ]; do
+  if [ "$1" != "-q" ]; then
+    echo "cfg: unexpected arg: $1" >&2
+    print_help
+    exit 1
+  fi
+  shift
+done
+
+source "$script_dir/_cfg_venv.sh"
+
+# guard: protected mode installs nothing — refuse before touching anything
+if _lazy_py_protected; then
+  echo "cfg-py: refusing to run in protected mode (LAZYCORTEX_PROTECTED is set): it installs packages" >&2
+  echo "cfg-py: run it from an interactive session or console, not in protected mode" >&2
+  exit 1
+fi
+
+venv="$(_target_venv)"
+_cfg_venv "$venv"
+echo "[lazy-python] project venv at ${venv} is configured" >&2

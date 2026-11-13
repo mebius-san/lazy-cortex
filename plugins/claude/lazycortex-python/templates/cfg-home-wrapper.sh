@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# ~/.local/bin/cfg-py — managed by /lazy-python.install (Phase 2b); edit the template, not this copy.
+# Finds the nearest <repo>/cli/cfg-py above the current directory and runs it through bash,
+# so the repo copy never needs the exec bit and the command name stays the same everywhere.
+set -eu
+_dir=$PWD
+while :; do
+  if [ -f "$_dir/cli/cfg-py" ]; then
+    exec bash "$_dir/cli/cfg-py" "$@"
+  fi
+  if [ "$_dir" = "/" ]; then
+    break
+  fi
+  _dir=$(dirname "$_dir")
+done
+echo "cfg-py: no cli/cfg-py found between $PWD and /" >&2
+exit 1

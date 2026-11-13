@@ -64,7 +64,7 @@ _KEY_OUTPUT         = "output"
 _KEY_LANGUAGE       = "language"
 _DEFAULT_DICTIONARY = "docs/guidelines/domain-groups.md"
 _DEFAULT_OUTPUT     = "docs/domains"
-_DEFAULT_LANGUAGE   = "English"
+_DEFAULT_LANGUAGE   = _explainers.LangId.EN.value
 
 # Error text raised when the loaded configuration is read without a `wiki.domains` section.
 _MSG_UNCONFIGURED = "wiki.domains is not configured"
@@ -261,10 +261,8 @@ class DomainConfig:
   @property
   def language_code(self) -> str:
     """
-    The configured language narrowed to an ISO 639-1 code — a legacy free-form
-    name is mapped through the compatibility table, a code passes through unchanged.
+    The configured language narrowed to an ISO 639-1 code; a code passes through unchanged.
     """
-    # the raw setting may still hold a pre-code free-form name for one release
     return _explainers.language_code(self.language)
 
   @classmethod
@@ -1881,7 +1879,7 @@ class DomainPlanner:
     return {
       **entry,
       PLAN_LANGUAGE:          self.cfg.language_code,
-      PAYLOAD_LANGUAGE_NAME:  _explainers.LANGUAGE_NAMES.get(self.cfg.language_code, self.cfg.language_code),
+      PAYLOAD_LANGUAGE_NAME:  _explainers.language_name(self.cfg.language_code),
       PAYLOAD_CATALOG_BLOCKS: catalog[CATALOG_BLOCKS],
       PAYLOAD_CATALOG_GROUPS: catalog[CATALOG_GROUPS],
     }

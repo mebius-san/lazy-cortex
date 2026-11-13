@@ -25,23 +25,19 @@ Key invariants enforced here:
 """
 from __future__ import annotations
 
-from typing import TypeVar
-
 import enum
 import re
 
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # pylint: disable=import-error,deprecated-module
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import AutorunState, Bucket, LangId, Phase  # pylint: disable=import-error
+from keys import AutorunState, Bucket, LangId, LockitKey, Phase  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from review_lockit import Lockit  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
-
-
-# One entry of a per-language string table — a template string, or a table of them
-_EntryType = TypeVar("_EntryType")
 
 
 # ----------------------------------------------------------- enums
@@ -424,128 +420,8 @@ _WAITING_CONTEXT_LABELS: dict[str, str] = {
 # Bare "Waiting" title — what an unknown or absent waiting context renders.
 _WAITING_BARE = "Waiting"
 
-# The in-process banner's first line, shared by every language: `{title}` takes a waiting label.
-_IN_PROCESS_TITLE_LINE = "> [!hint] {title} #review/in-process\n"
-
-_TEMPLATES: dict[str, dict[State, str]] = {
-    LangId.EN: {
-        State.IN_PROCESS: _IN_PROCESS_TITLE_LINE + (
-            "{autorun}"
-            "> To intervene, or to wake a document that looks stuck, write the instruction "
-            "in a `[!todo] #review/command` callout.\n"
-        ),
-        State.ACTION_NEEDED: (
-            "> [!caution] Action needed #review/action-needed\n"
-            "> Answer the open question or the decision candidate below by ticking an option, "
-            "then commit.\n"
-        ),
-        State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
-    },
-    LangId.RU: {
-        State.IN_PROCESS: _IN_PROCESS_TITLE_LINE + (
-            "{autorun}"
-            "> Чтобы вмешаться или разбудить застрявший документ, напишите указание "
-            "в коллауте `[!todo] #review/command`.\n"
-        ),
-        State.ACTION_NEEDED: (
-            "> [!caution] Action needed #review/action-needed\n"
-            "> Ответьте на открытый вопрос или кандидат решения ниже, отметив вариант, "
-            "и закоммитьте.\n"
-        ),
-        # a title and nothing else: no body prose exists here to carry the language
-        State.FINALIZING: "> [!hint] Waiting: finalize #review/finalizing\n",
-    },
-}
-
-# The ready banner before any validation round, or after an autorun stopped clean: one approval checkbox, the
-# `approve` gesture.
-# `{autorun}` takes the stop line of an autorun that ended, or nothing.
-_READY_SINGLE_TEMPLATE: dict[str, str] = {
-    LangId.EN: (
-        "> [!success] Ready to approve #review/ready\n"
-        "{autorun}"
-        "> Tick the box below to approve the whole document.\n"
-        "> To send it back for another writer round, edit the text and commit, "
-        "or write the instruction in a `[!todo] #review/command` callout.\n"
-        "> - [{tick}] approve the whole document\n"
-    ),
-    LangId.RU: (
-        "> [!success] Ready to approve #review/ready\n"
-        "{autorun}"
-        "> Отметьте галочку ниже, чтобы утвердить документ целиком.\n"
-        "> Чтобы отправить на доработку, поправьте текст и закоммитьте "
-        "или напишите указание в коллауте `[!todo] #review/command`.\n"
-        "> - [{tick}] утвердить документ целиком\n"
-    ),
-}
-
-# The ready banner once a validation round has run, unless an autorun stopped clean: the three approval
-# checkboxes, in `READY_GESTURE_KINDS` order. `{autorun}` takes the stop line of an autorun that ended, or nothing.
-_READY_TRIPLE_TEMPLATE: dict[str, str] = {
-    LangId.EN: (
-        "> [!success] Ready to approve #review/ready\n"
-        "{autorun}"
-        "> Tick ONE box: approve and send to the validators, approve and let the loop run to the end, "
-        "or approve and finalize without another validation round.\n"
-        "> To send it back for another writer round, edit the text and commit, "
-        "or write the instruction in a `[!todo] #review/command` callout.\n"
-        "> - [{tick}] approve this and previous rounds\n"
-        "> - [ ] approve and run to the end without stops\n"
-        "> - [ ] approve without further validation\n"
-    ),
-    LangId.RU: (
-        "> [!success] Ready to approve #review/ready\n"
-        "{autorun}"
-        "> Отметьте ОДНУ галочку: утвердить и отдать валидаторам, утвердить и дать циклу дойти до конца, "
-        "или утвердить и финализировать без ещё одного круга валидации.\n"
-        "> Чтобы отправить на доработку, поправьте текст и закоммитьте "
-        "или напишите указание в коллауте `[!todo] #review/command`.\n"
-        "> - [{tick}] утвердить этот и предыдущие раунды\n"
-        "> - [ ] утвердить и догнать до конца без остановок\n"
-        "> - [ ] утвердить без дальнейшей валидации\n"
-    ),
-}
-
-# The ready banner's opening line after an autorun stopped; `{reason}` comes from `_AUTORUN_STOP_REASONS`.
-_AUTORUN_STOP_LINE: dict[str, str] = {
-    LangId.EN: "> Autorun stopped after {cycles} cycle(s): {reason}\n",
-    LangId.RU: "> Автопрогон остановлен после {cycles} круг(ов): {reason}\n",
-}
-
-# Why an autorun stopped, keyed by its `review_autorun` stop state; a running or absent autorun has no entry.
-_AUTORUN_STOP_REASONS: dict[str, dict[str, str]] = {
-    LangId.EN: {
-        AutorunState.CLEAN: "the validators raised no concerns",
-        AutorunState.CAP: "the cycle cap was reached",
-        AutorunState.QUESTION: "an expert asked a question",
-    },
-    LangId.RU: {
-        AutorunState.CLEAN: "валидаторы не подняли замечаний",
-        AutorunState.CAP: "достигнут потолок кругов",
-        AutorunState.QUESTION: "эксперт задал вопрос",
-    },
-}
-
-# The in-process banner's progress line while an autorun is still turning.
-_AUTORUN_RUNNING_LINE: dict[str, str] = {
-    LangId.EN: "> Autorun in progress: {cycles} cycle(s) done without operator stops.\n",
-    LangId.RU: "> Идёт автопрогон: пройдено кругов без остановок: {cycles}.\n",
-}
-
-
-def _resolve_for_language(table: dict[str, _EntryType], lang: str) -> _EntryType:
-  """
-  Resolve a table's entry for a language, falling back to the shipped English one.
-
-  Args:
-    table: One of the per-language string tables.
-    lang: Resolved language code; a code with no entry of its own falls back.
-
-  Returns:
-    The language's entry, or the English entry when the language has none.
-  """
-  # every table is complete for English, so the floor always answers
-  return table.get(lang) or table[LangId.EN]
+# The autorun stop states: each has a stop-reason string in the lockit; a running or absent autorun has none.
+_AUTORUN_STOP_STATES = ( AutorunState.CLEAN, AutorunState.CAP, AutorunState.QUESTION )
 
 
 def render(
@@ -591,7 +467,7 @@ def render(
     autorun_cycles: Autoapprovals done in the current autorun, shown as `n` in the autorun line; `None` counts as 0.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose; titles stay English, and a language with
-      no table of its own renders the shipped English wording throughout.
+      no lockit file renders the English wording throughout.
 
   Returns:
     Callout markdown string for the given state, ready to embed in the document body.
@@ -638,23 +514,26 @@ def render(
   # the ready banner: one box on a clean autorun stop or before any validation round, three otherwise, opened by
   # the stop line of an autorun that ended
   if state is State.READY:
-    ready = _resolve_for_language(_READY_TRIPLE_TEMPLATE if validation_seen and autorun != AutorunState.CLEAN
-                                  else _READY_SINGLE_TEMPLATE, lang)
-    reason = _resolve_for_language(_AUTORUN_STOP_REASONS, lang).get(autorun or "")
-    stop_line = "" if reason is None else _resolve_for_language(_AUTORUN_STOP_LINE, lang).format(
-        cycles = cycles, reason = reason,
+    ready_key = (
+        LockitKey.BANNER_READY_TRIPLE if validation_seen and autorun != AutorunState.CLEAN
+        else LockitKey.BANNER_READY_SINGLE
     )
-    return ready.format(tick = "x" if approved else " ", autorun = stop_line)
+    stop_line = ""
+    if autorun in _AUTORUN_STOP_STATES:
+      stop_line = Lockit.text(LockitKey.AUTORUN_STOP_LINE, lang).format(
+          cycles = cycles, reason = Lockit.text(LockitKey.AUTORUN_STOP_REASON_PREFIX + autorun, lang),
+      )
+    return Lockit.text(ready_key, lang).format(tick = "x" if approved else " ", autorun = stop_line)
 
   # the waiting banner: a phase-enriched title, plus the progress line of an autorun still turning
-  template = _resolve_for_language(_TEMPLATES, lang)[state]
+  template = Lockit.text(LockitKey.BANNER_PREFIX + state.value, lang)
   if state is State.IN_PROCESS:
-    title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE)
-    running_line = (
-        _resolve_for_language(_AUTORUN_RUNNING_LINE, lang).format(cycles = cycles)
-        if autorun == AutorunState.RUNNING else ""
+    running_line = ""
+    if autorun == AutorunState.RUNNING:
+      running_line = Lockit.text(LockitKey.AUTORUN_RUNNING_LINE, lang).format(cycles = cycles)
+    return template.format(
+        title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE), autorun = running_line,
     )
-    return template.format(title = title, autorun = running_line)
   return template
 
 

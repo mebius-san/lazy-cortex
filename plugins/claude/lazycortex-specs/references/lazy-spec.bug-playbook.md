@@ -17,7 +17,7 @@ This file is the law of the wake on which `spec.coordinator` works an asset whos
 
 ## There is no architecture step
 
-The `Write architecture` checkbox never hangs on a bug — not on a code-bearing judgment, not on an expert's request, not on a large defect. A bug never has an architecture document: an architecture document describes the shape of code an asset introduces, and a bug introduces nothing — it returns the system to a shape already approved. The product's `architecture.md` is revised by the architect at the start of each release build if the fix needs it. When the fix does require changing the approved shape, it is not a bug: the coordinator raises an `[!asset-proposal]` for a `change` (or `feature`) asset that names the bug as its source, while the bug itself stays a description of the defect.
+The `Write architecture` checkbox never hangs on a bug — not on a code-bearing judgment, not on an expert's request, not on a large defect. A bug never has an architecture document: an architecture document describes the shape of code an asset introduces, and a bug introduces nothing — it returns the system to a shape already approved. The product's `architecture.md` is brought up to date with the approved `bug.md` on the product note, by the `Revise architecture` row (`lazy-spec.release-owner-playbook.md` § 4), never inside a release build. When the fix does require changing the approved shape, it is not a bug: the coordinator raises an `[!asset-proposal]` for a `change` (or `feature`) asset that names the bug as its source, while the bug itself stays a description of the defect.
 
 Accordingly, no block with that label ever appears in a bug's `# Gates`.
 

@@ -24,8 +24,9 @@
 #   chk <subcommand> [module ...]
 #
 # Runs standalone from a bare terminal — CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DATA
-# are optional (only an optimization for the venv helper's probe 4; probes 1-3 +
-# self-derivation work without them).
+# are not read: the venv resolver (_ensure_venv.sh) derives the project root itself, and
+# configures a missing or stale project venv from pyproject.toml the way `cfg` (cfg-py)
+# does — never in protected mode (LAZYCORTEX_PROTECTED), where it only verifies.
 set -e
 set -u
 set -o pipefail
@@ -33,7 +34,7 @@ set -o pipefail
 # directory containing the script
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 
-# bootstrap (or reuse) the shared venv; exports PATH with venv/bin first.
+# verify (and, when allowed, configure) the project venv; exports PATH with venv/bin first.
 # _ensure_venv.sh early-returns on a probe hit — wrapping it in its own function
 # keeps that `return` scoped to the wrapper so the env-source hook below still runs.
 _activate_venv() {

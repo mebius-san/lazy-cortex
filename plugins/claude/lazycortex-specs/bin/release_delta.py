@@ -3,7 +3,9 @@ Logic behind the `lazycortex-specs release-delta <product-key>` verb.
 
 The verb names the assets a product's next release carries — every approved, unreleased, uncancelled asset of
 the product that owns releases and of the nested products that ship with it, for a change once its cascade into
-the target designs is done — and finds the product's open release, if any.
+the target designs is done — finds the product's open release, if any, and reports the two facts a release start
+waits on: whether the owner's `architecture.md` is approved later than every design the release carries, and
+which notes carry an open coherence conflict.
 """
 from __future__ import annotations
 
@@ -38,8 +40,8 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    RESEARCH_ASSET_TYPE, AssetTypeKey, Gate, ReleaseKey, SpecCascadeKey, SpecKey,
-    SpecValue, Stage, StageKey,
+    RESEARCH_ASSET_TYPE, AssetTypeKey, ConflictKey, Gate, LevelDoc, ReleaseKey, SpecCascadeKey, SpecKey,
+    SpecMomentKey, SpecValue, Stage, StageKey,
 )
 
 
@@ -61,6 +63,11 @@ _INCLUDED = "included"
 _EXCLUDED = "excluded"
 _TOKEN = "token"
 _REASON = "reason"
+_ARCHITECTURE = "architecture"
+_DOC = "doc"
+_APPROVED_AT = "approved_at"
+_BEHIND = "behind"
+_CONFLICTED = "conflicted"
 
 
 # ----------------------------------------------------------------------------------------
@@ -74,12 +81,15 @@ class DeltaEntry:
     token: The asset folder's path relative to the release owner's root.
     asset_type: The asset's `spec_asset_type`.
     reason: Why the asset is held back, empty for an included one.
+    approved_at: The approval moment of the asset's start document, empty when it carries none or the asset is
+      held back.
   """
 
   note: Path
   token: str
   asset_type: str
   reason: str = ""
+  approved_at: str = ""
 
 
 def _member_roots(repo: Path, owner_key: str) -> list[Path]:
@@ -210,7 +220,10 @@ def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[Delta
     return None, None
 
   # the entry, named by its folder relative to the owner's root
-  entry = DeltaEntry(note = note, token = note.parent.relative_to(owner_root).as_posix(), asset_type = asset_type)
+  entry = DeltaEntry(
+      note = note, token = note.parent.relative_to(owner_root).as_posix(), asset_type = asset_type,
+      approved_at = str(start_fm.get(SpecMomentKey.APPROVED_AT, "")).strip(),
+  )
 
   # a change ships only once its delta is folded into the targets' designs; until then it is held back
   if base == _CHANGE_ASSET_TYPE and not _is_true(fm_values, SpecCascadeKey.DONE):
@@ -257,6 +270,105 @@ def find_all_delta_entries(repo: Path, key: str) -> tuple[list[DeltaEntry], list
   # both lists come back in token order, so the summary reads the same on every run
   by_token = attrgetter(_TOKEN)
   return sorted(included, key = by_token), sorted(excluded, key = by_token)
+
+
+def find_architecture_lag(repo: Path,
+                          owner_key: str,
+                          included: list[DeltaEntry]) -> tuple[Path, str | None, list[str]]:
+  """
+  Name the delta's assets the owner's architecture document does not cover yet.
+
+  Guarantees:
+    - The lagging tokens come back in the order of `included`.
+    - While the architecture is absent, not approved, or approved with no recorded moment, every included asset
+      lags.
+
+  Args:
+    repo: Repository root.
+    owner_key: The release owner's product key.
+    included: The delta's included entries, in the order they are reported.
+
+  Returns:
+    The path of `architecture.md` in the owner's root, its approval moment — `None` when the document is absent,
+    not approved, or approved with no recorded moment — and the tokens of the included assets it is behind, in
+    the order of `included`.
+  """
+
+  # Contract:
+  # The lagging tokens are returned in the order of `included`, so the release start reports them
+  # the same way on every run.
+
+  # Contract:
+  # While the architecture document is absent, not approved, or approved with no recorded moment,
+  # every included asset is reported as lagging; a release MUST NEVER start from such a document.
+
+  # Domain(spec.lifecycle):
+  # # The architecture covers a design only once it is approved after it
+  # A product's architecture is one document for all its releases, and it answers for every approved design of
+  # the product. It covers a design when its own approval came later than the design's: an architecture approved
+  # earlier was written without that design in view, whatever its text happens to say. An architecture that is
+  # not approved covers nothing, and a design whose approval moment is unknown cannot be shown to be covered, so
+  # both count against it. Two approvals at the same moment are covered. A release starts only from an
+  # architecture that is behind none of the designs it would carry.
+
+  # the owner's architecture document, named whether or not it exists
+  doc = spec_paths.spec_content_root(repo) / resolve_product.load_products(repo)[owner_key][_SPEC_PATH_KEY] \
+      / LevelDoc.ARCHITECTURE
+
+  # the document's approval moment, read only from an approved document
+  approved_at: str | None = None
+  if doc.is_file():
+    fm_values, _end = spec_frontmatter.parse(doc.read_text(encoding = _ENCODING))
+    if fm_values.get(StageKey.STAGE, "").strip() == Stage.APPROVED:
+      approved_at = str(fm_values.get(SpecMomentKey.APPROVED_AT, "")).strip() or None
+
+  # guard: an architecture with no approval moment covers no design at all
+  if approved_at is None:
+    return doc, None, [ entry.token for entry in included ]
+
+  # the moments are fixed-width UTC stamps, so their text order is their time order
+  return doc, approved_at, [
+      entry.token for entry in included if not entry.approved_at or entry.approved_at > approved_at
+  ]
+
+
+def find_all_conflicted_notes(repo: Path, owner_key: str, included: list[DeltaEntry]) -> list[Path]:
+  """
+  List the notes of a product's next release that carry an open coherence conflict.
+
+  Guarantees:
+    - The search covers the level notes of the owner's root and of every nested product that ships with it, and the
+      status notes of the included assets; no other note is reported.
+
+  Args:
+    repo: Repository root.
+    owner_key: The release owner's product key.
+    included: The delta's included entries.
+
+  Returns:
+    The level notes of the owner's root and of every nested product that ships with it, and the status notes of
+    the included assets, that carry `spec_conflicted: true`, sorted by path.
+  """
+
+  # Contract:
+  # Every product level that ships in the owner's releases, nested member products included, and every
+  # included asset is searched for an open conflict. A release start is held while the result is non-empty,
+  # so a level left out of the search would let a conflicted release start.
+
+  # the level note of every product root that ships in the owner's releases, then the delta's own assets
+  candidates = [ root / f"{root.name}{_MD_SUFFIX}" for root in _member_roots(repo, owner_key) ]
+  candidates.extend(entry.note for entry in included)
+
+  # a note counts only while its conflict flag reads true
+  conflicted: list[Path] = []
+  for note in candidates:
+    # guard: rejects a product root that has no level note on disk
+    if not note.is_file():
+      continue
+    fm_values, _end = spec_frontmatter.parse(note.read_text(encoding = _ENCODING))
+    if _is_true(fm_values, ConflictKey.CONFLICTED):
+      conflicted.append(note)
+  return sorted(conflicted)
 
 
 def find_open_release(repo: Path, key: str) -> Path | None:
@@ -306,9 +418,18 @@ def main(argv: list[str]) -> int:
   The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
   directory.
 
+  Guarantees:
+    - The JSON summary always carries `architecture`, with `doc`, `approved_at` and `behind`, and `conflicted`; a
+      release start is held while `behind` or `conflicted` is non-empty.
+    - `behind` lists the tokens of the included assets in the order of `included`; `conflicted` lists
+      repo-relative note paths, sorted.
+
   Notes:
     - Prints a JSON summary on stdout with the keys `owner`, `open_release` (repo-relative note path or null),
-      `included` (tokens) and `excluded` (objects with `token` and `reason`).
+      `included` (tokens), `excluded` (objects with `token` and `reason`), `architecture` (an object with `doc`,
+      the repo-relative path of the owner's `architecture.md`; `approved_at`, its approval moment or null; and
+      `behind`, the tokens of the included assets it does not cover yet) and `conflicted` (repo-relative paths of
+      the notes that carry an open coherence conflict).
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -316,6 +437,13 @@ def main(argv: list[str]) -> int:
   Returns:
     Exit code: 0 on success, 1 when no product in the key's chain owns releases.
   """
+
+  # Contract:
+  # The printed JSON summary always carries the key `architecture`, an object with `doc`, `approved_at` and
+  # `behind`, and the key `conflicted`; the product coordinator parses them to decide whether a release may
+  # start, and a start is held while `behind` or `conflicted` is non-empty. `behind` lists the tokens of the
+  # included assets in the order of `included`; `conflicted` lists repo-relative note paths, sorted.
+
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs release-delta")
   # waiver: argparse CLI signature -- positional argument name
@@ -332,11 +460,20 @@ def main(argv: list[str]) -> int:
     return 1
   included, excluded = find_all_delta_entries(repo, owner_key)
   note = find_open_release(repo, owner_key)
+
+  # the two facts a release start waits on: the architecture's lag and the open conflicts
+  doc, approved_at, behind = find_architecture_lag(repo, owner_key, included)
   print(json.dumps({
       _OWNER: owner_key,
       _OPEN_RELEASE: note.relative_to(repo).as_posix() if note is not None else None,
       _INCLUDED: [ entry.token for entry in included ],
       _EXCLUDED: [ { _TOKEN: entry.token, _REASON: entry.reason } for entry in excluded ],
+      _ARCHITECTURE: {
+          _DOC: doc.relative_to(repo).as_posix(), _APPROVED_AT: approved_at, _BEHIND: behind,
+      },
+      _CONFLICTED: [
+          path.relative_to(repo).as_posix() for path in find_all_conflicted_notes(repo, owner_key, included)
+      ],
   }))
   return 0
 

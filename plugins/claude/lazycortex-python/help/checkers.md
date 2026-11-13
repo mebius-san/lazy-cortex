@@ -1,10 +1,26 @@
 ---
 chapter_type: block
-summary: chk-py runs pcf, toi, cmp, mypy, ruff, pylint plus guideline review; tst-py runs pytest; both share a venv resolver that works anywhere.
-last_regen: 2026-11-10
+summary: chk-py runs pcf, toi, cmp, mypy, ruff, pylint plus guideline review; tst-py runs pytest; cfg-py builds the project venv they share.
+last_regen: 2026-11-13
 diagram_spec:
-  anchor: "How the pieces connect"
-  request: "Flow diagram showing chk-py and tst-py as entry points; chk-py fans out to six subcommands in the all gate (pcf, toi, cmp, mypy, rf, pylint) plus two standalone subcommands outside the all gate — pch (PyCharm inspection) and review (guideline review, its own cadence via chk-py review --base <ref>); the review step builds a manifest and names the lazy-python.code-reviewer agent to run against it rather than running a deterministic tool, exiting PENDING (2) until the review is dispatched and its findings are rendered, so a pending review fails chk-py review (and any CI step built around it) instead of passing silently; CHK_REVIEW=headless lets review.py dispatch the reviewer agent itself through the claude CLI in the same run; a separate render step (chk-py review --render) reads the agent's findings and can exit non-zero on a FAIL; pcf also checks that every comment and docstring is written in a configured language (allowed_languages, default english) and resolves the consumer's first-party package via [tool.pcf] project_package or autodetection; tst-py calls pytest with the _pytest_dedup plugin loaded via -p; both wrappers source _ensure_venv.sh which probes four venv locations in order (VIRTUAL_ENV env var, project .venv, pyproject.toml config path, fallback create/augment project .venv), then source _ensure_env.sh which optionally sources a repo-declared env-bootstrap script named by python.env_source; pcf is also invoked by the PostToolUse hook on every .py edit; all tools read pyproject.toml for configuration."
+  - anchor: "The chk-py gate"
+    request: "Flow diagram: chk-py as the entry point; chk-py all runs the six-step gate pcf → toi → cmp → mypy → ruff → pylint in order; chk-py also has two standalone subcommands outside the gate, pch (PyCharm inspection) and review (guideline review), each run only on request."
+    kind_hint: flow
+  - anchor: "Tests and the edit hook"
+    request: "Flow diagram: tst-py runs pytest with the _pytest_dedup plugin loaded via -p; separately, the PostToolUse hook runs pcf on every .py file an edit touches."
+    kind_hint: flow
+  - anchor: "Configuration from pyproject.toml"
+    request: "Flow diagram: pyproject.toml configures each tool — pcf, toi, cmp, mypy, ruff, pylint, pytest; for pcf it also supplies the allowed_languages list for the comment and docstring language check and the [tool.pcf] project_package naming the first-party package, which pcf autodetects when the key is absent."
+    kind_hint: flow
+  - anchor: "Review lifecycle"
+    request: "State diagram of a guideline review: chk-py review --base <ref> builds a manifest naming the lazy-python.code-reviewer agent and enters Pending (exit 2); from Pending the review is dispatched either by the user or, with CHK_REVIEW=headless, by review.py through the claude CLI in the same run; the agent writes findings; chk-py review --render reads them and ends Passed (exit 0) or Failed (non-zero on any FAIL finding); a pending review that is never dispatched keeps failing chk-py review and any CI step built around it."
+    kind_hint: state
+  - anchor: "How the venv is chosen"
+    request: "Decision flow of _ensure_venv.sh: is an activated VIRTUAL_ENV carrying the checker tools? yes → use it as is; no → target venv is [tool.lazy-python].venv, else project .venv; does its stamp match the pyproject.toml requirements digest? yes → use it; no (missing or stale) → is protected mode (LAZYCORTEX_PROTECTED) on or bootstrap-fallback = false? yes → fail and point at cfg-py; no → configure the venv the way cfg-py does (bin/cfg, bin/_cfg_venv.sh, bin/venv_spec.py; uv creates or updates it), then use it."
+    kind_hint: flow
+  - anchor: "Wrapper setup chain"
+    request: "Sequence diagram: the user runs chk-py or tst-py; the wrapper sources _ensure_venv.sh, which returns a ready venv; the wrapper then sources _ensure_env.sh, which sources the repo's env-bootstrap script when python.env_source names one and does nothing otherwise; the wrapper then runs the checks (chk-py) or pytest (tst-py) and returns the exit code to the user."
+    kind_hint: sequence
 source_skills:
   - chk
   - tst
@@ -15,14 +31,14 @@ source_skills:
   - _ensure_venv.sh
   - mypy_protected_access.py
   - mypy-protected-access-shim.py
-source_sha: e37cd0825c0891766ee7b8b1fe16fe2d39299aaf
-surface_sha: 504eaeb662127df33b209ad924718adcafa36ef029d5cdbd7ff41050c986b307
+source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
+surface_sha: cbb10c895e25a1528806e92401cd4a6e5dfd1b430f2022f7a7a993ff2e7c8ea7
 ---
 # Python checkers
 
-`chk-py` and `tst-py` are the two commands you use every day in a project that has lazycortex-python installed. `chk-py` runs the style, type, and guideline pipeline — format rules, type-only import analysis, syntax checking, mypy, ruff, pylint, and a guideline review pass — against any path you point it at. `tst-py` runs pytest scoped to the module you name, or the whole `tests/` tree when you omit the argument. Both are thin wrappers in your project's `cli/` directory; they resolve the active lazycortex-python plugin at exec time rather than delegating to a path frozen at install time, so they keep working across plugin version updates without needing to be re-deployed. Neither `cli/` copy carries the executable bit — a mode-blind git client (obsidian-git on Android, any Windows checkout) strips it anyway, so the wrappers launch through the interpreter named on their own shebang line instead of relying on it. Call them as `bash ./cli/chk-py` / `bash ./cli/tst-py` from the repo root, or install the `~/.local/bin/chk-py` / `~/.local/bin/tst-py` home wrappers (`/lazy-python.install` Step 2b) to get plain `chk-py` / `tst-py` from anywhere under the repo once `~/.local/bin` is on your `$PATH`. If a wrapper ever cannot find the plugin it prints a clear error directing you to re-run `/lazy-python.install`.
+`chk-py` and `tst-py` are the two commands you use every day in a project that has lazycortex-python installed; a third, `cfg-py`, creates and updates the project venv they run in. `chk-py` runs the style, type, and guideline pipeline — format rules, type-only import analysis, syntax checking, mypy, ruff, pylint, and a guideline review pass — against any path you point it at. `tst-py` runs pytest scoped to the module you name, or the whole `tests/` tree when you omit the argument. All three are thin wrappers in your project's `cli/` directory; they resolve the active lazycortex-python plugin at exec time rather than delegating to a path frozen at install time, so they keep working across plugin version updates without needing to be re-deployed. No `cli/` copy carries the executable bit — a mode-blind git client (obsidian-git on Android, any Windows checkout) strips it anyway, so the wrappers launch through the interpreter named on their own shebang line instead of relying on it. Call them as `bash ./cli/chk-py` / `bash ./cli/tst-py` / `bash ./cli/cfg-py` from the repo root, or install the `~/.local/bin/chk-py` / `~/.local/bin/tst-py` / `~/.local/bin/cfg-py` home wrappers (`/lazy-python.install` Step 2b) to get plain `chk-py` / `tst-py` / `cfg-py` from anywhere under the repo once `~/.local/bin` is on your `$PATH`. If a wrapper ever cannot find the plugin it prints a clear error directing you to re-run `/lazy-python.install`.
 
-Behind both commands sits `_ensure_venv.sh`, a shared venv resolver that finds mypy, pylint, pytest, and ruff wherever they live in your project — an activated venv, a project-local `.venv/`, a path in `pyproject.toml`, or a fallback that creates and augments `.venv/` in the repo root — without requiring any environment setup beyond a plain terminal. Right after the venv is active, both wrappers also source `_ensure_env.sh`, an optional hook that loads your project's own environment-bootstrap script when one is on record, so checks and tests run with the same secrets/config your project normally needs.
+Behind both commands sits `_ensure_venv.sh`, a shared venv resolver that finds mypy, pylint, pytest, and ruff in an activated venv or in your project venv (a path in `pyproject.toml`, else `.venv/` in the repo root), and builds that venv from `pyproject.toml` when it is missing or out of date — without requiring any environment setup beyond a plain terminal. The same logic is what `cfg-py` runs on request. Right after the venv is active, both wrappers also source `_ensure_env.sh`, an optional hook that loads your project's own environment-bootstrap script when one is on record, so checks and tests run with the same secrets/config your project normally needs.
 
 ## What's in this block
 
@@ -58,7 +74,9 @@ The magic-literal check's built-in trivial set — numeric values never flagged,
 
 **`tst`** is the test runner aggregator wrapper. You call it as `tst-py [module]`. With no argument, or with `all` named explicitly, it runs `pytest -q tests/` — `tst-py all` and a bare `tst-py` are the same whole-suite run. With any other module name it runs `pytest -q tests/<module>/`, and refuses up front — naming the modules that actually exist under `tests/` — when that directory doesn't exist, rather than handing pytest a path it cannot find. The `-q` flag is accepted as a no-op for compatibility. Pytest configuration lives under `[tool.pytest.ini_options]` in `pyproject.toml`. `tst-py` also always loads `_pytest_dedup.py` (via `pytest -p _pytest_dedup`) — it de-duplicates tests collected twice through re-export shims, keeping the first occurrence of each test and printing a one-line summary when it removes any; in a repo with no re-export shims it is a silent no-op.
 
-**`_ensure_venv.sh`** is sourced by both `chk` and `tst` before invoking any tool. It resolves the project root via `git rev-parse --show-toplevel` (falling back to `$PWD` when git is unavailable), then tries four probes in order: (1) `$VIRTUAL_ENV` if it is set and contains mypy, pylint, pytest, ruff, pytest-clarity, and pytest-sugar; (2) `<project>/.venv/` if present and equipped with those tools; (3) the path in `[tool.lazy-python] venv` in `pyproject.toml`; (4) a fallback that creates or augments `.venv/` in the repo root using `uv`. The fallback never wipes an existing `.venv/` — if a project `.venv/` already exists but lacks the checker tools, `uv pip install` adds them in place without touching project dependencies. Once probe 4 creates `.venv/`, subsequent runs hit probe 2 and skip the fallback entirely. Using the git-derived root means the fallback always places `.venv/` at the repo root, even when you run `chk-py` from a subdirectory. `review` is the one subcommand that skips this resolver entirely — it is pure stdlib, by design, so the guideline-review phase also works from pre-commit and CI where no venv is set up.
+**`cfg`** is the project-venv configurator, called as `cfg-py`. It creates the venv — or brings an existing one up to date — from what `pyproject.toml` (and `.python-version`) asks for: an interpreter that satisfies `requires-python`, every entry of `[project].dependencies`, every extra, every `[dependency-groups]` group, and on top of those the checker tools (mypy, pylint, pytest, ruff, pytest-clarity, pytest-sugar). The target is `[tool.lazy-python] venv` when set, else `.venv/` in the repo root. An existing venv whose interpreter no longer satisfies the project's Python requirement is recreated; otherwise its packages are updated in place. It needs `uv` on `PATH` and a venv on Python 3.11 or newer (the requirements are read with `tomllib`). A successful run records a digest of exactly those requirement inputs in `.lazy-python-cfg` inside the venv. In protected mode (`LAZYCORTEX_PROTECTED` set to anything but empty or `0`) `cfg-py` installs nothing and exits non-zero — run it from an interactive session or console. `-q` is accepted as a no-op; no other argument is.
+
+**`_ensure_venv.sh`** is sourced by both `chk` and `tst` before invoking any tool. It resolves the project root (Claude Code's project directory when set, else `git rev-parse --show-toplevel`, else `$PWD`), then decides in order: (1) `$VIRTUAL_ENV`, when it is set and carries mypy, pylint, pytest, ruff, pytest-clarity, and pytest-sugar, is used as is — your explicit choice, with no freshness check and nothing installed; (2) the target venv (`[tool.lazy-python] venv`, else `<project>/.venv/`) is activated when it is fresh, meaning it carries those tools and its `.lazy-python-cfg` stamp matches the current requirement digest. Editing an unrelated `pyproject.toml` section such as `[tool.ruff]` keeps the venv fresh; changing `requires-python`, dependencies, extras, dependency groups, or `.python-version` makes it stale, and a venv with no stamp counts as stale. A missing or stale venv is then handled one of three ways: in protected mode the run fails with a message telling you to run `cfg-py` outside protected mode, and nothing is installed; with `bootstrap-fallback = false` under `[tool.lazy-python]` it fails and points at `cfg-py` or an activated venv; otherwise it runs the same configure logic as `cfg-py` and then activates the venv. Once configured, later runs find the venv fresh and skip the work. Using the git-derived root means the venv always lands at the repo root, even when you run `chk-py` from a subdirectory. `review` is the one subcommand that skips this resolver entirely — it is pure stdlib, by design, so the guideline-review phase also works from pre-commit and CI where no venv is set up.
 
 **`mypy_protected_access.py`** is the `protected-access` mypy plugin, loaded by the `mypy` step of `chk-py`. It reports an access to a protected class member — a name starting with an underscore — made from outside the class hierarchy that declares it. Reading, writing, and calling a protected member is allowed only from code lexically inside a class whose MRO contains the declaring class; module-level code and unrelated classes are reported under the `protected-access` error code, as `Access to protected member "<name>" of "<class>" from outside its class hierarchy`. Names that only look protected are public: dunder names (`__x__`), sunder names (`_x_`, as the enum hooks use), and, on a namedtuple class only, its five documented API names (`_asdict`, `_fields`, `_field_defaults`, `_make`, `_replace`) — the same names on any other class stay protected. Exempt paths are never reported in: they come from `[tool.protected_access] exempt_paths` in `pyproject.toml`, a list of repo-relative globs, and the shipped default `["**/tests/**/*.py"]` covers every file under a directory named exactly `tests` inside the project, at any depth (a file named `tests.py` or a directory such as `tests_util` is checked as usual); a file outside the project root is matched on its path as given, so a `tests` directory anywhere in that path exempts it; a change of the list invalidates mypy's cache for the plugin. The plugin only reports — it never changes the type mypy inferred — and it stays silent for a receiver typed `Any`, access through `getattr` with a string name, a bound method referenced without a call, and a method call or class-object access whose receiver is typed as a `TypeVar`, as `Self`, or as a tuple. It depends on mypy internals outside the plugin API and is verified against mypy 2.1.0; if mypy cannot supply the checker it needs, the plugin raises an error rather than skipping the check silently. Editing the plugin file invalidates the mypy cache automatically.
 
@@ -70,7 +88,7 @@ The magic-literal check's built-in trivial set — numeric values never flagged,
 
 `chk-py pch` is a separate, slower flow. Because PyCharm's offline inspection requires `inspect.sh` from a PyCharm installation and takes noticeably longer than the other checks, it is invoked on demand rather than as part of the `all` gate. It also requires an explicit `[tool.pch]` section in `pyproject.toml` to activate for your repo — without it the command skips cleanly. Run it when you want the depth of PyCharm's cross-file and semantic analysis, particularly for inspections that mypy and pylint do not cover.
 
-Both `chk-py` and `tst-py` source `_ensure_venv.sh` before doing anything else, so they always run against the same Python environment. The resolver's probe order means an activated shell venv takes priority, the project `.venv/` is second, a `pyproject.toml`-configured path is third, and the fallback bootstrap is last — making the commands safe to call from any terminal, CI runner, or Claude skill without pre-activating an environment. Right after the venv resolves, both wrappers also source `_ensure_env.sh` in the same shell — so if your project records `python.env_source`, every checker subcommand and every pytest run picks up that environment automatically, with no extra flag or manual sourcing on your part.
+Both `chk-py` and `tst-py` source `_ensure_venv.sh` before doing anything else, so they always run against the same Python environment. The resolver's order means an activated shell venv carrying the tools takes priority, the project venv comes next if it is fresh, and a missing or stale one is configured from `pyproject.toml` last — making the commands safe to call from any terminal, CI runner, or Claude skill without pre-activating an environment. Where installing is forbidden (protected mode, `bootstrap-fallback = false`) they fail loudly instead, and you run `cfg-py` yourself. Right after the venv resolves, both wrappers also source `_ensure_env.sh` in the same shell — so if your project records `python.env_source`, every checker subcommand and every pytest run picks up that environment automatically, with no extra flag or manual sourcing on your part.
 
 `tst-py` additionally loads `_pytest_dedup.py` on every run, so the dedup pass happens automatically alongside the venv and env resolution — you don't call it separately, and in a repo without re-export shims it makes no difference to the output.
 
@@ -78,7 +96,7 @@ The PostToolUse hook slots into this block at the `pcf` level: on every `.py` ed
 
 ## Where this fits
 
-The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project's `cli/` directory. The wrappers are self-resolving: each time you run one, it locates the active lazycortex-python install (checking the dev source tree first, then the daemon-provided plugin-dirs env, then the Claude Code plugin manifest) rather than delegating to a path frozen at install time. This means the wrappers keep working across plugin version updates — the versioned cache dir changes on every `/plugin update`, but the wrapper finds the new location automatically. If the wrapper cannot locate the plugin — for example after an unusual cache clear — it prints `chk-py: cannot locate the lazycortex-python plugin` and directs you to re-run `/lazy-python.install`. That install's Step 2b additionally deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind git client can strip their bit. Each home wrapper walks up from your current directory to the nearest `cli/chk-py` (or `cli/tst-py`) and runs it through `bash`, so the same `chk-py <subcommand>` you'd type at the repo root also works from any subdirectory once `~/.local/bin` is on your `$PATH`; the install skill checks `command -v chk-py` after this step and reports a `path-warning` when it fails, but it never edits your shell rc files, so adding the directory to `$PATH` is on you. The install also seeds the `[tool.pcf]`, `[tool.toi]`, and `[tool.ruff]` sections in `pyproject.toml` that these checkers read (plus `[tool.pch]` when PyCharm is present on the machine), and it is the same install step that records `python.env_source` when your repo ships an environment-bootstrap script. The `discipline` block documents the rules and guidelines that `pcf.py` enforces and that the writer agents consult when generating or reviewing code — the same canon and overlay layers `review.py` collects into its manifest.
+The `install-and-audit` block is what puts `cfg-py`, `chk-py` and `tst-py` in your project's `cli/` directory (and makes sure `.venv/` is gitignored). The wrappers are self-resolving: each time you run one, it locates the active lazycortex-python install (checking the dev source tree first, then the daemon-provided plugin-dirs env, then the Claude Code plugin manifest) rather than delegating to a path frozen at install time. This means the wrappers keep working across plugin version updates — the versioned cache dir changes on every `/plugin update`, but the wrapper finds the new location automatically. If the wrapper cannot locate the plugin — for example after an unusual cache clear — it prints `chk-py: cannot locate the lazycortex-python plugin` and directs you to re-run `/lazy-python.install`. That install's Step 2b additionally deploys `~/.local/bin/cfg-py`, `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind git client can strip their bit. Each home wrapper walks up from your current directory to the nearest `cli/chk-py` (or `cli/tst-py`) and runs it through `bash`, so the same `chk-py <subcommand>` you'd type at the repo root also works from any subdirectory once `~/.local/bin` is on your `$PATH`; the install skill checks `command -v chk-py` after this step and reports a `path-warning` when it fails, but it never edits your shell rc files, so adding the directory to `$PATH` is on you. The install also seeds the `[tool.pcf]`, `[tool.toi]`, and `[tool.ruff]` sections in `pyproject.toml` that these checkers read (plus `[tool.pch]` when PyCharm is present on the machine), and it is the same install step that records `python.env_source` when your repo ships an environment-bootstrap script. The `discipline` block documents the rules and guidelines that `pcf.py` enforces and that the writer agents consult when generating or reviewing code — the same canon and overlay layers `review.py` collects into its manifest.
 
 ## Common adjustments
 
@@ -110,9 +128,13 @@ The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project
 
 **The protected-access plugin or its shim is missing or stale.** The shim at `cli/mypy/protected_access.py` is an install-managed mirror: do not edit it. Re-run `/lazy-python.install` to redeploy it and restore the `plugins` entry in `[tool.mypy]`; `/lazy-python.audit` reports a missing entry, a missing shim, or a shim out of date with the shipped template. If install prints a `manual-edit:` line for `pyproject.toml` (for example when `plugins` is not a list), apply the change it names yourself.
 
-**Pointing to a specific venv.** Set `[tool.lazy-python] venv = "<path>"` in `pyproject.toml` to use a venv that is not at `.venv/` and not activated in the shell. Tilde expansion and relative paths (resolved against the project root) are both supported.
+**Pointing to a specific venv.** Set `[tool.lazy-python] venv = "<path>"` in `pyproject.toml` to use a venv that is not at `.venv/` and not activated in the shell. Tilde expansion and relative paths (resolved against the project root) are both supported. That venv is the one `cfg-py` configures and the one `chk-py` / `tst-py` verify.
 
-**Disabling the fallback bootstrap.** Set `[tool.lazy-python] bootstrap-fallback = false` in `pyproject.toml` when you want `chk-py` and `tst-py` to fail loudly rather than create a `.venv/` automatically. Useful in CI where the project venv is always pre-activated.
+**Building or refreshing the project venv on demand.** Run `cfg-py`. It creates the venv, or updates it in place, from `requires-python`, the project's dependencies, extras and dependency groups, plus the checker tools. Run it after changing any of those inputs if you would rather rebuild now than at the next `chk-py` / `tst-py`, which do the same automatically when they find the venv stale.
+
+**Disabling the automatic configure.** Set `[tool.lazy-python] bootstrap-fallback = false` in `pyproject.toml` when you want `chk-py` and `tst-py` to fail loudly rather than create or update the venv themselves; they then point you at `cfg-py`. Useful in CI where the project venv is always pre-activated.
+
+**Running in protected mode.** With `LAZYCORTEX_PROTECTED` set (anything but empty or `0`), nothing installs: `cfg-py` refuses, and `chk-py` / `tst-py` run only against an activated venv with the tools or a fresh project venv. If the venv is missing or stale they stop and ask you to run `cfg-py` from an interactive session or console outside protected mode.
 
 **Bootstrapping a repo-specific environment for checks and tests.** If your repo has its own environment script (`cli/env`, `.env.sh`, or `scripts/env.sh`) that exports secret paths or provider credentials, re-run `/lazy-python.install` — it detects the script and records it as `python.env_source`, so `chk-py` and `tst-py` source it automatically on every run. If more than one candidate script is present, the install skill asks you which one to use.
 
@@ -132,41 +154,234 @@ The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project
 
 **A stdlib import getting misclassified in the ordering check.** `pcf.py` recognises stdlib modules from a fixed built-in name set, not from your environment's actual `sys.stdlib_module_names` — if a module you import is missing from that set, `pcf.py` reports the whole stdlib block as misordered even though it isn't. This is a bug in the checker's list, not something you configure around; report it (or check `CHANGELOG.public.md` — `fcntl` was one such gap, fixed in a later patch) rather than reordering your imports to work around it.
 
-**`chk-py` / `tst-py` not found on `$PATH`.** Re-run `/lazy-python.install` — Step 2b deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, which walk up from your current directory to the nearest `cli/chk-py` / `cli/tst-py` and run it through `bash`. If `command -v chk-py` still fails afterward, `~/.local/bin` is not on your `$PATH` — add it yourself in your shell's rc file; the install skill reports this as `path-warning` but never edits shell rc files for you. Until then, call the repo-root copies directly with `bash ./cli/chk-py` / `bash ./cli/tst-py` — neither carries the executable bit, so a bare `./cli/chk-py` fails.
+**`cfg-py` / `chk-py` / `tst-py` not found on `$PATH`.** Re-run `/lazy-python.install` — Step 2b deploys `~/.local/bin/cfg-py`, `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, which walk up from your current directory to the nearest `cli/cfg-py` / `cli/chk-py` / `cli/tst-py` and run it through `bash`. If `command -v chk-py` still fails afterward, `~/.local/bin` is not on your `$PATH` — add it yourself in your shell's rc file; the install skill reports this as `path-warning` but never edits shell rc files for you. Until then, call the repo-root copies directly with `bash ./cli/cfg-py` / `bash ./cli/chk-py` / `bash ./cli/tst-py` — none carries the executable bit, so a bare `./cli/chk-py` fails.
+
+**`uv` is missing when the venv needs configuring.** Creating or updating the venv always goes through `uv`; without it `cfg-py` (and the automatic configure in `chk-py` / `tst-py`) stops with a message naming the problem. Install `uv`, or activate a venv that already carries mypy, pylint, pytest, ruff, pytest-clarity, and pytest-sugar.
 
 ## How the pieces connect
+
+The checkers fit together in a few parts: what `chk-py` runs, what `tst-py` and the edit hook run, where every tool takes its settings from, how a guideline review moves from pending to rendered, how the venv is picked or built, and the setup every wrapper goes through before it runs anything.
+
+### The chk-py gate
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  chkPyEntry["chk-py entry point"]
-  tstPyEntry["tst-py entry point"]
-  postToolUseHook["PostToolUse hook on .py edit"]
-  ensureVenvEnv["_ensure_venv.sh + _ensure_env.sh (venv probe order: $VIRTUAL_ENV → .venv → configured → create)"]
-  allGate["all gate: pcf → toi → cmp → mypy → ruff → pylint"]
-  pchManual["pch (manual, outside gate)"]
-  pytestDedup["pytest + _pytest_dedup plugin"]
-  pyprojectConfig["pyproject.toml config"]
+  chkPy["chk-py"]
+  chkPyAll["chk-py all (six-step gate)"]
+  pcf["pcf"]
+  toi["toi"]
+  cmp["cmp"]
+  mypy["mypy"]
+  ruff["ruff"]
+  pylint["pylint"]
+  pch["pch (PyCharm inspection)"]
+  review["review (guideline review)"]
 
-  chkPyEntry -->|bootstrap| ensureVenvEnv
-  tstPyEntry -->|bootstrap| ensureVenvEnv
-  ensureVenvEnv -->|run gate| allGate
-  ensureVenvEnv -->|run tests| pytestDedup
-  chkPyEntry -->|run manual| pchManual
-  postToolUseHook -->|trigger gate| allGate
-  pyprojectConfig -->|configure| allGate
-  pyprojectConfig -->|configure| pytestDedup
+  chkPy -->|runs gate| chkPyAll
+  chkPyAll -->|first step| pcf
+  pcf -->|next| toi
+  toi -->|next| cmp
+  cmp -->|next| mypy
+  mypy -->|next| ruff
+  ruff -->|next| pylint
+  chkPy -->|standalone, on request| pch
+  chkPy -->|standalone, on request| review
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
-  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
 
-  class chkPyEntry entry
-  class tstPyEntry entry
-  class postToolUseHook entry
-  class ensureVenvEnv action
-  class allGate action
-  class pchManual action
-  class pytestDedup action
-  class pyprojectConfig store
+  class chkPy entry
+  class chkPyAll action
+  class pcf action
+  class toi action
+  class cmp action
+  class mypy action
+  class ruff action
+  class pylint action
+  class pch sub
+  class review sub
 ```
+
+`chk-py all` runs six checks in a fixed order — pcf, toi, cmp, mypy, ruff, pylint — and stops at the first one that fails. Two more subcommands sit outside that gate and run only when you call them: `pch` (PyCharm inspection) and `review` (the guideline review, on its own cadence).
+
+### Tests and the edit hook
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  tstPy["tst-py"]
+  pytestRun["pytest"]
+  pytestDedupPlugin["_pytest_dedup plugin"]
+  editTouchesPyFiles["Edit touches .py files"]
+  postToolUseHook["PostToolUse hook"]
+  pcfRun["pcf on every touched .py file"]
+
+  tstPy -->|runs| pytestRun
+  pytestDedupPlugin -->|loaded via -p into| pytestRun
+  editTouchesPyFiles -->|triggers| postToolUseHook
+  postToolUseHook -->|runs| pcfRun
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  class tstPy entry
+  class editTouchesPyFiles entry
+  class pytestRun action
+  class pcfRun action
+  class pytestDedupPlugin service
+  class postToolUseHook service
+```
+
+`tst-py` runs pytest with the `_pytest_dedup` plugin loaded, scoped to the module you name. Separately from both commands, the PostToolUse hook calls pcf on every `.py` file an edit touches, so format findings show up as you work.
+
+### Configuration from pyproject.toml
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  pyprojectToml["pyproject.toml"]
+  pcfTool["pcf"]
+  toiTool["toi"]
+  cmpTool["cmp"]
+  mypyTool["mypy"]
+  ruffTool["ruff"]
+  pylintTool["pylint"]
+  pytestTool["pytest"]
+  allowedLanguages["allowed_languages list"]
+  projectPackage["[tool.pcf] project_package"]
+  languageCheck["Comment and docstring language check"]
+  autodetectPackage["pcf autodetects the first-party package"]
+
+  pyprojectToml -->|configures| pcfTool
+  pyprojectToml -->|configures| toiTool
+  pyprojectToml -->|configures| cmpTool
+  pyprojectToml -->|configures| mypyTool
+  pyprojectToml -->|configures| ruffTool
+  pyprojectToml -->|configures| pylintTool
+  pyprojectToml -->|configures| pytestTool
+  pyprojectToml -->|supplies for pcf| allowedLanguages
+  pyprojectToml -->|supplies for pcf| projectPackage
+  allowedLanguages -->|feeds| languageCheck
+  projectPackage -->|names first-party package| pcfTool
+  projectPackage -->|key absent| autodetectPackage
+  autodetectPackage -->|resolves package for| pcfTool
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  class pyprojectToml entry
+  class pcfTool action
+  class toiTool action
+  class cmpTool action
+  class mypyTool action
+  class ruffTool action
+  class pylintTool action
+  class pytestTool action
+  class allowedLanguages sub
+  class projectPackage sub
+  class languageCheck service
+  class autodetectPackage service
+```
+
+Every tool reads its settings from `pyproject.toml`. That includes pcf, which checks the language of comments and docstrings against `allowed_languages` and finds your first-party package from `[tool.pcf] project_package`, or by autodetection when the key is absent.
+
+### Review lifecycle
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
+stateDiagram-v2
+  [*] --> pending : chk-py review --base ref builds manifest naming lazy-python.code-reviewer, exit 2
+  pending --> dispatched : dispatched by the user, or by review.py through the claude CLI with CHK_REVIEW=headless
+  pending --> pending : never dispatched, chk-py review keeps failing
+  dispatched --> findingsWritten : agent writes findings
+  findingsWritten --> passed : chk-py review --render, no FAIL finding, exit 0
+  findingsWritten --> failed : chk-py review --render, any FAIL finding, non-zero
+  passed --> [*]
+  failed --> [*]
+
+  style pending fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style dispatched fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style findingsWritten fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style passed fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  style failed fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+```
+
+`chk-py review --base <ref>` does not judge the code itself: it builds a manifest of the change and names the `lazy-python.code-reviewer` agent to read it, then exits `2` (pending) until that review has run and its findings are rendered — so a CI step built around it fails instead of passing silently. With `CHK_REVIEW=headless`, `review.py` dispatches the reviewer through the claude CLI in the same run. `chk-py review --render` reads the agent's findings and exits non-zero when any of them is a FAIL.
+
+### How the venv is chosen
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  ensureVenvStarts["_ensure_venv.sh starts"]
+  activatedHasTools{"Activated VIRTUAL_ENV carries the checker tools?"}
+  useActivatedVenv["Use activated VIRTUAL_ENV as is"]
+  pickTargetVenv["Target venv is [tool.lazy-python].venv, else project .venv"]
+  stampMatches{"Stamp matches the pyproject.toml requirements digest?"}
+  useTargetVenv["Use target venv"]
+  protectedOrNoFallback{"LAZYCORTEX_PROTECTED on or bootstrap-fallback = false?"}
+  failPointAtCfgPy["Fail and point at cfg-py"]
+  configureVenv["Configure venv the way cfg-py does via bin/cfg, bin/_cfg_venv.sh, bin/venv_spec.py (uv creates or updates it)"]
+  useConfiguredVenv["Use configured venv"]
+
+  ensureVenvStarts -->|check VIRTUAL_ENV| activatedHasTools
+  activatedHasTools -->|yes| useActivatedVenv
+  activatedHasTools -->|no| pickTargetVenv
+  pickTargetVenv -->|read stamp| stampMatches
+  stampMatches -->|yes| useTargetVenv
+  stampMatches -->|no, missing or stale| protectedOrNoFallback
+  protectedOrNoFallback -->|yes| failPointAtCfgPy
+  protectedOrNoFallback -->|no| configureVenv
+  configureVenv -->|venv ready| useConfiguredVenv
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  class ensureVenvStarts entry
+  class activatedHasTools guard
+  class stampMatches guard
+  class protectedOrNoFallback guard
+  class pickTargetVenv action
+  class configureVenv action
+  class useActivatedVenv success
+  class useTargetVenv success
+  class useConfiguredVenv success
+  class failPointAtCfgPy error
+```
+
+An activated `$VIRTUAL_ENV` that already carries the checker tools is used as is. Otherwise `_ensure_venv.sh` checks the target venv — `[tool.lazy-python].venv`, else `.venv/` — against a stamp of the `pyproject.toml` requirements. A fresh venv is used; a missing or stale one is built or updated the same way `cfg-py` does it, through `uv`, unless protected mode (`LAZYCORTEX_PROTECTED`) or `bootstrap-fallback = false` forbids that, in which case the run stops and points you at `cfg-py`.
+
+### Wrapper setup chain
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant wrapper as chk-py or tst-py wrapper
+  participant ensureVenv as _ensure_venv.sh
+  participant ensureEnv as _ensure_env.sh
+  participant envBootstrap as Repo env-bootstrap script
+  participant runner as Checks or pytest
+
+  user->>wrapper: run chk-py or tst-py
+  wrapper->>ensureVenv: source _ensure_venv.sh
+  ensureVenv-->>wrapper: ready venv
+  wrapper->>ensureEnv: source _ensure_env.sh
+  alt python.env_source names a script
+    ensureEnv->>envBootstrap: source env-bootstrap script
+    envBootstrap-->>ensureEnv: environment ready
+  else python.env_source names nothing
+    Note over ensureEnv: does nothing
+  end
+  ensureEnv-->>wrapper: control returns
+  wrapper->>runner: run checks (chk-py) or pytest (tst-py)
+  runner-->>wrapper: exit code
+  wrapper-->>user: exit code
+```
+
+Every wrapper runs the same setup before its real work: it sources `_ensure_venv.sh` to get a ready venv, then `_ensure_env.sh`, which sources your project's own bootstrap script when `python.env_source` names one, and only then runs `chk-py`'s checks or `tst-py`'s pytest.

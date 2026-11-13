@@ -1,0 +1,13 @@
+{
+  "autorun.running-line": "> Autorun in progress: {cycles} cycle(s) done without operator stops.\n",
+  "autorun.stop-line": "> Autorun stopped after {cycles} cycle(s): {reason}\n",
+  "autorun.stop-reason.cap": "the cycle cap was reached",
+  "autorun.stop-reason.clean": "the validators raised no concerns",
+  "autorun.stop-reason.question": "an expert asked a question",
+  "banner.action-needed": "> [!caution] Action needed #review/action-needed\n> Answer the open question or the decision candidate below by ticking an option, then commit.\n",
+  "banner.finalizing": "> [!hint] Waiting: finalize #review/finalizing\n",
+  "banner.in-process": "> [!hint] {title} #review/in-process\n{autorun}> To intervene, or to wake a document that looks stuck, write the instruction in a `[!todo] #review/command` callout.\n",
+  "banner.ready-single": "> [!success] Ready to approve #review/ready\n{autorun}> Tick the box below to approve the whole document.\n> To send it back for another writer round, edit the text and commit, or write the instruction in a `[!todo] #review/command` callout.\n> - [{tick}] approve the whole document\n",
+  "banner.ready-triple": "> [!success] Ready to approve #review/ready\n{autorun}> Tick ONE box: approve and send to the validators, approve and let the loop run to the end, or approve and finalize without another validation round.\n> To send it back for another writer round, edit the text and commit, or write the instruction in a `[!todo] #review/command` callout.\n> - [{tick}] approve this and previous rounds\n> - [ ] approve and run to the end without stops\n> - [ ] approve without further validation\n",
+  "history.explainer": "A log of what changed in this document during review. Kept automatically — do not edit by hand."
+}

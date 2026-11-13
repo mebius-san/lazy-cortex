@@ -16,7 +16,7 @@ The deliverable of `docs` is **the product's user-facing documentation**: the te
 
 **This tool has no plan.** The declaration carries no `plan_doc`, and that is a definite "no": an approved design document already states what the user got, and planning the shape of a user-facing text in a separate approvable document would only add a round of acceptance.
 
-The practical consequence: from this tool's side the release's `spec_plan_done` always reads ready, by absence. The gate is held only by the build's architecture step and the release's `code-plan.md`, when the release has one (`lazy-spec.release-playbook.md`, "The gates of the build"); the release's `test-plan.md` is written after the build and holds `spec_tests_passing`, never this gate.
+The practical consequence: from this tool's side the release's `spec_plan_done` always reads ready, by absence. The gate is held only by the release's code plan, until it is settled — `code-plan.md` `approved` or `cancelled`, or the code plan waived in the owner's `# Coordinator rules` (`lazy-spec.release-playbook.md`, "The gates of the build"); the release's `test-plan.md` is written after the build and holds `spec_tests_passing`, never this gate.
 
 ## The work inside a release build
 

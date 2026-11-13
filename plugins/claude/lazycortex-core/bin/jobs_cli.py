@@ -64,7 +64,8 @@ def cmd_list_jobs(argv: list[str]) -> int:
       `READY`; a bundle carrying none of them reports `-1`.
 
   Args:
-    argv: Argument vector after the subcommand name (`--expert`, `--status`, `--cwd`).
+    argv: Argument vector after the subcommand name (`--expert`, `--status`, `--with-dedup-key`, `--cwd`);
+      `--with-dedup-key` adds a `dedup_key` field to every listed entry.
 
   Returns:
     Process exit code: 0 on success.
@@ -77,19 +78,24 @@ def cmd_list_jobs(argv: list[str]) -> int:
   # A listed bundle's `age_sec` MUST be measured from the first marker present in the order `DONE`,
   # `DEAD`, `READY`; a bundle carrying none of them MUST report `-1`.
 
-  # the verb's command line: the two listing filters and the repo-root override
+  # the verb's command line: the two listing filters, the dedup-key switch and the repo-root override
   # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core list-jobs")
   # waiver: argparse CLI signature and help strings, not domain keys
   parser.add_argument("--expert", default = None, help = "restrict to one expert")
   # waiver: argparse CLI signature and help strings, not domain keys
   parser.add_argument("--status", default = None, help = "restrict to one status value")
+  # waiver: argparse CLI signature and help strings, not domain keys
+  parser.add_argument("--with-dedup-key", action = "store_true", help = "add each bundle's dedup key to its entry")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
 
   # the queue is read once, narrowed by whichever filters were given
-  entries = list_jobs(resolve_repo_root(args.cwd), expert = args.expert or None, status = args.status or None)
+  entries = list_jobs(
+    resolve_repo_root(args.cwd), expert = args.expert or None, status = args.status or None,
+    with_dedup_key = args.with_dedup_key,
+  )
 
   # one clock reading for the whole listing so ages are comparable across entries
   now = time.time()

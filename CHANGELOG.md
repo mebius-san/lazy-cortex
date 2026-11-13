@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 11.1.1 — 2026-11-13 UTC
+
+- A git-watch routine whose worker fails to start, for example on a timeout, no longer loses finished work. The unit that failed and every unit not yet attempted are recorded for retry, finished units are not replayed, and the cursor still advances. A worker that keeps timing out no longer makes the scanned range grow tick after tick.
+- Every routine subprocess now receives `LAZY_ROUTINE_TIMEOUT_SEC`, the routine's timeout in seconds. Workers handling a large batch can use it to stop early and report the remainder for retry.
+- `list-jobs` accepts `--with-dedup-key` to add each queued job's dedup key to its entry.
+- Question callouts now follow a new rule. Each option row names what it wins on, an option with no advantage is left out, and a lone surviving option is written as settled text instead of a question.
+
 ### 11.1.0 — 2026-11-12 UTC
 
 - `lazy-core.audit` now grades every skill, agent and command description by length, so oversized descriptions that load into every session show up. Descriptions over 400 characters, single-caller ones over 150, and any carrying an `<example>` block warn. Descriptions over 1024 characters fail. The report also gains a `descriptions_total` line. A description that states no invocation condition now warns too.
@@ -811,6 +818,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 11.1.0 — 2026-11-13 UTC
+
+- A release now starts from a current architecture and a settled plan, and builds on the operator's tick.
+- Cancelling an asset or a release now reaches both the product and the note's own coordinator.
+- When a finished job's result cannot be landed, the asset halts and records the reason, so it no longer stalls without explanation.
+- Start, Rebuild and Publish gates now carry a fixed footer in the note's language.
+
 ### 11.0.0 — 2026-11-12 UTC
 
 - **Breaking:** spec documents in the catalog that link into your repository's code through a forge, where the git remote is an ssh config alias such as `<alias>:owner/repo.git`, were skipped by the earlier source-link step. The migration now resolves the alias and rewrites those links to root-relative `[<name>](/<path>)` links. It edits the spec documents on disk; `/lazy-core.setup` applies it.
@@ -1257,6 +1271,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 6.2.2 — 2026-11-13 UTC
+
+- _no user-visible changes_
+
 ### 6.2.1 — 2026-11-12 UTC
 
 - Shorter skill and agent descriptions across the plugin (audit, capture, deploy, diagram-install, iconize-install, iconize-sync, install, and the tag-pages agent). Each now states only when to invoke it and what sets it apart from its siblings, which cuts the context the plugin costs in every session. The tag-pages agent no longer carries example dialogues.
@@ -1631,6 +1649,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.14.3 — 2026-11-13 UTC
+
+- A validator with nothing to report no longer sends the document back for another review round. Validator sections now carry findings only, with no "document is sound" statements, confirmations or retellings. A clean validation leaves the section empty, which clears findings from earlier rounds and sends no concerns to the writer.
 
 ### 6.14.2 — 2026-11-12 UTC
 
@@ -2075,6 +2097,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.10.2 — 2026-11-13 UTC
+
+- Experts now offer the operator an option only when it beats the others on at least one point, and they name that point. A lone surviving option is written as settled text and not asked about. The same rule applies to option rows in question callouts.
+
 ### 1.10.1 — 2026-11-12 UTC
 
 - The architect now says where each module's unit tests sit and the seam they reach it through, and never picks a test framework or runner. The planner takes the framework and the unit-test command from the product's `tech.md`, and flags a `tech.md` that lacks them. The implementer writes and runs the unit tests itself, using the `tech.md` tooling. Testing the deployed product stays with the tester.
@@ -2291,6 +2317,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.14.0 — 2026-11-13 UTC
+
+- New `cfg-py` command creates or updates the project venv from `pyproject.toml`. It installs the interpreter that `requires-python` asks for, every project dependency, extra and dependency group, and the checker tools. It recreates a venv whose Python no longer fits. `chk-py` and `tst-py` run the same setup on their own when the venv is missing or stale. `/lazy-python.install` deploys the wrapper. `cfg-py` refuses to run in protected mode.
 
 ### 4.13.1 — 2026-11-12 UTC
 
@@ -2581,6 +2611,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.7.3 — 2026-11-13 UTC
+
+- The scan of changed files no longer times out on a commit of several hundred files and fails on every later tick. It walks only the directories a scope's globs name, surveys tags once per scope, and skips nodes whose classify job is already queued. It stays inside its share of the routine timeout and reports the paths it did not start so they are retried. A git watch whose worker fails to spawn now records the owed units and advances its cursor. `list-jobs` gains `--with-dedup-key`.
 
 ### 3.7.2 — 2026-11-12 UTC
 

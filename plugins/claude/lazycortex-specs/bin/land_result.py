@@ -9,6 +9,11 @@ names; each attachment lands beside it under its own basename; the document's
 committed under this worker's own bot identity with an explicit pathspec, because the
 checkout's index is shared with the operator and with every other routine.
 
+A landing ends in one of three results: `landed` when files were written and committed, `empty` when
+the job had nothing to deliver, and `refused` — with a one-line reason — when a delivery was declared
+but this worker will not make it. A job that ended in error against a report journal lands its files
+like a successful one.
+
 `gate_tick.py` calls this on a job's `DONE`, before the coordinator opens review with the
 review system's `submit` verb — so the document the coordinator submits is already tracked.
 The path checks are mirrored file-wise from `lazycortex-review`'s own `payload.py` rather
@@ -42,7 +47,7 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_keys import AssetTypeKey, LevelDoc, ReleaseKey, SpecKey  # noqa: E402
+from spec_keys import SiblingDoc, SpecKey  # noqa: E402
 
 
 # Job-bundle layout, mirrored file-wise from `lazycortex-core`'s runtime rather than imported
@@ -59,6 +64,8 @@ _TARGET_DOC_KEY = "target_doc"
 # Response-envelope tokens this worker reads, mirrored the same way.
 _OUTCOME_KEY = "outcome"
 _OUTCOME_EDITED = "edited"
+_OUTCOME_ERROR = "error"
+_OUTCOME_DEFERRED = "deferred"
 _RESULT_KEY = "result"
 _PATH_KEY = "path"
 
@@ -90,16 +97,21 @@ _MD_SUFFIX = ".md"
 _ACTION_KEY = "action"
 _ACTION_LANDED = "landed"
 _ACTION_EMPTY = "empty"
+_ACTION_REFUSED = "refused"
 _LANDED_KEY = "landed"
+_REASON_KEY = "reason"
+
+# The report journals: documents that record every run, a failed one included.
+_JOURNAL_DOCS = frozenset({ SiblingDoc.CODE_REPORT, SiblingDoc.TEST_REPORT })
 
 
 class LandResultError(Exception):
   """
   A response payload this worker refuses to land.
 
-  Raised for an entry that names no path string, points outside the job's own `result/`, or
-  resolves to anything but a plain filename. The caller turns it into an `empty` landing, so
-  the coordinator marks the job undelivered instead of writing a file nobody declared.
+  Raised whenever a response, or one of the files it declares, cannot be landed as declared.
+  The caller turns it into a `refused` landing: nothing is written for it and the gate tick
+  halts the asset.
   """
 
 
@@ -233,27 +245,103 @@ def _require_entry_lands(source: Path, dest: Path | None, document: Path) -> Non
     raise LandResultError(f"attachment would overwrite a spec document: {source.name!r}")
 
 
-def _read_entries(job_dir: Path) -> list[object]:
+def _read_response(job_dir: Path) -> dict | None:
   """
-  Read one finished job's deliverable `result` entries.
+  Read one finished job's response envelope.
 
   Args:
     job_dir: The job-bundle directory.
 
   Returns:
-    The response's `result` array; empty when the bundle has no readable response, did not
-    finish with an edit, or delivered nothing.
+    The parsed `response.json` object, or `None` when the file is absent, unreadable, or holds
+    anything but a JSON object.
   """
   try:
     response = json.loads((job_dir / _RESPONSE_FILE).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError):
+    return None
+  return response if isinstance(response, dict) else None
+
+
+def _declared_entries(response: dict | None) -> list[object]:
+  """
+  Read the `result` entries a response declares.
+
+  Args:
+    response: The parsed response envelope, or `None` when there is none.
+
+  Returns:
+    The response's `result` array; empty when there is no response or it declares no array.
+  """
+  entries = response.get(_RESULT_KEY) if response is not None else None
+  return entries if isinstance(entries, list) else []
+
+
+def _select_entries(job_dir: Path, target_doc: Path) -> list[object]:
+  """
+  Select the `result` entries one finished job's outcome entitles it to land.
+
+  Args:
+    job_dir: The job-bundle directory.
+    target_doc: The path the job's result document takes.
+
+  Returns:
+    The response's `result` array when the job finished with an edit, or with an error against
+    a report journal; empty when the response declares no files, the work was deferred, or the
+    job failed against any other document.
+
+  Raises:
+    LandResultError: If the response is unreadable, or declares files under an outcome that is
+      neither an edit nor an error.
+  """
+
+  # Domain(spec.lifecycle):
+  # # What a job's outcome entitles it to deliver
+  # A job delivers files only by saying it finished its edit. A job that says it failed delivers
+  # nothing, with one exception: a report journal records every run, the failed one included, so
+  # the journal of a failed run is delivered like any other and the operator reads the failure
+  # where the successes are. A job that deferred its work, or declared no files, delivers
+  # nothing and that is an ordinary ending. A job that declares files under any other word has
+  # produced work the system cannot place: that is a failure of the delivery, reported as one,
+  # never an empty ending.
+
+  response = _read_response(job_dir)
+
+  # guard: a finished job with no readable response cannot say what it delivered
+  if response is None:
+    raise LandResultError(f"unreadable {_RESPONSE_FILE}")
+  entries = _declared_entries(response)
+  outcome = response.get(_OUTCOME_KEY)
+
+  # guard: nothing declared, or the work was deliberately not done — an ordinary empty ending
+  if not entries or outcome == _OUTCOME_DEFERRED:
     return []
 
-  # guard: only a completed edit carries files to land
-  if response.get(_OUTCOME_KEY) != _OUTCOME_EDITED:
-    return []
-  entries = response.get(_RESULT_KEY)
-  return entries if isinstance(entries, list) else []
+  # a failed job lands only the journal that records the failure
+  if outcome == _OUTCOME_ERROR:
+    return entries if target_doc.name in _JOURNAL_DOCS else []
+
+  # guard: files declared under a word that is not the success value cannot be placed
+  if outcome != _OUTCOME_EDITED:
+    raise LandResultError(
+        f"outcome {outcome!r} is not {_OUTCOME_EDITED!r}, yet the response declares "
+        f"{len(entries)} result file(s)")
+  return entries
+
+
+def _refuse_landing(job_dir: Path, reason: str) -> dict:
+  """
+  Report one landing this worker refuses, on stderr and as its result.
+
+  Args:
+    job_dir: The job-bundle directory, named in the log line.
+    reason: One line saying why nothing was landed.
+
+  Returns:
+    `{"action": "refused", "landed": [], "reason": <reason>}`.
+  """
+  sys.stderr.write(f"land-result: {job_dir.name}: {reason}\n")
+  return { _ACTION_KEY: _ACTION_REFUSED, _LANDED_KEY: [], _REASON_KEY: reason }
 
 
 def _is_inside(path: Path, root: Path) -> bool:
@@ -270,68 +358,50 @@ def _is_inside(path: Path, root: Path) -> bool:
   return path.is_relative_to(root.resolve())
 
 
-def _folder_note_frontmatter(folder: Path) -> dict:
-  """
-  Read the frontmatter of a folder's own note.
-
-  Args:
-    folder: The folder whose `<name>/<name>.md` note is read.
-
-  Returns:
-    The parsed frontmatter; empty when the folder has no note of its own.
-  """
-  path = folder / f"{folder.name}{_MD_SUFFIX}"
-
-  # guard: a folder without its own note carries no frontmatter to read
-  if not path.is_file():
-    return {}
-  return flip_gate.parse_frontmatter(path.read_text(encoding = "utf-8"))[0]
-
-
-def is_release_product_doc(target: Path, asset_dir: Path) -> bool:
-  """
-  Report whether a path is the product document a release build may revise outside its own folder.
-
-  Admits only the `architecture.md` in the root of the product owning the release.
-
-  Args:
-    target: The candidate document path.
-    asset_dir: The asset folder the job runs for.
-
-  Returns:
-    `True` when `asset_dir` is a release and `target` is the release owner's root `architecture.md`; `False`
-    otherwise.
-  """
-
-  # Domain(spec.lifecycle):
-  # # A release build revises the architecture of the product it ships
-  # The first step of a release's build dispatches an architect to revise the architecture document
-  # of the owner product against what the release carries. The revised text belongs to the product
-  # it describes and lands in that product's own folder, outside the release's folder. So besides its
-  # own folder a release accepts exactly one document, the architecture document sitting directly in
-  # the root of the owner product; any other document or location outside its own folder is refused.
-
-  # guard: only a release's job revises a document outside its own folder
-  if str(_folder_note_frontmatter(asset_dir).get(AssetTypeKey.TYPE) or "") != ReleaseKey.ASSET_TYPE:
-    return False
-
-  # the one document a build's first step writes, directly in the release owner's root
-  return target.resolve() == asset_dir.resolve().parent.parent / LevelDoc.ARCHITECTURE
-
-
 def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   """
   Name the path one dispatched job's result document takes, as the dispatch declared it.
 
+  Guarantees:
+    - A returned target always lies inside `asset_dir`, whatever path the dispatch spelled, and a release is held to
+      this exactly as any other asset; anything else yields `None`.
+
+  Notes:
+    - Writes one line to stderr saying why when the dispatch names no usable target.
+
   Args:
     job_dir: The job-bundle directory.
-    asset_dir: The asset folder the job's document must land in; for a release, the root `architecture.md` of
-      its owner product is accepted as well.
+    asset_dir: The asset folder the job's document must land in.
 
   Returns:
     The repo-root-resolved `target_doc` the dispatch payload declared, or `None` when the
-    payload is unreadable, declares no `target_doc`, or names a path outside `asset_dir` that is not the root
-    `architecture.md` of a release's owner product.
+    payload is unreadable, declares no `target_doc`, or names a path outside `asset_dir`.
+  """
+
+  # Contract:
+  # A job's `target_doc` is accepted only when it resolves inside the job's own asset folder, for a release
+  # exactly as for any other asset; anything else yields no target. Callers MUST NEVER receive a target
+  # outside the asset folder.
+
+  target, reason = _resolve_target(job_dir, asset_dir)
+
+  # the caller only learns there is no usable target, so the reason goes to the log
+  if target is None:
+    sys.stderr.write(f"land-result: {job_dir.name}: {reason}\n")
+  return target
+
+
+def _resolve_target(job_dir: Path, asset_dir: Path) -> tuple[Path | None, str]:
+  """
+  Resolve the path one dispatched job's result document takes, with the reason when there is none.
+
+  Args:
+    job_dir: The job-bundle directory.
+    asset_dir: The asset folder the job's document must land in.
+
+  Returns:
+    The repo-root-resolved `target_doc` and an empty reason, or `None` and one line saying why
+    the dispatch names no usable target.
   """
 
   # Domain(spec.lifecycle):
@@ -343,28 +413,25 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   # anyway — a cascade job writes into a different asset's folder entirely. A job that never said
   # where its document goes has nowhere to put it and stays undelivered.
 
+  # guard: a dispatch payload that cannot be read names no target at all
   try:
     request = json.loads((job_dir / _REQUEST_FILE).read_text(encoding = "utf-8"))
   except (OSError, json.JSONDecodeError) as exc:
-    sys.stderr.write(f"land-result: {job_dir.name}: unreadable {_REQUEST_FILE}: {exc}\n")
-    return None
+    return None, f"unreadable {_REQUEST_FILE}: {exc}"
   raw = request.get(_TARGET_DOC_KEY) if isinstance(request, dict) else None
 
   # guard: a job that declared no target has nowhere to put its document
   if not isinstance(raw, str) or not raw:
-    sys.stderr.write(f"land-result: {job_dir.name}: dispatch declares no {_TARGET_DOC_KEY!r}\n")
-    return None
+    return None, f"dispatch declares no {_TARGET_DOC_KEY!r}"
 
   # the declared path is repo-relative; resolving it collapses any parent hop before the
   # containment check below, which is what actually decides whether it may be written
   target = (flip_gate.repo_root(asset_dir) / raw).resolve()
 
-  # guard: a launch job's document belongs in its own asset folder, a release's revision also in its product's
-  if not _is_inside(target, asset_dir) and not is_release_product_doc(target, asset_dir):
-    sys.stderr.write(
-        f"land-result: {job_dir.name}: {_TARGET_DOC_KEY} {raw!r} is outside {asset_dir.name}\n")
-    return None
-  return target
+  # guard: a job's document belongs in its own asset folder and nowhere else
+  if not _is_inside(target, asset_dir):
+    return None, f"{_TARGET_DOC_KEY} {raw!r} is outside {asset_dir.name}"
+  return target, ""
 
 
 def _fix_links(body: str, names: list[str], job_dir: Path) -> str:
@@ -521,11 +588,18 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   Put one finished job's `result/` into the asset folder and commit it.
 
   Guarantees:
-    - Writes nothing and commits nothing when the job delivered no files or any entry is
-      refused; the job is left undelivered for the coordinator to report. An entry is refused
-      when it is not a plain filename under `result/`, when the bundle file is a symlink or
-      absent, when the document's basename is not the target's, or when an attachment's
-      destination is a symlink, the result document, or a spec catalog's own note.
+    - Writes nothing and commits nothing when the job has nothing to deliver — the response
+      declares no files, the work was deferred, or the job ended in error against a document
+      that is not a report journal — and reports `empty`.
+    - Writes nothing and commits nothing when the landing is refused, and reports `refused` with
+      a one-line reason, which the gate tick turns into a halted asset. A landing
+      is refused when `response.json` is unreadable, when files are declared under an outcome
+      that is neither `edited` nor `error`, when an entry is not a plain filename under
+      `result/`, when the bundle file is a symlink or absent, when the document's basename is
+      not the target's, or when an attachment's destination is a symlink, the result document,
+      or a spec catalog's own note.
+    - A job that ended in `error` against `code-report.md` or `test-report.md` lands its files
+      like one that ended with an edit.
     - The commit carries exactly the landed paths plus their icon repaint — content another
       writer parked in the shared index stays unpublished; a landing that changed no byte
       reports `landed` and makes no commit at all.
@@ -539,8 +613,9 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
     target_doc: The path the job's result document takes in the asset folder.
 
   Returns:
-    `{"action": "landed", "landed": [<repo-relative paths>]}` when files landed, or
-    `{"action": "empty", "landed": []}` when there was nothing to land.
+    `{"action": "landed", "landed": [<repo-relative paths>]}` when files landed,
+    `{"action": "empty", "landed": []}` when there was nothing to land, or
+    `{"action": "refused", "landed": [], "reason": <one line>}` when the landing was refused.
 
   Raises:
     subprocess.CalledProcessError: If a git command of the landing's own commit exits
@@ -556,12 +631,17 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # before the call, the index holds nothing this call put there, and the failure reaches the
   # caller.
 
-  entries = _read_entries(job_dir)
+  # Contract:
+  # A job that delivers nothing is reported `empty`; a job whose declared delivery this call will
+  # not make is reported `refused`, with a one-line reason. A refusal is never reported as
+  # `empty`, because the caller halts the asset on `refused` and retires the job on `empty`.
 
-  # guard: nothing delivered — the asset folder is left exactly as found
-  if not entries:
-    return {_ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: []}
   try:
+    entries = _select_entries(job_dir, target_doc)
+
+    # guard: nothing delivered — the asset folder is left exactly as found
+    if not entries:
+      return {_ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: []}
     names = [_basename(entry) for entry in entries]
 
     # guard: the document lands where the caller said, never under a name the expert chose
@@ -574,8 +654,7 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
       _require_entry_lands(job_dir / _RESULT_DIR / name,
                            None if index == 0 else target_doc.parent / name, target_doc)
   except LandResultError as exc:
-    sys.stderr.write(f"land-result: {job_dir.name}: {exc}\n")
-    return {_ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: []}
+    return _refuse_landing(job_dir, str(exc))
 
   # what every destination holds right now, so a failed commit can undo the whole landing
   repo = flip_gate.repo_root(target_doc.parent)
@@ -611,14 +690,59 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   return {_ACTION_KEY: _ACTION_LANDED, _LANDED_KEY: landed}
 
 
+def land_job(job_dir: Path, asset_dir: Path) -> dict:
+  """
+  Land one finished job's `result/` where its own dispatch said the document belongs.
+
+  Guarantees:
+    - A dispatch with no usable target never yields a silent empty ending for a job that declared
+      files: the answer is `refused` when the response declares files and `empty` only when it
+      declares none.
+
+  Args:
+    job_dir: The finished job's bundle directory.
+    asset_dir: The asset folder the job's document must land in.
+
+  Returns:
+    The result of `land_result` for the dispatch's target. When the dispatch names no usable
+    target: `{"action": "refused", "landed": [], "reason": <one line>}` if the response declares
+    files, `{"action": "empty", "landed": []}` if it declares none.
+
+  Raises:
+    subprocess.CalledProcessError: Propagated from `land_result`.
+    OSError: Propagated from `land_result`.
+  """
+
+  # Contract:
+  # When the dispatch names no usable target, the answer is `refused` if the response declares
+  # files and `empty` only if it declares none; declared files with nowhere to go are never
+  # reported as an empty ending.
+
+  target, reason = _resolve_target(job_dir, asset_dir)
+
+  # with a usable target the landing itself decides the rest
+  if target is not None:
+    return land_result(job_dir, target)
+
+  # guard: files with nowhere to go are a refused landing, not an empty one
+  if _declared_entries(_read_response(job_dir)):
+    return _refuse_landing(job_dir, reason)
+  return { _ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: [] }
+
+
 def main(argv: list[str]) -> int:
   """
   Land one finished job's result set from the command line, printing the result as JSON.
 
   Without `--target` the document goes where the job's own dispatch payload said, which must be
-  inside `asset_dir`, or be the root `architecture.md` of a release's owner product. With it, the
+  inside `asset_dir`. With it, the
   caller names the target itself — the coordinator's cascade landing, whose document belongs to
   another asset — and the only bound left is the spec catalog's own content root.
+
+  Notes:
+    - Without `--target`, prints the answer of `land_job` and exits 0: `refused` when the dispatch names
+      no usable target but the response declares files, `empty` when it declares none.
+    - Otherwise prints the result of the landing: `landed`, `empty` or `refused`.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -651,22 +775,19 @@ def main(argv: list[str]) -> int:
 
   # an overridden target answers to the catalog instead of to one asset folder
   if args.target is not None:
-    target: Path | None = args.target.resolve()
+    target: Path = args.target.resolve()
     catalog = spec_paths.spec_content_root(flip_gate.repo_root(asset_dir))
 
     # guard: no override may place a document outside the spec catalog
-    if target is not None and not _is_inside(target, catalog):
+    if not _is_inside(target, catalog):
       sys.stderr.write(f"target outside the spec catalog {catalog}: {target}\n")
       return 2
   else:
-    target = document_target(job_dir, asset_dir)
-
-  # guard: nothing to land onto — the job stays undelivered, reported as an empty landing
-  if target is None:
-    print(json.dumps({_ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: []}))
+    # the dispatch's own target, with the same refused-or-empty answer the tick gets when there is none
+    print(json.dumps(land_job(job_dir, asset_dir)))
     return 0
 
-  # run the landing and report it the same way every other lazycortex-specs worker does
+  # run the overridden landing and report it the same way every other lazycortex-specs worker does
   print(json.dumps(land_result(job_dir, target)))
   return 0
 

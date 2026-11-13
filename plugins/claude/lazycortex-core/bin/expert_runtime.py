@@ -689,7 +689,8 @@ def collect_job(repo: Path, expert: str, job_id: str) -> dict:
   return { JobCollectKey.STATUS: status, JobCollectKey.RESPONSE: read_response(bundle_dir) }
 
 
-def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = None) -> list[dict]:
+def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = None,
+              with_dedup_key: bool = False) -> list[dict]:
   """
   Enumerate jobs in a repository's queue.
 
@@ -706,9 +707,12 @@ def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = Non
     repo: Absolute path to the repository whose queue is enumerated.
     expert: Restrict the listing to a single expert when provided.
     status: Restrict the listing to a single status value when provided.
+    with_dedup_key: Add each job's dedup key to its descriptor; reading it costs one request read per job.
 
   Returns:
-    A list of job descriptors, each carrying `expert`, `job_id`, `path`, and `status`.
+    A list of job descriptors, each carrying `expert`, `job_id`, `path`, and `status`, and, when
+    `with_dedup_key` is set, `dedup_key` — the key the job was dispatched under, or None when its request
+    carries none or cannot be read.
   """
   base = Path(repo) / JOBS_BASE
   out: list[dict] = []
@@ -732,14 +736,42 @@ def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = Non
       # guard: bundle in an unrecognised shape is dropped from the listing
       if entry_status is None:
         continue
-      entry = { JobCollectKey.EXPERT: expert_name, JobCollectKey.JOB_ID: jdir.name, JobCollectKey.PATH: str(jdir),
-                JobCollectKey.STATUS: entry_status }
+      entry: dict[str, str | None] = {
+        JobCollectKey.EXPERT: expert_name, JobCollectKey.JOB_ID: jdir.name, JobCollectKey.PATH: str(jdir),
+        JobCollectKey.STATUS: entry_status,
+      }
 
       # a caller-supplied status filter keeps only matching bundles
       if status and entry[JobCollectKey.STATUS] != status:
         continue
+
+      # the key is read only on request — it costs one request read per listed bundle
+      if with_dedup_key:
+        entry[JobCollectKey.DEDUP_KEY] = _read_dedup_key(jdir)
       out.append(entry)
   return out
+
+
+def _read_dedup_key(jdir: Path) -> str | None:
+  """
+  Read the dedup key a job bundle was dispatched under.
+
+  Args:
+    jdir: Path to the bundle directory.
+
+  Returns:
+    The request's dedup key, or None when the request carries none or cannot be read.
+  """
+  try:
+    request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return None
+
+  # guard: a request that is not an object carries no key
+  if not isinstance(request, dict):
+    return None
+  dedup_key = request.get(JobRequestKey.DEDUP_KEY)
+  return dedup_key if isinstance(dedup_key, str) else None
 
 
 def read_job_status(jdir: Path) -> str | None:

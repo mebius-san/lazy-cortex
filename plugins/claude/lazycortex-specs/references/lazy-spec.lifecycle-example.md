@@ -41,9 +41,11 @@ design.md approved in lazy-review (review_result: approved)
   → the daemon's next pull fast-forwards the tick's commit in — spec.catalog-coordinator wakes,
     creates the release with `release-scaffold`, and wakes the release note once with
     `coordinator-dispatch --release-start`
-  → the release's spec.coordinator starts the build (release playbook, "The build"): it
-    dispatches the `Revise architecture` job, then, once that step is settled, the `Build` job —
-    each through dispatch-job with its role, source, context and `target_doc` — and marks
+  → the release's spec.coordinator reconciles the release note's rows and dispatches no job on
+    this wake; once the plan is settled it hangs `Build` (release playbook, "The build")
+  → operator ticks `Build` on the release note, commits, and pushes; on the wake that tick
+    raises, the coordinator dispatches the `Build` job through dispatch-job with its role,
+    source, context and `target_doc` — and marks
     active_job via mark-job, which checks the record's SHAPE, not the label's spelling; nothing
     is journaled until the job ends
   → the job runs on its own branch, returns `code-report.md`, reports DONE

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tst — Python test runner for the lazycortex-python plugin.
 #
-# Sources the shared venv (mypy/pylint/pytest), then the optional project-env
+# Sources the venv resolver (verifies the project venv, configuring it from pyproject.toml
+# when missing or stale and allowed), then the optional project-env
 # bootstrap (python.env_source in .claude/lazy.settings.json), then runs pytest
 # scoped to the requested module under tests/<module>/, or all tests if no arg given.
 # `all` is the module name for the whole suite, so `tst all` and a bare `tst` are the
@@ -16,8 +17,9 @@
 #   tst --help           # print this usage
 #
 # Runs standalone from a bare terminal — CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DATA
-# are optional (only an optimization for the venv helper's probe 4; probes 1-3 +
-# self-derivation work without them).
+# are not read: the venv resolver (_ensure_venv.sh) derives the project root itself, and
+# configures a missing or stale project venv from pyproject.toml the way `cfg` (cfg-py)
+# does — never in protected mode (LAZYCORTEX_PROTECTED), where it only verifies.
 set -e
 set -u
 set -o pipefail

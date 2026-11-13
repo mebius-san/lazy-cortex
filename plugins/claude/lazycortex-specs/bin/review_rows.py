@@ -40,7 +40,7 @@ import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-pos
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
-    GATE_ROW_ORDER, LEVEL_ROLES, ConflictCallout, GateCheckbox, GateRowGroup, LangId, LevelDoc, Section, SpecHaltKey,
+    GATE_ROW_ORDER, LEVEL_ROLES, ConflictCallout, GateCheckbox, GateRowGroup, LevelDoc, Section, SpecHaltKey,
     SpecKey, Stage, StageKey,
 )
 
@@ -425,9 +425,7 @@ def _callout_footer(verb: str, rows: list[GateRow], lang: str) -> list[str]:
     there is neither.
   """
   # a verb with a fixed helper always carries that one line
-  helper = (note_explainers.GATE_VERB_HELPERS.get(( verb, lang ))
-            or note_explainers.GATE_VERB_HELPERS.get(( verb, LangId.EN )))
-  if helper:
+  if helper := note_explainers.gate_helper_text(verb, lang):
     return [ helper ]
 
   # any other verb keeps what its rows said, each distinct text once
@@ -457,6 +455,7 @@ def render_gate_callout(verb: str, rows: list[GateRow], lang: str) -> list[str]:
   # the footer sits behind its own bare quoted line, so Obsidian's task renderer keeps it visible
   footer = _callout_footer(verb, rows, lang)
   tail = [ _QUOTE, *(f"{_QUOTE} {text}" if text else _QUOTE for text in footer) ] if footer else []
+
   # the title is the verb as the rows write it, in every note language; only the footer follows the language
   return [ f"{_GATE_OPEN}{verb}", *boxes, *tail ]
 
@@ -578,22 +577,6 @@ def group_of(row: GateRow, stages: dict[str, str]) -> str:
   return GateRowGroup.NEXT
 
 
-def _heading(group: str, lang: str) -> str:
-  """
-  Pick a layout group's sub-heading in the note's language.
-
-  Args:
-    group: One of the `GateRowGroup` values.
-    lang: Authoring language of the note.
-
-  Returns:
-    The `## ` heading line, English for an unknown language.
-  """
-  # an unknown language falls back to the English heading
-  return (note_explainers.GATE_GROUP_HEADINGS.get(( group, lang ))
-          or note_explainers.GATE_GROUP_HEADINGS[( group, LangId.EN )])
-
-
 def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) -> list[str]:
   """
   Lay a `# Gates` section out into its row groups and conflict callouts.
@@ -636,16 +619,20 @@ def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) 
   # rebuild, publish, revise, or any other first word — sit together in one callout titled by that verb exactly as
   # the rows write it, whatever language the note is written in. The callout lists one checkbox per
   # row in ladder order, and the callouts themselves follow the ladder position of their first row. The explanation
-  # is written once, at the bottom of the callout, never per row: write and review rows carry a fixed explanation of
-  # what a tick does, and any other verb keeps the distinct explanations its rows brought along. A ticked row is the
-  # operator's gesture and stays in its verb's callout as a ticked checkbox. An older note that kept every row in a
-  # block of its own is read the same way and folded into this shape.
+  # is written once, at the bottom of the callout, never per row: write, review, start, rebuild and publish rows carry
+  # a fixed explanation of what a tick does, in the note's language, and any other verb keeps the distinct
+  # explanations its rows brought along. A ticked row is the operator's gesture and stays in its verb's callout as a
+  # ticked checkbox. An older note that kept every row in a block of its own is read the same way and folded into
+  # this shape.
 
-  headings = set(note_explainers.GATE_GROUP_HEADINGS.values())
+  headings = note_explainers.gate_heading_texts()
 
-  # every line outside the callouts, as runs of written lines, blank lines and old sub-headings dropped
+  # the spans of every gate and conflict callout, in section order
   conflict_spans = find_all_conflict_spans(section_lines)
   block_spans = sorted([ *_find_all_gate_spans(section_lines), *conflict_spans ])
+
+  # every line outside the callouts, as runs of written lines; a blank line or an old sub-heading ends a run and is
+  # dropped, and so does the start of a callout
   runs: list[list[str]] = []
   run: list[str] = []
   pos = 0
@@ -684,13 +671,13 @@ def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) 
       by_verb.setdefault(verb_of(row.label), []).append(row)
 
     # the sub-heading, then one callout per verb
-    laid.extend([ "", _heading(group, lang) ])
+    laid.extend([ "", note_explainers.gate_heading_text(group, lang) ])
     for verb, verb_rows in by_verb.items():
       laid.extend([ "", *render_gate_callout(verb, verb_rows, lang) ])
 
   # last the conflict callouts, under their own sub-heading, each carried as the section holds it
   if conflict_spans:
-    laid.extend([ "", _heading(GateRowGroup.CONFLICTS, lang) ])
+    laid.extend([ "", note_explainers.gate_heading_text(GateRowGroup.CONFLICTS, lang) ])
     for start, end in conflict_spans:
       laid.extend([ "", *section_lines[start:end] ])
 

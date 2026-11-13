@@ -93,6 +93,12 @@ class CoreDispatch:
   _JOB_ID        = "job_id"
   _JOB_DEDUP_KEY = "dedup_key"
 
+  # `list-jobs` flag adding each bundle's dedup key, the entry field carrying a bundle's status,
+  # and the status value of a job no worker has claimed yet.
+  _ARG_WITH_DEDUP_KEY = "--with-dedup-key"
+  _JOB_STATUS         = "status"
+  _STATUS_QUEUED      = "queued"
+
   # Environment variable name core reads to locate the repo.
   _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
@@ -170,12 +176,10 @@ class CoreDispatch:
 
     Args:
       repo: Absolute path to the repository root.
-      node_path: Absolute or repo-relative path to the node being
-        curated; the resolved-absolute form is combined with the
-        curation `kind` to build the `dedup_key`, so repeated
-        dispatches for the same (kind, node) collapse to one pending
-        job while classify and link dispatches for the same node are
-        kept distinct.
+      node_path: Absolute or repo-relative path to the node being curated; its resolved-absolute form and
+        the curation `kind` make up the `dedup_key` given by `curator_dedup_key`, so repeated dispatches
+        for the same (kind, node) collapse to one pending job while classify and link dispatches for the
+        same node are kept distinct.
       payload: Caller-assembled curation payload dict (curation `kind`,
         node path, scope context, pins).
 
@@ -212,9 +216,8 @@ class CoreDispatch:
     # is reduced to one canonical written form, otherwise the same target named two ways yields two keys
     # and two requests instead of one.
 
-    # resolve the path to its absolute form so relative/absolute callers
-    # collapse to the same dedup_key.
-    abs_node = node_path.resolve() if node_path.is_absolute() else (Path(repo) / node_path).resolve()
+    # the absolute form of the node, the one its dedup key is built from
+    abs_node = self._resolve_node(repo, node_path)
 
     # the bundle names the node; the pump copies it when it claims the job, so the curator sees
     # the file as it stands then rather than as it stood when the dispatch was queued
@@ -234,10 +237,101 @@ class CoreDispatch:
       "payload":   self._merge_dictionary_anchor(repo, payload),
       "source":    [ node_rel ],
       "result":    [ "curation.json" ],
-      "dedup_key": f"{payload.get(self._PAYLOAD_KIND, '')}:{abs_node}",
+      "dedup_key": self.curator_dedup_key(
+        repo = repo, node_path = node_path, kind = payload.get(self._PAYLOAD_KIND, ""),
+      ),
     }
     self._retire_finished(repo, bundle)
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
+
+  # ------------------------------------------------------------------
+  @classmethod
+  def curator_dedup_key(cls, *, repo: Path, node_path: Path, kind: str) -> str:
+    """
+    Return the dedup key a curator job of one kind for one node is queued under.
+
+    Guarantees:
+      - The key is exactly the `dedup_key` that `dispatch_curator` sends to core for the same kind and node.
+      - Relative and absolute spellings of one node give the same key.
+
+    Args:
+      repo: Absolute path to the repository root.
+      node_path: Absolute or repo-relative path to the node.
+      kind: The curation kind, one of the `KIND_*` values.
+
+    Returns:
+      The key `dispatch_curator` sends to core for that kind and node; relative and absolute
+      spellings of one node give the same key.
+    """
+
+    # Contract:
+    # The returned key is exactly the `dedup_key` that `dispatch_curator` sends to core for the same
+    # kind and node, and a relative and an absolute spelling of one node give the same key. Callers
+    # match this key against the queue to recognise a node whose job already waits there.
+
+    # the kind and the resolved absolute node path make up the key
+    return f"{kind}:{cls._resolve_node(repo, node_path)}"
+
+  # ------------------------------------------------------------------
+  @staticmethod
+  def _resolve_node(repo: Path, node_path: Path) -> Path:
+    """
+    Resolve a node path to its absolute form.
+
+    Args:
+      repo: Absolute path to the repository root.
+      node_path: Absolute or repo-relative path to the node.
+
+    Returns:
+      The resolved absolute path; a relative path resolves against `repo`.
+    """
+    return node_path.resolve() if node_path.is_absolute() else (Path(repo) / node_path).resolve()
+
+  # ------------------------------------------------------------------
+  def query_queued_dedup_keys(self, *, repo: Path, expert: str) -> set[str]:
+    """
+    Return the dedup keys of one expert's jobs that wait unclaimed, via `list-jobs`.
+
+    Guarantees:
+      - The returned set holds only the keys of jobs no worker has claimed yet (status `queued`); the key
+        of a running job is never returned.
+
+    Args:
+      repo: Absolute path to the repository root.
+      expert: Expert name whose queue is read.
+
+    Returns:
+      The keys of the jobs no worker has claimed yet; a running job is left out. Empty when core
+      answered with anything but a JSON array.
+
+    Raises:
+      RuntimeError: When the core subprocess exits non-zero.
+      json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+    """
+
+    # Contract:
+    # The returned set holds only the keys of jobs no worker has claimed yet (status `queued`); the key of
+    # a running job is NEVER returned. Callers skip a dispatch on a hit, which is safe only for an
+    # unclaimed job, because it will still read its source as it stands when claimed. A running job may
+    # have read the source before its latest change, so its node must still be dispatched.
+
+    listing = self._run_core(
+      [ self._CMD_LIST_JOBS, self._ARG_EXPERT, expert, self._ARG_WITH_DEDUP_KEY, self._ARG_CWD, str(repo) ],
+      {}, repo,
+    )
+
+    # guard: core answered with something that is not a listing
+    if not isinstance(listing, list):
+      return set()
+
+    # only a job nobody claimed yet will still read its source as it stands when it is claimed
+    return {
+      entry[self._JOB_DEDUP_KEY]
+      for entry in listing
+      if isinstance(entry, dict)
+      and entry.get(self._JOB_STATUS) == self._STATUS_QUEUED
+      and isinstance(entry.get(self._JOB_DEDUP_KEY), str)
+    }
 
   # ------------------------------------------------------------------
   def dispatch_tag_curator(self, *,

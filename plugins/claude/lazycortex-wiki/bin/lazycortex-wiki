@@ -9,9 +9,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -132,6 +134,125 @@ _SUBCOMMANDS = {
 _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 # The last-stdout-line key a multi-path worker narrows the daemon's retry unit with
 _FAILED_PATHS_KEY = "failed_paths"
+# Environment variable the daemon exports with the routine's subprocess timeout, in seconds.
+_ENV_ROUTINE_TIMEOUT = "LAZY_ROUTINE_TIMEOUT_SEC"
+
+
+# ----------------------------------------------------------------------------------------
+class _ProcessFileRun:
+  """
+  Shared state of one `process-file` invocation.
+
+  Lets every path of the invocation draw on one time budget and on lookups that do not change between
+  paths. The budget comes from the `LAZY_ROUTINE_TIMEOUT_SEC` environment variable the daemon exports; an
+  invocation without it has no budget.
+  """
+
+  # Domain(runtime.routines):
+  # # Time budget of a batch worker
+  # The daemon gives a routine's worker a fixed time and kills it when it outlives that time. A kill loses the
+  # record of what the worker had already finished, so the same oversized batch is handed over again and times
+  # out again. A worker over a batch of independent items therefore spends only a share of its time. Once the
+  # share is used up it starts no further item, reports the items it did not start as still owed, and ends as a
+  # partial failure. The daemon then retries only the owed items, so one oversized batch becomes several runs
+  # that each make progress. The first item of a batch always runs, so every run moves forward. With no declared
+  # time limit, as in a run by hand, there is no budget and every item is handled.
+
+  # Share of the routine's timeout an invocation may spend before it stops starting new paths;
+  # the rest is left for the path in flight and for the daemon's own bookkeeping.
+  _BUDGET_FRACTION = 0.8
+
+  def __init__(self, *, repo: Path) -> None:
+    """
+    Begin tracking one `process-file` invocation and start its time budget.
+
+    Args:
+      repo: Absolute repository root the invocation works in.
+    """
+    self._repo = repo
+    self._deadline = self._compute_deadline()
+    self._tags: dict[str, dict] = {}
+    self._queued_keys: set[str] | None = None
+
+  # ------------------------------------------------------------------
+  def is_spent(self) -> bool:
+    """
+    Tell whether the invocation has used up its time budget.
+
+    Returns:
+      True once the budget the daemon's timeout allows has elapsed; always False when the
+      invocation runs without a declared timeout.
+    """
+    return self._deadline is not None and time.monotonic() >= self._deadline
+
+  # ------------------------------------------------------------------
+  def read_tags(self, scope_id: str, cfg: dict) -> dict:
+    """
+    Return the tag survey of one scope, taken at most once per invocation.
+
+    Args:
+      scope_id: The scope's identifier.
+      cfg: The scope-config dict.
+
+    Returns:
+      The scope's per-axis tag survey; the same survey for every call with the same scope.
+    """
+    # opt: one survey per scope per invocation — assumes the survey may lag by the length of one invocation:
+    # it is an advisory anchor for the curator, so a value another writer adds meanwhile is only missing from it
+    if scope_id not in self._tags:
+      self._tags[scope_id] = _tags.TagOps(repo = self._repo, scope_id = scope_id, cfg = cfg).collect()
+    return self._tags[scope_id]
+
+  # ------------------------------------------------------------------
+  def is_queued(self, node_path: Path) -> bool:
+    """
+    Tell whether a classify job for the node already waits unclaimed in the queue.
+
+    Notes:
+      - When the queue cannot be read, no job counts as queued and every node is dispatched.
+      - A job already running does not count: it may have read the node before its latest change.
+
+    Args:
+      node_path: Absolute or repo-relative path to the node.
+
+    Returns:
+      True when a repeated dispatch for the node would only collapse into a job that has not started.
+    """
+    # opt: the queue is read once per invocation — assumes every path of the invocation was committed before
+    # it started, so a job still unclaimed at the read sees the node as it stands now whenever it is claimed
+    if self._queued_keys is None:
+      try:
+        self._queued_keys = _dispatch.CoreDispatch().query_queued_dedup_keys(
+          repo = self._repo, expert = _dispatch.CoreDispatch.EXPERT_NAME,
+        )
+      except (RuntimeError, json.JSONDecodeError):
+        # the check only spares work: without the listing every dispatch still goes to core, which
+        # collapses a repeat itself
+        self._queued_keys = set()
+    return _dispatch.CoreDispatch.curator_dedup_key(
+      repo = self._repo, node_path = node_path, kind = _dispatch.CoreDispatch.KIND_CLASSIFY,
+    ) in self._queued_keys
+
+  # ------------------------------------------------------------------
+  @classmethod
+  def _compute_deadline(cls) -> float | None:
+    """
+    Compute the moment after which no new path is started.
+
+    Derives the deadline from a share of the timeout in the `LAZY_ROUTINE_TIMEOUT_SEC` environment variable.
+
+    Returns:
+      The monotonic-clock deadline, or None when the variable is absent or not a positive number.
+    """
+    try:
+      timeout_sec = float(os.environ.get(_ENV_ROUTINE_TIMEOUT, ""))
+    except ValueError:
+      return None
+
+    # guard: a timeout that is not a positive number bounds nothing
+    if math.isnan(timeout_sec) or timeout_sec <= 0:
+      return None
+    return time.monotonic() + timeout_sec * cls._BUDGET_FRACTION
 
 
 # ----------------------------------------------------------------------------------------
@@ -444,6 +565,7 @@ class Cli:
   _MSG_SKIP_FILE_NOT_FOUND   = "skip (file not found)"
   _MSG_SKIP_UNRECOGNISED     = "skip (unrecognised type)"
   _MSG_SKIP_SOURCE_UNCHANGED = "skip (source unchanged)"
+  _MSG_SKIP_ALREADY_QUEUED   = "skip (classify already queued)"
   _MSG_SKIP_FILE_EXISTS      = "skip (file exists)"
   _MSG_SKIP_OUTSIDE_DOMAIN   = "skip (path outside domain sources)"
 
@@ -2920,33 +3042,41 @@ class Cli:
 
     Accepts `path` as a bare file path, a git-item JSON string (`{"path": "...", ...}`), or a
     multi-path item (`{"paths": [...], ...}`) as the whole-tick unit of a git watch carries.
-    Every path is handled on its own: a node outside every configured scope is skipped with
-    a note, and a node whose dispatch raises is recorded rather than aborting the rest.
-    Exits promptly without waiting for any curator.
+    Every path is handled on its own: a node outside every configured scope, or one whose classify
+    job already waits unclaimed in the queue, is skipped with a note, and a node whose dispatch raises is
+    recorded rather than aborting the rest. Once the invocation's time budget is spent no further
+    path is started and the unstarted paths are recorded as failed. Exits promptly without waiting
+    for any curator.
 
     Args:
       args: Parsed argument namespace; must carry `.path` and `.repo`.
 
     Returns:
-      Integer exit code — 0 when every path was dispatched or skipped, 1 when at least one
-      failed, in which case the last stdout line is `{"failed_paths": [...]}` naming them.
+      Integer exit code — 0 when every path was dispatched or skipped, 1 when at least one failed or
+      was left unstarted, in which case the last stdout line is `{"failed_paths": [...]}` naming them.
     """
     repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
 
-    # each path is its own unit of success; the failures narrow what the daemon retries
+    # what the invocation learns once: its time budget, the tag surveys, the jobs already queued
+    run = _ProcessFileRun(repo = repo)
+
+    # each path is its own unit of success; the failures, and the paths the budget left unstarted,
+    # narrow what the daemon retries
     failed = self._each_path(
-      self._parse_paths_arg(args.path), lambda raw: self._process_one(repo, raw),
+      self._parse_paths_arg(args.path), lambda raw: self._process_one(repo, raw, run),
+      is_spent = run.is_spent,
     )
     return self._report_failed(failed)
 
 
-  def _process_one(self, repo: Path, raw_path: str) -> int:
+  def _process_one(self, repo: Path, raw_path: str, run: _ProcessFileRun) -> int:
     """
     Dispatch a classify curation job for one node, or skip it with a printed note.
 
     Args:
       repo: Absolute repository root the node resolves against.
       raw_path: The node path as the argument named it.
+      run: The invocation's shared state, supplying the tag survey and the already-queued check.
 
     Returns:
       Integer exit code (0 on dispatch or skip).
@@ -2993,6 +3123,12 @@ class Cli:
       print(f"{self._CMD_PROCESS_FILE}: {self._MSG_SKIP_SOURCE_UNCHANGED} {raw_path}")
       return 0
 
+    # a classify job for the node already waits unclaimed — a repeat would only collapse into it,
+    # so the payload is not even assembled
+    if run.is_queued(node_path):
+      print(f"{self._CMD_PROCESS_FILE}: {self._MSG_SKIP_ALREADY_QUEUED} {raw_path}")
+      return 0
+
     # the node's operator pins travel with the payload
     pins = {
       "pinned_topics":    node_obj.pinned_topics,
@@ -3004,7 +3140,7 @@ class Cli:
     # the existing per-axis tag values across the scope — the classify anchor, so
     # the curator reuses a value already in use instead of coining a synonym
     # (empty axes on cold-start)
-    existing_tags = _tags.TagOps(repo = repo, scope_id = scope_id, cfg = cfg).collect()
+    existing_tags = run.read_tags(scope_id, cfg)
 
     # assemble the classify job bundle from the node, its scope, and the scope's vocabulary
     payload = {
@@ -3119,21 +3255,31 @@ class Cli:
 
 
   @staticmethod
-  def _each_path(paths: list[str], handler: Callable[[str], int]) -> list[str]:
+  def _each_path(paths: list[str], handler: Callable[[str], int], *,
+                 is_spent: Callable[[], bool] | None = None) -> list[str]:
     """
     Run a per-path handler over a unit's paths and collect the ones it could not handle.
 
     Args:
       paths: The paths of one unit, in the item's own order.
       handler: Callable handling one path; a non-zero return or an exception marks it failed.
+      is_spent: Callable asked before each path whether the invocation is out of time; once it
+        answers True no further path is started. None runs every path.
 
     Returns:
-      The paths whose handler raised or returned non-zero, in input order.
+      The paths whose handler raised or returned non-zero and the paths never started, in
+      input order.
     """
     failed: list[str] = []
 
     # one path's failure is recorded and the rest still run — the unit is retried narrowed
-    for raw in paths:
+    for position, raw in enumerate(paths):
+      # guard: out of time — the paths not started are owed to the next run; the first path is
+      # never held back, so every run handles at least one
+      if position > 0 and is_spent is not None and is_spent():
+        print(f"time budget spent: {len(paths) - position} path(s) left for the next run", file = sys.stderr)
+        failed.extend(paths[position : ])
+        break
       try:
         exit_code = handler(raw)
       except Exception as error:  # noqa: BLE001

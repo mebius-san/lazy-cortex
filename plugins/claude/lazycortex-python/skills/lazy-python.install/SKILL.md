@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Install lazycortex-python
 
-Idempotent and quiet install (plus a log write). Mirrors the four plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers and the mypy plugin shim (`cli/mypy/`) into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
+Idempotent and quiet install (plus a log write). Mirrors the four plugin rules into `.claude/rules/`, deploys the `cfg-py` / `chk-py` / `tst-py` wrappers and the mypy plugin shim (`cli/mypy/`) into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
 
 The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.json` when the plugin is enabled — no install step writes to the consumer's settings.json.
 
@@ -16,8 +16,8 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
-   - `Step 2 — Deploy chk-py, tst-py and the mypy shim into cli/ and ensure .venv/ gitignored`
-   - `Step 2b — Install ~/.local/bin/chk-py and tst-py`
+   - `Step 2 — Deploy cfg-py, chk-py, tst-py and the mypy shim into cli/ and ensure .venv/ gitignored`
+   - `Step 2b — Install ~/.local/bin/cfg-py, chk-py and tst-py`
    - `Step 3 — Detect PyCharm inspect.sh prerequisite`
    - `Step 4 — Bootstrap pyproject.toml checker sections (pch gated on PyCharm presence)`
    - `Step 5 — Scaffold project overlay guidelines under docs/guidelines/`
@@ -43,7 +43,7 @@ The Python ≥ 3.12 floor is owned by `/lazy-core.install` (its single Step 0 pr
 
 Two classes of file, two policies. Which applies follows from who owns the bytes, never from how large the diff is.
 
-**Install-managed mirrors** — the four plugin rules, the `chk-py` / `tst-py` wrappers, and the scaffold template: files copied or rendered verbatim out of the plugin. The plugin owns them end to end; a consumer who wants different content authors **their own** rule file (or registers a `_local` scaffold entry), so a target that differs from the shipped source is a stale copy by construction. Absent → copy (`installed`); byte-identical → nothing (`unchanged`); different → overwrite from the source (`refreshed`). No diff preview, no merge, no question. A no-longer-shipped rule (orphan) is left in place silently (`kept-orphan`) — this skill never deletes consumer files. The verdict comes from a byte comparison plus a post-write re-check, never from reading the two files and judging.
+**Install-managed mirrors** — the four plugin rules, the `cfg-py` / `chk-py` / `tst-py` wrappers, and the scaffold template: files copied or rendered verbatim out of the plugin. The plugin owns them end to end; a consumer who wants different content authors **their own** rule file (or registers a `_local` scaffold entry), so a target that differs from the shipped source is a stale copy by construction. Absent → copy (`installed`); byte-identical → nothing (`unchanged`); different → overwrite from the source (`refreshed`). No diff preview, no merge, no question. A no-longer-shipped rule (orphan) is left in place silently (`kept-orphan`) — this skill never deletes consumer files. The verdict comes from a byte comparison plus a post-write re-check, never from reading the two files and judging.
 
 **Consumer-owned config** — `pyproject.toml`, the `docs/guidelines/*.md` overlays, `.gitignore`, `lazy.settings.json`: files the consumer routinely edits, where this skill only contributes sections. Add what is missing (always silent), leave what is there byte-for-byte. A direct contradiction — the consumer set a checker key to a value that opposes a required one — is the ONLY case that asks. "Conflict" means you cannot determine what should survive, **not** merely that the bytes differ. The site that hits one prints the four context items before the call, filled from the run: **Where** — `/lazy-python.install · Step <N> — <title>`; target the conflicting file's path. **Found** — the consumer's region quoted, the shipped value it opposes, and a unified diff between them. **Why asking** — local and shipped contradict each other and the skill cannot tell which should survive. **Answers** — `merge-shipped` — the shipped value replaces the consumer's in that region now, nothing else in the file moves, not re-asked while the values agree; `keep-local` — the file stays byte-for-byte, the region is reported `kept-local`, nothing is persisted so the next run asks again while the contradiction persists. Then `AskUserQuestion`: header `"<file basename> conflict"`, question `"<file path> sets <key> to <local value>; lazycortex-python requires <shipped value>. Which survives?"`, options `merge-shipped` / `keep-local` with those descriptions.
 
@@ -63,11 +63,11 @@ It prints a JSON receipt mapping each rule to its state and exits non-zero when 
 
 Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical) / `refreshed` (stale → overwritten) / `failed` (write did not verify).
 
-## Step 2: Deploy chk-py, tst-py and the mypy shim into `cli/` and ensure `.venv/` gitignored
+## Step 2: Deploy cfg-py, chk-py, tst-py and the mypy shim into `cli/` and ensure `.venv/` gitignored
 
-Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`, and `${CLAUDE_PLUGIN_ROOT}/templates/mypy-protected-access-shim.py` verbatim to `<consumer>/cli/mypy/protected_access.py` — an install-managed mirror that the consumer's `pyproject.toml` references by that relative path. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
+Copy `${CLAUDE_PLUGIN_ROOT}/templates/cfg-wrapper.sh`, `chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/cfg-py`, `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`, and `${CLAUDE_PLUGIN_ROOT}/templates/mypy-protected-access-shim.py` verbatim to `<consumer>/cli/mypy/protected_access.py` — an install-managed mirror that the consumer's `pyproject.toml` references by that relative path. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the project venv `cfg-py` configures (and `chk-py` / `tst-py` configure automatically when it is missing or stale) defaults to `<consumer>/.venv` in the repo root, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
 
-After this step `bash ./cli/chk-py` and `bash ./cli/tst-py` work from the repo root; the wrappers carry no exec bit on purpose (see `lazy-core.skill-writing § 12`).
+After this step `bash ./cli/cfg-py`, `bash ./cli/chk-py` and `bash ./cli/tst-py` work from the repo root; the wrappers carry no exec bit on purpose (see `lazy-core.skill-writing § 12`).
 
 Run:
 
@@ -77,11 +77,11 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.i
 
 The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). They are install-managed mirrors — `phase2` writes the current render unconditionally, so a re-run with an unchanged render is a no-op rewrite and a stale wrapper is replaced. The `.gitignore` append is consumer-owned config and idempotent: the `.venv/` line is added only when absent.
 
-Outcome: `wrappers-deployed-3 + gitignore-ensured` when `.venv/` was added to the consumer's `.gitignore`; `wrappers-deployed-3 + gitignore-already-present` when the `.venv/` line was already there (idempotent re-run).
+Outcome: `wrappers-deployed-4 + gitignore-ensured` when `.venv/` was added to the consumer's `.gitignore`; `wrappers-deployed-4 + gitignore-already-present` when the `.venv/` line was already there (idempotent re-run).
 
-## Step 2b: Install `~/.local/bin/chk-py` and `tst-py`
+## Step 2b: Install `~/.local/bin/cfg-py`, `chk-py` and `tst-py`
 
-Deploys the human-facing wrappers — the only files this plugin ever marks executable, since they live outside every vault and no mode-blind git client can strip the bit on them. Each walks up from the caller's `$PWD` to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `bash`, so typing `chk-py` / `tst-py` works from anywhere under a repo that has run Step 2, once `~/.local/bin` is on `$PATH`.
+Deploys the human-facing wrappers — the only files this plugin ever marks executable, since they live outside every vault and no mode-blind git client can strip the bit on them. Each walks up from the caller's `$PWD` to the nearest `<repo>/cli/chk-py` (or `cfg-py` / `tst-py`) and runs it through `bash`, so typing `cfg-py` / `chk-py` / `tst-py` works from anywhere under a repo that has run Step 2, once `~/.local/bin` is on `$PATH`.
 
 Run:
 
@@ -227,4 +227,4 @@ One line per task in the canonical list, with its outcome word. A missing line i
 
 - **`/lazy-python.install` aborts: plugin source not found** — `${CLAUDE_PLUGIN_ROOT}` is unset or points at a path with no `rules/lazy-python.*.md` files → ensure the plugin is installed and enabled, then re-run.
 - **Step 1: target rule file is read-only** — consumer's `.claude/rules/lazy-python.*.md` is write-protected → unlock the file and re-run; the mirror always overwrites.
-- **Step 2: wrapper template missing** — `${CLAUDE_PLUGIN_ROOT}/templates/{chk,tst}-wrapper.sh` absent from the plugin cache → run `/plugin update lazycortex-python@lazycortex` to restore templates, then re-run.
+- **Step 2: wrapper template missing** — `${CLAUDE_PLUGIN_ROOT}/templates/{cfg,chk,tst}-wrapper.sh` absent from the plugin cache → run `/plugin update lazycortex-python@lazycortex` to restore templates, then re-run.

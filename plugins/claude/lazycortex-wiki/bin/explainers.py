@@ -7,20 +7,19 @@ to guess what the file is or whether hand edits survive (they do not). Longer
 fixed passages — a generated file's whole preamble, a message a skill reports
 — live here under their own keys.
 
-This module is the only place any of that wording exists. A writer that needs
-a passage asks the CLI's `text` verb for it by key and pastes what comes back;
-no agent or skill body carries a copy, so a new language is one entry here and
-touches nothing a model reads.
+The wording itself lives in the plugin's locale files, one per language, and
+the rest of the wiki reaches it through this module. A writer that needs a
+passage asks the CLI's `text` verb for it by key and pastes what comes back;
+no agent or skill body carries a copy, so a new language is one locale file
+and touches nothing a model reads.
 
 The wiki's language is resolved by core's language verb with the wiki's own
 section, so `wiki.language` outranks the repo-wide `language`, and `en` is the
-floor. The domain surfaces
-instead follow the language their documents are authored in, read from
-`wiki.domains.language` through `language_code` — so the index always
-matches the docs it lists. Every language key holds an ISO 639-1 code;
-`language_code` still accepts the free-form names that key used to hold,
-for one release, and `LANGUAGE_NAMES` expands a code back into a name
-wherever a sender puts a language into a model's prompt.
+floor. The domain surfaces instead follow the language their documents are
+authored in, read from `wiki.domains.language` through `language_code` — so
+the index always matches the docs it lists. Every language key holds an
+ISO 639-1 code, and `language_name` expands a code back into a name wherever a
+sender puts a language into a model's prompt.
 """
 from __future__ import annotations
 
@@ -40,6 +39,8 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import wiki_lockit as _lockit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The wiki's own settings section, passed to core's language verb so `wiki.language` outranks the root key.
@@ -79,49 +80,20 @@ SURFACE_DOMAIN_SECTION = "domain-section"
 TEXT_TAG_DICTIONARY_INTRO = "tag-dictionary-intro"
 TEXT_QUERY_NO_RESULTS = "query-no-results"
 
-EXPLAINERS: dict[tuple[str, str], str] = {
-    (SURFACE_TOPICS, LangId.EN): "The topic catalog for this scope. Rebuilt automatically — do not edit by hand.",
-    (SURFACE_TOPICS, LangId.RU):
-        "Каталог тем этого раздела. Пересобирается автоматически — руками не править.",
-    (SURFACE_DOMAINS_INDEX, LangId.EN): "The rule-group index. Rebuilt automatically — do not edit by hand.",
-    (SURFACE_DOMAINS_INDEX, LangId.RU):
-        "Указатель групп правил. Пересобирается автоматически — руками не править.",
-    (SURFACE_DOMAIN_DOC, LangId.EN):
-        "A domain knowledge document: principles, mechanics, contracts. Rebuilt automatically — do not edit by hand.",
-    (SURFACE_DOMAIN_DOC, LangId.RU):
-        "Документ доменного знания: принципы, механика, контракты. Пересобирается автоматически — руками не править.",
-    (SURFACE_DOMAIN_FOLDER, LangId.EN):
-        "This group's folder: overview and document list. Rebuilt automatically — do not edit by hand.",
-    (SURFACE_DOMAIN_FOLDER, LangId.RU):
-        "Папка группы: обзор и список документов. Пересобирается автоматически — руками не править.",
-    (SURFACE_DOMAIN_SECTION, LangId.EN):
-        "A section of the domain tree: the groups it holds. Rebuilt automatically — do not edit by hand.",
-    (SURFACE_DOMAIN_SECTION, LangId.RU):
-        "Раздел доменного дерева: группы внутри него. Пересобирается автоматически — руками не править.",
-}
+# Every surface key, in the order the CLI's `text` verb lists them.
+SURFACES: tuple[str, ...] = (
+  SURFACE_TOPICS, SURFACE_DOMAINS_INDEX, SURFACE_DOMAIN_DOC, SURFACE_DOMAIN_FOLDER, SURFACE_DOMAIN_SECTION,
+)
 
-TEXTS: dict[tuple[str, str], str] = {
-    (TEXT_TAG_DICTIONARY_INTRO, LangId.EN): (
-        "# Tag values\n"
-        "\n"
-        "Advisory dictionary of the wiki's canonical tag values, maintained by the wiki tag curator.\n"
-        "It records what each value covers so a later classification reuses a settled value instead of\n"
-        "coining a synonym beside it. It constrains nothing: a classification may coin a value the\n"
-        "dictionary does not list, and the next canon pass records it here."
-    ),
-    (TEXT_TAG_DICTIONARY_INTRO, LangId.RU): (
-        "# Значения тегов\n"
-        "\n"
-        "Справочный словарь канонических значений тегов вики, который ведёт куратор тегов. Он\n"
-        "записывает, что покрывает каждое значение, чтобы следующая классификация переиспользовала\n"
-        "уже устоявшееся значение, а не завела рядом синоним. Он ничего не ограничивает:\n"
-        "классификация вправе завести значение, которого в словаре нет, и следующий проход канона\n"
-        "запишет его сюда."
-    ),
-    (TEXT_QUERY_NO_RESULTS, LangId.EN): "No wiki material matched this question.",
-    (TEXT_QUERY_NO_RESULTS, LangId.RU):
-        "Ни один материал вики не подошёл под этот вопрос.",
-}
+# Every fixed-passage key.
+TEXT_KEYS: tuple[str, ...] = ( TEXT_TAG_DICTIONARY_INTRO, TEXT_QUERY_NO_RESULTS )
+
+# Lockit key prefix of a surface's explainer text; the surface key follows it.
+EXPLAINER_KEY_PREFIX = "explainers."
+# Lockit key prefix of a fixed passage; the passage key follows it.
+TEXT_KEY_PREFIX = "texts."
+# Lockit key of a language's display name, written in that language.
+LANGUAGE_NAME_KEY = "language-name"
 
 
 def resolve_language(repo: Path) -> str:
@@ -173,20 +145,21 @@ def resolve_language(repo: Path) -> str:
   return proc.stdout.removesuffix("\n")
 
 
-# Legacy free-form values `wiki.domains.language` carried before the key held a code.
-# Dropped one release after the doctor's rewrite offer; nothing new may be added here.
-_LEGACY_NAME_CODES: dict[str, str] = {
-    "русский": LangId.RU,
-    "russian": LangId.RU,
-    "english": LangId.EN,
-}
+def language_name(code: str) -> str:
+  """
+  Expand a language code into the display name a sender puts into a model's prompt.
 
-# Display name per code — the expansion a sender applies when it puts a language
-# into a model's prompt. There is no reverse reading of these anywhere.
-LANGUAGE_NAMES: dict[str, str] = {
-    LangId.EN: "English",
-    LangId.RU: "русский",
-}
+  Args:
+    code: An ISO 639-1 code.
+
+  Returns:
+    The language's name written in that language, for a language the wiki carries
+    texts in; any other code unchanged.
+  """
+  # guard: a language the wiki carries no texts in has no name of its own — the code stands in
+  if code not in { lang.value for lang in LangId }:
+    return code
+  return _lockit.Lockit.text(LANGUAGE_NAME_KEY, code)
 
 
 def language_code(value: str) -> str:
@@ -198,12 +171,10 @@ def language_code(value: str) -> str:
       resolves to the `en` floor.
 
   Args:
-    value: The configured value — a code, or one of the legacy free-form
-      names the setting carried before codes.
+    value: The configured language value, an ISO 639-1 code.
 
   Returns:
-    The matching code for a known legacy name; otherwise the value stripped
-    and lowercased, so a code passes through unchanged.
+    The value stripped and lowercased, so a code passes through unchanged.
   """
 
   # Contract:
@@ -215,7 +186,7 @@ def language_code(value: str) -> str:
   # guard: nothing configured — `en` is the shipped floor
   if not cleaned:
     return LangId.EN
-  return _LEGACY_NAME_CODES.get(cleaned, cleaned)
+  return cleaned
 
 
 def explainer_line(surface: str, lang: str) -> str:
@@ -232,14 +203,16 @@ def explainer_line(surface: str, lang: str) -> str:
 
   Returns:
     The `*...*` line, without a trailing newline.
+
+  Raises:
+    KeyError: The surface key has no English explainer text.
   """
 
   # Contract:
   # Every `SURFACE_*` key MUST render a line in some language: a language tag
   # carrying no text of its own falls back to the English wording.
 
-  text = EXPLAINERS.get((surface, lang)) or EXPLAINERS[(surface, LangId.EN)]
-  return f"*{text}*"
+  return f"*{_lockit.Lockit.text(EXPLAINER_KEY_PREFIX + surface, lang)}*"
 
 
 def text_keys() -> list[str]:
@@ -249,10 +222,7 @@ def text_keys() -> list[str]:
   Returns:
     The surface keys followed by the fixed-passage keys, each once, in a stable order.
   """
-  surfaces = [
-    SURFACE_TOPICS, SURFACE_DOMAINS_INDEX, SURFACE_DOMAIN_DOC, SURFACE_DOMAIN_FOLDER, SURFACE_DOMAIN_SECTION,
-  ]
-  return surfaces + sorted({ key for key, _ in TEXTS })
+  return list(SURFACES) + sorted(TEXT_KEYS)
 
 
 def text_for(key: str, lang: str) -> str:
@@ -275,14 +245,14 @@ def text_for(key: str, lang: str) -> str:
     The passage, without a trailing newline.
 
   Raises:
-    KeyError: The key belongs to neither table.
+    KeyError: The key is neither a surface key nor a fixed-passage key.
   """
 
   # Contract:
   # Every key `text_keys` lists MUST render in some language: a language tag carrying
   # no text of its own falls back to the English wording.
 
-  # guard: a surface renders through the explainer form, which wraps it in asterisks
-  if ( key, LangId.EN ) in EXPLAINERS:
-    return explainer_line( key, lang )
-  return TEXTS.get( ( key, lang ) ) or TEXTS[ ( key, LangId.EN ) ]
+  # a surface renders through the explainer form, which wraps it in asterisks; a passage renders verbatim
+  if key in SURFACES:
+    return explainer_line(key, lang)
+  return _lockit.Lockit.text(TEXT_KEY_PREFIX + key, lang)

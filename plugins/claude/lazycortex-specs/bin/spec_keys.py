@@ -757,8 +757,8 @@ class TickAction:
       `active_job` marker was cleared.
     JOB_CANCELLED: An active expert job's bundle carried a `CANCELLED` marker;
       the `active_job` marker was cleared.
-    ASSET_HALTED: An active expert job's bundle carried a `DEAD` marker; the
-      asset was halted.
+    ASSET_HALTED: An active expert job's bundle carried a `DEAD` marker, or a
+      `DONE` marker whose result landing was refused; the asset was halted.
     NOOP: Nothing to do this tick.
     DISPATCH_STALE: A dispatch returned an already-terminal job (a dedup hit on a
       finished-but-unconsumed bundle); no `active_job` marker was written, a warning
@@ -814,7 +814,8 @@ class TickAction:
   JOB_DONE = "job-done"
   # An active expert job's bundle carried a `CANCELLED` marker; the `active_job` marker was cleared.
   JOB_CANCELLED = "job-cancelled"
-  # An active expert job's bundle carried a `DEAD` marker; the asset was halted.
+  # An active expert job's bundle carried a `DEAD` marker, or a `DONE` marker whose result landing was refused;
+  # the asset was halted.
   ASSET_HALTED = "asset-halted"
   # Nothing to do this tick.
   NOOP = "noop"
@@ -842,6 +843,9 @@ class GateCheckbox:
     WRITE_TEST_PLAN: Label for the test-plan-readiness checkbox.
     WRITE_ARCHITECTURE: Label for the product note's checkbox that writes the product's
       `architecture.md`.
+    REVISE_ARCHITECTURE: Label for the product note's checkbox that brings the product's `architecture.md` up
+      to date with the approved designs.
+    BUILD: Label for the release note's checkbox that starts the release's first build.
     START_RESEARCH: Label for the `research` tool's launch checkbox.
     START_RELEASE: Label for the product note's checkbox that creates a release from the current delta.
     REBUILD: Label for the release note's checkbox that pulls new approvals in and builds again.
@@ -854,6 +858,11 @@ class GateCheckbox:
       carries an `active_job` entry.
     WRITE_VERB: The verb, the first word of a label, shared by every `Write <doc>` row.
     REVIEW_VERB: The verb, the first word of a label, shared by every `Review <doc>` row.
+    REVISE_VERB: The verb, the first word of a label, shared by every `Revise <doc>` row.
+    BUILD_VERB: The verb, the first word of a label, of the release note's first-build row.
+    START_VERB: The verb, the first word of a label, shared by the `Start release` and `Start research` rows.
+    REBUILD_VERB: The verb, the first word of a label, of the release note's rebuild row.
+    PUBLISH_VERB: The verb, the first word of a label, of the release note's publish row.
     GATE_CALLOUT_MARK: Markdown callout prefix marking a gate-readiness block.
   """
 
@@ -863,6 +872,11 @@ class GateCheckbox:
   WRITE_TEST_PLAN = "Write test-plan"
   # Label for the product note's checkbox that writes the product's `architecture.md`.
   WRITE_ARCHITECTURE = "Write architecture"
+  # Label for the product note's checkbox that brings the product's `architecture.md` up to date with the approved
+  # designs.
+  REVISE_ARCHITECTURE = "Revise architecture"
+  # Label for the release note's checkbox that starts the release's first build.
+  BUILD = "Build"
   # Launch label of the `research` tool, declared by its playbook and never parameterised.
   START_RESEARCH = "Start research"
   # Label for the product note's checkbox that creates a release from the current delta.
@@ -881,6 +895,16 @@ class GateCheckbox:
   WRITE_VERB = "Write"
   # The verb every `Review <doc>` row's label opens with.
   REVIEW_VERB = "Review"
+  # The verb every `Revise <doc>` row's label opens with.
+  REVISE_VERB = "Revise"
+  # The verb of the release note's first-build row.
+  BUILD_VERB = "Build"
+  # The verb the `Start release` and `Start research` rows' labels open with.
+  START_VERB = "Start"
+  # The verb of the release note's rebuild row.
+  REBUILD_VERB = "Rebuild"
+  # The verb of the release note's publish row.
+  PUBLISH_VERB = "Publish"
   # Markdown callout prefix marking a gate-readiness block.
   GATE_CALLOUT_MARK = "[!gate]"
 
@@ -891,8 +915,7 @@ class GateRowGroup:
   The groups the `review-rows` verb lays a `# Gates` section out into.
 
   Attributes:
-    NEXT: Rows that move the asset forward — every `Write`, `Start`, `Rebuild`, `Revise` and `Publish` row,
-      and a `Review` row whose document is not approved yet.
+    NEXT: Rows that move the asset forward — every row but a `Review` row of a document already approved.
     REREVIEW: `Review` rows of documents already approved, where a tick re-opens a settled review.
     CONFLICTS: The coherence check's conflict callouts, laid out last.
   """
@@ -1000,6 +1023,7 @@ GATE_ROW_ORDER = [
     SiblingDoc.CODE_PLAN,
     GateCheckbox.START_RESEARCH,
     GateCheckbox.START_RELEASE,
+    GateCheckbox.BUILD,
     GateCheckbox.REBUILD,
     GateCheckbox.PUBLISH,
 ]
@@ -1148,12 +1172,15 @@ class PluginErrorCause:
       triggered it had already landed.
     ICON_REPAINT_FAILED: A best-effort icon repaint of the notes a commit carries that failed; the commit went
       ahead without the repaint.
+    LANDING_REFUSED: A finished job's result could not be put in the asset folder; the asset was halted.
   """
 
   # A best-effort wake of a release owner's level note raised after the change that triggered it had already landed.
   RELEASE_OWNER_WAKE_FAILED = "release-owner-wake-failed"
   # A best-effort icon repaint of the notes a commit carries failed; the commit went ahead without the repaint.
   ICON_REPAINT_FAILED = "icon-repaint-failed"
+  # A finished job's result could not be put in the asset folder; the asset was halted.
+  LANDING_REFUSED = "landing-refused"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1192,8 +1219,8 @@ class CoordinatorTrigger:
       `payload["asset"]` naming the asset's token relative to the root of the product that owns
       releases, not to the asset's own product. Synthetic, never derived from `item`; it creates
       and launches nothing.
-    RELEASE_START: A release's own coordinator is woken one hop downward after `Start release`, and again after a
-      verdict on the revised `architecture.md` of the build's first step. Synthetic, never derived from `item`.
+    RELEASE_START: A release's own coordinator is woken one hop downward after `Start release`, and again when the
+      product's `architecture.md` turns approved while a release is open. Synthetic, never derived from `item`.
     RELEASE_PUBLISHED: A release was published; raised on the release owner's level note. Synthetic, never
       derived from `item`.
     DOC_LANDED: A level document entered review while the level note still hangs its `Write` row, regardless of
@@ -1229,16 +1256,16 @@ class CoordinatorTrigger:
   # brief. Carries `payload["asset"]` naming the asset's token relative to the root of the product that owns releases,
   # not to the asset's own product. Synthetic, never derived from `item`; it creates and launches nothing.
   ASSET_APPROVED = "asset-approved"
-  # A release's own coordinator is woken one hop downward after `Start release`, and again after a verdict on the
-  # revised `architecture.md` of the build's first step. Synthetic, never derived from `item`.
+  # A release's own coordinator is woken one hop downward after `Start release`, and again when the product's
+  # `architecture.md` turns approved while a release is open. Synthetic, never derived from `item`.
   RELEASE_START = "release-start"
   # A release of the product that owns releases was published, dispatched one hop upward onto that product's level
   # note after the publish commit, so it can recompute the delta, hang or take down `Start release` and rewrite its
   # brief. Synthetic, never derived from `item`; it creates and launches nothing.
   RELEASE_PUBLISHED = "release-published"
-  # A level document entered review while the level note still hangs its `Write` row — a document written from
-  # below, such as the product's `architecture.md` from a release build's first step. Wakes the level note whoever
-  # authored the commit; the coordinator takes the row down and creates nothing.
+  # A level document entered review while the level note still hangs its `Write` row — a document put into review
+  # from outside the level's own ladder. Wakes the level note whoever authored the commit; the coordinator takes
+  # the row down and creates nothing.
   DOC_LANDED = "doc-landed"
 
 
@@ -1495,13 +1522,16 @@ class HaltReason:
   These are short natural-English clauses naming what went wrong, not full
   sentences — the caller wraps them into the final `spec_halted`-callout /
   History-line text (which inserts the reason verbatim, so an internal slug
-  would otherwise render raw to the operator). `JOB_DIED` is the one member
-  that is a format template rather than a bare phrase: it reproduces the
-  DEAD-branch wording verbatim (`job {job_id} ({label}) died`).
+  would otherwise render raw to the operator). `JOB_DIED` and `LANDING_REFUSED`
+  are the members that are format templates rather than bare phrases: the first
+  reproduces the DEAD-branch wording verbatim (`job {job_id} ({label}) died`),
+  the second carries the collector's own reason into the halt.
 
   Attributes:
     JOB_DIED: An expert job's bundle carried a `DEAD` marker; format template
       taking `job_id` and `label`.
+    LANDING_REFUSED: A finished job's result could not be put in place; format
+      template taking `job_id`, `label` and `reason`.
     MERGE_CONFLICT: A cascade job reported a merge conflict while folding its
       result into the target document.
     PLAN_DROP_PARTIAL: A plan-dropping step (an attach drop, or cascade
@@ -1512,6 +1542,8 @@ class HaltReason:
 
   # An expert job's bundle carried a `DEAD` marker; format template taking `job_id` and `label`.
   JOB_DIED = "job {job_id} ({label}) died"
+  # A finished job's result could not be put in place; format template taking `job_id`, `label` and `reason`.
+  LANDING_REFUSED = "job {job_id} ({label}) finished but its result was not landed: {reason}"
   # A cascade job reported a merge conflict while folding its result into the target document.
   MERGE_CONFLICT = "change delta could not be applied cleanly to the feature docs"
   # A plan-dropping step (an attach drop, or cascade code-plan removal) failed partway, leaving asset state

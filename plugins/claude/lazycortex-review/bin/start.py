@@ -64,19 +64,13 @@ import finalize as _finalize  # noqa: E402  # pylint: disable=import-error,wrong
 import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import LangId, Phase, ReviewKey, Tag  # noqa: E402
+from keys import LangId, LockitKey, Phase, ReviewKey, Tag  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from review_lockit import Lockit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The per-cycle autorun choices a review entry removes from the frontmatter.
 _AUTORUN_KEYS = ( ReviewKey.SKIP_VALIDATION, ReviewKey.AUTORUN, ReviewKey.AUTORUN_CYCLES )
-
-
-# comment one-liner seeded under the `# History` heading (after its owner tag) so the section
-# is self-described in source without rendering; per vault language, English is the floor
-_HISTORY_EXPLAINERS = {
-    LangId.EN: "A log of what changed in this document during review. Kept automatically — do not edit by hand.",
-    LangId.RU: "Журнал изменений документа за время ревью. Ведётся автоматически — руками не править.",
-}
 
 
 def _history_explainer(file_path: Path) -> str:
@@ -87,15 +81,16 @@ def _history_explainer(file_path: Path) -> str:
     file_path: The document the section is being seeded on.
 
   Returns:
-    The HTML-comment explainer line in the vault's resolved language,
-    falling back to English.
+    The HTML-comment explainer line in the vault's resolved language, or in English when that language has no
+    lockit file.
   """
   # the resolver lives beside the banner writer, so start, submit, and the paint-banner verb read one chain
   # waiver: type: ignore — in a whole-project run mypy binds this bare `note_ops` to the specs
   # plugin's same-named module, which has no such attribute; at runtime it is review's own
-  text = _HISTORY_EXPLAINERS.get(
-      _note_ops.resolve_language(file_path)  # type: ignore[attr-defined]
-  ) or _HISTORY_EXPLAINERS[LangId.EN]
+  text = Lockit.text(
+      LockitKey.HISTORY_EXPLAINER,
+      _note_ops.resolve_language(file_path),  # type: ignore[attr-defined]
+  )
   return f"<!-- {text} -->"
 
 
@@ -118,8 +113,14 @@ def _first_sentence(text: str) -> str:
   return text.split(". ", 1)[0].strip().rstrip(".")
 
 
-# the opening sentence of every explainer ever seeded, which identifies a legacy italic explainer
-_EXPLAINER_OPENINGS = frozenset(_first_sentence(text) for text in _HISTORY_EXPLAINERS.values())
+def _explainer_openings() -> set[str]:
+  """
+  Collect the opening sentence of the explainer in every language the plugin carries texts in.
+
+  Returns:
+    The opening sentences, which identify a legacy italic explainer line.
+  """
+  return { _first_sentence(Lockit.text(LockitKey.HISTORY_EXPLAINER, lang)) for lang in LangId }
 
 
 def _is_explainer_line(line: str) -> bool:
@@ -134,7 +135,7 @@ def _is_explainer_line(line: str) -> bool:
     of a seeded explainer; `False` for any other line, an operator's own italic note included.
   """
   if (italic := _ITALIC_LINE_RE.match(line)) is not None:
-    return _first_sentence(italic.group(1)) in _EXPLAINER_OPENINGS
+    return _first_sentence(italic.group(1)) in _explainer_openings()
   return bool(_COMMENT_EXPLAINER_RE.match(line))
 
 

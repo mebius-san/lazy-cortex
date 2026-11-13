@@ -28,8 +28,7 @@ class LangId(StrEnum):
   """
   The ISO 639-1 codes the review plugin carries texts in.
 
-  One definition for the whole plugin — `note_ops`, `start` and `banner` all key their
-  per-language string tables by these members.
+  One definition for the whole plugin — each member names one lockit file.
 
   Attributes:
     EN: English — the shipped floor every lookup falls back to and the language resolver
@@ -39,6 +38,28 @@ class LangId(StrEnum):
 
   EN = "en"
   RU = "ru"
+
+
+# ----------------------------------------------------------------------------------------
+class LockitKey:
+  """
+  Keys of the user-visible strings the review plugin reads from its lockit files.
+  """
+
+  # The prefix of a banner body key; a banner state value follows it.
+  BANNER_PREFIX = "banner."
+  # The ready banner carrying one approval checkbox.
+  BANNER_READY_SINGLE = "banner.ready-single"
+  # The ready banner carrying the three approval checkboxes.
+  BANNER_READY_TRIPLE = "banner.ready-triple"
+  # The ready banner's opening line after an autorun stopped.
+  AUTORUN_STOP_LINE = "autorun.stop-line"
+  # The prefix of an autorun stop-reason key; an `AutorunState` stop token follows it.
+  AUTORUN_STOP_REASON_PREFIX = "autorun.stop-reason."
+  # The in-process banner's progress line while an autorun is turning.
+  AUTORUN_RUNNING_LINE = "autorun.running-line"
+  # The explainer line seeded under the `# History` heading.
+  HISTORY_EXPLAINER = "history.explainer"
 
 
 # The autorun cycle cap a review class gets when its config names none.

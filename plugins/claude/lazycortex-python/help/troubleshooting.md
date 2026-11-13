@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-11-12
+last_regen: 2026-11-13
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 7f5618226560d6b9847d7353e886248812944c83b0fde17346ffb35a0d5394c3
+source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
+surface_sha: 761a7fc31242a12fece3f8587db0a889a96f113df61b860fa34ce2d683409615
 ---
 # Troubleshooting
 
@@ -46,7 +46,7 @@ surface_sha: 7f5618226560d6b9847d7353e886248812944c83b0fde17346ffb35a0d5394c3
 
 ## `/lazy-python.install` Step 2 fails: wrapper template missing
 
-**Symptom**: Phase 2 cannot find `chk-wrapper.sh` or `tst-wrapper.sh` under the plugin's `templates/` directory, leaving `cli/chk-py` and `cli/tst-py` undeployed.
+**Symptom**: Phase 2 cannot find `cfg-wrapper.sh`, `chk-wrapper.sh` or `tst-wrapper.sh` under the plugin's `templates/` directory, leaving `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` undeployed.
 
 **Likely cause**: The local plugin cache is incomplete — the templates directory was not fully synced when the plugin was installed or last updated.
 
@@ -60,27 +60,27 @@ surface_sha: 7f5618226560d6b9847d7353e886248812944c83b0fde17346ffb35a0d5394c3
 
 **Likely cause**: The wrapper scripts deployed in `cli/` are self-resolving, path-agnostic scripts — `/lazy-python.install` Phase 2 copies the template verbatim (no path substitution), and each wrapper resolves the active `lazycortex-python` install at the moment it runs: first a dev-vault sibling checkout, then `$LAZYCORTEX_PLUGIN_DIRS` (for daemon-spawned processes), then Claude Code's own `installed_plugins.json`. Every stage now checks only that the candidate `bin/chk` file exists, then launches it by reading its own shebang line — none of them check for an executable bit, since a mode-blind git client (Obsidian-git on Android, a Windows checkout) can strip it at any commit. This error fires only when none of the three stages finds the file at all — most often because the plugin genuinely is not installed or not enabled for the current session, or `installed_plugins.json` is missing or unreadable.
 
-**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, re-run `/lazy-python.install` — Phase 2 redeploys both wrappers unconditionally from the current template.
+**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, re-run `/lazy-python.install` — Phase 2 redeploys the wrappers (`cfg-py`, `chk-py`, `tst-py`) unconditionally from the current templates.
 
 ---
 
 ## `./cli/chk-py` fails with "Permission denied" when run directly
 
-**Symptom**: Running `./cli/chk-py` or `./cli/tst-py` directly from the repo root (`./cli/chk-py all -q`) fails with a shell permission error, even right after a fresh `/lazy-python.install`.
+**Symptom**: Running `./cli/cfg-py`, `./cli/chk-py` or `./cli/tst-py` directly from the repo root (`./cli/chk-py all -q`) fails with a shell permission error, even right after a fresh `/lazy-python.install`.
 
 **Likely cause**: `/lazy-python.install` Step 2 deploys the wrapper without ever setting an executable bit on it — the exec bit is deliberately not part of the contract for any file tracked in the repo, because a mode-blind git client (Obsidian-git on Android is the motivating case) resets every tracked file to `100644` on commit, silently stripping any bit the install had set. The wrapper is designed to be launched through a shell rather than executed directly.
 
-**Fix**: Run it through `bash` instead of directly: `bash ./cli/chk-py` / `bash ./cli/tst-py`. For a bare `chk-py` / `tst-py` command that works the same way from any directory, use the human-facing copies `/lazy-python.install` Step 2b deploys to `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — those two files are the only ones this plugin ever marks executable, since `~/.local/bin` lives outside any git-tracked vault and nothing can strip their bit. Re-run `/lazy-python.install` if they are not there yet.
+**Fix**: Run it through `bash` instead of directly: `bash ./cli/cfg-py` / `bash ./cli/chk-py` / `bash ./cli/tst-py`. For a bare `cfg-py` / `chk-py` / `tst-py` command that works the same way from any directory, use the human-facing copies `/lazy-python.install` Step 2b deploys to `~/.local/bin/cfg-py`, `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — those three files are the only ones this plugin ever marks executable, since `~/.local/bin` lives outside any git-tracked vault and nothing can strip their bit. Re-run `/lazy-python.install` if they are not there yet.
 
 ---
 
-## `chk-py` / `tst-py` not found in a fresh shell
+## `cfg-py` / `chk-py` / `tst-py` not found in a fresh shell
 
-**Symptom**: Typing `chk-py` or `tst-py` bare in a new terminal reports "command not found", even though `/lazy-python.install` has already run and `cli/chk-py` exists in the repo.
+**Symptom**: Typing `cfg-py`, `chk-py` or `tst-py` bare in a new terminal reports "command not found", even though `/lazy-python.install` has already run and `cli/chk-py` exists in the repo.
 
-**Likely cause**: Step 2b deploys the human-facing wrappers to `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, but it never edits shell rc files — it only writes the two files. If `~/.local/bin` is not already on `$PATH`, the shell has no way to find them. The install step itself checks for this: right after Step 2b it runs `command -v chk-py`, and reports `path-warning` in its own output when that check fails, without attempting a fix.
+**Likely cause**: Step 2b deploys the human-facing wrappers to `~/.local/bin/cfg-py`, `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, but it never edits shell rc files — it only writes the three files. If `~/.local/bin` is not already on `$PATH`, the shell has no way to find them. The install step itself checks for this: right after Step 2b it runs `command -v chk-py`, and reports `path-warning` in its own output when that check fails, without attempting a fix.
 
-**Fix**: Add `~/.local/bin` to `$PATH` in your shell profile (`~/.zshrc`, `~/.bashrc`, or equivalent) yourself — this is the one thing `/lazy-python.install` deliberately leaves to you. Open a new shell (or re-source the profile) and confirm with `command -v chk-py`. Until then, run `bash ./cli/chk-py` (or `tst-py`) from inside the repo directly.
+**Fix**: Add `~/.local/bin` to `$PATH` in your shell profile (`~/.zshrc`, `~/.bashrc`, or equivalent) yourself — this is the one thing `/lazy-python.install` deliberately leaves to you. Open a new shell (or re-source the profile) and confirm with `command -v chk-py`. Until then, run `bash ./cli/chk-py` (or `cfg-py` / `tst-py`) from inside the repo directly.
 
 ---
 
@@ -286,7 +286,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: The current wrapper template is self-resolving and path-agnostic — `/lazy-python.install` Phase 2 now copies it verbatim, with no substitution step at all, so a wrapper it deploys can never contain a `{{..._BIN_PATH}}` literal. This finding only fires against a wrapper deployed by an older, pre-redesign version of the plugin (one whose Phase 2 did substitute a path into the template) whose install was interrupted after the copy but before the substitution completed, and the repo has not re-run install since upgrading past that redesign.
 
-**Fix**: Re-run `/lazy-python.install`. Phase 2 redeploys both wrappers unconditionally from the current, path-agnostic template, replacing any stale pre-redesign copy outright — no substitution step to complete. Check 4 also confirms each wrapper opens with a shebang line rather than checking for an executable bit — the wrappers no longer carry one on purpose (see the "Permission denied" entry above), so `WARN`, not `FAIL`, is what fires if a wrapper is simply missing.
+**Fix**: Re-run `/lazy-python.install`. Phase 2 redeploys the wrappers unconditionally from the current, path-agnostic templates, replacing any stale pre-redesign copy outright — no substitution step to complete. Check 4 also confirms each wrapper opens with a shebang line rather than checking for an executable bit — the wrappers no longer carry one on purpose (see the "Permission denied" entry above), so `WARN`, not `FAIL`, is what fires if a wrapper is simply missing.
 
 ---
 
@@ -302,11 +302,21 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ## `/lazy-python.audit` `check11` reports `WARN` — venv degraded
 
-**Symptom**: Check 11 shows `WARN`. Running `cli/chk-py` immediately fails because `mypy`, `pylint`, `pytest`, or `ruff` is not found, or the `pytest-clarity`/`pytest-sugar` plugins are absent from the venv.
+**Symptom**: Check 11 shows `WARN`. Running `cli/chk-py` fails because `mypy`, `pylint`, `pytest`, or `ruff` is not found, the `pytest-clarity`/`pytest-sugar` plugins are absent from the venv, or the project venv is out of date with `pyproject.toml`.
 
-**Likely cause**: The venv probe could not find a usable virtual environment — either no `$VIRTUAL_ENV` is active, no `.venv` exists in the project root, no `[tool.lazy-python].venv` entry in `pyproject.toml`, and the plugin-data fallback either has not been bootstrapped or is stale.
+**Likely cause**: One of the recoverable degradations the check reports: a venv that is found but is missing tools or the two pytest plugins; a stale venv (its `.lazy-python-cfg` stamp no longer matches the requirement inputs in `pyproject.toml` — `requires-python`, dependencies, extras, dependency groups, `.python-version`, or the tool list — or it has no stamp at all); no venv while `[tool.lazy-python] bootstrap-fallback = false` forbids creating one; or no `uv` on `$PATH`. A venv that is simply missing is not a warning while `uv` is present and `bootstrap-fallback` is not `false` — `cfg-py` or the first `chk-py` creates it.
 
-**Fix**: Activate a project venv that has `mypy`, `pylint`, `pytest`, and `ruff` installed (or create one with `uv venv && uv pip install mypy pylint pytest ruff pytest-clarity pytest-sugar`). Re-run `/lazy-python.audit`; check 11 will upgrade to `PASS` once it finds the venv. Alternatively, re-run `/lazy-python.install` to trigger the fallback bootstrap via `_ensure_venv.sh` if `uv` is on `$PATH`.
+**Fix**: Run `cfg-py` (`bash ./cli/cfg-py`, or bare `cfg-py` once `~/.local/bin` is on `$PATH`) from an interactive session or a console. It creates or updates the project venv from `pyproject.toml` — the interpreter `requires-python` asks for, every dependency, extra and dependency group, plus the checker tools — and records a fresh stamp. Install `uv` first if it is missing. `cfg-py` refuses to run in protected mode (`LAZYCORTEX_PROTECTED` set), so use a session outside it. Re-run `/lazy-python.audit`; check 11 returns to `PASS`. Alternatively, activate a venv of your own that has `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity` and `pytest-sugar` (a `$VIRTUAL_ENV` venv is judged on completeness alone). If `cfg-py` is not in `cli/` yet, re-run `/lazy-python.install` first.
+
+---
+
+## `chk-py` / `tst-py` stop with "the project venv is missing or stale"
+
+**Symptom**: `chk-py` or `tst-py` exits with a message that the project venv at its path is missing or stale and, depending on the case, that `LAZYCORTEX_PROTECTED` is set so nothing is installed, or that `bootstrap-fallback = false`.
+
+**Likely cause**: Normally `chk-py` and `tst-py` configure the venv themselves when it is missing or stale. They do not when protected mode is on (nothing is installed there) or when `[tool.lazy-python] bootstrap-fallback = false` opts out of the automatic configure.
+
+**Fix**: Run `cfg-py` from an interactive session or console outside protected mode, then retry. With `bootstrap-fallback = false` you can instead activate a venv that carries the checker tools, which sets `$VIRTUAL_ENV`.
 
 ---
 

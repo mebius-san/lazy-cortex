@@ -4,12 +4,14 @@ Shared HTML-comment explainer lines for generated spec-note sections.
 Every bot-written section of a spec note carries one `<!-- ... -->` one-liner
 under its heading, in the vault's authoring language, so the operator never has
 to guess what a section means — visible in the editor, invisible in reading
-view. This module owns the mechanics (idempotent insert/replace) plus the text
+view. This module owns the mechanics (idempotent insert/replace) plus the key
 table for asset/container folder-note sections; `upstream_tick.py` keeps its
-own upstream-note table and reuses the mechanics. It also owns the
+own upstream-note key table and reuses the mechanics. It also owns the
 language-resolved templates for the narrative `# History` lines the bin
-primitives land on notes, and the language-resolved helper line of a
-`Review <doc>` gate block in a folder note's `# Gates` section.
+primitives land on notes, and the language-resolved footer line of a gate
+callout in a folder note's `# Gates` section, for every verb that has a fixed one.
+Every text itself lives in the plugin's lockit, read through `spec_lockit`; the
+`lockit-text` and `lockit-keys` CLI verbs hand those texts to callers outside Python.
 
 Asterisk-italic lines (`*...*`) — the explainers' pre-comment form — are still
 recognized at the explainer slot and migrate to the comment form on the next
@@ -21,6 +23,7 @@ the tag the first content line as the protected-sections convention requires.
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -42,7 +45,10 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_keys import GateCheckbox, GateRowGroup, HistoryEvent, LangId, Section  # noqa: E402
+from spec_keys import GateCheckbox, LangId, Section  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_lockit import Lockit  # noqa: E402
 
 
 # A section's owner tag line sits directly under the heading and stays the first content line
@@ -57,129 +63,60 @@ EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!--(?!\s*spec:).*-->)\s*$")
 # theirs, so only an explainer this plugin ships — word for word — is replaced there
 OPERATOR_SECTIONS = frozenset({ Section.COORD_RULES, Section.COORD_COMMANDS })
 
-# One-liners rendered as `<!-- ... -->` under the generated sections of asset/container
-# folder-notes — the note documents itself so the operator never has to guess what a section means
-ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
-    (Section.SUMMARY, LangId.EN):
-        "A short description, and on a collection its counts. Written automatically — do not edit by hand.",
-    (Section.SUMMARY, LangId.RU):
-        "Краткое описание, а у коллекции — её счётчик. Пишутся автоматически — руками не править.",
-    (Section.GATES, LangId.EN): "Work stages. Tick an item — the next stage starts on its own.",
-    (Section.GATES, LangId.RU):
-        "Этапы работы. Отметьте пункт — следующий этап начнётся сам.",
-    (Section.STATUS_BRIEF, LangId.EN): "What is happening now and what comes next. Written automatically.",
-    (Section.STATUS_BRIEF, LangId.RU):
-        "Что сейчас происходит и что будет дальше. Пишется автоматически.",
-    (Section.COORD_RULES, LangId.EN):
-        "Your standing instructions for the automation. Write here freely — it takes them into account.",
-    (Section.COORD_RULES, LangId.RU):
-        "Ваши постоянные указания для автоматики. Пишите сюда свободно — она их учитывает.",
-    (Section.COORD_COMMANDS, LangId.EN):
-        "A one-off instruction: write it here — it will be carried out, and the outcome moves to # History.",
-    (Section.COORD_COMMANDS, LangId.RU):
-        "Разовое поручение: напишите здесь — оно будет выполнено, а итог переедет в # History.",
-    (Section.HISTORY, LangId.EN): "What has already happened. Filled in automatically.",
-    (Section.HISTORY, LangId.RU):
-        "Что уже произошло. Заполняется автоматически.",
+# The lockit key of the one-liner rendered as `<!-- ... -->` under each generated section of an asset/container
+# folder-note, by section heading — the note documents itself so the operator never has to guess what a section means
+ASSET_EXPLAINER_KEYS: dict[str, str] = {
+    Section.SUMMARY: "asset-explainer.summary",
+    Section.GATES: "asset-explainer.gates",
+    Section.STATUS_BRIEF: "asset-explainer.status-brief",
+    Section.COORD_RULES: "asset-explainer.coordinator-rules",
+    Section.COORD_COMMANDS: "asset-explainer.coordinator-commands",
+    Section.HISTORY: "asset-explainer.history",
 }
 
-# Narrative line templates the bin primitives land on notes — `# History` tails plus the halt
-# callout's tail — keyed by event and language; the `- <date> — <author> · ` / `> [!failure] `
-# wrappers stay at the call sites (dates, bot identities, and callout marks are
-# language-neutral). A key whose rendering is a substring of another key's — `HALTED_CALLOUT`
-# under `HALTED` — is a fragment key: `history_fragments` renders it in every language so a
-# caller can recognize the event in a body regardless of how the note was authored.
-HISTORY_LINES: dict[tuple[str, str], str] = {
-    (HistoryEvent.SCAFFOLDED, LangId.EN): "scaffolded {asset_type} '{slug}' under {product}",
-    (HistoryEvent.SCAFFOLDED, LangId.RU):
-        "создан каркас {asset_type} '{slug}' под {product}",
-    (HistoryEvent.HALTED, LangId.EN): "{reason} — asset halted",
-    (HistoryEvent.HALTED, LangId.RU):
-        "{reason} — ассет остановлен",
-    (HistoryEvent.HALTED_CALLOUT, LangId.EN): "asset halted: {reason}",
-    (HistoryEvent.HALTED_CALLOUT, LangId.RU):
-        "ассет остановлен: {reason}",
-    (HistoryEvent.JOB_DEAD, LangId.EN):
-        "WARNING: coordinator job {job_id} ({trigger}) died — cleared the coordinator-job marker, "
-        "asset NOT halted; a pending operator edit, if any, survives for the next genuine wake",
-    (HistoryEvent.JOB_DEAD, LangId.RU):
-        "WARNING: координаторский job {job_id} ({trigger}) умер — маркер coordinator-job снят, "
-        "ассет НЕ остановлен; незавершённая правка оператора, если была, доживёт до следующего "
-        "настоящего пробуждения",
-    (HistoryEvent.STAGE_LAG, LangId.EN):
-        "WARNING: {doc} is still at draft after its {review_result} review — the coordinator did not promote it; "
-        "not waking it again for this verdict",
-    (HistoryEvent.STAGE_LAG, LangId.RU):
-        "WARNING: {doc} всё ещё в draft после ревью {review_result} — координатор не повысил стадию; "
-        "по этому вердикту повторного пробуждения не будет",
-    (HistoryEvent.REQUEST_PROCESSED, LangId.EN): "request [[{wikilink}]] accepted → processed",
-    (HistoryEvent.REQUEST_PROCESSED, LangId.RU):
-        "запрос [[{wikilink}]] принят → обработан",
-    (HistoryEvent.DEPLOYED, LangId.EN): "deployed to {target} (log: {log})",
-    (HistoryEvent.DEPLOYED, LangId.RU):
-        "развёрнуто на {target} (лог: {log})",
-    (HistoryEvent.DEPLOY_FAILED, LangId.EN): "deploy to {target} failed with exit code {code} (log: {log})",
-    (HistoryEvent.DEPLOY_FAILED, LangId.RU):
-        "деплой на {target} провалился с кодом {code} (лог: {log})",
-    (HistoryEvent.PUBLISHED, LangId.EN): "published {version}: {count} asset(s) released",
-    (HistoryEvent.PUBLISHED, LangId.RU):
-        "опубликована версия {version}: выпущено ассетов — {count}",
-    (HistoryEvent.VERSION_SET, LangId.EN): "version set to {version} by the operator",
-    (HistoryEvent.VERSION_SET, LangId.RU):
-        "оператор задал версию {version}",
-    (HistoryEvent.COHERENCE_CHECKED, LangId.EN): "coherence check of {doc}: {count} conflict(s)",
-    (HistoryEvent.COHERENCE_CHECKED, LangId.RU):
-        "сверка {doc}: конфликтов — {count}",
-    (HistoryEvent.COHERENCE_FAILED, LangId.EN):
-        "WARNING: coherence check of {doc} (job {job_id}) delivered no usable result",
-    (HistoryEvent.COHERENCE_FAILED, LangId.RU):
-        "WARNING: сверка {doc} (job {job_id}) не дала пригодного результата",
-    (HistoryEvent.COHERENCE_TRIMMED, LangId.EN):
-        "coherence check of {doc}: {count} neighbour(s) dropped over the size budget",
-    (HistoryEvent.COHERENCE_TRIMMED, LangId.RU):
-        "сверка {doc}: соседей отброшено по лимиту размера — {count}",
-    (HistoryEvent.COHERENCE_CHECKED_TRIMMED, LangId.EN):
-        "coherence check of {doc}: {count} conflict(s), {dropped} neighbour(s) dropped over the size budget",
-    (HistoryEvent.COHERENCE_CHECKED_TRIMMED, LangId.RU):
-        "сверка {doc}: конфликтов — {count}, соседей отброшено по лимиту размера — {dropped}",
+# Lockit key prefix of the narrative line templates the bin primitives land on notes — `# History` tails plus the
+# halt callout's tail; the full key is the prefix plus a `HistoryEvent` value. The `- <date> — <author> · ` /
+# `> [!failure] ` wrappers stay at the call sites (dates, bot identities, and callout marks are language-neutral).
+# A key whose rendering is a substring of another key's — `HALTED_CALLOUT` under `HALTED` — is a fragment key:
+# `history_fragments` renders it in every language so a caller can recognize the event in a body regardless of how
+# the note was authored.
+HISTORY_KEY_PREFIX = "history."
+
+# The lockit key of the footer line of the gate callout holding the rows of one verb, by verb; a verb without an
+# entry carries the hints its rows brought along
+GATE_HELPER_KEYS: dict[str, str] = {
+    GateCheckbox.WRITE_VERB: "gate-helper.write",
+    GateCheckbox.REVIEW_VERB: "gate-helper.review",
+    GateCheckbox.REVISE_VERB: "gate-helper.revise",
+    GateCheckbox.START_VERB: "gate-helper.start",
+    GateCheckbox.BUILD_VERB: "gate-helper.build",
+    GateCheckbox.REBUILD_VERB: "gate-helper.rebuild",
+    GateCheckbox.PUBLISH_VERB: "gate-helper.publish",
 }
 
-# The footer line of the gate callout holding the rows of one verb, keyed by the verb and the note's language; a
-# verb without an entry carries the hints its rows brought along
-GATE_VERB_HELPERS: dict[tuple[str, str], str] = {
-    (GateCheckbox.WRITE_VERB, LangId.EN): "tick to create the document and open its review",
-    (GateCheckbox.WRITE_VERB, LangId.RU): "отметьте, чтобы создать документ и открыть его ревью",
-    (GateCheckbox.REVIEW_VERB, LangId.EN):
-        "tick to open review: the document re-enters the loop at the reviewer round",
-    (GateCheckbox.REVIEW_VERB, LangId.RU): "отметьте, чтобы открыть ревью документа",
-}
+# Lockit key prefix of the `##` sub-headings the `review-rows` verb writes inside `# Gates`, one per row group; the
+# full key is the prefix plus a `GateRowGroup` value
+GATE_HEADING_KEY_PREFIX = "gate-heading."
 
-# The `##` sub-headings the `review-rows` verb writes inside `# Gates`, one per row group, keyed by group and language
-GATE_GROUP_HEADINGS: dict[tuple[str, str], str] = {
-    (GateRowGroup.NEXT, LangId.EN): "## Next step",
-    (GateRowGroup.NEXT, LangId.RU): "## Следующий шаг",
-    (GateRowGroup.REREVIEW, LangId.EN): "## Re-review",
-    (GateRowGroup.REREVIEW, LangId.RU): "## Повторное ревью",
-    (GateRowGroup.CONFLICTS, LangId.EN): "## Conflicts",
-    (GateRowGroup.CONFLICTS, LangId.RU): "## Конфликты",
-}
+# Exit code of a lockit verb that refuses its arguments — a key the lockit does not carry, a note outside the vault.
+_EXIT_REFUSED = 2
 
 
-def is_explainer_line(line: str, heading: str, table: dict[tuple[str, str], str] | None = None) -> bool:
+def is_explainer_line(line: str, heading: str, table: dict[str, str] | None = None) -> bool:
   """
   Judge whether a line under a section heading is that section's explainer rather than content.
 
   Guarantees:
     - Under an operator-written heading (`# Coordinator rules`, `# Coordinator commands`), only a
-      line matching one of this plugin's own explainer texts verbatim, in either the comment or
-      the legacy italic form, counts as the explainer.
+      line matching one of this plugin's own explainer texts verbatim, in any language the plugin
+      carries and in either the comment or the legacy italic form, counts as the explainer.
     - Under any other heading, any line matching the explainer shape counts as the explainer.
 
   Args:
     line: The candidate line, found directly under the heading.
     heading: The H1 heading line the candidate line sits under.
-    table: The `(heading, lang) -> text` table checked against under an operator-written
-      heading; defaults to `ASSET_EXPLAINERS`.
+    table: The section heading to lockit key mapping whose texts are checked against under an
+      operator-written heading; defaults to `ASSET_EXPLAINER_KEYS`.
 
   Returns:
     Whether `line` is the section's explainer rather than operator-written or generated content.
@@ -188,27 +125,34 @@ def is_explainer_line(line: str, heading: str, table: dict[tuple[str, str], str]
   if heading not in OPERATOR_SECTIONS:
     return bool(EXPLAINER_LINE_RE.match(line))
 
-  # an operator-written section only gives up a line this plugin wrote, in either form
-  texts = ( ASSET_EXPLAINERS if table is None else table ).values()
+  # an operator-written section only gives up a line this plugin wrote, in any language and either form
+  keys = ( ASSET_EXPLAINER_KEYS if table is None else table ).values()
+  texts = { Lockit.text(key, lang) for key in keys for lang in LangId }
   return line.strip() in { form for text in texts for form in ( f"<!-- {text} -->", f"*{text}*" ) }
 
 
-def explainer_text(heading: str, lang: str, table: dict[tuple[str, str], str]) -> str | None:
+def explainer_text(heading: str, lang: str, table: dict[str, str]) -> str | None:
   """
-  Look up a section heading's explainer text, falling back to English per line.
+  Look up a section heading's explainer text, falling back to English.
 
   Args:
     heading: The H1 heading line (e.g. `# Gates`).
     lang: The vault's authoring language.
-    table: The `(heading, lang) -> text` table to read.
+    table: The section heading to lockit key mapping to read.
 
   Returns:
-    The explainer text, or None when the heading has no entry in any language.
+    The explainer text, or None when the heading has no entry in the table.
+
+  Raises:
+    KeyError: If the table names a lockit key the English strings do not carry.
   """
-  return table.get((heading, lang)) or table.get((heading, LangId.EN))
+  # guard: a heading the table does not name has no explainer
+  if (key := table.get(heading)) is None:
+    return None
+  return Lockit.text(key, lang)
 
 
-def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -> str:
+def with_explainer(section: str, lang: str, table: dict[str, str]) -> str:
   """
   Insert a rendered section's comment explainer line right under its heading.
 
@@ -223,7 +167,7 @@ def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -
   Args:
     section: A rendered section — heading line plus body.
     lang: The vault's authoring language; falls back to English per line.
-    table: The `(heading, lang) -> text` table to read.
+    table: The section heading to lockit key mapping to read.
 
   Returns:
     The section with exactly one explainer line under the heading, or unchanged
@@ -250,7 +194,7 @@ def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -
 
 
 def ensure_explainers(
-    body: str, lang: str, table: dict[tuple[str, str], str] | None = None,
+    body: str, lang: str, table: dict[str, str] | None = None,
 ) -> str:
   """
   Insert or refresh the explainer line under every known section of a note body.
@@ -273,7 +217,7 @@ def ensure_explainers(
   Args:
     body: The note body text (post-frontmatter).
     lang: The vault's authoring language; falls back to English per line.
-    table: The `(heading, lang) -> text` table; defaults to `ASSET_EXPLAINERS`.
+    table: The section heading to lockit key mapping; defaults to `ASSET_EXPLAINER_KEYS`.
 
   Returns:
     The body with explainer lines in place; unchanged when no known heading is
@@ -299,7 +243,7 @@ def ensure_explainers(
   # calling this function again on its own output never accumulates more than one explainer
   # line per heading.
 
-  texts = ASSET_EXPLAINERS if table is None else table
+  keys = ASSET_EXPLAINER_KEYS if table is None else table
   lines = spec_frontmatter.split_lines(body)
   idx = 0
 
@@ -308,7 +252,7 @@ def ensure_explainers(
   fenced = spec_frontmatter.fenced_lines(lines)
   while idx < len(lines):
     heading = lines[idx].strip()
-    note = None if fenced[idx] else explainer_text(heading, lang, texts)
+    note = None if fenced[idx] else explainer_text(heading, lang, keys)
 
     # guard: not a known section heading — keep scanning
     if note is None:
@@ -323,7 +267,7 @@ def ensure_explainers(
     # replace a line wearing the explainer shape — any non-`spec:` HTML comment, or a legacy
     # italic render; anything else (an underscore placeholder, a `spec:` marker comment,
     # operator prose) is content and the explainer is inserted above it instead
-    if insert_at < len(lines) and is_explainer_line(lines[insert_at], heading, texts):
+    if insert_at < len(lines) and is_explainer_line(lines[insert_at], heading, keys):
       lines[insert_at] = f"<!-- {note} -->"
     else:
       lines.insert(insert_at, f"<!-- {note} -->")
@@ -359,16 +303,18 @@ def history_line_for_lang(lang: str, key: str, **fields: str) -> str:
   Render one narrative `# History` line tail for an explicit language.
 
   Args:
-    lang: The authoring language tag; unknown tags fall back to English.
-    key: The event key in `HISTORY_LINES`.
+    lang: The authoring language tag; a language with no text for the event falls back to English.
+    key: The event key, a `HistoryEvent` value.
     fields: Named values substituted into the template's placeholders.
 
   Returns:
     The rendered line tail (the part after the `· ` separator).
+
+  Raises:
+    KeyError: If the lockit carries no text for the event key, or `fields` lacks a placeholder the text names.
   """
-  # unknown languages land on the English floor, exactly like the explainer tables
-  template = HISTORY_LINES.get((key, lang)) or HISTORY_LINES[(key, LangId.EN)]
-  return template.format(**fields)
+  # unknown languages land on the English floor, exactly like the explainer lines
+  return Lockit.text(HISTORY_KEY_PREFIX + key, lang).format(**fields)
 
 
 def history_line(note_path: Path, key: str, **fields: str) -> str:
@@ -377,32 +323,42 @@ def history_line(note_path: Path, key: str, **fields: str) -> str:
 
   Args:
     note_path: The note file the line will be appended to.
-    key: The event key in `HISTORY_LINES`.
+    key: The event key, a `HistoryEvent` value.
     fields: Named values substituted into the template's placeholders.
 
   Returns:
     The rendered line tail (the part after the `· ` separator).
+
+  Raises:
+    KeyError: If the lockit carries no text for the event key, or `fields` lacks a placeholder the text names.
   """
   return history_line_for_lang(lang_for_note(note_path), key, **fields)
 
 
 def history_fragments(key: str, **fields: str) -> list[str]:
   """
-  Render one event key's dedup fragment in every language the table ships.
+  Render one event key's dedup fragment in every language the plugin carries texts in.
 
   A caller greps a note body with every returned variant so an event recorded under a
   previous authoring language still counts as recorded.
 
   Guarantees:
-    - Every event key ships a template in every language the table carries, so scanning with
-      the returned fragments recognizes an event recorded under any authoring language.
+    - One fragment is returned per language `LangId` names, in `LangId` order, so scanning with
+      the returned fragments recognizes an event recorded under any authoring language the plugin
+      writes in.
+    - Every event key must carry its own text in every language `LangId` names: a key missing one
+      language yields the English fragment a second time, and events recorded in that language go
+      unrecognized, silently, by the callers that scan for them.
 
   Args:
-    key: The event key in `HISTORY_LINES` (typically a fragment key).
+    key: The event key, a `HistoryEvent` value (typically a fragment key).
     fields: Named values substituted into the template's placeholders.
 
   Returns:
-    The rendered fragments, one per language carrying the key, in table order.
+    The rendered fragments, one per language the plugin carries texts in, in `LangId` order.
+
+  Raises:
+    KeyError: If the lockit carries no text for the event key, or `fields` lacks a placeholder the text names.
   """
 
   # Domain(spec.notes):
@@ -415,14 +371,16 @@ def history_fragments(key: str, **fields: str) -> list[str]:
   # not only whichever language is currently in force for the note.
 
   # Contract:
-  # Every event key MUST carry a template in every language the table ships, so a body scanned
-  # with the returned fragments recognizes an event recorded under any authoring language;
-  # a key missing one language silently makes events recorded under it unrecognizable to the
-  # callers that scan for them.
+  # The function returns one fragment per language `LangId` names, in `LangId` order, so a body
+  # scanned with the returned fragments recognizes an event recorded under any authoring language
+  # the plugin writes in.
+  # Every event key MUST carry its own text in every language `LangId` names: the lockit falls
+  # back to English for a key a language's file lacks, so a key missing one language yields the
+  # English fragment a second time, and events recorded in that language go unrecognized, silently,
+  # by the callers that scan for them.
 
-  # render the key's template in each language carrying it, in table order
-  return [template.format(**fields)
-          for (event_key, _), template in HISTORY_LINES.items() if event_key == key]
+  # render the key's template in each language the plugin carries texts in
+  return [ Lockit.text(HISTORY_KEY_PREFIX + key, lang).format(**fields) for lang in LangId ]
 
 
 def heal_note_text(note_path: Path, text: str) -> str:
@@ -452,3 +410,137 @@ def heal_note_text(note_path: Path, text: str) -> str:
   # split the frontmatter off so heading scans never look inside it
   fm_end = spec_frontmatter.block(text)[1]
   return text[:fm_end] + ensure_explainers(text[fm_end:], lang_for_note(note_path))
+
+
+def gate_helper_text(verb: str, lang: str) -> str | None:
+  """
+  Give the fixed footer line of the gate callout holding the rows of one verb.
+
+  Args:
+    verb: The verb the callout's rows share, as the labels write it.
+    lang: The note's authoring language; a language with no text falls back to English.
+
+  Returns:
+    The footer line, or None for a verb that has no fixed one.
+  """
+  # guard: a verb outside the fixed set carries the hints its rows brought along
+  if (key := GATE_HELPER_KEYS.get(verb)) is None:
+    return None
+  return Lockit.text(key, lang)
+
+
+def gate_heading_text(group: str, lang: str) -> str:
+  """
+  Give the `##` sub-heading of one row group of a `# Gates` section.
+
+  Args:
+    group: One of the `GateRowGroup` values.
+    lang: The note's authoring language; a language with no text falls back to English.
+
+  Returns:
+    The heading line.
+
+  Raises:
+    KeyError: If `group` is not a row group the lockit carries a heading for.
+  """
+  return Lockit.text(GATE_HEADING_KEY_PREFIX + group, lang)
+
+
+def gate_heading_texts() -> set[str]:
+  """
+  Give the `##` sub-heading of every row group of a `# Gates` section in every language.
+
+  Returns:
+    The heading lines of every group, in every language the plugin carries texts in.
+  """
+  # the groups are whatever the lockit carries a heading for, so a new group needs no second list here
+  return {
+      Lockit.text(key, lang)
+      for key in Lockit.load_keys() if key.startswith(GATE_HEADING_KEY_PREFIX) for lang in LangId
+  }
+
+
+def main_lockit_text(argv: list[str]) -> int:
+  """
+  Print one fixed text of the plugin from the command line.
+
+  Notes:
+    - The language is `--lang` when given, else the one resolved for the `--note` note, else the repository's.
+    - A refused request prints nothing to stdout and a refusal line naming the key or the note to stderr.
+    - A request is refused for a key the lockit does not carry, or for an absolute `--note` path outside the vault.
+
+  Args:
+    argv: Command-line arguments, excluding the program name.
+
+  Returns:
+    Exit code 0 when the text was printed, 2 when the request is refused.
+  """
+  # waiver: argparse CLI signature -- program name shown in --help / usage
+  parser = argparse.ArgumentParser(prog = "lazycortex-specs lockit-text")
+  # waiver: argparse CLI signature -- positional argument name
+  parser.add_argument("key")
+  parser.add_argument(
+      # waiver: argparse CLI signature -- option flag
+      "--lang", default = None,
+      # waiver: one-off human-facing message -- argparse help text
+      help = "language code of the text (default: the note's language, else the repo's)",
+  )
+  parser.add_argument(
+      # waiver: argparse CLI signature -- option flag
+      "--note", default = None,
+      # waiver: one-off human-facing message -- argparse help text
+      help = "note the text is meant for; its resolved language is used when --lang is absent",
+  )
+  parser.add_argument(
+      # waiver: argparse CLI signature -- option flag + vault-root default
+      "--cwd", type = Path, default = None,
+      # waiver: one-off human-facing message -- argparse help text
+      help = "vault root holding .claude/lazy.settings.json (default: cwd)",
+  )
+  args = parser.parse_args(argv)
+
+  # an explicit language wins; then the note's own resolved language; then the repo's
+  vault: Path = (args.cwd or Path.cwd()).resolve()
+  lang: str | None = args.lang
+
+  # guard: no explicit language given — fall back to the one resolved for the note the text is meant for
+  if lang is None and args.note is not None:
+    note = Path(args.note)
+
+    # guard: an absolute note path outside the vault has no language to resolve — refused on stderr
+    if note.is_absolute() and not note.resolve().is_relative_to(vault):
+      sys.stderr.write(f"note is outside the vault: {args.note}\n")
+      return _EXIT_REFUSED
+    lang = resolve_language.resolve_spec_language(
+        vault, str(note.resolve().relative_to(vault) if note.is_absolute() else note))
+
+  # guard: neither a language nor a note given — fall back to the repository's language
+  if lang is None:
+    lang = resolve_language.resolve_repo_language(vault)
+
+  # a key the lockit does not carry is refused on stderr, with nothing printed
+  try:
+    print(Lockit.text(args.key, lang))
+  except KeyError:
+    sys.stderr.write(f"unknown lockit key: {args.key}\n")
+    return _EXIT_REFUSED
+  return 0
+
+
+def main_lockit_keys(argv: list[str]) -> int:
+  """
+  Print every key of the plugin's fixed texts from the command line.
+
+  Notes:
+    - Prints one key per line, sorted.
+
+  Args:
+    argv: Command-line arguments, excluding the program name.
+
+  Returns:
+    Exit code 0.
+  """
+  # waiver: argparse CLI signature -- program name shown in --help / usage
+  argparse.ArgumentParser(prog = "lazycortex-specs lockit-keys").parse_args(argv)
+  print("\n".join(Lockit.load_keys()))
+  return 0

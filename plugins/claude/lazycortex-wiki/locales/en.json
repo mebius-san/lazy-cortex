@@ -1,0 +1,10 @@
+{
+  "explainers.domain-doc": "A domain knowledge document: principles, mechanics, contracts. Rebuilt automatically — do not edit by hand.",
+  "explainers.domain-folder": "This group's folder: overview and document list. Rebuilt automatically — do not edit by hand.",
+  "explainers.domain-section": "A section of the domain tree: the groups it holds. Rebuilt automatically — do not edit by hand.",
+  "explainers.domains-index": "The rule-group index. Rebuilt automatically — do not edit by hand.",
+  "explainers.topics": "The topic catalog for this scope. Rebuilt automatically — do not edit by hand.",
+  "language-name": "English",
+  "texts.query-no-results": "No wiki material matched this question.",
+  "texts.tag-dictionary-intro": "# Tag values\n\nAdvisory dictionary of the wiki's canonical tag values, maintained by the wiki tag curator.\nIt records what each value covers so a later classification reuses a settled value instead of\ncoining a synonym beside it. It constrains nothing: a classification may coin a value the\ndictionary does not list, and the next canon pass records it here."
+}

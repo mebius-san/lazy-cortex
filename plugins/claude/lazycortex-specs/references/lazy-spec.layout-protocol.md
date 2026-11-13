@@ -45,7 +45,7 @@ An asset folder is `<spec_path>/<folder>/<slug>/`, where `<folder>` is the type'
 
 - the status folder-note `<slug>.md` (`spec_role: status`, flat gates, `spec_asset_type` — see [status-note](./lazy-spec.status-note-protocol.md) Part 4 and [lifecycle](./lazy-spec.lifecycle-protocol.md));
 - the document named by the type's `start_doc` — `design.md` for the shipped `feature` / `change` types, for `content` (typed `content-design` there) and for `research` (typed `research-design` there), `bug.md` for `bug`, and `code-plan.md` for `release` — the one type whose start document is opt-in: the product coordinator's `release-scaffold` creates the release note alone, and the plan arrives through the release's own `Write code-plan` row. There is no default layout: a type with no `start_doc` cannot be scaffolded at all;
-- never `architecture.md`: the architecture is the product's root document (`system-architecture`), revised by the architect at the start of every release build — see the [release](./lazy-spec.release-playbook.md) and [catalog](./lazy-spec.catalog-playbook.md) playbooks;
+- never `architecture.md`: the architecture is the product's root document (`system-architecture`), kept current with the approved designs on the product note and revised by no release build — see the [release](./lazy-spec.release-playbook.md) and [catalog](./lazy-spec.catalog-playbook.md) playbooks;
 - `vision.md` per the asset type's `vision` contract — opt-in on a feature, a change and `content` (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug, a research or a release;
 - optionally `use-cases.md` and/or `ui-design.md` — feature/change layout only, NEVER on a bug; opt-in the same way as `code-plan.md` / `test-plan.md`, each created only once its launch checkbox is ticked or the product or asset declares it mandatory — see the [feature](./lazy-spec.feature-playbook.md) and [change](./lazy-spec.change-playbook.md) playbooks;
 - optionally `test-plan.md` — on a feature, a change or a bug the asset's own test cases (`test-plan`), hung by `Write test-plan`, reviewed and approved like `design.md`, in no gate; on a release the `test` tool's composed plan. `code-plan.md` exists in a release folder only;
@@ -174,7 +174,7 @@ All products follow this shape. No concrete names appear in this rule — skills
     │           ├── tech.md                  ← product-level tech (loose at product root)
     │           ├── decisions.md              ← opt-in — product-level decisions registry, lazily created
     │           ├── use-cases.md              ← opt-in — product-level use cases (system-use-cases), absence is never a defect
-    │           ├── architecture.md           ← opt-in — the product's code structure (system-architecture); products that own releases, revised at every build
+    │           ├── architecture.md           ← opt-in — the product's code structure (system-architecture); products that own releases, revised from the product note
     │           ├── test-plan.md              ← opt-in — the product's standing test instructions (system-test-plan); products that own releases
     │           ├── <slug>/                  ← feature asset folder — default_path "." lands it straight at the product root
     │           │   ├── <slug>.md            ← status folder-note (spec_role: status, flat gates)

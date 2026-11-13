@@ -6,8 +6,8 @@ against the consumer repo. Phases are idempotent; safe to re-run.
 
 Phases:
   phase1 — mirror plugin rules into <consumer>/.claude/rules/
-  phase2 — deploy chk-py, tst-py and cli/mypy/protected_access.py into <consumer>/cli/
-  phase2b — deploy chk-py and tst-py human wrappers into $HOME/.local/bin
+  phase2 — deploy cfg-py, chk-py, tst-py and cli/mypy/protected_access.py into <consumer>/cli/
+  phase2b — deploy cfg-py, chk-py and tst-py human wrappers into $HOME/.local/bin
   phase3 — bootstrap consumer pyproject.toml with checker sections
   phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
   phase5 — scaffold project overlay guidelines under docs/guidelines/
@@ -182,15 +182,21 @@ class Phase1MirrorRules:
 # ----------------------------------------------------------------------------------------
 class Phase2Wrappers:
   """
-  Install phase that writes byte-for-byte copies of the `chk-py` and `tst-py` wrapper scripts and
+  Install phase that writes byte-for-byte copies of the `cfg-py`, `chk-py` and `tst-py` wrapper scripts and
   the `mypy/protected_access.py` plugin shim into the consumer's `cli/` directory and ensures
   `.venv/` is listed in the consumer's `.gitignore`.
 
   Guarantees:
     - Leaves a `.gitignore` that already ignores `.venv` byte-for-byte untouched.
+
+  Attributes:
+    consumer_dir: Root directory of the consumer repository.
+    target_dir: Directory receiving the wrapper scripts and the shim.
+    gitignore: The consumer's `.gitignore` file.
   """
 
   WRAPPERS = (
+    ("cfg-wrapper.sh", "cfg-py"),
     ("chk-wrapper.sh", "chk-py"),
     ("tst-wrapper.sh", "tst-py"),
     ("mypy-protected-access-shim.py", "mypy/protected_access.py"),
@@ -203,7 +209,7 @@ class Phase2Wrappers:
 
   def run(self) -> int:
     """
-    Write the `chk-py` and `tst-py` wrappers and the `mypy/protected_access.py` shim to the
+    Write the `cfg-py`, `chk-py` and `tst-py` wrappers and the `mypy/protected_access.py` shim to the
     consumer's `cli/` directory and update `.gitignore`.
 
     Returns:
@@ -254,18 +260,24 @@ class Phase2Wrappers:
 # ----------------------------------------------------------------------------------------
 class HomeWrappersPhase:
   """
-  Install phase that writes `chk-py` and `tst-py` into `$HOME/.local/bin`.
+  Install phase that writes `cfg-py`, `chk-py` and `tst-py` into `$HOME/.local/bin`.
 
   These are the only files this plugin ever marks executable: they live outside every
   vault, so no mode-blind git client can strip the bit, and they find the repo's own
-  `cli/` wrapper by walking up from the caller's directory.
+  `cli/` wrapper from the caller's directory.
 
   Guarantees:
-    - Reasserts the executable bit on both wrappers every run, even when their content
+    - Reasserts the executable bit on every wrapper every run, even when its content
       is already current.
+
+  Attributes:
+    consumer_dir: Root directory of the consumer repository.
+    plugin_root: Root directory of the plugin shipping the wrapper templates.
+    target_dir: Directory receiving the wrappers.
   """
 
   TEMPLATES: tuple = (
+    ("cfg-home-wrapper.sh", "cfg-py"),
     ("chk-home-wrapper.sh", "chk-py"),
     ("tst-home-wrapper.sh", "tst-py"),
   )
@@ -280,7 +292,7 @@ class HomeWrappersPhase:
 
   def run(self) -> int:
     """
-    Write both wrappers, byte-verified, and set the exec bit on the written copies.
+    Write every wrapper, byte-verified, and set the exec bit on the written copies.
 
     Returns:
       0 on success.
@@ -300,7 +312,7 @@ class HomeWrappersPhase:
         dst.write_bytes(body)
 
       # Contract:
-      # The executable bit is reasserted on both wrappers every run, even when their
+      # The executable bit is reasserted on every wrapper every run, even when its
       # content is already current, so a git client that stripped it is corrected without
       # requiring a content change.
 

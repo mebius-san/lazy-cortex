@@ -25,6 +25,8 @@ from iconize_sync import (  # pylint: disable=import-error
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import vault_manifest  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from obsidian_lockit import Lockit  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -93,9 +95,8 @@ CORE_CLI_REL = Path("bin") / "lazycortex-core"
 # The settings section whose own `language` key overrides the repo-wide one
 SETTINGS_SECTION = "obsidian"
 
-# The fixed description line of a templated page per language, and the line for every other language
-TEMPLATED_LINES: dict[str, str] = { "ru": "Тег `{tag}`." }
-TEMPLATED_DEFAULT_LINE = "Tag `{tag}`."
+# The lockit key of the fixed description line of a templated page
+TEMPLATED_LINE_KEY = "tag-page.templated-line"
 
 
 # ----------------------------------------------------------------------------------------
@@ -574,7 +575,7 @@ def templated_summaries(tags: list[str], language: str) -> dict[str, str]:
   # setting when that section names none. Only new pages receive this line; an existing page is never rewritten.
 
   # every tag gets the same line, worded for the language
-  line = TEMPLATED_LINES.get(language, TEMPLATED_DEFAULT_LINE)
+  line = Lockit.text(TEMPLATED_LINE_KEY, language)
   return { tag: line.format(tag = tag) for tag in tags }
 
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-11-12
+last_regen: 2026-11-13
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,14 +21,14 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 69e3515367846c5fd09392f1844e104a90dd7834a1cbfcff7def3426a933b77b
+source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
+surface_sha: 11d14acb0886a60487274bbe7c6c73180089b90a6a9b8fc5cb605fbb73074ef2
 ---
 # Frequently asked questions
 
 ## Do I need to re-run `/lazy-python.install` after a plugin update?
 
-It depends on what you want to pick up. The `chk-py` and `tst-py` wrappers self-resolve the active plugin at exec time — they locate the current plugin source each time they run, so they keep working correctly across a `/plugin update` without a re-install. Any new canon rules, updated checker configuration, or new overlay stubs that came with the update do require a re-run of `/lazy-python.install`, because those artifacts land in your project tree only when the install phases run.
+It depends on what you want to pick up. The `cfg-py`, `chk-py` and `tst-py` wrappers self-resolve the active plugin at exec time — they locate the current plugin source each time they run, so they keep working correctly across a `/plugin update` without a re-install. Any new canon rules, updated checker configuration, or new overlay stubs that came with the update do require a re-run of `/lazy-python.install`, because those artifacts land in your project tree only when the install phases run.
 
 A practical rule: re-run `/lazy-python.install` after any plugin update where the release notes mention changes to rules, `pyproject.toml` defaults, or the wrapper scripts themselves. The install is idempotent — it only overwrites the mirrored rule files and adds missing sections; your existing project additions are left untouched.
 
@@ -54,23 +54,23 @@ Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requi
 
 ## `/lazy-python.audit` warns about the venv (Check 11). How do I fix it?
 
-Check 11 warns when no usable venv is found and bootstrapping one is not possible (e.g. `uv` is not on `$PATH`). Re-running `/lazy-python.install` re-probes the venv chain and attempts to bootstrap the plugin-local fallback venv under `${CLAUDE_PLUGIN_DATA}/venv`. If `uv` is available when you re-run, the venv is created automatically. If it is not, install `uv` first (`pip install uv` or the standalone installer), then re-run the install.
+Check 11 warns about a recoverable venv problem: the venv it finds is missing checker tools or the two pytest plugins, it is stale against your `pyproject.toml` requirements (its `.lazy-python-cfg` stamp no longer matches, or is absent), `bootstrap-fallback = false` is set and there is no venv, or `uv` is not on `$PATH`. The fix is `cfg-py`, not an install re-run: run it from an interactive session or console (it refuses in protected mode, when `LAZYCORTEX_PROTECTED` is set), after installing `uv` first if that is what is missing (`pip install uv` or the standalone installer). `cfg-py` builds or updates the project venv — `<repo>/.venv` unless `[tool.lazy-python] venv` names another path — from your `pyproject.toml`. A repo with no venv yet reports `PASS` while `uv` is present, because the first `cfg-py`, `chk-py` or `tst-py` run creates it.
 
 ---
 
 ## How does `chk-py` decide which Python environment to use?
 
-Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: an already-activated `$VIRTUAL_ENV`, then `<repo>/.venv`, then a path configured under `[tool.lazy-python]` in `pyproject.toml`, then the plugin-local fallback venv created or augmented on first run. Once a venv is active, the wrappers separately check `python.env_source` in `.claude/lazy.settings.json` — if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first. The `review` subcommand is the one exception — it skips the venv resolver entirely, since it is pure stdlib by design, so the guideline-review phase also works from pre-commit hooks and CI runners that never set up a venv.
+Every `chk-py` and `tst-py` invocation resolves the venv first, in order: an already-activated `$VIRTUAL_ENV` that carries the checker tools (used as is; nothing is installed into it), then the target venv — the path set as `venv` under `[tool.lazy-python]` in `pyproject.toml` when present, otherwise `<repo>/.venv`. The target venv counts as ready only when it carries the checker tools and its configuration stamp still matches your `pyproject.toml` requirements; editing an unrelated section such as `[tool.ruff]` does not make it stale. When it is missing or stale, the wrapper configures it from `pyproject.toml` on its own: `uv` picks an interpreter that satisfies `requires-python` / `.python-version`, then installs your project dependencies, extras, dependency groups and the checker tools. `cfg-py` does the same on request without running any check. Two opt-outs stop the automatic configure and point you at `cfg-py` instead: protected mode (`LAZYCORTEX_PROTECTED` set) and `bootstrap-fallback = false` under `[tool.lazy-python]`. Once a venv is active, the wrappers separately check `python.env_source` in `.claude/lazy.settings.json` — if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first. The `review` subcommand is the one exception — it skips the venv resolver entirely, since it is pure stdlib by design, so the guideline-review phase also works from pre-commit hooks and CI runners that never set up a venv.
 
 `python.env_source` is not something you set by hand: `/lazy-python.install` Step 7 detects a recognised bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) in your repo and records it automatically. Zero or one candidate is handled silently; if more than one is found, install asks once which script to use. A value already on record is never re-asked or overwritten, and no audit check inspects it — recording `python.env_source` is an install-time convenience, not a verified invariant.
 
 ---
 
-## How do I actually run `chk-py` and `tst-py` — bare, or through `bash`?
+## How do I actually run `cfg-py`, `chk-py` and `tst-py` — bare, or through `bash`?
 
-Two ways, and both are wired up by `/lazy-python.install`. Step 2b deploys `chk-py` and `tst-py` into `~/.local/bin` — the only two files this plugin ever marks executable, since they live outside every repo and no mode-blind git sync can strip the bit off them. Each one walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py all -q` / `tst-py <module> -q` commands work from anywhere under a repo that has also run Step 2.
+Two ways, and both are wired up by `/lazy-python.install`. Step 2b deploys `cfg-py`, `chk-py` and `tst-py` into `~/.local/bin` — the only three files this plugin ever marks executable, since they live outside every repo and no mode-blind git sync can strip the bit off them. Each one walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `cfg-py` / `tst-py`) and runs it, so once `~/.local/bin` is on your `$PATH`, the bare `cfg-py`, `chk-py all -q` / `tst-py <module> -q` commands work from anywhere under a repo that has also run Step 2.
 
-If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly with an explicit interpreter: `bash ./cli/chk-py all -q` / `bash ./cli/tst-py <module> -q` from the repo root. The repo-local `cli/chk-py` / `cli/tst-py` wrappers Step 2 deploys deliberately carry no executable bit — they used to, but a mode-blind git client (obsidian-git on Android, some Windows checkouts) silently strips the bit on pull, which broke the wrapper outright. Running it through `bash` sidesteps that failure mode for good, at the cost of typing `bash` in front of the command when the home wrapper isn't reachable.
+If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly with an explicit interpreter: `bash ./cli/cfg-py` / `bash ./cli/chk-py all -q` / `bash ./cli/tst-py <module> -q` from the repo root. The repo-local `cli/cfg-py` / `cli/chk-py` / `cli/tst-py` wrappers Step 2 deploys deliberately carry no executable bit — they used to, but a mode-blind git client (obsidian-git on Android, some Windows checkouts) silently strips the bit on pull, which broke the wrapper outright. Running it through `bash` sidesteps that failure mode for good, at the cost of typing `bash` in front of the command when the home wrapper isn't reachable.
 
 ---
 
@@ -360,11 +360,11 @@ Check that each overlay file still opens with its canonical `# Project additions
 
 ## The `chk-py` wrapper is missing after install, or the bare `chk-py` command isn't found.
 
-Re-run `/lazy-python.install`. Step 2 deploys `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. Step 2 also deploys the protected-access mypy shim to `cli/mypy/protected_access.py`, which `pyproject.toml` references by that path. If the phase reports `wrappers-deployed-3` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
+Re-run `/lazy-python.install`. Step 2 deploys `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. Step 2 also deploys the protected-access mypy shim to `cli/mypy/protected_access.py`, which `pyproject.toml` references by that path, and makes sure your `.gitignore` carries a `.venv/` line for the project venv `cfg-py` builds. If the phase reports `wrappers-deployed-4` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
 
-Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `tst-py`) and runs it through `bash`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `bash ./cli/chk-py`.
+Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/cfg-py`, `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `cfg-py` / `tst-py`) and runs it through `bash`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `bash ./cli/chk-py`.
 
-If the problem persists, run `/lazy-python.audit` (Check 4) to see whether the deployed wrappers open with a leading shebang and whether unsubstituted `{{CHK_BIN_PATH}}` placeholders remain, either of which would indicate an interrupted or partial install.
+If the problem persists, run `/lazy-python.audit` (Check 4) to see whether the deployed `cfg-py` / `chk-py` / `tst-py` wrappers open with a leading shebang and whether unsubstituted `{{CHK_BIN_PATH}}` placeholders remain, either of which would indicate an interrupted or partial install.
 
 ---
 

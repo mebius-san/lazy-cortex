@@ -11,12 +11,14 @@ cascades into its targets. This worker keeps only the four concerns no LLM needs
   job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, per the `lazycortex-core` job-runtime
   layout, read file-wise — never imported across the plugin boundary) checked on every tick.
   `DONE` lands the job's `result/` into the asset folder through the `land-result` collector —
-  the only channel a job's document and attachments take into the catalog — then clears the
-  marker and retires the bundle (`gate_dispatch.consume_stale_job`, freeing its dedup key so the
-  checkbox can be re-dispatched), writing nothing into the folder-note; `CANCELLED` does the same
-  without the landing; `DEAD` additionally sets `spec_halted: true` and appends a persistent `[!failure]`
-  callout to `# Gates` (un-halting is a manual operator act, out of scope here), leaving its
-  bundle unretired for diagnostics. Every clear also raises `pending_wake: job-done` in the sidecar, and that
+  the only channel a job's document and attachments take into the catalog. A landing that is
+  `landed` or `empty` clears the marker and retires the bundle (`gate_dispatch.consume_stale_job`,
+  freeing its dedup key so the checkbox can be re-dispatched), writing nothing into the folder-note;
+  `CANCELLED` does the same without the landing. `DEAD`, and a `DONE` whose landing was `refused`,
+  instead set `spec_halted: true` and append a persistent `[!failure]` callout to `# Gates`
+  (un-halting is a manual operator act, out of scope here), leaving the bundle unretired for
+  diagnostics; a refused landing also reports a `plugin_error` warning to the core error ledger,
+  fire-and-forget. Every clear also raises `pending_wake: job-done` in the sidecar, and that
   flag is the whole wake: the `collect-tick` postman sweep dispatches the coordinator on it directly, with no
   commit behind it. This worker opens no review itself; the
   coordinator opens it with `lazy-review.submit` on the `job-done` wake this same poll raises.
@@ -67,6 +69,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import error_report  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -93,6 +97,7 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     HistoryEvent,
     JobMarker,
     LevelDoc,
+    PluginErrorCause,
     SpecCoordinatorDocStateKey,
     SpecKey,
     TickAction,
@@ -125,8 +130,16 @@ _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 # `note_ops.note_check`'s result-dict key this worker folds into its own tick result.
 _VIOLATIONS_KEY = "violations"
 
-# `land_result.land_result`'s result-dict key listing the paths it wrote.
+# The landing collector's result-dict vocabulary, mirrored from `land_result`: the paths it wrote,
+# what became of the landing, and the one-line reason of a refused one.
 _LANDED_KEY = "landed"
+_LANDING_ACTION_KEY = "action"
+_LANDING_EMPTY = "empty"
+_LANDING_REFUSED = "refused"
+_LANDING_REASON_KEY = "reason"
+
+# Prefix of the error-ledger incident a refused landing opens, completed with `<expert>/<job_id>`.
+_LANDING_INCIDENT_PREFIX = "landing-refused:"
 
 # The `coherence-apply` verb's summary key counting the conflicts it hung.
 _CONFLICTS_KEY = "conflicts"
@@ -279,12 +292,12 @@ def read_job_claim_head(repo_root: Path, expert: str, job_id: str) -> str | None
   return value or None
 
 
-def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str) -> list[str]:
+def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str) -> dict:
   """
   Put one finished job's document in the asset folder through the `land-result` collector.
 
   Notes:
-    - Nothing is raised: a landing failure leaves the job undelivered and the tree as it was found.
+    - Nothing is raised: a landing failure of any kind is reported as a refused landing.
 
   Args:
     repo_root: The repository root holding the job queue.
@@ -293,7 +306,9 @@ def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str)
     job_id: The finished job's id.
 
   Returns:
-    The repo-relative paths the landing wrote and committed; empty when nothing landed.
+    The collector's result: `{"action": "landed", "landed": [<paths>]}` when files landed,
+    `{"action": "empty", "landed": []}` when the job delivered nothing or its bundle is gone, and
+    `{"action": "refused", "landed": [], "reason": <one line>}` when the delivery failed.
   """
 
   # the finished job's bundle directory in the expert job queue
@@ -301,23 +316,20 @@ def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str)
 
   # guard: the bundle is gone — there is nothing to land
   if not job_dir.is_dir():
-    return []
+    return { _LANDING_ACTION_KEY: _LANDING_EMPTY, _LANDED_KEY: [] }
   try:
     # waiver: local import inside the try on purpose -- a broken or missing `land_result` module
-    # degrades into an undelivered job like any other landing failure instead of crashing the tick
+    # degrades into a refused landing like any other landing failure instead of crashing the tick
     import land_result  # pylint: disable=import-error
-    target = land_result.document_target(job_dir, asset_dir)
-
-    # guard: the job delivered no document — nothing to place
-    if target is None:
-      return []
-    return land_result.land_result(job_dir, target)[_LANDED_KEY]
-  # waiver: fire-and-forget collector — ANY landing failure, the collector's own refusal
-  # included, must leave the job undelivered rather than stop the tick that also has a
-  # History line and a wake to write
+    return land_result.land_job(job_dir, asset_dir)
+  # waiver: the tick survives ANY landing failure — it is turned into a refused landing the caller
+  # halts the asset on, rather than an exception that stops the tick mid-marker
   except Exception as error:
     sys.stderr.write(f"gate-tick: land-result {expert}/{job_id}: {error}\n")
-    return []
+    return {
+        _LANDING_ACTION_KEY: _LANDING_REFUSED, _LANDED_KEY: [],
+        _LANDING_REASON_KEY: str(error) or type(error).__name__,
+    }
 
 
 def _apply_coherence_result(repo_root: Path, job_dir: Path) -> int | None:
@@ -597,18 +609,24 @@ def apply_job_marker(
   Apply an active expert job's terminal bundle marker to the asset.
 
   Every marker retires the tracked job and raises a `job-done` wake for the coordinator to act
-  on. `DONE` lands the job's `result/` into the asset folder — undelivered when the job left
-  nothing to land — and leaves the folder-note untouched; `CANCELLED` leaves everything untouched
-  but the job's own records. `DEAD` instead halts the asset, appending a persistent
-  `[!failure]` callout to `# Gates` that stays until an operator resolves it by hand, and leaves
-  the job bundle in place for diagnostics. Deciding what happens next on the asset — dispatching a
-  replacement job, reacting to the halt — is `spec.coordinator`'s call; this pass only records the
-  terminal outcome.
+  on. `DONE` lands the job's `result/` into the asset folder and leaves the folder-note untouched
+  when the result was delivered or the job left nothing to land; `CANCELLED` leaves everything
+  untouched but the job's own records. `DEAD`, and a `DONE` whose delivery was refused, instead
+  halt the asset, appending a persistent `[!failure]` callout to `# Gates` that stays until an
+  operator resolves it by hand, and leave the job bundle in place for diagnostics; a refused
+  delivery is additionally reported as a `plugin_error` warning to the core error ledger,
+  fire-and-forget. Deciding what happens next on the asset — dispatching a replacement job,
+  reacting to the halt — is `spec.coordinator`'s call; this pass only records the terminal outcome.
 
   Guarantees:
-    - On a `DONE` or `CANCELLED` marker, the job bundle is retired, freeing its dedup key for
-      re-dispatch while its files stay on disk.
-    - On a `DEAD` marker, the job bundle is left unretired, kept on disk for diagnostics.
+    - On a `CANCELLED` marker, and on a `DONE` marker whose result was delivered or was
+      legitimately empty, the job bundle is retired, freeing its dedup key for re-dispatch while
+      its files stay on disk.
+    - On a `DEAD` marker, and on a `DONE` marker whose delivery was refused, the job bundle is
+      left unretired, kept on disk for diagnostics.
+    - The asset is halted with a persistent failure callout in `# Gates` exactly when the job
+      ended `DEAD` or ended `DONE` with its delivery refused; every other terminal marker leaves
+      the folder-note untouched.
 
   Args:
     asset_note: The status folder-note path.
@@ -623,7 +641,9 @@ def apply_job_marker(
     today_str: ISO date string pinned into the halt callout.
 
   Returns:
-    A result dict naming the applied `TickAction` plus the job's `checkbox` and `job_id`.
+    A result dict naming the applied `TickAction` plus the job's `checkbox` and `job_id`. The
+    action is the asset-halted one whenever the asset was halted, the cancelled one for
+    `CANCELLED`, and the job-done one otherwise.
 
   Raises:
     RuntimeError: Propagated from `history_journal.append` when the core verb refuses or cannot
@@ -633,11 +653,16 @@ def apply_job_marker(
   """
 
   # Contract:
-  # On a `DONE` or `CANCELLED` marker, the job bundle is retired via
-  # `gate_dispatch.consume_stale_job`, freeing its dedup key so the same checkbox can be
-  # re-dispatched, while the bundle's files stay on disk for the coordinator's job-done wake
-  # to read. On a `DEAD` marker, the bundle is deliberately left unretired, kept for
-  # diagnostics alongside the asset halt.
+  # The job bundle is retired, freeing its dedup key so the same checkbox can be re-dispatched,
+  # on a `CANCELLED` marker and on a `DONE` marker whose result was delivered or was legitimately
+  # empty; its files stay on disk for the coordinator's job-done wake to read. On a `DEAD` marker
+  # and on a `DONE` marker whose delivery was refused, the bundle is deliberately left unretired,
+  # kept for diagnostics.
+
+  # Contract:
+  # The asset is halted with a persistent failure callout in its `# Gates` section exactly when
+  # the job ended `DEAD` or ended `DONE` with its delivery refused; every other terminal marker
+  # leaves the asset's folder-note untouched.
 
   checkbox_label = job_info[JobMarker.CHECKBOX]
   job_id = job_info[JobMarker.JOB_ID]
@@ -649,31 +674,51 @@ def apply_job_marker(
       { JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE },
   )
 
-  # only DEAD touches the note; a finished or cancelled job leaves it as it is
+  # the clause a halt of this asset carries; stays None on every branch that leaves the note as it is
+  halt_reason: str | None = None
+  expert = job_info[JobMarker.EXPERT]
+
+  # a dead job, or a finished one whose result could not be placed, halts the asset; every other
+  # ending leaves the note untouched
   if marker == JOB_MARKER_DONE:
     # the job's document and attachments arrive only through `result/`: put them in the asset
     # folder and commit them here, so the document the coordinator submits into review on the
     # `job-done` wake this same call raises is already tracked
-    _land_job_result(repo_root, asset_dir, job_info[JobMarker.EXPERT], job_id)
+    landing = _land_job_result(repo_root, asset_dir, expert, job_id)
     action = TickAction.JOB_DONE
 
-    # retire the bundle so its dedup key frees for a retry — same move the coordinator-job
-    # branch already makes; the bundle's files stay on disk for the coordinator's wake to read
-    gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
+    # a failed delivery leaves the work in the bundle, kept unretired for diagnostics, and halts
+    # the asset on the collector's own reason; a delivered or empty one retires the bundle
+    if landing.get(_LANDING_ACTION_KEY) == _LANDING_REFUSED:
+      action = TickAction.ASSET_HALTED
+      halt_reason = HaltReason.LANDING_REFUSED.format(
+          job_id = job_id, label = checkbox_label, reason = landing.get(_LANDING_REASON_KEY),
+      )
+      error_report.report_warning(
+          repo_root, cause = PluginErrorCause.LANDING_REFUSED,
+          incident = f"{_LANDING_INCIDENT_PREFIX}{expert}/{job_id}", detail = halt_reason,
+      )
+    else:
+      # retire the bundle so its dedup key frees for a retry — same move the coordinator-job
+      # branch already makes; the bundle's files stay on disk for the coordinator's wake to read
+      gate_dispatch.consume_stale_job(repo_root, expert, job_id)
   elif marker == _JOB_MARKER_CANCELLED:
     # a cancelled bundle is equally spent — retire it so the checkbox can be re-dispatched
     action = TickAction.JOB_CANCELLED
-    gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
+    gate_dispatch.consume_stale_job(repo_root, expert, job_id)
   else:
-    # marker == JOB_MARKER_DEAD — halt the asset via the shared text-core primitive, in this
-    # branch's own single write+commit (the marker clear above touched no note text)
-    reason = HaltReason.JOB_DIED.format(job_id = job_id, label = checkbox_label)
+    # marker == JOB_MARKER_DEAD — the bundle is left unretired beside the halt
+    action = TickAction.ASSET_HALTED
+    halt_reason = HaltReason.JOB_DIED.format(job_id = job_id, label = checkbox_label)
+
+  # halt the asset via the shared text-core primitive, in this call's own single write+commit
+  # (the marker clear above touched no note text)
+  if halt_reason is not None:
     fm_text, body, _ = flip_gate.halt_asset_text(
-        text[:fm_end], body, reason, today = today_str, lang = note_explainers.lang_for_note(asset_note),
+        text[:fm_end], body, halt_reason, today = today_str, lang = note_explainers.lang_for_note(asset_note),
     )
     spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, fm_text + body))
-    commit_note_change(asset_dir, asset_note, f"{_PROMOTE_AUTHOR_NAME}: halt {asset_dir.name} — {reason}")
-    action = TickAction.ASSET_HALTED
+    commit_note_change(asset_dir, asset_note, f"{_PROMOTE_AUTHOR_NAME}: halt {asset_dir.name} — {halt_reason}")
 
   # the applied marker's action plus the job identity it acted on, for every branch above
   return {
@@ -958,8 +1003,8 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
   Stage promotion, gate advancement, and dispatching further work are not part of the tick.
 
   Guarantees:
-    - A failure to land a finished job's result leaves the job undelivered for the coordinator
-      to report and the asset folder as found, and never raises out of or fails the tick.
+    - A failure to land a finished job's result halts the asset with a persistent failure
+      callout and leaves the job bundle unretired, and never raises out of or fails the tick.
     - A failure to run the advisory `note-check` degrades to no violations and never raises out
       of or fails the tick.
 
@@ -984,8 +1029,7 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
 
   # Contract:
   # A failure to land a finished job's result never raises out of the tick and never fails it.
-  # The job stays undelivered for the coordinator to report, and the asset folder is left
-  # as found.
+  # The asset is halted with a persistent failure callout and the job bundle stays unretired.
 
   # Contract:
   # A failure to run the advisory note-check never raises out of the tick and never fails it.

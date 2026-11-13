@@ -30,6 +30,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import pcf  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from venv_spec import VenvSpec  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # Allow override via env (Claude Code sets CLAUDE_PLUGIN_ROOT; consumer install → cache path, not dev source).
@@ -168,7 +170,10 @@ class Check3ArtifactsPresent:
     ("references/lazy-python.guidelines-index.md", "index"),
     ("bin/chk", "chk aggregator"),
     ("bin/tst", "tst aggregator"),
-    ("bin/_ensure_venv.sh", "venv bootstrap"),
+    ("bin/cfg", "cfg venv configurator"),
+    ("bin/_ensure_venv.sh", "venv resolver"),
+    ("bin/_cfg_venv.sh", "shared venv configure logic"),
+    ("bin/venv_spec.py", "venv requirement reader"),
     ("bin/pcf.py", "pcf checker"),
     ("bin/toi.py", "toi checker"),
     ("bin/pch.py", "pch checker"),
@@ -182,6 +187,7 @@ class Check3ArtifactsPresent:
     ("agents/lazy-python.contract-writer.md", "contract-writer agent"),
     ("agents/lazy-python.domain-writer.md", "domain-writer agent"),
     ("templates/pyproject-defaults.toml", "pyproject template"),
+    ("templates/cfg-wrapper.sh", "cfg-py wrapper template"),
     ("templates/chk-wrapper.sh", "chk-py wrapper template"),
     ("templates/tst-wrapper.sh", "tst-py wrapper template"),
     ("templates/python/python-template.py", "python file template"),
@@ -213,14 +219,14 @@ class Check3ArtifactsPresent:
 # ----------------------------------------------------------------------------------------
 class Check4Wrappers:
   """
-  Verify consumer `cli/chk-py` and `cli/tst-py` are deployed, open with a shebang, and have
+  Verify consumer `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` are deployed, open with a shebang, and have
   substituted bin paths.
 
   Attributes:
     consumer_dir: Absolute path to the consumer repository root.
   """
 
-  WRAPPERS: tuple = ("chk-py", "tst-py")
+  WRAPPERS: tuple = ("cfg-py", "chk-py", "tst-py")
   PLACEHOLDER = re.compile(r'\{\{[A-Z_]+_BIN_PATH\}\}')
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -228,7 +234,7 @@ class Check4Wrappers:
 
   def run(self) -> dict:
     """
-    Check both wrappers for presence, a leading shebang, and placeholder substitution.
+    Check every wrapper for presence, a leading shebang, and placeholder substitution.
 
     Returns:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
@@ -253,7 +259,7 @@ class Check4Wrappers:
       return {"severity": "FAIL", "message": f"wrappers contain unsubstituted placeholders: {broken}"}
     if missing:
       return {"severity": "WARN", "message": f"wrappers missing or no shebang: {missing}"}
-    return {"severity": "PASS", "message": "both wrappers deployed, shebang-led, and substituted"}
+    return {"severity": "PASS", "message": "all wrappers deployed, shebang-led, and substituted"}
 
 
 # ----------------------------------------------------------------------------------------
@@ -546,7 +552,8 @@ class Check10Hook:
 # ----------------------------------------------------------------------------------------
 class Check11Venv:
   """
-  Read-only mirror of the venv probe-then-fallback logic applied at install time.
+  Read-only mirror of the venv resolution chk-py / tst-py apply before every run, including whether a project
+  venv is current.
 
   Attributes:
     consumer_dir: Absolute path to the consumer repository root.
@@ -609,7 +616,10 @@ class Check11Venv:
 
   def run(self) -> dict:
     """
-    Walk probes 1-3 plus the repo-root fallback in install order and report venv readiness.
+    Walk the venv resolution order chk-py / tst-py follow and report venv readiness.
+
+    A project venv counts as ready only when it carries the checker tools and was configured against the
+    current `pyproject.toml`.
 
     Returns:
       Finding dict with `severity` (PASS or WARN) and a `message` string.
@@ -618,11 +628,13 @@ class Check11Venv:
     # Domain(install.reconciliation):
     # # Python environment resolution order
     # The tooling looks for a Python execution environment in a fixed order: an already
-    # activated environment, a project-local environment, an explicitly configured one, and
-    # only when none of those exist, one created automatically before the checks run. The
-    # first candidate that exists settles the outcome even when it turns out to lack the
-    # required tools — a broken candidate is reported as broken rather than being skipped in
-    # favor of a later candidate in the order.
+    # activated environment carrying the checker tools is used as it is; otherwise the
+    # project's own environment — the explicitly configured one, or the project-local one
+    # when none is configured — must be configured against the project's current
+    # requirements. A missing or stale project environment is built or updated from the
+    # project's requirements before the checks run, unless installing is forbidden there, in
+    # which case the run fails and names the configure command. A found-but-incomplete
+    # candidate is reported as broken rather than skipped in favor of a later one.
 
     # probe 1: $VIRTUAL_ENV
     virtual_env = os.environ.get("VIRTUAL_ENV", "")
@@ -632,36 +644,51 @@ class Check11Venv:
         return {"severity": "PASS", "message": f"$VIRTUAL_ENV venv satisfies probe-1 ({venv})"}
       return {"severity": "WARN", "message": f"$VIRTUAL_ENV venv missing tools ({venv})"}
 
-    # probe 2: <consumer>/.venv (also the repo-root fallback target — probe 4 creates/augments it here)
-    project_venv = self.consumer_dir / ".venv"
-    if project_venv.exists():
-      if self._venv_has_tools(project_venv):
-        return {"severity": "PASS", "message": "consumer .venv satisfies probe-2"}
-      return {"severity": "WARN",
-              "message": "consumer .venv exists but missing tools (fallback will augment it in place)"}
-
-    # probe 3: [tool.lazy-python].venv
+    # probe 2: the target venv — [tool.lazy-python].venv when set, else <consumer>/.venv
     configured = self._read_pyproject_key("venv")
-    if configured:
-      configured_path = Path(configured).expanduser()
-      if not configured_path.is_absolute():
-        configured_path = self.consumer_dir / configured_path
-      if self._venv_has_tools(configured_path):
-        return {"severity": "PASS", "message": f"configured venv satisfies probe-3 ({configured})"}
-      return {"severity": "WARN", "message": f"configured venv missing tools or absent ({configured})"}
+    target = Path(configured).expanduser() if configured else Path(".venv")
+    if not target.is_absolute():
+      target = self.consumer_dir / target
+    if target.exists():
+      if not self._venv_has_tools(target):
+        return {"severity": "WARN", "message": f"project venv {target} is missing checker tools — run cfg-py"}
+      if not self._venv_is_fresh(target):
+        return {"severity": "WARN",
+                "message": f"project venv {target} is stale (not configured against the current pyproject.toml)"
+                           " — run cfg-py"}
+      return {"severity": "PASS", "message": f"project venv {target} is configured and fresh"}
 
-    # no venv found — fallback will create/augment <consumer>/.venv on first chk-py; check opt-out + uv availability
-    fallback_flag = self._read_pyproject_key("bootstrap-fallback")
-    if fallback_flag == "false":
+    # no project venv yet — chk-py / tst-py create it on first run unless opted out or uv is missing
+    if self._read_pyproject_key("bootstrap-fallback") == "false":
       return {"severity": "WARN",
-              "message": "no venv found AND bootstrap-fallback = false (consumer must configure)"}
+              "message": f"no project venv at {target} AND bootstrap-fallback = false — run cfg-py"}
 
-    # guard: the fallback builds the venv with uv, so its absence makes the fallback a dead end
+    # guard: every create / install step goes through uv, so its absence makes the venv unbuildable
     if not shutil.which("uv"):
-      return {"severity": "WARN", "message": "no venv found AND uv missing — fallback won't work on first chk-py"}
+      return {"severity": "WARN",
+              "message": "no project venv AND uv missing — neither cfg-py nor chk-py can build it"}
 
-    # no venv yet, but nothing blocks the fallback from creating one
-    return {"severity": "PASS", "message": "no venv yet; fallback creates <consumer>/.venv on first chk-py"}
+    # no venv yet, but nothing blocks cfg-py or the first chk-py from creating one
+    return {"severity": "PASS", "message": f"no project venv yet; cfg-py or the first chk-py creates {target}"}
+
+  def _venv_is_fresh(self, venv: Path) -> bool:
+    """
+    Tell whether a venv was configured against the consumer's current `pyproject.toml` requirements.
+
+    Args:
+      venv: Root directory of the venv.
+
+    Returns:
+      `True` when its recorded requirement fingerprint matches; `False` otherwise, including when
+      `pyproject.toml` cannot be parsed.
+    """
+
+    # guard: an unparseable pyproject.toml leaves nothing to be fresh against
+    try:
+      spec = VenvSpec(project_dir = self.consumer_dir)
+    except tomllib.TOMLDecodeError:
+      return False
+    return spec.is_fresh(venv)
 
 
 # ----------------------------------------------------------------------------------------

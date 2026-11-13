@@ -397,6 +397,11 @@ class ScopeResolver:
   _GIT_DIR = ".git"
   _ENCODING = "utf-8"
 
+  # Characters that make a glob segment a pattern rather than a literal name, and the wildcard
+  # that spans whole path components.
+  _WILDCARD_CHARS = frozenset("*?")
+  _DEEP_WILDCARD = "**"
+
   def __init__(self, *, repo: Path | str) -> None:
     """
     Initialise the resolver for the given repository root.
@@ -652,6 +657,10 @@ class ScopeResolver:
       - The enumeration is sorted and duplicate-free, so the same repository and scope config
         always yield the same list in the same order.
 
+    Notes:
+      - Only the directories the scope's `paths` globs name are walked, so the cost follows the size of the
+        scope rather than the size of the repository.
+
     Args:
       cfg: A single scope-config dict (the value side of a `wiki.scopes` entry).
 
@@ -672,42 +681,112 @@ class ScopeResolver:
     seen_abs: set[Path] = set()
     candidates: list[Path] = []
 
-    # one walk of the repo serves every glob in the scope
-    for base, dirs, files in os.walk(str(self._repo)):
-      # prune git internals from the walk
-      dirs[ : ] = [ d for d in dirs if d != self._GIT_DIR ]
-      for fname in files:
-        full = Path(base) / fname
-        rel = full.relative_to(self._repo).as_posix()
-        for pat in paths_globs:
-          # only a pattern matching this file selects it
-          if not self._matcher.match(rel, pat):
-            continue
-          ap = full.resolve()
+    # only the directories the globs name are walked; every file found is tested against every glob
+    for full, rel in self._list_glob_files(paths_globs):
+      for pat in paths_globs:
+        # only a pattern matching this file selects it
+        if not self._matcher.match(rel, pat):
+          continue
+        ap = full.resolve()
 
-          # already collected under a different glob — skip duplicate
-          if ap in seen_abs:
-            break
-
-          # excluded by an exclude_paths pattern
-          if any(self._matcher.match(rel, ep) for ep in exclude_globs):
-            break
-
-          # the scope's own generated topics index is never one of its nodes
-          if self._is_topics_index(cfg, rel, full):
-            break
-          seen_abs.add(ap)
-
-          # collect only real files that clear the scope's optional frontmatter filter — a
-          # filtered node (e.g. review_active: true) drops out of the index entirely, so other
-          # nodes do not link to it while the flag is set.
-          if ap.is_file() and self._passes_filter(cfg, full):
-            candidates.append(ap)
+        # already collected under a different glob — skip duplicate
+        if ap in seen_abs:
           break
+
+        # excluded by an exclude_paths pattern
+        if any(self._matcher.match(rel, ep) for ep in exclude_globs):
+          break
+
+        # the scope's own generated topics index is never one of its nodes
+        if self._is_topics_index(cfg, rel, full):
+          break
+        seen_abs.add(ap)
+
+        # collect only real files that clear the scope's optional frontmatter filter — a
+        # filtered node (e.g. review_active: true) drops out of the index entirely, so other
+        # nodes do not link to it while the flag is set.
+        if ap.is_file() and self._passes_filter(cfg, full):
+          candidates.append(ap)
+        break
 
     # walk order is filesystem-dependent — sort so callers get a stable enumeration
     candidates.sort()
     return candidates
+
+  # ------------------------------------------------------------------
+  def _list_glob_files(self, paths_globs: list[str]) -> list[tuple[Path, str]]:
+    """
+    List every file lying where a scope's include globs can reach.
+
+    Args:
+      paths_globs: The scope's `paths` globs.
+
+    Returns:
+      `(absolute path, repo-relative POSIX path)` for each file under a directory the globs
+      name; a file is listed once, and git internals are never entered.
+    """
+    found: list[tuple[Path, str]] = []
+    for root, recursive in self._compute_walk_roots(paths_globs):
+      for base, dirs, files in os.walk(str(root)):
+        # a glob that names one directory level stops there; a deeper one still skips git internals
+        dirs[ : ] = [ d for d in dirs if d != self._GIT_DIR ] if recursive else []
+        for fname in files:
+          full = Path(base) / fname
+          found.append(( full, full.relative_to(self._repo).as_posix() ))
+    return found
+
+  # ------------------------------------------------------------------
+  def _compute_walk_roots(self, paths_globs: list[str]) -> list[tuple[Path, bool]]:
+    """
+    Reduce a scope's include globs to the directories that have to be walked.
+
+    Args:
+      paths_globs: The scope's `paths` globs.
+
+    Returns:
+      `(directory, recursive)` pairs in sorted order, none lying under another recursive one; a
+      directory that does not exist, sits behind a symlinked directory or inside git internals
+      is left out.
+    """
+    # opt: only the wildcard-free directory prefix of each glob is walked, one level deep unless the glob reaches
+    # further — assumes the matcher anchors every pattern at the repository root and lets a single `*` or `?`
+    # match inside one path segment only, so a glob can match nothing outside what is walked for it
+    wanted: dict[tuple[str, ...], bool] = {}
+    for pattern in paths_globs:
+      segments = PurePath(pattern).as_posix().split("/")
+
+      # the leading segments without a wildcard name the directory; the last segment names files
+      depth = 0
+      while depth < len(segments) - 1 and not self._WILDCARD_CHARS.intersection(segments[depth]):
+        depth += 1
+      prefix = tuple(segments[ : depth ])
+      rest = segments[depth : ]
+
+      # more than one level left, or a `**` in what is left, reaches below the named directory
+      recursive = len(rest) > 1 or self._DEEP_WILDCARD in rest[0]
+      wanted[prefix] = wanted.get(prefix, False) or recursive
+
+    # a directory under one that is walked in full is already covered by that walk
+    roots: list[tuple[Path, bool]] = []
+    for prefix in sorted(wanted):
+      # covered by a recursive ancestor
+      if any(wanted.get(prefix[ : cut ], False) for cut in range(len(prefix))):
+        continue
+
+      # git internals hold no nodes, and a whole-repository walk never enters them
+      if self._GIT_DIR in prefix:
+        continue
+      root = self._repo.joinpath(*prefix)
+
+      # a whole-repository walk never follows a symlinked directory, so a root behind one holds nothing
+      if any(self._repo.joinpath(*prefix[ : cut ]).is_symlink() for cut in range(1, len(prefix) + 1)):
+        continue
+
+      # guard: the named directory does not exist
+      if not root.is_dir():
+        continue
+      roots.append(( root, wanted[prefix] ))
+    return roots
 
   # ------------------------------------------------------------------
   def _is_topics_index(self, cfg: dict, rel_posix: str, abs_path: Path) -> bool:

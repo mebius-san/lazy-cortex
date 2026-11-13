@@ -770,9 +770,12 @@ def _has_group_note_changed(item: dict, asset_note: Path, repo_root: Path) -> bo
   return False
 
 
-def resolve_wake_trigger(
-    repo_root: Path, frontmatter: dict, body: str, item: dict, markers: dict, cursor: str | None,
-) -> str | None:
+def resolve_wake_trigger(repo_root: Path,
+                         frontmatter: dict,
+                         body: str,
+                         item: dict,
+                         markers: dict,
+                         cursor: str | None) -> str | None:
   """
   Resolve the wake trigger for this tick, honoring the halt override.
 
@@ -834,10 +837,16 @@ def resolve_wake_trigger(
   return CoordinatorTrigger.OPERATOR_EDIT
 
 
-def _resolve_group_trigger(
-    repo_root: Path, frontmatter: dict, body: str, item: dict, markers: dict, members: list[Path],
-    asset_note: Path, cursor: str | None, *, raised_lags: Mapping[str, str],
-) -> tuple[str | None, dict[str, str]]:
+def _resolve_group_trigger(repo_root: Path,
+                           frontmatter: dict,
+                           body: str,
+                           item: dict,
+                           markers: dict,
+                           members: list[Path],
+                           asset_note: Path,
+                           cursor: str | None,
+                           *,
+                           raised_lags: Mapping[str, str]) -> tuple[str | None, dict[str, str]]:
   """
   Resolve the wake trigger for a grouped git-watch item, honoring the halt override.
 
@@ -960,10 +969,14 @@ def _level_doc_transitions(frontmatter: dict, members: list[Path], *,
   return transitions
 
 
-def _resolve_level_trigger(
-    repo_root: Path, frontmatter: dict, body: str, item: dict, members: list[Path], cursor: str | None, *,
-    raised_lags: Mapping[str, str],
-) -> tuple[str | None, dict[str, str]]:
+def _resolve_level_trigger(repo_root: Path,
+                           frontmatter: dict,
+                           body: str,
+                           item: dict,
+                           members: list[Path],
+                           cursor: str | None,
+                           *,
+                           raised_lags: Mapping[str, str]) -> tuple[str | None, dict[str, str]]:
   """
   Resolve the wake trigger for a level note, honoring the halt override.
 
@@ -997,9 +1010,9 @@ def _resolve_level_trigger(
   # applies, in a fixed order: an explicit operator command, which gets through even when the level
   # is paused, then — unless paused — a fresh answer to a question the coordinator itself asked,
   # then a level document's review outcome changing, then a level document that has entered review
-  # while the note still offers to write it, then any other operator edit. A document written from
-  # below, such as a product's architecture written by a release build's first step, wakes the note
-  # whoever made the change, because the stale offer to write it must come down. A level note never
+  # while the note still offers to write it, then any other operator edit. A document put into review
+  # from outside the level's own ladder wakes the note whoever made the change, because the stale
+  # offer to write it must come down. A level note never
   # waits on a background job of its own. An edit to a level document under active review is
   # otherwise the review's own business.
 
@@ -1378,7 +1391,8 @@ def _wake_release_owner(repo_root: Path,
   # either direction, or the asset being cancelled or reinstated, changes what the next release would carry. A
   # release being published successfully changes it too, because what shipped no longer waits. The product is
   # told once, so its level view stays current without polling every asset inside it. A release's own note,
-  # the owner's unit of shipping, never raises the approval edge itself.
+  # the owner's unit of shipping, never tells the product about its own design gate, which is closed from the
+  # release's creation; it tells the product only when the release itself is cancelled or reinstated.
   # The product told is the outermost one in the asset's chain that builds releases. An asset outside any
   # product, under a chain that builds no releases, or under an owner whose level note was never created
   # wakes nobody. The notification travels exactly one hop outward from the change and is never chased further.
@@ -1461,10 +1475,16 @@ def _coordination_rules_context(repo_root: Path) -> tuple[list[str], list[str]]:
   return [], [ f"coordination rules not found: {rules_rel}" ]
 
 
-def _build_level_bundle(
-    repo_root: Path, level_note: Path, role: str, trigger: str, *,
-    doc_transition: str | None = None, asset_approved: str | None = None,
-) -> tuple[list[str], list[str], list[str], dict, str, list[str]]:
+# waiver: the closing parenthesis takes its own line — the return annotation does not fit beside the last
+# parameter within the line limit
+def _build_level_bundle(repo_root: Path,
+                        level_note: Path,
+                        role: str,
+                        trigger: str,
+                        *,
+                        doc_transition: str | None = None,
+                        asset_approved: str | None = None,
+                        ) -> tuple[list[str], list[str], list[str], dict, str, list[str]]:
   """
   Assemble the `lazycortex-core dispatch-job` wire bundle pieces for a level-note wakeup.
 
@@ -1594,10 +1614,13 @@ def _build_level_bundle(
   return source, context, warnings, payload, f"{relative}:coordinator", protocols
 
 
-def _build_bundle(
-    repo_root: Path, asset_dir: Path, asset_note: Path, fm_text: str, trigger: str, *,
-    doc_transition: str | None = None,
-) -> tuple[list[str], list[str], list[str], dict, str]:
+def _build_bundle(repo_root: Path,
+                  asset_dir: Path,
+                  asset_note: Path,
+                  fm_text: str,
+                  trigger: str,
+                  *,
+                  doc_transition: str | None = None) -> tuple[list[str], list[str], list[str], dict, str]:
   """
   Assemble the `lazycortex-core dispatch-job` wire bundle pieces for a coordinator wakeup.
 
@@ -1767,10 +1790,14 @@ def _commit(asset_dir: Path, asset_note: Path, subject: str) -> None:
   )
 
 
-def _has_group_wake(
-    frontmatter: dict, body: str, item: dict, members: list[Path], *, raised_lags: Mapping[str, str],
-    note_changed: bool = True, basenames: frozenset[str] | None = None,
-) -> bool:
+def _has_group_wake(frontmatter: dict,
+                    body: str,
+                    item: dict,
+                    members: list[Path],
+                    *,
+                    raised_lags: Mapping[str, str],
+                    note_changed: bool = True,
+                    basenames: frozenset[str] | None = None) -> bool:
   """
   Check whether a tick the busy-job guard is about to decline actually carries a wake-worthy
   signal — a cheap "is there anything to catch up on" probe, not the full trigger ladder.
@@ -1906,12 +1933,17 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       unreachable, in which case it is dropped instead of replayed.
     - A call on an asset of any type but `release` whose `Gate.DESIGN_DONE` or
       `Gate.SPEC_CANCELLED` changed value dispatches one job on the level note of the product that
-      owns releases. That side effect runs only after this asset's own dispatch has landed, and
-      never propagates a failure of its own back to the caller (N2).
+      owns releases; on a `release` note only a changed `Gate.SPEC_CANCELLED` does, and a changed
+      `Gate.DESIGN_DONE` dispatches nothing upward. That side effect runs only after this asset's
+      own dispatch has landed, and never propagates a failure of its own back to the caller (N2).
     - That edge does not require a trigger to have resolved on the asset itself: both gates are
-      normally flipped by a bot-authored commit that wakes nothing here, so the crossing is
-      evaluated before the no-trigger exit, recorded on the note, and dispatched onward from that
-      exit too.
+      normally flipped by a bot-authored commit that wakes nothing on the asset, so the crossing
+      is evaluated before the no-trigger exit, recorded on the note, and dispatched onward from
+      that exit too.
+    - A changed `Gate.SPEC_CANCELLED` on a note that is not a level note, in either direction,
+      also wakes the note's own coordinator with `CoordinatorTrigger.OPERATOR_EDIT` whoever
+      authored the commit, when no other trigger resolved for the tick and the note is not
+      halted. A changed `Gate.DESIGN_DONE` alone dispatches no job on the asset itself.
 
   Args:
     asset_note: The status folder-note path; its parent is the asset dir.
@@ -1940,8 +1972,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       Trigger resolution short-circuits to `CoordinatorTrigger.ASSET_APPROVED` (honoring the halt
       override); `item` is `{}` on this path. None for every ordinary tick.
     release_start: True when this call is the one-hop downward dispatch raised on a release's own
-      status note after `Start release`, and again after a verdict on the revised `architecture.md`
-      of the build's first step. Accepted only by a status note of type `release` — any other note
+      status note after `Start release`, and again when the product's `architecture.md` turns approved
+      while a release is open. Accepted only by a status note of type `release` — any other note
       refuses it; trigger resolution short-circuits to `CoordinatorTrigger.RELEASE_START` (honoring
       the halt override); `item` is `{}` on this path.
     release_published: True when this call is the one-hop upward dispatch raised on the level note of the
@@ -2246,7 +2278,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   # and both its gates are normally flipped by a bot-authored commit that wakes nothing here, so a
   # crossing evaluated after the exit would be lost (N1)
   cur_ready = None
-  approved_crossed = False
+  owner_edge_crossed = False
+  cancel_crossed = False
   prev_ready: dict = {}
   if not is_level:
     prev_ready = _read_marker_dict(frontmatter, SpecCoordinatorReadyStateKey.STATE)
@@ -2255,11 +2288,32 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
         Gate.SPEC_CANCELLED: flip_gate.is_true(frontmatter, Gate.SPEC_CANCELLED),
     }
 
+    # Domain(spec.lifecycle):
+    # # A cancellation is a change everyone concerned has to see
+    # Cancelling an asset, or lifting the cancellation, changes what the product's next release carries, so the
+    # product that owns releases is told, exactly as it is told when a design is approved. A release is told the
+    # same way when it is cancelled itself: a cancelled release is closed and no longer stands in the way of a
+    # new one. The approval of a release's own design is never such a change, since a release is created with
+    # that gate already closed. A cancellation also changes the cancelled note's own state, so the note's own
+    # coordinator is woken to put it in order, whoever made the change — unless the note is halted, which
+    # silences every wake but an explicit command.
+
     # the approval edge rides the same marker too, in both directions; a recorded marker from before the
     # approval keys existed reads as matching on them, so the upgrade itself raises no hop
-    approved_crossed = asset_type != ReleaseKey.ASSET_TYPE and any(
-        cur_ready[key] != prev_ready.get(key, cur_ready[key] if prev_ready else False) for key in _APPROVAL_EDGES
-    )
+    crossed = {
+        key for key in _APPROVAL_EDGES
+        if cur_ready[key] != prev_ready.get(key, cur_ready[key] if prev_ready else False)
+    }
+
+    # a release is created with its design gate closed, so only its cancellation is a crossing
+    if asset_type == ReleaseKey.ASSET_TYPE:
+      crossed.discard(Gate.DESIGN_DONE)
+    owner_edge_crossed = bool(crossed)
+    cancel_crossed = Gate.SPEC_CANCELLED in crossed
+
+  # a cancellation crossing nothing else woke on still wakes the note's own coordinator, halt excepted
+  if trigger is None and cancel_crossed and not flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
+    trigger = CoordinatorTrigger.OPERATOR_EDIT
 
   # no trigger this tick: record a gate crossing and the dead-job line if either landed, wake the
   # release owner that crossing reaches, and leave without dispatching
@@ -2271,7 +2325,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     # dispatching path stamps it, so the edge cannot re-fire on a later tick.
     # A marker lacking the approval keys is stamped to the full snapshot on its first wake, so a
     # later approval or reopening is measured against a recorded value rather than read as matching.
-    stamped = approved_crossed or _is_marker_legacy(prev_ready)
+    stamped = owner_edge_crossed or _is_marker_legacy(prev_ready)
     fm_head = text[:fm_end]
     if stamped and cur_ready is not None:
       fm_head = gate_tick.set_fm_json(fm_head, SpecCoordinatorReadyStateKey.STATE, cur_ready)
@@ -2283,14 +2337,14 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       # name what actually landed: the dead-job line outranks a crossing, a crossing outranks an upgrade
       what = (
           f"coordinator job died on {asset_dir.name}" if note_dirty
-          else f"recorded gate crossing on {asset_dir.name}" if approved_crossed
+          else f"recorded gate crossing on {asset_dir.name}" if owner_edge_crossed
           else f"recorded gate snapshot on {asset_dir.name}"
       )
       spec_paths.write_text_atomic(asset_note, note_explainers.heal_note_text(asset_note, text))
       _commit(asset_dir, asset_note, f"{_DISPATCH_AUTHOR_NAME}: {what}")
 
     # the hop runs after the record lands, so a failing release owner can't lose the stamp
-    if approved_crossed:
+    if owner_edge_crossed:
       wake_release_owner_on_approval(repo_root, asset_dir, today = today)
     return { TickAction.ACTION: TickAction.NOOP }
 
@@ -2425,7 +2479,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
 
     # an approval crossing wakes the release owner's level coordinator only after this asset's own
     # dispatch has landed, one hop, best-effort, so a broken release owner can't strand it (N2)
-    if approved_crossed:
+    if owner_edge_crossed:
       wake_release_owner_on_approval(repo_root, asset_dir, today = today)
 
     # this tick's own trigger was retired, not dispatched — see the guard above
@@ -2466,7 +2520,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
 
   # an approval crossing wakes the release owner's level coordinator only after this asset's own
   # dispatch has landed, one hop, best-effort, so a broken release owner can't strand it (N2)
-  if approved_crossed:
+  if owner_edge_crossed:
     wake_release_owner_on_approval(repo_root, asset_dir, today = today)
 
   # the fresh dispatch this tick queued

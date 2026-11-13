@@ -167,6 +167,14 @@ COMMON_ALLOWED = {
 ROUTINE_PROTOCOLS_ENV = "LAZYCORTEX_ROUTINE_PROTOCOLS"
 _ROUTINE_PROTOCOLS_SEP = ";"
 
+# Environment variable that tells a routine's subprocess how long the daemon waits for it, in
+# seconds, so a worker over a large batch can stop early and report the rest for retry.
+ROUTINE_TIMEOUT_ENV = "LAZY_ROUTINE_TIMEOUT_SEC"
+
+# How much of a worker's stderr tail, or of a spawn fault's text, a git watch keeps in the reason it
+# stores with a failed item in `state.json`.
+_REASON_MAX_CHARS = 300
+
 # The flat sub-keys a composite filter block accepts — reused for the top-level
 # `filter` dict, each `filter.any_of[i]` member, and the any_of/flat-key exclusion check
 _FILTER_COMPOSITE_SUBKEYS = { "frontmatter", "folder_note", "basename" }
@@ -352,14 +360,29 @@ def build_routine_subprocess_env(cfg: dict) -> dict[str, str]:
   spawned process inherits the rest of the environment plus every routine-scoped variable this
   module manages.
 
+  Guarantees:
+    - The overlay always carries `LAZY_ROUTINE_TIMEOUT_SEC` (`ROUTINE_TIMEOUT_ENV`), holding the routine's
+      subprocess timeout in seconds: its `timeout_sec`, or the default when the key is absent.
+
   Args:
     cfg: Routine configuration dict.
 
   Returns:
     The merged overlay: the declared-protocols entry when the routine has any, the git-author
-    pair when the routine declares one, plus the hook allow-list entry, which is always present.
+    pair when the routine declares one, plus two entries that are always present — the hook
+    allow-list and `LAZY_ROUTINE_TIMEOUT_SEC`, the routine's subprocess timeout in seconds.
   """
-  return { **build_routine_protocols_env(cfg), **build_routine_git_author_env(cfg), **build_routine_hooks_env(cfg) }
+
+  # Contract:
+  # The overlay always carries `LAZY_ROUTINE_TIMEOUT_SEC` (`ROUTINE_TIMEOUT_ENV`) holding the routine's
+  # subprocess timeout in seconds — the routine's `timeout_sec`, or the default when the key is absent.
+  # Workers in other plugins read it to stop before the daemon kills them.
+
+  # the overlay entries, the timeout entry always among them
+  return {
+    **build_routine_protocols_env(cfg), **build_routine_git_author_env(cfg), **build_routine_hooks_env(cfg),
+    ROUTINE_TIMEOUT_ENV: str(cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)),
+  }
 
 
 def parse_routine_protocols_env(env_value: str | None) -> list[str]:
@@ -1557,7 +1580,10 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       encoding of the per-watch item dict (e.g. `{"sha":"...","subject":"...",...}`).
       An item whose worker exits non-zero is recorded in `failed_items` and
       retried, ahead of any fresh item, on a later tick; the cursor still
-      advances past it so one broken item never stalls the rest.
+      advances past it so one broken item never stalls the rest. A spawn that
+      raises (a timeout, an OS error) does not end the tick before the state
+      write: that item and every item not yet attempted are recorded in
+      `failed_items` too, and the tick then returns the failure.
 
   `last_seen_sha` is tracked in `state.json`'s `git_watch.<name>` block. First
   run records the current ref and dispatches nothing (no history backfill).
@@ -1570,8 +1596,15 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   schema back-compat (vestigial; not rejected).
 
   Guarantees:
-    - `last_seen_sha` always advances to the tick's HEAD by the time a successful tick returns,
-      including a tick whose range was discarded by a force-push or rebase.
+    - `last_seen_sha` always advances to the tick's HEAD by the time the tick returns, on every tick
+      after the first that got as far as dispatching — including a tick whose range was discarded by a
+      force-push or rebase and a tick that ends in a worker spawn failure. A tick that fails earlier
+      (not a git repo, HEAD unreadable, command unresolvable, invalid request template) leaves it
+      where it was.
+    - When spawning a command worker raises, the tick loses no finished work: items that already
+      succeeded are not replayed, items that exited non-zero earlier stay owed, and the item whose
+      spawn failed together with every item not yet attempted is owed to the next tick. The failure
+      is reported only after that state is stored.
     - The first tick after a watch is configured never backfills prior history; it records the
       current HEAD as the baseline and dispatches nothing.
     - A commit whose message carries the `Lazy-Watch: skip` trailer contributes no item to any
@@ -1598,12 +1631,21 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   """
 
   # Contract:
-  # `last_seen_sha` always advances to the tick's HEAD by the time the tick returns, on every
-  # successful tick after the first — including a tick whose range was discarded by a force-push or
-  # rebase. The very first tick after a watch is configured records the current HEAD as the baseline
+  # `last_seen_sha` always advances to the tick's HEAD by the time the tick returns, on every tick
+  # after the first that got as far as dispatching — including a tick whose range was discarded by a
+  # force-push or rebase and a tick that ends in a worker spawn failure. A tick that fails earlier
+  # (not a git repo, HEAD unreadable, command unresolvable, invalid request template) leaves it where
+  # it was. The very first tick after a watch is configured records the current HEAD as the baseline
   # and dispatches nothing; no prior history is ever backfilled. An item a worker subprocess failed
   # on is retried on a later tick, ahead of any fresh item, for as long as its commit stays reachable
   # from HEAD; once history rewrites it away it is dropped rather than redelivered.
+
+  # Contract:
+  # When spawning a command worker raises (a timeout, an OS error), the tick loses no finished work:
+  # items that already succeeded in the tick are not replayed, items that exited non-zero earlier in
+  # the tick stay owed, and the item whose spawn failed together with every item of the tick not yet
+  # attempted, retry and fresh alike, is owed to the next tick. Only after that state is stored does
+  # the tick report the failure (`exit = -1`, error `command_dispatch_failed`).
 
   # Contract:
   # A commit whose message carries the `Lazy-Watch: skip` trailer contributes no item to any watch.
@@ -1772,6 +1814,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # first, so a broken item gets its next attempt before any fresh item is even tried
   # limit: retried items skip the composite filter re-match; re-run it over `retry_items` if filter drift matters
   next_failed_items = retry_items
+  spawn_fault: str | None = None
   if RoutineKey.COMMAND in cfg:
     timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
     try:
@@ -1786,6 +1829,13 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       # resending the item-json payload; the worker only ever expects the raw item shape
       # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
       clean_item = { key: value for key, value in item.items() if key != "reason" }
+
+      # an earlier spawn of this tick faulted — nothing more is attempted, and the item is owed
+      # to the next tick exactly like the one that faulted
+      if spawn_fault is not None:
+        # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
+        still_failing.append({ **clean_item, "reason": "not attempted: an earlier spawn of the tick failed" })
+        continue
       payload = json.dumps(clean_item, sort_keys = True)
       try:
         # blocking — one process at a time, no parallel spawns
@@ -1800,18 +1850,19 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
         )
       except Exception as error:
         # the spawn itself faulted (e.g. TimeoutExpired) rather than the worker reporting a
-        # clean non-zero exit — bail out before the `failed_items` write below, so this item
-        # (and the rest of `retry_items + fresh_items`) is retried from scratch next tick
-        # instead of the tick crashing mid-loop with that write abandoned
-        # waiver: one-off routine-outcome note/reason token, not an internal key
-        return _err(name, started, "command_dispatch_failed", str(error))
+        # clean non-zero exit — the item and everything after it are owed to the next tick, and
+        # the state write below still closes the range, so the work the earlier items of this
+        # tick finished is not replayed and the range does not grow tick after tick
+        spawn_fault = str(error)
+        # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
+        still_failing.append({ **clean_item, "reason": f"spawn failed: {spawn_fault}"[:_REASON_MAX_CHARS] })
+        continue
 
       # worker failed on this item — keep it for the next tick's retry pass; the cursor
       # still advances below so one broken item never stalls the whole conveyor
       if proc.returncode != 0:
-        # waiver: inline numeric/default literal, not a domain constant — bounds the stored
-        # reason so a chatty worker can't grow state.json without limit
-        stderr_tail = proc.stderr[-300:].strip() if proc.stderr else ""
+        # the stored reason is bounded so a chatty worker can't grow state.json without limit
+        stderr_tail = proc.stderr[-_REASON_MAX_CHARS:].strip() if proc.stderr else ""
         still_failing.append({
           **_narrow_failed_item(clean_item, proc.stdout),
           "reason": f"exit {proc.returncode}: {stderr_tail}",
@@ -1863,6 +1914,12 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       StateKey.FAILED_ITEMS: next_failed_items,
     })
   )
+
+  # guard: a spawn faulted — the tick is a failure the daemon records, now that the state holds
+  # what is owed
+  if spawn_fault is not None:
+    # waiver: one-off routine-outcome note/reason token, not an internal key
+    return _err(name, started, "command_dispatch_failed", spawn_fault)
 
   # fold every status worth a daemon-log line into one note — a persistent per-item failure
   # stays a visible line on every tick until it clears or its sha is dropped, per design

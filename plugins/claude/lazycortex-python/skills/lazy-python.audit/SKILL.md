@@ -72,7 +72,7 @@ Outcome: `PASS` / `FAIL` (the plugin tree at `${CLAUDE_PLUGIN_ROOT}` is incomple
 
 ## Check 4: Wrappers deployed
 
-Verify `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, open with a shebang, and contain no unsubstituted `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholders. Missing wrappers mean install Phase 2 never ran; unsubstituted placeholders mean the install completed with a corrupted template.
+Verify `<consumer>/cli/cfg-py`, `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, open with a shebang, and contain no unsubstituted `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholders. Missing wrappers mean install Phase 2 never ran; unsubstituted placeholders mean the install completed with a corrupted template.
 
 Run:
 
@@ -80,7 +80,7 @@ Run:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check4 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `PASS` (both wrappers deployed and substituted) / `WARN` (one or both wrappers missing from `<consumer>/cli/` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholder is still in the wrapper — the install was interrupted → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
+Outcome: `PASS` (all three wrappers deployed and substituted) / `WARN` (one or more wrappers missing from `<consumer>/cli/` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholder is still in the wrapper — the install was interrupted → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
 
 ## Check 5: Pyproject checker sections
 
@@ -156,7 +156,7 @@ Outcome: `PASS` (manifest present + declares the hook) / `WARN` (`${CLAUDE_PLUGI
 
 ## Check 11: Venv bootstrap state
 
-Mirror the probe-then-fallback logic of `_ensure_venv.sh`, read-only. A venv is "complete" only when all four bins (`mypy`, `pylint`, `pytest`, `ruff`) are executable AND the two pytest plugins (`pytest_clarity`, `pytest_sugar`) import in the venv's interpreter — the same contract `_venv_has_tools` enforces. Try `$VIRTUAL_ENV`, then `<consumer>/.venv`, then `[tool.lazy-python].venv` from pyproject. When none satisfies the contract, the fallback creates/augments `<consumer>/.venv` (the repo root, == probe 2 target) on first `chk-py` — so "no venv yet but `uv` present and `bootstrap-fallback != false`" is `PASS` (implicit). `WARN` covers every recoverable degradation — missing tools/plugins in a found venv (the fallback will augment it in place), no venv plus `bootstrap-fallback = false`, or no `uv` on PATH.
+Mirror the venv resolution of `_ensure_venv.sh`, read-only. A venv is "complete" only when all four bins (`mypy`, `pylint`, `pytest`, `ruff`) are executable AND the two pytest plugins (`pytest_clarity`, `pytest_sugar`) import in the venv's interpreter — the same contract `_venv_has_tools` enforces. A `$VIRTUAL_ENV` venv is judged on completeness alone. Otherwise the target venv — `[tool.lazy-python].venv` from pyproject, else `<consumer>/.venv` — must also be fresh: its `.lazy-python-cfg` stamp matches the digest of the current `pyproject.toml` requirement inputs (`requires-python`, dependencies, extras, dependency groups, `.python-version`, the tool list). A missing target venv is `PASS` while `uv` is present and `bootstrap-fallback != false` (`cfg-py` or the first `chk-py` creates it). `WARN` covers every recoverable degradation — a found venv missing tools or plugins, a stale or stamp-less venv, no venv plus `bootstrap-fallback = false`, or no `uv` on PATH.
 
 Run:
 
@@ -164,7 +164,7 @@ Run:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check11 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `PASS` (probe satisfied or fallback bootstrappable) / `WARN` (recoverable degradation — a found venv missing tools or pytest plugins, no venv plus `bootstrap-fallback = false`, or no `uv` on `$PATH` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), or point `[tool.lazy-python].venv` at a venv that satisfies the contract).
+Outcome: `PASS` (venv complete and fresh, or creatable on first run) / `WARN` (recoverable degradation — a found venv missing tools or pytest plugins, a stale venv, no venv plus `bootstrap-fallback = false`, or no `uv` on `$PATH` → run `cfg-py` from an interactive session or console (it refuses in protected mode, `LAZYCORTEX_PROTECTED`), after installing `uv` when it is missing).
 
 ## Check 12: Domain-groups dictionary
 

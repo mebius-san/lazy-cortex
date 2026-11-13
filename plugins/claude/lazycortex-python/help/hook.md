@@ -1,14 +1,15 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-11-10
+last_regen: 2026-11-13
 no_diagram: true
 source_skills:
+  - lazy-python.check-style
   - lazy-python.check-style.sh
   - hooks.json
   - pcf.py
-source_sha: e37cd0825c0891766ee7b8b1fe16fe2d39299aaf
-surface_sha: 795563082a1de2b28a9881d981be18ced7b1d6aade603a518cadd0450e6d7ea9
+source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
+surface_sha: 07f1ec927cae56e421bda5f29b09d4d863f5ea629ddf68e87c50fc83c8cb1e8d
 ---
 # Inline style feedback on every Python edit
 
@@ -18,6 +19,7 @@ Every time you save a `.py` file — via `Edit` or `Write` — the plugin's Post
 
 - Getting immediate feedback when a new file violates import ordering, docstring structure, line length, or code-format rules — without breaking focus to run `chk-py` manually.
 - Iterating on a file that touches multiple `[tool.pcf]` checks at once: each save cycle reports the remaining violations so you can work through them one at a time.
+- Reviewing a finished batch of changes before you commit: `/lazy-python.check-style` adds the manual guideline review and the full `chk-py` + `tst-py` gate on top of what the hook reports per file.
 - Working in a project where some directories are excluded from `pcf.py` in `pyproject.toml`: the hook silently no-ops on excluded paths so you are never interrupted by noise from generated or vendored code.
 
 ## How it fits together
@@ -31,6 +33,16 @@ Every time you save a `.py` file — via `Edit` or `Write` — the plugin's Post
 The violation format the hook surfaces is the same `file:line: note: message` format that `chk-py pcf` emits, so findings look identical whether they come from the hook or from a manual checker run.
 
 `/lazy-python.install` never writes to the hook registration itself — it stays out of the hook's own path entirely, since the manifest-based registration needs no consumer-side setup. Install's job is the checker stack the hook depends on: it bootstraps `[tool.pcf]` (and the rest of the checker sections) in `pyproject.toml`, so the hook has exclude rules and check flags to read from the moment it first fires.
+
+**`/lazy-python.check-style`** is the on-demand counterpart to the hook. The hook sees one file at a time, right after you save it, and only reports what `pcf.py` can detect. Run the skill after a batch of edits and before committing ("check my style", "is this ready to commit"): it reviews every Python file in your change set (the union of staged and unstaged changes against `HEAD`, or the paths you pass) in six steps — read the guidelines, identify the modified files, review them manually, run the automated checks, fix what remains, and re-verify.
+
+- **Guidelines are re-read on every run.** It loads the three canonical guidelines shipped with the plugin (coding, documenting, comments), then your project overlay in `docs/guidelines/` and the `## Style` section of your `CLAUDE.md`, if present. The overlay wins on conflict.
+- **A manual pass covers what the checkers cannot see.** Docstring quality, contract consistency between signatures and docstrings, guard-clause comments, method organization, naming, structural rules, the substance of `opt:` / `limit:` / `Decision:` marker clauses, and preservation of the special comment markers. A clean hook or a clean `chk-py` run does not replace this pass.
+- **Then the full gate.** It runs `chk-py all -q` per file (or per directory when more than three modified files share one), then across the whole project, applies minimal targeted fixes, and re-runs `chk-py all -q` plus `tst-py <module> -q` for each module the edits touched.
+- **Tests are never edited silently.** If a fix would change a file under `tests/`, the skill stops and asks you, naming that file, whether to edit the test or keep it and fix the code instead.
+- **Persistent violations are escalated.** If checks still fail after the fixes, the skill reports the remaining issues and asks how to proceed rather than looping.
+
+The run ends with one outcome line per step, so a skipped step is visible. The hook gives you the quick signal while you work; the skill is the deliberate review before you commit.
 
 ## Common adjustments
 

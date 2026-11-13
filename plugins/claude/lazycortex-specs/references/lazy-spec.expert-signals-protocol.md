@@ -1,11 +1,11 @@
 ---
 name: lazy-spec.expert-signals-protocol
-version: 5
-description: The wire this file owns — two `request.json` extra fields naming files the expert reads in place, two `response.json` extra fields, the language obligation every writer resolves via the `resolve-language` primitive, and the closed list of things an expert dispatched against a spec asset is forbidden to do — among them restating or quoting another spec document. Every markup shape an expert writes to signal the coordinator (asset proposals, in-doc questions, decision-candidate markers) is owned by the callout and tag registry in `lazycortex-core:lazy-core.markdown-style`, pointed to below by name.
+version: 6
+description: The wire this file owns — two `request.json` extra fields naming files the expert reads in place, the `outcome` values a spec job takes, two `response.json` extra fields, the language obligation every writer resolves via the `resolve-language` primitive, and the closed list of things an expert dispatched against a spec asset is forbidden to do — among them restating or quoting another spec document. Every markup shape an expert writes to signal the coordinator (asset proposals, in-doc questions, decision-candidate markers) is owned by the callout and tag registry in `lazycortex-core:lazy-core.markdown-style`, pointed to below by name.
 ---
-# Expert → coordinator signal protocol v5
+# Expert → coordinator signal protocol v6
 
-This is the wire contract for the one-directional channel every expert dispatched against a spec asset (designer, architect, planner, developer, tester — any class, any product) uses to reach `spec.coordinator` without ever acting on the spec system directly. `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` is the coordinator's own reasoning about what to DO once a signal arrives; `lazy-core.markdown-style.md`'s callout and tag registry owns the concrete markup shape of every signal named below. This file owns only the two `request.json` extra fields, the two `response.json` extra fields, and the hard prohibitions — on a disagreement about a markup FORMAT, the markdown-style doc wins (playbook § 15).
+This is the wire contract for the one-directional channel every expert dispatched against a spec asset (designer, architect, planner, developer, tester — any class, any product) uses to reach `spec.coordinator` without ever acting on the spec system directly. `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` is the coordinator's own reasoning about what to DO once a signal arrives; `lazy-core.markdown-style.md`'s callout and tag registry owns the concrete markup shape of every signal named below. This file owns only the two `request.json` extra fields, the `outcome` values, the two `response.json` extra fields, and the hard prohibitions — on a disagreement about a markup FORMAT, the markdown-style doc wins (playbook § 15).
 
 An expert reaches the coordinator through exactly three markup shapes, all authored INSIDE the document the expert is already writing or reporting into — never on a folder-note, never in another asset's document, never via a side channel:
 
@@ -28,9 +28,17 @@ Two extra fields, both optional, both arrays of repo-relative paths pointing int
 
 **The expert opens these paths in the working tree directly.** They are deliberately not copied into the job dir: a guideline and a decisions registry are living documents that other jobs keep writing to, and the expert must read the file as it stands when it runs rather than a snapshot of it. Nothing under `source/` or `context/` corresponds to them.
 
+## `outcome` values
+
+The envelope (`outcome` / `result` / `error`) is owned by `lazy-core.expert-runtime-contract.md`; this protocol declares only the values `outcome` takes for a job dispatched against a spec asset:
+
+- `edited` — the one success value of a job whose `request.json` names a `target_doc`. The FIRST entry of `result` is that document, under the target's own basename; every further entry is an attachment (§ Attachments policy). The collector lands the files only on this value: a response that declares `result` entries under any other success word is refused, and the asset halts with a `[!failure]` callout naming the refusal.
+- `error` — the reserved failure value. A job whose `target_doc` is a report journal (`code-report.md`, `test-report.md`) still returns the journal in `result`, with the failed run's own entry written into it, and the collector lands it: a failed run is part of the record the journal keeps. For every other document the collector lands nothing on `error`.
+- `deferred` — the reserved value of work deliberately not done; nothing is landed.
+
 ## `response.json` extra fields
 
-Two extra fields, both riding alongside the ordinary envelope (`outcome` / `result` / `error`, owned by `lazy-core.expert-runtime-contract.md` — this protocol never redefines or replaces `outcome`; these fields only add detail to an `outcome: error` response):
+Two extra fields, both riding alongside the ordinary envelope (this protocol never redefines or replaces `outcome`; these fields only add detail to an `outcome: error` response):
 
 - `blocked: <subtype> <detail>` — detail on an `outcome: error` response, never an outcome of its own: the pump's success gate reads only `outcome`, so a response carrying `blocked` without `outcome: error` is malformed, and a consumer must not branch on `blocked` in any other company. It is the planner's last resort when it cannot produce a plan; one subtype:
   - `blocked: missing decision <what>` — the planner cannot decompose a plan at all because the source doc (`design.md` or `architecture.md`) lacks a decision the plan needs. `<what>` names the missing decision in one short phrase. The coordinator drives the round trip back up the chain from this signal: the designer/architect updates the source doc, the doc is re-reviewed, the planner is redispatched.

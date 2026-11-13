@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-11-12
+last_regen: 2026-11-13
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: c57d8139d8e69bdeb7c1efad42344b2f1f6346b5c3cdee8df066ac1116bcd332
+source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
+surface_sha: 91d035f7ce3668cfdfdc960892819969aef2d53c691651e0449e8e8474d92473
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 

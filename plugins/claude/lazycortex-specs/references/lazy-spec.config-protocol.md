@@ -125,7 +125,7 @@ Per-product doc-template overrides are NOT declared in the record. The override 
 
 ### `products[<key>].guidelines` — expert-job context paths
 
-A product record MAY carry a `guidelines` dict supplying extra context to every expert job dispatched on the product's documents — the writer rounds a `Write <doc>` row opens (`Write design`, `Write test-plan`, `Write architecture` on a product note, `Write code-plan` on a release note, `Start research` on a research asset) and the release's build jobs (`Revise architecture`, `Build`, `Test`), and the writer and validator rounds `lazycortex-review`'s coordinator dispatches on a document under review (every `Write <doc>` row ends in such a round, so a design's author reads the product's guidelines for its role the same way an implementer does):
+A product record MAY carry a `guidelines` dict supplying extra context to every expert job dispatched on the product's documents — the writer rounds a `Write <doc>` row opens (`Write design`, `Write test-plan`, `Write architecture` on a product note, `Write code-plan` on a release note, `Start research` on a research asset), the writer round the product note's `Revise architecture` row opens and the release's jobs (`Build`, `Test`), and the writer and validator rounds `lazycortex-review`'s coordinator dispatches on a document under review (every `Write <doc>` row ends in such a round, so a design's author reads the product's guidelines for its role the same way an implementer does):
 
 ```json
 "guidelines": {
@@ -140,7 +140,7 @@ A product record MAY carry a `guidelines` dict supplying extra context to every 
 
 | Key | Description |
 |---|---|
-| `architect` | Guideline paths folded into the product's `Write architecture` row and into the `Revise architecture` job of every release build — this is also the blessed route for handing the architect an operator-declared `docs/structure.md` project-structure map (`lazy-spec.coordination-playbook.md` Chapter 8), when the operator wants it injected as job context instead of left to the architect's own pull-skill query. |
+| `architect` | Guideline paths folded into the product's `Write architecture` row and into the writer round its `Revise architecture` row opens — this is also the blessed route for handing the architect an operator-declared `docs/structure.md` project-structure map (`lazy-spec.coordination-playbook.md` Chapter 8), when the operator wants it injected as job context instead of left to the architect's own pull-skill query. |
 | `planner` | Guideline paths folded into a release's `Write code-plan` row. |
 | `tester` | Guideline paths folded into every `Write test-plan` row — an asset's test cases, the product's standing plan, a release's composed plan — and into a release's `Test` job; all dispatch under the `tester` role. |
 | `developer` | Guideline paths folded into a release's `Build` job, led by the release implementer (`resolve-product release-implementer`), and handed on to the child agents it delegates foreign tools to. |
