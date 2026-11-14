@@ -1463,6 +1463,7 @@ class ReleaseKey:
     TAG_PREFIX: Prefix of the mirror tag of a version, written with the dots replaced by hyphens.
     ASSET_TYPE: The asset type name a release note carries in `spec_asset_type`.
     FOLDER: The reserved folder under a product root where releases live.
+    ARCHIVE: The subfolder of the releases folder that holds the closed releases.
     SLUG_WIDTH: Width of a release folder's zero-padded sequence number.
   """
 
@@ -1476,8 +1477,10 @@ class ReleaseKey:
   ASSET_TYPE = "release"
   # The reserved folder under a product root where releases live.
   FOLDER = "releases"
+  # The subfolder of the releases folder that holds the closed releases.
+  ARCHIVE = "archive"
   # Width of a release folder's zero-padded sequence number.
-  SLUG_WIDTH = 3
+  SLUG_WIDTH = 5
 
 
 # ----------------------------------------------------------------------------------------

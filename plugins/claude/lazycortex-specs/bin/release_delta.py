@@ -185,8 +185,10 @@ def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[Delta
   # its targets has converged, because the implementer builds from the targets' folded designs,
   # never from the change's own text.
 
-  # guard: rejects a file that is not a typed status note, so no asset stands behind it
+  # the note's declared asset type, empty when it declares none
   asset_type = fm_values.get(AssetTypeKey.TYPE, "").strip()
+
+  # guard: rejects a file that is not a typed status note, so no asset stands behind it
   if fm_values.get(SpecKey.ROLE, "").strip() != SpecValue.ROLE_STATUS or not asset_type:
     return None, None
 
@@ -210,8 +212,7 @@ def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[Delta
     return None, DeltaEntry(note, note.parent.relative_to(owner_root).as_posix(), asset_type, REASON_NO_START_DOC)
 
   # guard: rejects an asset whose start document is not on disk
-  start = note.parent / start_file
-  if not start.is_file():
+  if not (start := note.parent / start_file).is_file():
     return None, None
 
   # an asset whose start document is not approved is not ready to ship
@@ -250,6 +251,8 @@ def find_all_delta_entries(repo: Path, key: str) -> tuple[list[DeltaEntry], list
   # guard: rejects a product key with no release owner in its chain — an umbrella without code has no delta
   if owner_key is None:
     raise ValueError(f"no release owner above product {key!r}")
+
+  # the owner's member products, and the roots of every other product, which the walk never enters
   roots = _member_roots(repo, owner_key)
   content_root = spec_paths.spec_content_root(repo)
   all_roots = [ content_root / record[_SPEC_PATH_KEY] for record in resolve_product.load_products(repo).values()
@@ -380,15 +383,22 @@ def find_open_release(repo: Path, key: str) -> Path | None:
     key: A product key; the release owner is resolved from it.
 
   Returns:
-    The status note of the first release folder, by name, that is not yet published (`spec_released` is not true,
-    a built release included) and not cancelled; None when there is none, or when no product in the key's chain
-    owns releases.
+    The status note of the first numbered release folder, by name, that is not yet published (`spec_released` is
+    not true, a built release included) and not cancelled; None when there is none, or when no product in the
+    key's chain owns releases. Only numbered folders directly in `releases/` count, so the archive is never
+    searched or returned.
   """
   owner_key = resolve_product.find_release_owner_key(repo, key)
 
   # guard: rejects a product key with no release owner in its chain — no owner, no releases
   if owner_key is None:
     return None
+
+  # Domain(spec.lifecycle):
+  # # Only numbered release folders can be the open release
+  # A product has at most one open release, found among the numbered release folders of its releases folder. The
+  # archive that sits beside them holds only closed history and is never taken for a release, however it is
+  # named or what it contains.
 
   # the owner's releases folder
   releases = spec_paths.spec_content_root(repo) / resolve_product.load_products(repo)[owner_key][_SPEC_PATH_KEY] \
@@ -402,9 +412,12 @@ def find_open_release(repo: Path, key: str) -> Path | None:
   for entry in sorted(os.listdir(releases)):
     note = releases / entry / f"{entry}{_MD_SUFFIX}"
 
-    # guard: rejects a folder without its own note, which is no release
-    if not note.is_file():
+    # guard: rejects any folder not named by an ASCII decimal number, the archive included, and any numbered
+    # folder without its own note: none of them is a release
+    if not (entry.isascii() and entry.isdigit()) or not note.is_file():
       continue
+
+    # a release neither published nor cancelled is the open one
     fm_values, _end = spec_frontmatter.parse(note.read_text(encoding = _ENCODING))
     if not _is_true(fm_values, Gate.RELEASED) and not _is_true(fm_values, Gate.SPEC_CANCELLED):
       return note
@@ -458,6 +471,8 @@ def main(argv: list[str]) -> int:
   if owner_key is None:
     sys.stderr.write(f"no release owner above product {args.product!r}\n")
     return 1
+
+  # the delta and the release currently open
   included, excluded = find_all_delta_entries(repo, owner_key)
   note = find_open_release(repo, owner_key)
 

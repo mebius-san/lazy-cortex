@@ -58,6 +58,8 @@ Before composing any prose — the `wiki_summary`, a See-also gloss — run `"${
 
 Never translated, in any language: frontmatter keys and values, `wiki/<axis>/<value>` tags and axis names, canonical section headings (`# Topics`, `# See also`), identifiers, file paths, and link targets. A link's display text may be translated; the path never is.
 
+A widely known English term (URL, e-mail, API) keeps its English spelling in your prose, or a loanword the resolved language has already adopted. Never translate it, replace it with a descriptive phrase (the local words for "page address" in place of URL), or coin a native equivalent: the summary lands in the catalog, and a question that names the term has to find it there.
+
 ### kind = `classify`
 
 1. **Read inputs.** Node content — tail:true: the single file staged in `source/`, which carries the node's own filename; tail:false: the real `node_path` on disk. Axis names — tail:true: `request.json["tag_axes"]`; tail:false: the inline `tag_axes` param. Operator pins — tail:true: `request.json["pins"]`; tail:false: the real node's own pin fields. Existing tag values (anchor, optional) — tail:true: `request.json["existing_tags"]`; tail:false: the inline `existing_tags` param; empty/absent on cold-start.

@@ -1,5 +1,5 @@
 ---
-description: Contract for plugin-shipped iconize registries — file location and schema, the five semantic priority bands, layer-composition order, shipped-callback resolution, and the review checklist a registry must pass.
+description: Contract for plugin-shipped iconize registries — file location and schema, the six semantic priority bands, layer-composition order, shipped-callback resolution, and the review checklist a registry must pass.
 ---
 # Iconize plugin-registry contract
 
@@ -20,7 +20,7 @@ A plugin that knows the meaning of its own frontmatter ships that knowledge as a
     {
       "when": { "frontmatter.spec_halted": true },
       "resolve": { "iconName": "{{frontmatter.iconize_icon}}", "iconColor": "#fca5a5" },
-      "priority": 550
+      "priority": 650
     }
   ],
   "registries": { "optional-lookup-tables": {} }
@@ -37,15 +37,16 @@ The band is assigned to a **rule** by the class of its signal, never to a plugin
 
 | Band | Range | Signal class | Examples |
 |---|---|---|---|
-| 1. Error / blocker | 500–599 | red visible through everything | `spec_halted`, dead job, upstream source failing |
-| 2. Operator action needed | 400–499 | orange stripe | review `action-needed`, concerns pause, upstream `Take into work` |
-| 3. Transient process | 300–399 | overrides status, yields to 1–2 | review `in-process`, job in flight |
-| 4. Permanent status | 200–299 | stage / kind | asset stage, upstream unit status, wiki note kind, plugin versions |
-| 5. Base / decor | 100–199 | defaults | icon by file type, folder color |
+| 1. Error / blocker | 600–699 | red visible through everything | `spec_halted`, dead job, upstream source failing |
+| 2. Terminal state | 500–599 | a closed note; overrides 3–6, yields to 1 | `spec_cancelled`, a cancelled document |
+| 3. Operator action needed | 400–499 | orange stripe | review `action-needed`, concerns pause, upstream `Take into work` |
+| 4. Transient process | 300–399 | overrides status, yields to 1–3 | review `in-process`, job in flight |
+| 5. Permanent status | 200–299 | stage / kind | asset stage, upstream unit status, wiki note kind, plugin versions |
+| 6. Base / decor | 100–199 | defaults | icon by file type, folder color |
 
-A registry matcher whose `priority` is missing, non-integer, or outside 100–599 is **skipped with a stderr diagnostic** — the band is the contract, not a suggestion.
+A registry matcher whose `priority` is missing, non-integer, or outside 100–699 is **skipped with a stderr diagnostic** — the band is the contract, not a suggestion.
 
-The key consequence: precedence is by meaning, not by plugin. Review's `in-process` (band 3) yields to specs' `spec_halted` (band 1) on the same file; a halted asset stays red even while under review.
+The key consequence: precedence is by meaning, not by plugin. Review's `in-process` (band 4) yields to specs' `spec_halted` (band 1) on the same file; a halted asset stays red even while under review. A terminal state (band 2) closes the note: a cancelled asset stays grey whatever process or operator action its frontmatter still names, and only an error shows through it.
 
 ## 3a. The icon is the type; state changes only the colour
 
@@ -79,7 +80,7 @@ Both callback ops carry the candidate's vault-relative `path`. A `when` callback
 
 Reviewing a registry (in code review, or in the plugin maintainer's own audit tooling) means checking:
 
-- every matcher's `priority` sits inside the band its signal class belongs to (table above) — a transient process at 550 or a blocker at 250 is a finding;
+- every matcher's `priority` sits inside the band its signal class belongs to (table above) — a transient process at 650 or a blocker at 250 is a finding;
 - no state matcher resolves a literal `iconName` (§ 3a) — a literal is legal only as a type's own icon, carried identically by every matcher of that type;
 - no two matchers of the same registry can claim the same file at the same priority;
 - `when` predicates key on the plugin's own frontmatter/callbacks, not on vault-specific paths — consumer content roots are configurable, so `path_glob` on a hardcoded root is a finding;

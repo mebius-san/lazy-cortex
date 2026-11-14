@@ -818,6 +818,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 11.1.1 — 2026-11-14 UTC
+
+- Release folders are now numbered with five digits. Creating the next release moves every closed release into `releases/archive/`, re-padding old three-digit folders and renaming their notes. Release numbering and the previous published version read across the archive. The archive gets its own group note. The step refuses before writing anything if an archive slot is taken, two releases would claim one slot, or the archive note's template does not resolve.
+- The spec coordinators write widely known English terms in their original form when the surrounding prose is not English. This covers the catalog coordinator's summary and status brief.
+- The releases folder note now counts its releases: a total, with the released, open and cancelled ones beneath it. A product's own totals are unchanged.
+- A cancelled release keeps its `spec_state`. The release playbook no longer tells the coordinator to overwrite it on cancellation.
+- A cancelled note stays grey in the file tree whatever `spec_state` it still carries. Halted, conflicted and failing-upstream notes now show in the error colours.
+
 ### 11.1.0 — 2026-11-13 UTC
 
 - A release now starts from a current architecture and a settled plan, and builds on the operator's tick.
@@ -1270,6 +1278,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 6.2.3 — 2026-11-14 UTC
+
+- Iconize icon priority gains a terminal-state band (500-599), and the error band moves to 600-699. A cancelled note now stays grey whatever `spec_state` it still carries, while halted, conflicted and failed-upstream-fetch states move to the error band.
 
 ### 6.2.2 — 2026-11-13 UTC
 
@@ -2097,6 +2109,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.10.3 — 2026-11-14 UTC
+
+- Technical experts now keep a widely known English term such as URL, e-mail or API as it is in a document of any language. They no longer translate it, swap it for a descriptive phrase or coin a native word for it.
+- The planner no longer writes function bodies into the plan. Each task states the files, signatures, contracts, behaviour, test cases and the verifying command, and the implementer writes the code test-first. Code stays in a plan only where the exact text is the decision, such as a signature, a config key or a command.
+- The designer now leaves storage, traversal, synchronisation and write-order mechanics to the architect. It decides the outcome the user sees. An edge case that only a mechanism can close becomes a one-line requirement on the architecture.
+
 ### 1.10.2 — 2026-11-13 UTC
 
 - Experts now offer the operator an option only when it beats the others on at least one point, and they name that point. A lone surviving option is written as settled text and not asked about. The same rule applies to option rows in question callouts.
@@ -2611,6 +2629,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 3.7.4 — 2026-11-14 UTC
+
+- When the wiki curator and the domain document writer work in a non-English language, they now keep widely known English terms such as URL, e-mail and API in English, or use a loanword the language has already adopted. They no longer translate these terms or replace them with a descriptive phrase. A question that names the term therefore still finds the node summary that mentions it.
 
 ### 3.7.3 — 2026-11-13 UTC
 

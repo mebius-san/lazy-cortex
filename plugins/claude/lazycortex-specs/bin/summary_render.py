@@ -41,6 +41,9 @@ _BUCKET_IN_PROGRESS = "in_progress"
 _BUCKET_NOT_STARTED = "not_started"
 _BUCKET_PRODUCT = "product"
 _BUCKET_SHELF = "shelf"
+_BUCKET_RELEASE_RELEASED = "release_released"
+_BUCKET_RELEASE_OPEN = "release_open"
+_BUCKET_RELEASE_CANCELLED = "release_cancelled"
 
 # The container stats block's wording: a markdown list of `<count> <label>` total items, each total
 # followed by its non-zero breakdown items one level deeper
@@ -55,6 +58,9 @@ _STATS_RELEASED = "released"
 _STATS_IN_PROGRESS = "in progress"
 _STATS_NOT_STARTED = "not started"
 _STATS_CANCELLED = "cancelled"
+_STATS_RELEASE_ONE = "release"
+_STATS_RELEASE_MANY = "releases"
+_STATS_OPEN = "open"
 # The requests-inbox stats block's wording: the request total, then one item per non-zero status
 _STATS_REQUEST_ONE = "request"
 _STATS_REQUEST_MANY = "requests"
@@ -167,7 +173,8 @@ def classify(note_text: str) -> str:
 
   Returns:
     One of `released` / `cancelled` / `in_progress` / `not_started`, `product` for a nested
-    product's own level note, or `shelf` for a folder-note that is neither.
+    product's own level note, or `shelf` for a folder-note that is neither and for a release's
+    status note, which is counted apart from the assets.
   """
 
   # Domain(spec.lifecycle):
@@ -181,7 +188,8 @@ def classify(note_text: str) -> str:
   # progress the moment it was cancelled, whatever it had reached before; release is checked
   # next because it is the more informative fact about where an asset stands than merely being
   # under way. A release is the product's own unit of shipping, not one of the assets it ships,
-  # so its note is read like a shelf and counted toward nothing.
+  # so for the asset reading its note is read like a shelf: it is not one of the assets and is
+  # counted apart from them.
 
   fm = _frontmatter(note_text)
 
@@ -211,6 +219,39 @@ def classify(note_text: str) -> str:
   if any(_read_gate(fm, g) for g in GATE_ORDER):
     return _BUCKET_IN_PROGRESS
   return _BUCKET_NOT_STARTED
+
+
+def _release_bucket(fm: str) -> str | None:
+  """
+  Sort one release's status note into a release bucket.
+
+  Args:
+    fm: The note's frontmatter block.
+
+  Returns:
+    The cancelled, released or open release bucket, or `None` when the note is no release.
+  """
+
+  # Domain(spec.lifecycle):
+  # # A release is counted in exactly one of three states
+  # A release is a status note of the release asset type, counted in its own total apart from
+  # the assets. It falls into exactly one of three states: cancelled, released or open.
+  # Cancellation wins over everything, as it does for an asset, because a cancelled release
+  # stopped counting toward shipping the moment it was cancelled, whether or not it was ever
+  # published. A published release is released, and any other one is still open.
+
+  # any note other than a status note of the release asset type is no release
+  if not _has_role(fm, SpecValue.ROLE_STATUS) or not _is_release(fm):
+    return None
+
+  # cancellation wins over publication, exactly as it does for an asset
+  if _read_gate(fm, Gate.SPEC_CANCELLED):
+    return _BUCKET_RELEASE_CANCELLED
+
+  # a published release is closed; any other one is still open
+  if _read_gate(fm, Gate.RELEASED):
+    return _BUCKET_RELEASE_RELEASED
+  return _BUCKET_RELEASE_OPEN
 
 
 def _read_request_status(text: str) -> str | None:
@@ -324,14 +365,17 @@ def is_shelf_note(note: Path) -> bool:
   """
   Judge whether a folder-note is a shelf — a folder the container tally reads straight through.
 
-  This is the one transparency predicate: the tally descends through exactly the folders it
-  reports as shelves, and a caller refreshing stats regions upward climbs through the same set.
+  This is the one transparency predicate: a caller refreshing stats regions upward climbs
+  through exactly the folders it reports as shelves, and the tally descends through the same
+  set with two exceptions: it counts a release and never enters it, and it never enters the
+  reserved `releases` folder from above, although that folder's group note reads as a shelf.
 
   Args:
     note: The folder's own folder-note.
 
   Returns:
-    True when the note declares neither the asset status role nor the product role.
+    True when the note is neither an asset status note nor a product's level note; a release's
+    status note reads as a shelf too.
   """
   return classify(note.read_text(encoding = "utf-8")) == _BUCKET_SHELF
 
@@ -341,13 +385,16 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
   """
   Tally one folder's status-note children into `buckets`, descending through group folders.
 
+  Assets, nested products and releases each land in a bucket of their own. A release is counted
+  and never entered, and the reserved `releases` folder is never entered from above it.
+
   A folder is reached at most once per tally, whatever its bucket: a symlink pointing back up
   the tree neither loops nor double-counts the shelves behind it, and a second symlinked route
   to one asset folder counts that asset once, not once per route.
 
   Args:
     container_dir: The folder whose subfolders are tallied.
-    buckets: Bucket counters, incremented in place.
+    buckets: Asset, product and release bucket counters, incremented in place.
     visited: Resolved folder paths already reached by this tally; None starts a fresh walk.
   """
 
@@ -359,6 +406,11 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
   # other way would report a product as empty the moment its operator filed its assets into
   # named folders rather than leaving them loose. A nested product ends the reading instead of
   # continuing it, because it runs its own ladder and answers for its own assets.
+  # The reserved releases folder is closed to a summary reading from above it: a product's
+  # summary, or that of any container enclosing it, never looks inside, so releases count
+  # toward nothing at product level. A release met by the walk, which only a summary of the
+  # releases folder itself or of a group folder inside it can reach, is counted by its own
+  # state and never entered.
 
   # a symlinked folder resolves to a path the walk may already be standing in, so the set of
   # reached folders is what bounds the descent rather than the depth of the tree on disk
@@ -366,6 +418,10 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
   for entry in sorted(container_dir.iterdir()):
     # only subfolders carrying a same-named folder-note count
     if not entry.is_dir():
+      continue
+
+    # the reserved releases folder is closed to a walk coming from above it
+    if entry.name == ReleaseKey.FOLDER:
       continue
     note = entry / f"{entry.name}.md"
 
@@ -378,7 +434,15 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
     if resolved in seen:
       continue
     seen.add(resolved)
-    bucket = classify(note.read_text(encoding = "utf-8"))
+
+    # a release is counted by its own state and never entered
+    text = note.read_text(encoding = "utf-8")
+    if (release := _release_bucket(_frontmatter(text))) is not None:
+      buckets[release] += 1
+      continue
+
+    # every other note falls into an asset bucket, the product bucket or the shelf reading
+    bucket = classify(text)
 
     # a group folder is transparent — it is never counted, and the tally reads through it
     if bucket == _BUCKET_SHELF:
@@ -395,8 +459,9 @@ def render_container_stats(container_dir: Path) -> str:
 
   Detects a requests inbox (flat `*.md` files with `request_status`) and emits
   request-status counts; otherwise falls back to the asset-ladder counts. A nested product
-  among the children is counted in an item of its own rather than as an asset, and a
-  group folder is transparent — its own children count here, the folder itself never does.
+  or a release among the children is counted in an item of its own rather than as an asset,
+  and a group folder is transparent — its own children count here, the folder itself never does.
+  The reserved `releases` folder is not entered from above it.
 
   Args:
     container_dir: The group folder (e.g. `bugs/`) or requests inbox.
@@ -404,26 +469,32 @@ def render_container_stats(container_dir: Path) -> str:
   Returns:
     A multi-line markdown list. Total items sit at the top level and their breakdown items nest one
     level beneath them; zero-count breakdown items are omitted. A products item comes first when
-    nested products exist, and the asset item is left out when its count is zero beside products.
+    nested products exist, then a releases item when releases exist, and the asset item is left
+    out when its count is zero beside products or releases.
   """
 
   # Domain(spec.notes):
   # # How a container presents its counts
   # Nested products are counted as their own total and listed first, apart from the assets,
-  # because each of them runs its own ladder and answers for its own assets. The asset total
-  # follows, with one nested count for every non-zero lifecycle state beneath it, even when only
-  # one state is present, so the reader always sees which state the assets are in. An asset total
-  # of zero is left out beside products, where it would only repeat that the products hold
-  # everything, but an empty container still shows a zero asset count so the counts are never
-  # blank. A requests inbox lists its request total, with one nested count for every non-zero
-  # request status beneath it.
+  # because each of them runs its own ladder and answers for its own assets. Releases come
+  # next, as a total of their own with one nested count for every non-zero release state in the
+  # order released, open, cancelled, because a release is the product's unit of shipping and
+  # not one of its assets. The asset total follows, with one nested count for every non-zero
+  # lifecycle state beneath it, even when only one state is present, so the reader always sees
+  # which state the assets are in. An asset total of zero is left out beside products or
+  # releases, where it would only repeat that they hold everything, but an empty container
+  # still shows a zero asset count so the counts are never blank. A requests inbox lists its
+  # request total, with one nested count for every non-zero request status beneath it.
 
   # delegate to requests mode when the inbox heuristic matches
   if _is_requests_inbox(container_dir):
     return _render_requests_stats(container_dir)
+
+  # every other container is tallied into asset, product and release buckets
   buckets = {
       _BUCKET_RELEASED: 0, _BUCKET_IN_PROGRESS: 0,
       _BUCKET_NOT_STARTED: 0, _BUCKET_CANCELLED: 0, _BUCKET_PRODUCT: 0,
+      _BUCKET_RELEASE_RELEASED: 0, _BUCKET_RELEASE_OPEN: 0, _BUCKET_RELEASE_CANCELLED: 0,
   }
   _tally_children(container_dir, buckets)
 
@@ -435,16 +506,29 @@ def render_container_stats(container_dir: Path) -> str:
     lines.append(_STATS_ITEM.format(
         count = products, label = _STATS_PRODUCT_ONE if products == 1 else _STATS_PRODUCT_MANY))
 
-  # the asset total is left out when it is zero beside products; an empty container still shows it as zero
-  total = sum(count for bucket, count in buckets.items() if bucket != _BUCKET_PRODUCT)
-  if total or not products:
-    lines.append(_STATS_ITEM.format(count = total, label = _STATS_ASSET_ONE if total == 1 else _STATS_ASSET_MANY))
+  # releases are counted beside the assets too, their total followed by each non-zero release state
+  release_labels = [
+      (_BUCKET_RELEASE_RELEASED, _STATS_RELEASED), (_BUCKET_RELEASE_OPEN, _STATS_OPEN),
+      (_BUCKET_RELEASE_CANCELLED, _STATS_CANCELLED),
+  ]
+  releases = sum(buckets[key] for key, _label in release_labels)
+  if releases:
+    lines.append(_STATS_ITEM.format(
+        count = releases, label = _STATS_RELEASE_ONE if releases == 1 else _STATS_RELEASE_MANY))
+    lines.extend(
+        _STATS_SUB_ITEM.format(count = buckets[key], label = label) for key, label in release_labels if buckets[key]
+    )
 
-  # each non-zero lifecycle bucket nests under the asset total
+  # the asset total is left out when it is zero beside products or releases; an empty container still shows it
   labels = [
       (_BUCKET_RELEASED, _STATS_RELEASED), (_BUCKET_IN_PROGRESS, _STATS_IN_PROGRESS),
       (_BUCKET_NOT_STARTED, _STATS_NOT_STARTED), (_BUCKET_CANCELLED, _STATS_CANCELLED),
   ]
+  total = sum(buckets[key] for key, _label in labels)
+  if total or not (products or releases):
+    lines.append(_STATS_ITEM.format(count = total, label = _STATS_ASSET_ONE if total == 1 else _STATS_ASSET_MANY))
+
+  # each non-zero lifecycle bucket nests under the asset total
   lines.extend(_STATS_SUB_ITEM.format(count = buckets[key], label = label) for key, label in labels if buckets[key])
   return _STATS_LINE_SEPARATOR.join(lines)
 

@@ -9,7 +9,7 @@
         "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fca5a5"
       },
-      "priority": 550
+      "priority": 650
     },
     {
       "when": {
@@ -19,7 +19,7 @@
         "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fca5a5"
       },
-      "priority": 540
+      "priority": 640
     },
     {
       "when": {
@@ -29,7 +29,28 @@
         "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#f0abfc"
       },
-      "priority": 500
+      "priority": 600
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_cancelled": true
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 550
+    },
+    {
+      "when": {
+        "frontmatter.spec_stage": "cancelled"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 545
     },
     {
       "when": {
@@ -169,16 +190,6 @@
     },
     {
       "when": {
-        "frontmatter.spec_stage": "cancelled"
-      },
-      "resolve": {
-        "iconName": "{{frontmatter.iconize_icon}}",
-        "iconColor": "#94a3b8"
-      },
-      "priority": 245
-    },
-    {
-      "when": {
         "frontmatter.spec_stage": "deferred"
       },
       "resolve": {
@@ -197,17 +208,6 @@
         "iconColor": "#94a3b8"
       },
       "priority": 242
-    },
-    {
-      "when": {
-        "frontmatter.spec_role": "status",
-        "frontmatter.spec_cancelled": true
-      },
-      "resolve": {
-        "iconName": "{{frontmatter.iconize_icon}}",
-        "iconColor": "#94a3b8"
-      },
-      "priority": 241
     },
     {
       "when": {

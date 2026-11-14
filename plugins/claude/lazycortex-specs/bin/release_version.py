@@ -119,8 +119,9 @@ def bump(previous: str | None, part: str) -> str:
   # numbers the whole delta moves — a delta of fixes the last, a delta that adds behaviour the middle,
   # a delta that breaks what consumers rely on the first — and every number below the moved one
   # returns to zero. The previous version is read from the product's manifest when the product names
-  # one, otherwise it is the highest version among the product's published releases, and a product
-  # with neither starts at zero-point-one-point-zero whatever movement was asked for. A rebuild only
+  # one, otherwise it is the highest version among the product's published releases, those in the
+  # archive included, so archiving old releases never resets the version line. A product with
+  # neither starts at zero-point-one-point-zero whatever movement was asked for. A rebuild only
   # ever moves the version upward, and a published version is frozen.
 
   # guard: an unknown part is a caller typo
@@ -140,7 +141,7 @@ def bump(previous: str | None, part: str) -> str:
   return ".".join(str(number) for number in numbers)
 
 
-def version_tag(version: str) -> str:
+def render_version_tag(version: str) -> str:
   """
   Render a version as its Obsidian mirror tag.
 
@@ -229,32 +230,37 @@ def write_manifest_version(path: Path, version: str) -> None:
   raise ValueError(f"no version field in {path}")
 
 
-def _published_versions(releases_dir: Path) -> list[str]:
+def _read_published_versions(releases_dir: Path) -> list[str]:
   """
-  Collect the versions of the published releases under a releases folder.
+  Collect the versions of the published releases under a releases folder and its archive.
 
   Args:
     releases_dir: The product's `releases/` folder.
 
   Returns:
-    The `spec_version` of every release note whose `spec_released` is true, unordered.
+    The `spec_version` of every release note, in the folder or its archive, whose `spec_released` is true,
+    unordered.
   """
-  # guard: a product without releases has nothing published
-  if not releases_dir.is_dir():
-    return []
-
-  # every release folder's own note, published ones only
+  # every release folder's own note, published ones only, in the releases folder and its archive
   versions: list[str] = []
-  for entry in sorted(os.listdir(releases_dir)):
-    note = releases_dir / entry / f"{entry}.md"
-
-    # guard: a folder without its own note is no release
-    if not note.is_file():
+  for folder in ( releases_dir, releases_dir / ReleaseKey.ARCHIVE ):
+    # guard: a product without releases, or without an archive yet, has nothing published there
+    if not folder.is_dir():
       continue
-    fm_values, _fm_end = spec_frontmatter.parse(note.read_text(encoding = _ENCODING))
-    version = fm_values.get(ReleaseKey.VERSION, "").strip()
-    if version and flip_gate.is_true(fm_values, Gate.RELEASED):
-      versions.append(version)
+
+    # each numbered folder's own note is read for its version and its published gate
+    for entry in sorted(os.listdir(folder)):
+      note = folder / entry / f"{entry}.md"
+
+      # guard: only a numbered folder with its own note is a release
+      if not (entry.isascii() and entry.isdigit()) or not note.is_file():
+        continue
+
+      # a published release contributes its version
+      fm_values, _fm_end = spec_frontmatter.parse(note.read_text(encoding = _ENCODING))
+      version = fm_values.get(ReleaseKey.VERSION, "").strip()
+      if version and flip_gate.is_true(fm_values, Gate.RELEASED):
+        versions.append(version)
   return versions
 
 
@@ -269,7 +275,7 @@ def read_previous_version(repo: Path, record: dict, releases_dir: Path) -> str |
 
   Returns:
     The manifest's version when the record's `release.manifest` names one, otherwise the highest version among
-    the published releases, otherwise None.
+    the published releases, archived ones included, otherwise None.
   """
   # the manifest is the point of reference whenever the product names one
   release_section = record.get(ReleaseConfigKey.SECTION) or {}
@@ -278,7 +284,7 @@ def read_previous_version(repo: Path, record: dict, releases_dir: Path) -> str |
     return read_manifest_version(repo / manifest)
 
   # otherwise the highest published release, if any
-  versions = _published_versions(releases_dir)
+  versions = _read_published_versions(releases_dir)
   return max(versions, key = parse) if versions else None
 
 
@@ -331,7 +337,7 @@ def set_release_version(note: Path, version: str) -> dict:
     return { _STATUS: _STATUS_REFUSED, _REASON: "release is published; its version is frozen" }
 
   # the version's tag replaces any older release tag, every other tag stays
-  tag = version_tag(version)
+  tag = render_version_tag(version)
   tags = spec_frontmatter.read_list(text, _TAGS_KEY)
   new_tags = [ item for item in tags if not item.startswith(ReleaseKey.TAG_PREFIX) ] + [ tag ]
   changed = fm_values.get(ReleaseKey.VERSION, "").strip() != version or tags != new_tags
@@ -390,8 +396,8 @@ def main(argv: list[str]) -> int:
     if args.explicit is not None:
       version = args.explicit
     else:
-      record = resolve_product.resolve_product_by_key(repo, args.product)
-      if record is None:
+      # guard: an unknown product has no previous version to bump from
+      if (record := resolve_product.resolve_product_by_key(repo, args.product)) is None:
         sys.stderr.write(f"unknown product: {args.product!r}\n")
         return 2
       previous = read_previous_version(repo, record, note.parent.parent)

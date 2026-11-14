@@ -87,7 +87,7 @@ _EXIT_CODE = "exit_code"
 _LOG = "log"
 
 
-def _refusal(reason: str) -> dict:
+def _create_refusal(reason: str) -> dict:
   """
   Build a refusal result.
 
@@ -100,7 +100,7 @@ def _refusal(reason: str) -> dict:
   return { _OUTCOME: _OUTCOME_REFUSED, _REASON: reason }
 
 
-def _moment(today: str | None) -> str:
+def _format_moment(today: str | None) -> str:
   """
   Return the ISO 8601 UTC moment stamped beside the released gate.
 
@@ -152,7 +152,7 @@ def release_asset(note: Path, version: str, moment: str) -> None:
   # the version's tag joins the tags the asset already carries, earlier release tags included: an asset shipped
   # again in a later release carries every version it changed in
   tags = spec_frontmatter.read_list(text, _TAGS_KEY)
-  tag = release_version.version_tag(version)
+  tag = release_version.render_version_tag(version)
   if tag not in tags:
     text = spec_frontmatter.write_list(text, _TAGS_KEY, [ *tags, tag ])
   spec_paths.write_text_atomic(note, text)
@@ -222,15 +222,15 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
 
   # guard: the release ladder itself must have reached built — an accepted test report and the merged build
   if not flip_gate.is_true(fm_values, Gate.BUILT):
-    return _refusal(f"release's {Gate.BUILT} is not true")
+    return _create_refusal(f"release's {Gate.BUILT} is not true")
 
   # guard: a published release is frozen
   if flip_gate.is_true(fm_values, Gate.RELEASED):
-    return _refusal(_MSG_PUBLISHED)
+    return _create_refusal(_MSG_PUBLISHED)
 
   # guard: no version, no tag to put on anything
   if not version:
-    return _refusal(f"release carries no {ReleaseKey.VERSION}")
+    return _create_refusal(f"release carries no {ReleaseKey.VERSION}")
 
   # the product record names the deploy targets and the manifest
   vault = spec_paths.find_settings_root(release_note.resolve().parent)
@@ -239,14 +239,17 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
 
   # guard: rejects a release note that no product covers
   if record is None:
-    return _refusal(_MSG_NO_PRODUCT)
+    return _create_refusal(_MSG_NO_PRODUCT)
+
+  # the included notes the release names, and those of them no longer on disk
+  assets = resolve_included_notes(vault, text)
+  missing = [ note for note in assets if not note.is_file() ]
 
   # guard: every included note must be on disk before anything irreversible runs — a renamed or deleted asset
   # refuses the publish rather than failing it after production has been deployed
-  assets = resolve_included_notes(vault, text)
-  missing = [ note for note in assets if not note.is_file() ]
   if missing:
-    return _refusal(f"included note is missing: {missing[0].resolve().relative_to(repo.resolve()).as_posix()}")
+    return _create_refusal(
+        f"included note is missing: {missing[0].resolve().relative_to(repo.resolve()).as_posix()}")
 
   # the production deploy comes first: its failure leaves the release unpublished with one journal line
   lines: list[str] = []
@@ -267,7 +270,7 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
 
   # every carried asset is released by this version; each write is idempotent, so a publish interrupted before
   # the release note's own write below can simply run again
-  moment = _moment(today)
+  moment = _format_moment(today)
   for note in assets:
     release_asset(note, version, moment)
 

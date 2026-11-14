@@ -923,6 +923,109 @@ def main(argv: list[str]) -> int:
   return 0
 
 
+def ensure_group_note(repo: Path,
+                      group_dir: Path,
+                      *,
+                      asset_type: str,
+                      owner_key: str,
+                      owner_record: dict,
+                      alias_base: str = "",
+                      tokens: dict | None = None) -> Path | None:
+  """
+  Return a folder's same-named group note, writing it first when the folder has none.
+
+  A note written here is built from the landing type's group-note template chain. It carries the icon of the type
+  that owns the folder and no colour, and lands healed with its stats region counted. The product's own root has no
+  group note of its own and is never given one. The folder must lie inside the owning product's tree.
+
+  Guarantees:
+    - An existing note is never touched, so an operator-edited group note always survives.
+    - Every folder other than the product's own root leaves the call with its group note in place, and the result is
+      that note's path; None is returned only for the product's own root.
+
+  Args:
+    repo: Repository root.
+    group_dir: Absolute folder the note is written for; the note is named after the folder. Must lie inside the
+      owning product's tree, that is under the content root joined with the owner's `spec_path`.
+    asset_type: The asset type whose template chain supplies the note.
+    owner_key: Key of the product owning the folder.
+    owner_record: The owning product's effective record.
+    alias_base: Base context when `asset_type` is an alias, or empty.
+    tokens: Template tokens to substitute, or none.
+
+  Returns:
+    The group note's path, existing or newly written; None when the folder is the product's own root. A caller that
+    needs to know whether the note is fresh checks for its existence before the call.
+
+  Raises:
+    ValueError: When `group_dir` lies outside the owning product's tree, whether or not a note exists there; this
+      is checked before anything else.
+    ScaffoldRefusal: When a note is about to be written and no group-note template resolves for the type; never
+      raised when a note already exists or the folder is the product's own root.
+    OSError: When the group-note template cannot be read or the note cannot be written.
+  """
+
+  # Contract:
+  # A note that already exists in the folder is never rewritten, merged into or otherwise touched,
+  # so an operator-edited group note always survives every caller.
+
+  # Contract:
+  # Every folder other than the product's own root leaves the call with its group note in place,
+  # and the result is that note's path, whether it already existed or was just written;
+  # None is returned only for the product's own root.
+
+  # Domain(spec.declarations):
+  # # A shared folder gets its own note only once, from whichever asset arrives first
+  # A folder several assets share is not itself an asset, so it earns an editable note of its
+  # own only the first time something lands in it or is moved into it — never rewritten afterward,
+  # and never created at all over a note the operator or an enclosing asset already owns, or at
+  # the product's own root, which is a different worker's concern entirely. The note identifies
+  # the folder itself, taking its icon from whichever declared type calls that folder its own
+  # default home, regardless of which asset or move actually happened to trigger the seed.
+
+  # the folder is read as the owner sees it — relative to its own tree, which it must lie in
+  owner_root = spec_paths.spec_content_root(repo) / owner_record[Keys.SPEC_PATH]
+  owner_folder = group_dir.relative_to(owner_root).as_posix()
+  group_note = group_dir / f"{group_dir.name}.md"
+
+  # guard: the product root's note is the product wizard's, never a group note
+  if group_dir == owner_root:
+    return None
+
+  # guard: a note already there is returned as it is, never touched
+  if group_note.exists():
+    return group_note
+
+  # the note comes from the landing type's template chain
+  group_template = resolve_template(repo, asset_type, owner_key, Keys.GROUP_NOTE_TMPL, alias_base = alias_base)
+  group_text = substitute(group_template.read_text(encoding = "utf-8"), tokens or {})
+
+  # the type that calls this folder its default home names the note's icon
+  # waiver: sibling-module declaration walk -- the one merged-declaration view every specs primitive shares
+  home_type = next((name for name in asset_types.declared(owner_record)
+                    if asset_types.default_path(name, owner_record) == owner_folder), "")
+
+  # Domain(obsidian.icon-resolution):
+  # # Container colour is the state axis
+  # Colour marks state: an asset's folder takes its colour from its own state, and a document
+  # takes its colour from its stage. A container holds no state of its own, so only one kind of
+  # container is painted at all — the product root, in a neutral tone a product may override, so
+  # a product reads apart from the group folders beneath it. An ordinary group folder — a
+  # declared type's own folder or an ad-hoc one — carries no colour key whatsoever, only the
+  # icon of the type that owns it as its default folder. A type's declared colour never reaches
+  # that folder; it reaches only the asset status notes of that type, as their seed colour.
+
+  # an ordinary container takes the owning type's icon and no colour at all: colour is the
+  # state axis and a shelf has no state (the intake shelves are the deliberate exception)
+  if home_type and (home_paint := asset_types.icon_color(home_type, owner_record)):
+    group_text = inject_iconize(group_text, home_paint[0], "")
+
+  # the note lands healed, its stats region counted from the folder as it stands
+  spec_paths.write_text_atomic(group_note, note_explainers.heal_note_text(group_note, group_text))
+  summary_render.apply_container_stats(group_note)
+  return group_note
+
+
 def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: list[tuple[str, str]] | None = None,
              path: str = "", targets: list[str] | None = None) -> dict:
   """
@@ -956,8 +1059,7 @@ def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: li
 
   # the asset folder the scaffold writes into, under the named product's tree
   folder = _type_folder(asset_type, record, path)
-  content_root = spec_paths.spec_content_root(repo)
-  target_folder = content_root / record[Keys.SPEC_PATH] / folder / slug
+  target_folder = spec_paths.spec_content_root(repo) / record[Keys.SPEC_PATH] / folder / slug
 
   # a `--path` reaching into a nested product's tree lands the asset in that product: its tag,
   # pins, templates, paint, tools and stages are the innermost owner's, never the caller's key's
@@ -1025,55 +1127,17 @@ def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: li
     produced.append({ Keys.OUT_FILE: str(doc_path.relative_to(repo)),
                       Keys.OUT_STAGE: _initial_stage(repo, doc_type, owner_key) })
 
-  # Domain(obsidian.icon-resolution):
-  # # Container colour is the state axis
-  # Colour marks state: an asset's folder takes its colour from its own state, and a document
-  # takes its colour from its stage. A container holds no state of its own, so only one kind of
-  # container is painted at all — the product root, in a neutral tone a product may override, so
-  # a product reads apart from the group folders beneath it. An ordinary group folder — a
-  # declared type's own folder or an ad-hoc one — carries no colour key whatsoever, only the
-  # icon of the type that owns it as its default folder. A type's declared colour never reaches
-  # that folder; it reaches only the asset status notes of that type, as their seed colour.
-
-  # Domain(spec.declarations):
-  # # A shared folder gets its own note only once, from whichever asset arrives first
-  # A folder several assets share is not itself an asset, so it earns an editable note of its
-  # own only the first time something lands in it — never rewritten afterward, and never
-  # created at all over a note the operator or an enclosing asset already owns, or at the
-  # product's own root, which is a different worker's concern entirely. The note identifies
-  # the folder itself, taking its icon from whichever declared type calls that folder its own
-  # default home, regardless of which asset actually happened to trigger the seed.
-
-  # group folders exist lazily: the folder's first asset seeds its operator-zone folder-note,
-  # last so a refusal anywhere above leaves no stray note in the shared group folder. An
-  # existing note is never touched — the operator's, or an enclosing asset's own status note
-  # (a nested asset's parent) — and the product root's note belongs to the product wizard.
-  # The icon comes from the type that OWNS the folder (its `default_path` names it), never from
-  # the landing asset's type; an ad-hoc folder no declaration names gets a note without icon keys.
+  # the immediate parent group folder gets its note when this asset is its first arrival, last so a
+  # refusal anywhere above leaves no stray note behind
   # limit: only the immediate parent is seeded, a deeper fresh `--path a/b` chain leaves the
   # intermediate levels note-less; seed them by landing an asset in each, or author notes by hand
   group_dir = target_folder.parent
-  group_note = group_dir / f"{group_dir.name}.md"
-  owner_root = content_root / owner_record[Keys.SPEC_PATH]
-  seeded_group = ""
-  if not group_note.exists() and group_dir != owner_root:
-    group_template = resolve_template(repo, asset_type, owner_key, Keys.GROUP_NOTE_TMPL,
-                                       alias_base = alias_base)
-    group_text = substitute(group_template.read_text(encoding = "utf-8"), tokens)
+  existed = ( group_dir / f"{group_dir.name}.md" ).exists()
+  group_note = ensure_group_note(repo, group_dir, asset_type = asset_type, owner_key = owner_key,
+                                 owner_record = owner_record, alias_base = alias_base, tokens = tokens)
 
-    # the folder is matched as the owner sees it — relative to its own tree, not the caller's
-    owner_folder = group_dir.relative_to(owner_root).as_posix()
-    # waiver: sibling-module declaration walk -- the one merged-declaration view every specs primitive shares
-    owner = next((name for name in asset_types.declared(owner_record)
-                  if asset_types.default_path(name, owner_record) == owner_folder), "")
-
-    # an ordinary container takes the owning type's icon and no colour at all: colour is the
-    # state axis and a shelf has no state (the intake shelves are the deliberate exception)
-    if owner and (owner_paint := asset_types.icon_color(owner, owner_record)):
-      group_text = inject_iconize(group_text, owner_paint[0], "")
-    spec_paths.write_text_atomic(group_note, note_explainers.heal_note_text(group_note, group_text))
-    summary_render.apply_container_stats(group_note)
-    seeded_group = str(group_note.relative_to(repo))
+  # the result names the group note only when this scaffold wrote it
+  seeded_group = str(group_note.relative_to(repo)) if group_note and not existed else ""
 
   # repo-relative paths in the result so the calling skill can quote them straight back
   return {

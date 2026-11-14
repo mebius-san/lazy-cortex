@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-11-12
+last_regen: 2026-11-14
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.editor
   - lazy-experts.fiction-writer
   - lazy-experts.fiction-editor
-source_sha: 4cb5a8c2afe6cb034ba46b94541514fe69e6bcf3
-surface_sha: c02d720f7a99f123014493a8818cf8d8936c4de7c752282dff5a3271a9d11c01
+source_sha: 6d961c39b840fca89d0b5c315300ea881ed22020
+surface_sha: fd4d67c7f3c3f84e84b4e5f14efa22f6b1c1232261c8ef70d8a7b6ed7e8264e3
 ---
 # Troubleshooting
 

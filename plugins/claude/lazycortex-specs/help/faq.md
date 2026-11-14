@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-11-13
+last_regen: 2026-11-14
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 854c86a8ab2345d3e23b1f7139f14d715d5435ad
-surface_sha: 476fd36709472a8e092fc2b8e9ea049b6cabcfcafcb8979a95442e23deb608a0
+source_sha: 637b8d8f58164d0685253d2c876a269107ecbef2
+surface_sha: 2169e0b57d5bc47da1de15146b57459d178759daefb4a32b682309d2b752f844
 ---
 # Frequently asked questions
 
@@ -138,7 +138,7 @@ Once a type exists on the product, `/lazy-spec.create-asset` scales its clarifyi
 
 ## What are the gates and how do they advance?
 
-Every asset but a release is design-only: its status folder-note carries `spec_design_done`, `spec_released` and the `spec_cancelled` overlay, and nothing else. `spec_design_done` is **derived** — it closes once the asset's start document (`design.md`, or a bug's `bug.md`) reaches `spec_stage: approved`. The asset then waits for a release (`awaiting-release`, `in-release` once an open release lists it), and `spec_released` is set when you tick `Publish` on the release that carries it. Implementation, plans and tests happen only in a release (`releases/NNN/`), and only a release note carries the full ladder of six gates: `spec_design_done` (true from creation), `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_built`, and `spec_released`, each requiring every earlier one. Its plan gate is derived: it closes once the release's `code-plan.md` is approved or cancelled, or the product's `# Coordinator rules` waive the code plan — an absent `code-plan.md` without that waiver keeps it open, and the build waits until you tick `Write code-plan` or declare the waiver. Its develop and tests gates close on accepted reports and a merged build; `spec_built` marks the build as tested and merged but not yet published; `spec_released` is set when you tick `Publish`. Deciding when a gate is ready, and calling `/lazy-spec.flip-gate` to move it, is `spec.coordinator`'s job — it wakes on a commit that changes the asset's folder-note, clears its active-job marker, or lands a review approval on one of the asset's own docs once that commit reaches the daemon's own checkout, reasons from its playbook set, and narrates what it's waiting on in `# Status brief`. Because the daemon typically runs in a different checkout than the one you edit in, a wake needs your gesture committed AND pushed first, and the coordinator's own answer needs its commit pushed and pulled back to you — not an instant round trip. To flip a gate manually yourself, run `/lazy-spec.flip-gate <asset> <gate>`; the skill confirms with you, then the primitive performs the flip unconditionally (it does not check the gate's readiness itself — it refuses only an unknown gate name, a gate the note's own ladder does not carry, opening a middle gate on a design-only note, and any flip on a cancelled asset).
+Every asset but a release is design-only: its status folder-note carries `spec_design_done`, `spec_released` and the `spec_cancelled` overlay, and nothing else. `spec_design_done` is **derived** — it closes once the asset's start document (`design.md`, or a bug's `bug.md`) reaches `spec_stage: approved`. The asset then waits for a release (`awaiting-release`, `in-release` once an open release lists it), and `spec_released` is set when you tick `Publish` on the release that carries it. Implementation, plans and tests happen only in a release, whose folder is `releases/<NNNNN>/` (five digits) — each time `spec.catalog-coordinator` enacts a ticked `Start release` row it creates the next numbered folder and moves the closed releases still sitting in `releases/` into `releases/archive/`, so only the open release stays at the top of the folder — and only a release note carries the full ladder of six gates: `spec_design_done` (true from creation), `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_built`, and `spec_released`, each requiring every earlier one. Its plan gate is derived: it closes once the release's `code-plan.md` is approved or cancelled, or the product's `# Coordinator rules` waive the code plan — an absent `code-plan.md` without that waiver keeps it open, and the build waits until you tick `Write code-plan` or declare the waiver. Its develop and tests gates close on accepted reports and a merged build; `spec_built` marks the build as tested and merged but not yet published; `spec_released` is set when you tick `Publish`. Deciding when a gate is ready, and calling `/lazy-spec.flip-gate` to move it, is `spec.coordinator`'s job — it wakes on a commit that changes the asset's folder-note, clears its active-job marker, or lands a review approval on one of the asset's own docs once that commit reaches the daemon's own checkout, reasons from its playbook set, and narrates what it's waiting on in `# Status brief`. Because the daemon typically runs in a different checkout than the one you edit in, a wake needs your gesture committed AND pushed first, and the coordinator's own answer needs its commit pushed and pulled back to you — not an instant round trip. To flip a gate manually yourself, run `/lazy-spec.flip-gate <asset> <gate>`; the skill confirms with you, then the primitive performs the flip unconditionally (it does not check the gate's readiness itself — it refuses only an unknown gate name, a gate the note's own ladder does not carry, opening a middle gate on a design-only note, and any flip on a cancelled asset).
 
 ---
 

@@ -25,7 +25,7 @@ No additions. This aspect introduces no new universal `kind`, `role`, or `outcom
 
 ## Discovery and tooling
 
-This aspect carries no domain discovery and no tool access of its own. Its only input beyond the document being written is the upstream document the job carries (brief, spec, plan) — the source of the term dictionary (see Obligations).
+This aspect carries no domain discovery and no tool access of its own. Its only input beyond the document being written is the upstream document the job carries (brief, spec, plan) — the source of the term dictionary (see Terminology discipline).
 
 ## Banned constructions
 
@@ -40,7 +40,6 @@ These never appear in a technical document, whatever the section:
 - **Invented terminology.** A noun phrase coined for this document as if it were an established term — a name-shaped label the reader cannot look up anywhere. A concept that genuinely needs a name goes into the repository's terms dictionary and is introduced per Terminology discipline; everything else is described in plain words, even when the plain description is longer. The test: would a reader searching the repository for this phrase find a definition? No definition anywhere — no coined phrase in the document. **The qualified form of a term the upstream document or the dictionary already carries is not invented terminology** — it is that term written as a name, per Terminology discipline; the ban is on labels nobody can look up, not on the qualifier that tells a term from an everyday word.
 - **Informal register.** No second-person address to the reader, no rhetorical questions, no exclamation marks, no asides in parentheses that comment on the document instead of stating something about the subject. A document is read by someone who was not in the conversation that produced it.
 - **Invented abbreviations.** `cfg`, `impl`, `req`, `fn`, `svc` save nothing and cost the reader a decoding step. Write the word. Established domain acronyms the upstream document already uses (`API`, `HTTP`, `JSON`) stay as they are; any other short form is introduced once with its expansion before first use, or not used.
-- **Synonym rotation for established terms.** See Terminology discipline.
 - **Connective padding.** Announcing what a sentence is about to say, restating what a neighboring sentence already said, naming the document's own kind in its prose ("The feature is…", "This design describes…") — the section heading and the frontmatter already say what the document is; open with the subject itself.
 - **Sentences about a derived sibling document.** A sentence whose subject is a document built from this one is banned at any length: "the design defines X", "X is carried by the design" — naming one thing that document owns or three is an inventory with an implied "and nothing else", and the reader learns nothing from it.
 - **Nominalized clause chains.** A claim names who does what to what: one subject, one concrete verb, the document's own names for both. Replacing a named operation with an abstract nominal turn ("recovery arrives where the vault is configured" for "deploy runs on a configured machine", "at the cost of unaccounted config" for "deletes local settings the record does not carry") passes the no-filler bar while hiding the actor and the operation — the sentence gets shorter and stops parsing. If parsing a sentence takes more than two clauses, split it; if it paraphrases around a name the document or its upstream already has, put the name back.
@@ -115,6 +114,7 @@ The document is written natively in its own language, whatever that language is.
 
 - **Verbs collocate with their objects by the norms of the document's language.** A goal is achieved, met, or missed — never "given"; a requirement is stated or satisfied, never "made". A verb-noun pair that native prose does not use is an error, not a stylistic choice, however compact the sentence it enables.
 - **No calques.** A construction translated word-for-word from another language is rewritten in the document language's own idiom, even when the calque is shorter or closer to the source the sentence compresses.
+- **A widely known English term keeps its form.** URL, e-mail, API stay in their English spelling in a document of any language; a loanword the document's language has already adopted for such a term (a local spelling of "commit" or "plugin") is equally correct. Such a term is never translated, never replaced with a descriptive phrase (the local words for "page address" in place of URL, or "mail address" in place of e-mail), and never given a coined native equivalent.
 - **Grammar binds.** Case government, agreement, verb aspect, and word order follow the document language's norms; a sentence that parses only after mental back-translation into another language is broken.
 - **The reread test.** Every thesis stands alone as a correct, natural sentence of the document's language. A sentence a literate reader would stumble on is rewritten before the document lands — terseness never outranks correctness.
 
@@ -149,43 +149,27 @@ These thoughts mean stop — you are about to violate this aspect:
 | "I keep repeating the same word; a synonym reads better." | Repetition of a term is precision, not bad style. Keep the term. |
 | "This intro paragraph warms the reader up." | The reader came for facts. Start with the subject. |
 | "'Robust' summarizes the property well." | It hides the property. Name the measured behavior. |
-| "Everyone knows these two words mean the same thing here." | Downstream greps and downstream experts do not. One term. |
 | "This phrasing sounds natural, like a colleague explaining it." | The reader is not your colleague and was not in the conversation. Name the operation. |
-| "`cfg` is obvious from context and shorter." | It is shorter to type and slower to read. Write the word. |
 | "Fewer words — I compressed it into one dense sentence." | Density that swaps names for abstractions is not compression, it is encryption. Keep the names, split the sentence. |
 | "The phrasing is off but the meaning is clear." | A reader who stumbles on grammar doubts the content. Rewrite the sentence in the language's own idiom. |
 | "Bullets are easier to scan than subsections." | A heap scans and does not read: order and grouping are content, and a flat list of mixed concerns deletes them. Group, name, order. |
 | "Two related claims read better joined by 'and'." | A joined claim cannot be checked or refuted as one. Split it. |
 | "'Where possible' keeps the statement honest." | It makes the statement unfalsifiable. State the condition, or state the claim without the escape. |
 | "The number is not settled yet, I'll write 'approximately'." | An unsettled number is an open question, not an adverb. Raise it. |
-| "The operator's paragraph is theirs; I'll add a clean one after it." | Their meaning is theirs, their wording is yours to fix. Rewrite the paragraph in place, under markers. |
-| "Semicolons keep the paragraph compact." | A paragraph of semicolons is a list the reader has to unpack. Write the list. |
 
 Red flags in your own output: a sentence with no verifiable fact and no obligation; two names for one concept; an adjective you could not defend with a measurement; an opening sentence that does not mention the document's subject.
 
 ## Obligations
 
 - Every sentence in a document you write carries a verifiable fact or an obligation; delete sentences that carry neither.
-- Rewrite the operator's own sentences in place where they are badly written or carry an error — the original under the deletion marker, the correction under the insertion marker — never by leaving them and adding text beside them; keep every one of them saying exactly what it said, and never add, drop, narrow or widen a claim.
-- Write every claim so it admits one interpretation, and state what makes it true or false; a claim nobody can check is not finished.
-- Keep one thought per statement: a claim joined by "and", "or", "unless", "but" is two claims and is split into two.
-- Give every quantity its unit, and replace a vague quantifier ("some", "several", "approximately", "significant") with the number or with nothing.
-- Never leave an escape clause ("where possible", "as appropriate", "if necessary") or an open-ended tail ("including but not limited to", "etc.") in a claim.
-- Name the actor as the grammatical subject of the claim and give it one concrete verb, using the document's own names for both; the passive voice hides who acts and is used only where the actor is genuinely unknown, and a sentence whose parsing takes more than two clauses is split.
+- Rewrite the operator's own sentences in place, as Purpose prescribes; never add, drop, narrow or widen a claim of theirs.
+- Honor every statement of the Canon of specification prose: one interpretation and one thought per claim, a unit on every quantity, no vague quantifier, no escape clause, no open-ended tail.
+- Name the actor as the grammatical subject of the claim and give it one concrete verb, using the document's own names for both; use the passive voice only where the actor is genuinely unknown.
 - Leave no placeholder standing in a document you hand back — no "TBD", no "to be specified", no empty promise of a later paragraph.
-- Write the document's language natively: verbs collocate with their objects, no calques, and every thesis reads as a correct standalone sentence of that language.
 - Prefer concrete nouns, numbers, paths, and entity names over abstractions in every claim.
-- Take entity names verbatim from the upstream document, and normalize its prose rather than reproducing it; introduce a genuinely new term once, with a definition, then keep it fixed.
-- Write every term as a name: a qualifying noun whenever the bare word has an everyday or a second meaning in the document's language; inherit the qualifier with the term, and introduce the qualified form once when the upstream document uses the bare word.
-- When the repository's terms dictionary names the concept differently from the upstream document, use the dictionary's term and say nothing about the disagreement in your document.
-- Fill the `## Terms` section when the document uses a term worth defining: one alphabetical line per term, the dictionary's definition verbatim for a dictionary term, your own definition for a term the document introduces; drop the section whole when there is no such term, and never pad it with everyday words.
-- Leave a section empty when you have nothing checkable to put under it — a mandatory section keeps its heading and template comment, a section whose comment opens with `Optional.` goes out whole — and never write prose whose only job is to make the section look filled.
+- Use none of the Banned constructions, in any section of any document.
+- Follow Language correctness: write the document's language natively, and keep a widely known English term in its form.
+- Follow Structure discipline in every section, list, bullet and paragraph you write.
+- Follow Terminology discipline: write every term as a name, take entity names from the upstream document, and let the repository's terms dictionary outrank it silently.
+- Fill the `## Terms` section when the document uses a term worth defining; drop the section whole when there is no such term, and never pad it with everyday words.
 - When an upstream term is wrong or ambiguous, surface the rename as an open point in the document; never switch terms silently.
-- Never open a document or section with atmosphere, narrative, or motivation prose detached from the subject.
-- Name every operation with the verb that describes it; never with shop talk ("wire up", "kick off", "dip into").
-- Keep the register formal: no address to the reader, no rhetorical questions, no exclamation marks, no asides about the document itself.
-- Spell words out; use only the domain acronyms the upstream document established, and expand any other short form once before first use.
-- Keep a bullet to one claim in one to three lines; move rationale into prose under `###` subsections, and split any section longer than a screen.
-- Give every list a recognizable order and adjacency by concern; group mixed-concern lists under named subsections or lead-ins, and write related content as named structure rather than a flat enumeration.
-- Keep a paragraph to one thought; relocate or delete a sentence that does not work for it.
-- Write every enumeration of three or more items, or of items carrying their own detail, as a markdown list with one item per line; never string it through a sentence with semicolons, commas or dashes.

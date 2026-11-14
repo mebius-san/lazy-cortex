@@ -102,13 +102,13 @@ _INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 REGISTRY_SCHEMA_VERSION = 1
 
 # Semantic priority bands for registry matchers (see the iconize registry contract):
-# 500-599 error/blocker, 400-499 operator action, 300-399 transient process,
+# 600-699 error/blocker, 500-599 terminal state, 400-499 operator action, 300-399 transient process,
 # 200-299 permanent status, 100-199 base/decor. A registry matcher outside the bands is
 # skipped with a stderr diagnostic. Operator matchers without a `priority` float above
 # every band, so legacy personal rules keep beating plugin rules until the operator
 # assigns an explicit band.
 PRIORITY_BAND_MIN = 100
-PRIORITY_BAND_MAX = 599
+PRIORITY_BAND_MAX = 699
 OPERATOR_DEFAULT_PRIORITY = 1000
 
 # Internal provenance key injected into plugin-layer matchers by compose_layers so the
@@ -2428,7 +2428,7 @@ def compose_layers(icon_map: dict, registries: list[tuple[str, Path, dict]]) -> 
       the operator's matcher precedes any plugin's, and two plugin matchers at equal
       priority order by plugin name then declaration order.
     - An operator matcher without a `priority` defaults above every band (1000).
-    - A plugin matcher whose `priority` is missing, non-int, or outside the 100-599 band
+    - A plugin matcher whose `priority` is missing, non-int, or outside the 100-699 band
       never acts; it is skipped with a stderr diagnostic — the band is the registry's
       contract, not a suggestion.
 
@@ -2446,9 +2446,11 @@ def compose_layers(icon_map: dict, registries: list[tuple[str, Path, dict]]) -> 
   # # Personal rules always outrank the rules a plugin ships
   # A vault's own rules and the rule sets shipped by installed plugins are combined into one ordered
   # list, evaluated highest priority first. Every plugin-shipped rule must declare a priority inside one
-  # of five bands — from a blocking error at the top, through an action the operator must take, a
-  # transient process state, a permanent status, down to plain decoration at the bottom — and a rule
-  # outside every band is dropped rather than guessed into one. A personal rule that declares no priority
+  # of six bands — from a blocking error at the top, then the terminal state of a closed note, then an
+  # action the operator must take, a transient process state, a permanent status, down to plain
+  # decoration at the bottom. A closed note, a cancelled one for example, keeps its terminal look
+  # whatever process or pending operator action it still names, and only an error shows through it.
+  # A rule outside every band is dropped rather than guessed into one. A personal rule that declares no priority
   # floats above every plugin band by default, so an operator's untouched rule keeps beating every shipped
   # rule until the operator deliberately assigns it a band of its own. When two rules still tie on
   # priority, a personal rule wins over any plugin's, and two plugin rules are ordered by the name of
