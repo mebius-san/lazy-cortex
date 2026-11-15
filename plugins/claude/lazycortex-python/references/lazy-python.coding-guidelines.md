@@ -573,6 +573,7 @@ if TYPE_CHECKING:
 - Repository and storage: repository abstractions `repo_`, direct storage calls `db_`.
 - Execution and main loops: `run_` for lifecycle or iteration-based logic execution.
 - Construction: `build_` for step-by-step assembly of complex structures.
+- Helper-object factories: `make_` for a method that produces, from its arguments, an auxiliary object its own class or its callers work with — a property descriptor, a query filter, a test double — rather than an instance of the domain entity the class stands for. Example: `_make_layered_prop(val_cls, name)`, `_make_entity_filter(player_id = ...)`.
 - Collection manipulation: add items — `add_`, remove structural references — `remove_`.
 - Deletion: remove entities or records from storage — `delete_`.
 - Registration: enroll in a tracking system — `register_`, withdraw — `unregister_`.
@@ -588,7 +589,7 @@ if TYPE_CHECKING:
 - Communication: transmit data — `send_`, receive data — `receive_`.
 
 ### Conflict Resolution.
-- If multiple prefixes apply, choose by priority: event or hook → lifecycle → execution (`run_`) → I/O (`read_` or `load_` or `fetch_` or `query_`) → mutation (`update_` or `apply_` or `patch_` or `mutate_`) → computation (`compute_` or `score_`, etc.) → construction (`build_`) → lookup (`find_` or `search_`) → registration (`register_`) → representation (`to_` or `as_` or `render_` or `format_`).
+- If multiple prefixes apply, choose by priority: event or hook → lifecycle → execution (`run_`) → I/O (`read_` or `load_` or `fetch_` or `query_`) → mutation (`update_` or `apply_` or `patch_` or `mutate_`) → computation (`compute_` or `score_`, etc.) → construction (`build_` or `make_`) → lookup (`find_` or `search_`) → registration (`register_`) → representation (`to_` or `as_` or `render_` or `format_`).
 - Do not mix different effects under one verb. Use `fetch_` for network calls rather than `load_`.
 - Avoid boolean flags that drastically change behavior. Split into separate methods, for example `save_state` and `save_state_async`.
 - A characteristic method (see Prefixes by Semantics) needs no prefix; once it constructs something new, `compute_` applies instead.

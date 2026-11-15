@@ -1,9 +1,9 @@
 """
-Logic behind the `lazycortex-specs release-deploy <release-note> <staging|production>` verb.
+Logic behind the `lazycortex-specs release-deploy <release-note> <staging|production> [--build <k>]` verb.
 
 The verb runs one deploy target of the product's `release.deploy` configuration against the repository, keeps the
-command's output in a log file, and journals the outcome on the release note. `release-publish` reuses the runner
-for the production deploy of a `Publish` tick.
+command's output in a log file, and journals the outcome on the release note, naming the build when `--build` gives
+one. `release-publish` reuses the runner for the production deploy of a `Publish` tick.
 """
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ def run_target(repo: Path, record: dict, target: str, *, log_dir: Path) -> Deplo
   return DeployResult(target, exit_code == 0, exit_code, log_path, str(config.get(ReleaseConfigKey.URL) or ""))
 
 
-def render_history_line(note: Path, result: DeployResult, log_rel: str) -> str:
+def render_history_line(note: Path, result: DeployResult, log_rel: str, *, build: str | None = None) -> str:
   """
   Render the `# History` line a deploy outcome leaves on a release note.
 
@@ -172,10 +172,21 @@ def render_history_line(note: Path, result: DeployResult, log_rel: str) -> str:
     note: The release note the line is written to.
     result: The run's outcome.
     log_rel: The log file's repo-relative path.
+    build: The number of the build deployed, named in the line; None for a line naming no build.
 
   Returns:
     The rendered line tail in the note's authoring language.
   """
+
+  # a named build's line records which build reached the target, so the journal holds one line per deployed build
+  if build is not None:
+    if result.ok:
+      return note_explainers.history_line(note, HistoryEvent.DEPLOYED_BUILD, build = build, target = result.target,
+                                          log = log_rel)
+    return note_explainers.history_line(note, HistoryEvent.DEPLOY_FAILED_BUILD, build = build,
+                                        target = result.target, log = log_rel, code = str(result.exit_code))
+
+  # a line naming no build
   if result.ok:
     return note_explainers.history_line(note, HistoryEvent.DEPLOYED, target = result.target, log = log_rel)
   return note_explainers.history_line(note, HistoryEvent.DEPLOY_FAILED, target = result.target, log = log_rel,
@@ -206,6 +217,8 @@ def main(argv: list[str]) -> int:
 
   Notes:
     - Prints the JSON summary of `to_dict` on stdout, or a refusal when the product declares no such target.
+    - `--build <k>` names the deployed build in the `# History` line, so the journal records each build's deploy;
+      without it the line names no build.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -219,6 +232,8 @@ def main(argv: list[str]) -> int:
   parser.add_argument("note")
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("target", choices = ( ReleaseConfigKey.STAGING, ReleaseConfigKey.PRODUCTION ))
+  # waiver: argparse CLI signature -- option name
+  parser.add_argument("--build", type = int, default = None)
   args = parser.parse_args(argv)
   repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
   note = (repo / args.note).resolve()
@@ -237,7 +252,8 @@ def main(argv: list[str]) -> int:
   # the run, then its outcome on the release note's journal
   result = run_target(repo, record, args.target, log_dir = repo / LOG_DIR)
   summary = to_dict(repo, result)
-  history_journal.append_to_file(note, render_history_line(note, result, summary[_LOG]), repo = repo)
+  line = render_history_line(note, result, summary[_LOG], build = None if args.build is None else str(args.build))
+  history_journal.append_to_file(note, line, repo = repo)
   release_version.commit_paths(
       repo, [ note ], author = DEPLOY_NAME,
       subject = f"{DEPLOY_NAME}: {args.target} of {note.parent.name} {'ok' if result.ok else 'failed'}",

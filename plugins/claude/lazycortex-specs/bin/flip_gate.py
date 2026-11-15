@@ -796,7 +796,8 @@ def _commit_flip(
   this asset — the enclosing group note, every shelf above it, and the product note that reads
   through them — when the flip changed a count and the note is an asset's own, plus any
   caller-supplied `extra_paths`), leaving the operator's staged entries untouched, with a
-  deterministic subject naming the gate and its new value. Skipped silently when the
+  deterministic subject naming the gate and its new value. The icon repaint of every committed note rides in the
+  same commit and also covers the caller's `extra_paths` that exist on disk. Skipped silently when the
   asset does not live inside a git repository (the unit-test fixture path, where the worker is
   exercised against a bare tmp dir). The daemon always runs the routine inside the operator's
   repo, so production reaches the commit branch every time. Any subprocess error inside the
@@ -840,9 +841,11 @@ def _commit_flip(
     if apply_container_stats(container):
       add_paths.append(str(container))
 
-  # fold the notes' icon repaint into this same commit so no separate icons commit follows
+  # fold the icon repaint of every committed note into this same commit so no separate icons commit follows;
+  # a caller's path gone from disk has no icon left to repaint
+  repaint_set = [ *add_paths, *(str(path) for path in (extra_paths or []) if Path(path).is_file()) ]
   add_paths.extend(iconize_inline.repaint_paths(
-      repo, [str(Path(path).resolve().relative_to(repo.resolve())) for path in add_paths],
+      repo, [Path(path).resolve().relative_to(repo.resolve()).as_posix() for path in dict.fromkeys(repaint_set)],
   ))
 
   # commit under the dedicated bot identity so the operator's authorship stays untouched; the

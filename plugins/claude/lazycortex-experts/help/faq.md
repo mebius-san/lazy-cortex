@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, auditing the composition, and the sixteen generic agents' lane boundaries.
-last_regen: 2026-11-14
+last_regen: 2026-11-15
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.editor
   - lazy-experts.fiction-editor
-source_sha: 6d961c39b840fca89d0b5c315300ea881ed22020
-surface_sha: fd4d67c7f3c3f84e84b4e5f14efa22f6b1c1232261c8ef70d8a7b6ed7e8264e3
+source_sha: 3e2e190cd772d291291a135991817ea02bae1274
+surface_sha: cff67a3e63f18501df46a4c4fdb2ff67c797a0db38053f0e40937e5bdb547eb5
 ---
 # Frequently asked questions
 

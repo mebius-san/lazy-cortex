@@ -41,11 +41,17 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
 # The closed stage set, in the order the refusal lists it.
 STAGES = ( Stage.EMPTY, Stage.DRAFT, Stage.APPROVED, Stage.REJECTED, Stage.CANCELLED, Stage.DEFERRED )
 
+# The stages an accepted document is promoted from: a draft, or a seeded document whose stage never advanced.
+_PROMOTABLE_STAGES = frozenset({ Stage.DRAFT, Stage.EMPTY })
+
 # The two stages a deferred document may leave for.
 _DEFERRED_EXITS = frozenset({ Stage.DRAFT, Stage.CANCELLED })
 
-# The document types mandatory for their asset's category, which no caller may cancel.
-_UNCANCELLABLE_TYPES = frozenset({ "design", "system-design", "bug", "system-architecture" })
+# The stages an un-cancel returns a cancelled document to as recorded; any other recorded stage returns it to draft.
+_RESTORED_AS_RECORDED = frozenset({ Stage.EMPTY, Stage.DEFERRED, Stage.REJECTED })
+
+# The document types mandatory for their asset's category, cancelled only together with their asset.
+_CANCELLED_ONLY_WITH_ASSET_TYPES = frozenset({ "design", "system-design", "bug", "system-architecture" })
 
 # The replacement each removed stage value points its caller at.
 _REMOVED_STAGE_HINTS = {
@@ -165,17 +171,59 @@ def _to_repo_relative(path: Path, repo: Path) -> str:
   return resolved.relative_to(repo).as_posix() if resolved.is_relative_to(repo) else resolved.as_posix()
 
 
-def validate(doc: Path, stage: str, *, restamp: bool) -> ValidatedDoc:
+def compute_restored_stage(recorded: str) -> str:
+  """
+  Name the stage an un-cancel returns a document to from the stage its cancel recorded.
+
+  Guarantees:
+    - A recorded `empty`, `deferred` or `rejected` is returned as it is; every other value, `approved` and the legacy
+      `true` included, yields `draft`.
+
+  Args:
+    recorded: The document's `spec_cancelled_with_asset` value.
+
+  Returns:
+    `empty`, `deferred` or `rejected` for those recorded stages; `draft` for every other value, `approved` and the
+    legacy `true` included.
+  """
+
+  # Contract:
+  # A recorded `empty`, `deferred` or `rejected` stage is returned as it is; every other value, `approved` and the
+  # legacy `true` included, yields `draft`. The un-cancel of an asset returns each document to this stage.
+
+  # Domain(spec.lifecycle):
+  # # Where an un-cancelled document returns
+  # An un-cancelled document returns to the stage it had when its asset was cancelled. A document that had no stage
+  # yet, a parked (deferred) one and a rejected one come back exactly as they were, and a draft comes back as a
+  # draft. An approved document comes back as a draft, not as approved: its approval described the document before
+  # the asset was abandoned, so it is reviewed again from the writing round. A mark written before stages were
+  # recorded, or one that names no known stage, counts as a draft.
+
+  # a recorded stage the un-cancel restores as it is, every other one is a draft
+  value = recorded.strip()
+  return value if value in _RESTORED_AS_RECORDED else Stage.DRAFT
+
+
+def validate(doc: Path, stage: str, *, restamp: bool, with_asset: bool = False,
+             restore_from_cancel: bool = False) -> ValidatedDoc:
   """
   Check that a document may move to the requested stage.
 
   Guarantees:
-    - A document at `cancelled` is moved to no stage but `draft`; every other move out of `cancelled` is refused.
+    - A document at `cancelled` is moved to `draft` always, and with `restore_from_cancel` also to the stage that
+      `compute_restored_stage` names for its `spec_cancelled_with_asset` mark; every other move out of `cancelled`
+      is refused.
+    - A category-mandatory type (design, system design, bug, system architecture) is cancelled only together with
+      its asset; asked alone, the move is refused.
 
   Args:
     doc: The document to validate.
     stage: The requested stage.
     restamp: Whether the caller asks to restamp the approval time.
+    with_asset: Whether the document is cancelled together with its asset, which lets a category-mandatory type
+      move to `cancelled`.
+    restore_from_cancel: Whether an un-cancel returns the document to the stage its cancel recorded, which lets a
+      cancelled document move to that stage.
 
   Returns:
     The validated facts about the document.
@@ -183,13 +231,19 @@ def validate(doc: Path, stage: str, *, restamp: bool) -> ValidatedDoc:
   Raises:
     SetStageRefusedError: If the document carries no declared staged type, is an attachment, the stage is outside the
       closed set, an approval would leave a decision-candidate open, a deferred document is moved anywhere but
-      `draft` or `cancelled`, a cancelled document is moved to any stage but `draft`, a category-mandatory type is
-      cancelled, or `restamp` is asked for a stage other than `approved`.
+      `draft` or `cancelled`, a cancelled document is moved to a stage other than `draft` or, with
+      `restore_from_cancel`, the stage its mark restores, a category-mandatory type is cancelled without
+      `with_asset`, or `restamp` is asked for a stage other than `approved`.
   """
 
   # Contract:
-  # A document at `cancelled` is moved to no stage but `draft`; every other move out of
-  # `cancelled` is refused with `SetStageRefusedError`.
+  # A document at `cancelled` is moved to `draft` always, and with `restore_from_cancel` also to exactly the stage
+  # `compute_restored_stage` names for its `spec_cancelled_with_asset` mark; every other move out of `cancelled`
+  # is refused with `SetStageRefusedError`.
+
+  # Contract:
+  # A category-mandatory type (design, system design, bug, system architecture) is moved to `cancelled` only
+  # when `with_asset` is true; without it the move is refused with `SetStageRefusedError`.
 
   text = spec_paths.read_text(doc)
   values, _end = spec_frontmatter.parse(text)
@@ -224,11 +278,11 @@ def validate(doc: Path, stage: str, *, restamp: bool) -> ValidatedDoc:
 
   # Domain(spec.lifecycle):
   # # Stage ladder of an authored document
-  # An authored document sits at exactly one of six stages: none yet, draft, approved, rejected, cancelled or deferred.
-  # The set is closed. Three older stage words (review, done and wtr) were retired: a document under review is a
-  # draft with its review switched on, a finished one is approved, and a waiting one is a draft or approved by intent.
-  # A request for a retired word is refused with its replacement named. The stage is always mirrored by a matching
-  # stage tag on the same document, so the two never disagree.
+  # An authored document sits at exactly one of six stages: none yet, draft, approved, rejected, cancelled or
+  # deferred. The set is closed. Three older stage words (review, done and wtr) were retired: a document under
+  # review is a draft with its review switched on, a finished one is approved, and a waiting one is a draft or
+  # approved by intent. A request for a retired word is refused with its replacement named. The stage is always
+  # mirrored by a matching stage tag on the same document, so the two never disagree.
 
   # guard: 3. a stage outside the closed set is refused, with the replacement named for a removed one
   if stage not in STAGES:
@@ -261,22 +315,30 @@ def validate(doc: Path, stage: str, *, restamp: bool) -> ValidatedDoc:
     raise SetStageRefusedError("document is deferred — set it to `draft` or `cancelled` first")
 
   # Domain(spec.lifecycle):
-  # # A cancelled document has one way back
-  # Cancelling abandons a document together with its asset. Its one way back is draft, taken when its asset is
-  # un-cancelled. From cancelled it cannot be approved, rejected, parked or emptied.
+  # # Exits of a cancelled document
+  # Cancelling abandons a document together with its asset. A cancelled document goes back to draft; and when its
+  # asset is un-cancelled it goes back to the stage it had when the asset was cancelled. From cancelled it cannot
+  # otherwise be approved, rejected, parked or emptied.
 
-  # guard: a cancelled document's one exit is draft, taken when its asset is un-cancelled
-  if current == Stage.CANCELLED and stage not in ( Stage.CANCELLED, Stage.DRAFT ):
-    raise SetStageRefusedError("document is cancelled — its only exit is `draft`")
+  # the exits of a cancelled document: draft always, and on an un-cancel the stage its cancel recorded
+  exits = { Stage.CANCELLED, Stage.DRAFT }
+  if restore_from_cancel:
+    exits.add(compute_restored_stage(str(values.get(StageKey.CANCELLED_WITH_ASSET, ""))))
+
+  # guard: a cancelled document leaves only through draft or, on an un-cancel, the stage its cancel recorded
+  if current == Stage.CANCELLED and stage not in exits:
+    raise SetStageRefusedError(
+        "document is cancelled — it leaves only for `draft` or, on an un-cancel, the stage its cancel recorded; "
+        f"requested `{stage}`")
 
   # Domain(spec.lifecycle):
-  # # Mandatory documents are never cancelled
+  # # Mandatory documents are cancelled only with their asset
   # Some document types are mandatory for their asset's category: design, system design, bug and system architecture.
-  # An asset of that category cannot exist without them, so such a document may be rejected or deferred but never
-  # cancelled. Cancelling is available for every other staged type.
+  # An asset cannot exist without them, so such a document is never cancelled on its own. It is cancelled only
+  # together with its asset, when the whole asset is abandoned. Every other staged type may be cancelled alone.
 
-  # guard: a category-mandatory type is never cancelled
-  if stage == Stage.CANCELLED and doc_type in _UNCANCELLABLE_TYPES:
+  # guard: a category-mandatory type is cancelled only together with its asset
+  if stage == Stage.CANCELLED and doc_type in _CANCELLED_ONLY_WITH_ASSET_TYPES and not with_asset:
     raise SetStageRefusedError(f"cancelled not allowed on `{doc}`")
 
   # guard: the restamp rides only on an approval
@@ -450,7 +512,9 @@ def _drop_key(text: str, key: str) -> str:
 
 def apply_stage(doc: Path, stage: str, *,
                 restamp: bool = False,
-                now: str | None = None) -> StageResult:
+                now: str | None = None,
+                with_asset: bool = False,
+                restore_from_cancel: bool = False) -> StageResult:
   """
   Move one authored document to a stage.
 
@@ -460,12 +524,15 @@ def apply_stage(doc: Path, stage: str, *,
 
   Guarantees:
     - Never commits; every written path is listed in the result's `touched_paths` for the caller's commit.
-    - Moving an `approved` document to `draft` also removes its `review_result` from the frontmatter, so no
-      later promotion pass can return the document to `approved`.
-    - Moving a `cancelled` document to `draft` also removes its `review_result` from the frontmatter, so a
-      document that returns from cancellation is reviewed again before it can be approved.
-    - Moving a document out of `approved` to any other stage removes its `spec_approved_at` stamp, so the stamp
-      exists only while the document is `approved`.
+    - Every move out of `approved` or `cancelled` to a stage other than `approved` removes the document's
+      `review_result`, so no later promotion pass can return it to `approved` on a stale verdict.
+    - A move to `cancelled` with `with_asset` writes `spec_cancelled_with_asset` holding the stage the document had
+      (`empty` when it had none) in the same write as the stage; a document already at `cancelled` keeps its mark
+      untouched, and every move out of `cancelled` removes it.
+    - Moving a document out of `approved`, or out of `cancelled` to a stage other than `approved`, removes its
+      `spec_approved_at` stamp, so the stamp exists only while the document is `approved`.
+    - A category-mandatory type (design, system design, bug, system architecture) is moved to `cancelled` only
+      together with its asset; asked alone, the move is refused and nothing is written.
 
   Notes:
     - Approving a living document is first put to the decision registry; on its refusal nothing is written, the
@@ -476,6 +543,10 @@ def apply_stage(doc: Path, stage: str, *,
     stage: The requested stage.
     restamp: Whether to restamp the approval time on an already approved document.
     now: The approval time to stamp, as an ISO 8601 string; the current UTC time when omitted.
+    with_asset: Whether the document is cancelled together with its asset, which lets a category-mandatory type
+      move to `cancelled`.
+    restore_from_cancel: Whether an un-cancel returns the document to the stage its cancel recorded, which lets a
+      cancelled document move to that stage.
 
   Returns:
     The outcome, carrying the refusal reason on a refusal and the written paths otherwise.
@@ -492,31 +563,44 @@ def apply_stage(doc: Path, stage: str, *,
   # so the caller's commit carries the whole change.
 
   # Contract:
-  # Moving an `approved` document to `draft` also removes its `review_result` from the
-  # frontmatter, so no later promotion pass can return the document to `approved`.
+  # Every move out of `approved` or `cancelled` to a stage other than `approved` removes the document's
+  # `review_result`, so no later promotion pass can return it to `approved` on a stale verdict.
 
   # Contract:
-  # Moving a `cancelled` document to `draft` also removes its `review_result` from the
-  # frontmatter, so a document that returns from cancellation walks review again before approval.
+  # A move to `cancelled` with `with_asset` writes `spec_cancelled_with_asset` holding the stage the document had
+  # (`empty` when it had none) in the same write as the stage.
+
+  # Contract:
+  # A document already at `cancelled` keeps its `spec_cancelled_with_asset` mark untouched when it is cancelled
+  # again, so the recorded stage is never overwritten.
+
+  # Contract:
+  # Every move out of `cancelled` removes `spec_cancelled_with_asset`.
 
   # Contract:
   # The `spec_approved_at` stamp exists only while the document is `approved`:
-  # every move out of `approved` to any other stage removes it, so a reader never
-  # takes a stale stamp for a current approval.
+  # every move out of `approved`, or out of `cancelled` to a stage other than `approved`, removes it, so a reader
+  # never takes a stale stamp for a current approval.
+
+  # Contract:
+  # A category-mandatory type (design, system design, bug, system architecture) is moved to `cancelled` only
+  # when `with_asset` is true; without it the move is refused in the result and nothing is written.
 
   try:
-    validated = validate(doc, stage, restamp = restamp)
+    validated = validate(doc, stage, restamp = restamp, with_asset = with_asset,
+                         restore_from_cancel = restore_from_cancel)
   except SetStageRefusedError as refused:
     return StageResult(status = StageStatus.REFUSED, stage = stage, reason = refused.reason)
 
   # Domain(spec.decisions):
   # # Approval of a living document hands its decisions to the registry
-  # Vision, design, bug, tech and architecture documents live on after approval, so the decisions written inside them
-  # are kept in the decision registry rather than in the text. Approving one of them moves its decisions there. Before
-  # anything is written, the registry is asked whether it will accept the transfer. It may refuse, for example because
-  # the owning asset is cancelled, halted or already released. A refusal means the approval does not happen at all: no
-  # file is written, the document keeps its previous stage, and the outcome is reported as a refusal with the
-  # registry's reason. When the registry accepts, the stage is written and the decisions are moved into the registry.
+  # Vision, design, bug, tech and architecture documents live on after approval, so the decisions written inside
+  # them are kept in the decision registry rather than in the text. Approving one of them moves its decisions
+  # there. Before anything is written, the registry is asked whether it will accept the transfer. It may refuse,
+  # for example because the owning asset is cancelled, halted or already released. A refusal means the approval
+  # does not happen at all: no file is written, the document keeps its previous stage, and the outcome is reported
+  # as a refusal with the registry's reason. When the registry accepts, the stage is written and the decisions are
+  # moved into the registry.
 
   # an approved living doc hands its decisions to the registry, so the registry is asked before any write
   promotes = stage == Stage.APPROVED and validated.role in _LIVING_ROLES
@@ -530,7 +614,8 @@ def apply_stage(doc: Path, stage: str, *,
   # An approved document records the moment of its approval, and that moment exists only while the document is
   # approved. It is written when the document enters approved from any other stage, and again only when the caller
   # explicitly asks to restamp. It is removed on every move out of approved, whether to draft, rejected, cancelled,
-  # deferred or empty, so nobody reads a past approval as a current one. Approving a document that is already
+  # deferred or empty, and also when a document returns from cancellation to any stage but approved, so nobody reads
+  # a past approval as a current one. Approving a document that is already
   # approved leaves the original moment untouched, so a repeated call never rewrites history. The stamp belongs to
   # approval alone: asking to restamp while moving to any other stage is refused. The moment is the current UTC time
   # unless the caller supplies one.
@@ -541,24 +626,42 @@ def apply_stage(doc: Path, stage: str, *,
 
   # Domain(spec.lifecycle):
   # # Rolling an approved document back retracts its verdict
-  # Moving an approved document back to draft is the one downward stage move, made when what the document was built
-  # from has changed. The review verdict that approved it no longer describes it, so the move retracts that verdict
-  # too; otherwise the document would read as accepted-but-not-yet-promoted and be promoted straight back.
+  # An approved document is moved back when what it was built from has changed, or is abandoned. The review verdict
+  # that approved it no longer describes it, so any move out of approved to a stage other than approved retracts that
+  # verdict too; otherwise the document would read as accepted-but-not-yet-promoted and be promoted straight back.
 
   # Domain(spec.lifecycle):
   # # A document returning from cancellation is reviewed again
-  # A cancelled document comes back only to draft, and it comes back to be reviewed and then approved. A verdict it
-  # carried from before the cancellation describes the document as it stood then, not a review it has passed since,
-  # so the return to draft retracts that verdict as well; otherwise a document cancelled after approval would read
-  # as accepted-but-not-yet-promoted and be approved again without any review.
+  # A cancelled document comes back to be reviewed and then approved. A verdict it carried from before the
+  # cancellation describes the document as it stood then, not a review it has passed since, so any move out of
+  # cancelled to a stage other than approved retracts that verdict as well; otherwise a document cancelled after
+  # approval would read as accepted-but-not-yet-promoted and be approved again without any review.
 
   # a roll-back from approved, or a return from cancellation, drops the old verdict, so the next promote walk
   # cannot approve the document on it
-  if stage == Stage.DRAFT and validated.current_stage in ( Stage.APPROVED, Stage.CANCELLED ):
+  if validated.current_stage in ( Stage.APPROVED, Stage.CANCELLED ) \
+      and stage not in ( Stage.APPROVED, validated.current_stage ):
     new = _drop_key(new, SpecKey.REVIEW_RESULT)
 
-  # a move out of approved retracts the approval moment, so no reader takes a stale stamp for a current approval
-  if stage != Stage.APPROVED and validated.current_stage == Stage.APPROVED:
+  # Domain(spec.lifecycle):
+  # # A document cancelled with its asset is marked
+  # A document abandoned together with its asset carries a mark saying so, written in the same edit as its stage.
+  # The mark records the stage the document had when it was cancelled, a document with no stage yet counting as
+  # empty. It is what lets un-cancelling the asset bring back only the documents the cancellation took, each to the
+  # stage it had, and leave alone one that was cancelled on its own. A document that is already cancelled keeps its
+  # mark when it is cancelled again, so the recorded stage is never overwritten. The mark exists only while the
+  # document is cancelled and goes away when it leaves cancelled for any stage.
+
+  # a document cancelled with its asset records the stage it had in the same edit; leaving `cancelled` takes the
+  # mark off
+  if stage == Stage.CANCELLED and with_asset and validated.current_stage != Stage.CANCELLED:
+    new = spec_frontmatter.set_scalar(new, StageKey.CANCELLED_WITH_ASSET, validated.current_stage or Stage.EMPTY)
+  elif validated.current_stage == Stage.CANCELLED and stage != Stage.CANCELLED:
+    new = _drop_key(new, StageKey.CANCELLED_WITH_ASSET)
+
+  # a move out of approved, or a return from cancellation, retracts the approval moment, so no reader takes a stale
+  # stamp for a current approval
+  if stage != Stage.APPROVED and validated.current_stage in ( Stage.APPROVED, Stage.CANCELLED ):
     new = _drop_key(new, _APPROVED_AT)
 
   # a real approval or an explicit restamp records the approval moment
@@ -599,19 +702,26 @@ def apply_stage(doc: Path, stage: str, *,
 
 def is_stage_lagging(doc: Path) -> bool:
   """
-  Check whether a document was accepted in review yet still sits at `draft`.
+  Check whether a document was accepted in review yet still sits at `draft` or `empty`.
 
   Args:
     doc: The document to check.
 
   Returns:
-    True when the document carries an accepted `review_result`, `spec_stage: draft`, no active review, and is
-    not an attachment.
+    True when the document carries an accepted `review_result`, a `spec_stage` of `draft` or `empty` (a seeded
+    document whose stage was never advanced), no active review, and is not an attachment.
   """
+
+  # Domain(spec.lifecycle):
+  # # Promotion of an accepted document
+  # A document accepted in review is promoted to approved from draft, and also from the not-yet-started stage: a
+  # seeded document may enter review before its stage was advanced, and its accepted verdict must not strand it. A
+  # document without an accepted verdict at that stage is not promoted.
+
   values, _end = spec_frontmatter.parse(spec_paths.read_text(doc))
   return (
       values.get(SpecKey.REVIEW_RESULT) in ReviewResultValue.ACCEPTED
-      and values.get(StageKey.STAGE) == Stage.DRAFT
+      and values.get(StageKey.STAGE) in _PROMOTABLE_STAGES
       and values.get(SpecKey.REVIEW_ACTIVE) != _TRUE
       and not values.get(AttachmentKey.OWNER_DOC)
   )

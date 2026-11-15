@@ -14,6 +14,10 @@ the job had nothing to deliver, and `refused` — with a one-line reason — whe
 but this worker will not make it. A job that ended in error against a report journal lands its files
 like a successful one.
 
+A job whose document belongs outside its own asset folder, inside the spec catalog, names a foreign target; the
+coordinator lands such a cascade fold through the `--target` call. A `--target` landing that ends `landed` or
+`empty` also retires the job bundle, freeing its dedup key; a `refused` one leaves the bundle for diagnostics.
+
 `gate_tick.py` calls this on a job's `DONE`, before the coordinator opens review with the
 review system's `submit` verb — so the document the coordinator submits is already tracked.
 The path checks are mirrored file-wise from `lazycortex-review`'s own `payload.py` rather
@@ -41,6 +45,8 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -391,6 +397,47 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   return target
 
 
+def foreign_target(job_dir: Path, asset_dir: Path) -> Path | None:
+  """
+  Name the catalog path a dispatched job's document takes when it lies outside the job's own asset folder.
+
+  Guarantees:
+    - A returned target always lies outside `asset_dir` and inside the spec content root; else `None`.
+
+  Args:
+    job_dir: The job-bundle directory.
+    asset_dir: The asset folder the job was dispatched from.
+
+  Returns:
+    The repo-root-resolved `target_doc` when it lies outside `asset_dir` but inside the spec catalog; `None` when
+    the payload is unreadable, declares no `target_doc`, or names a path inside `asset_dir` or outside the catalog.
+  """
+
+  # Contract:
+  # A job's `target_doc` is returned only when it resolves outside the job's own asset folder and inside the spec
+  # content root; a target inside the asset folder, outside the content root, or none at all yields no target.
+
+  # guard: a dispatch payload that cannot be read names no target at all
+  try:
+    request = json.loads((job_dir / _REQUEST_FILE).read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return None
+  raw = request.get(_TARGET_DOC_KEY) if isinstance(request, dict) else None
+
+  # guard: a job that declared no target names nothing
+  if not isinstance(raw, str) or not raw:
+    return None
+
+  # the declared path, resolved the same way the landing resolves it
+  repo = flip_gate.repo_root(asset_dir)
+  target = (repo / raw).resolve()
+
+  # only a path past the asset folder yet inside the catalog is a foreign catalog target
+  if _is_inside(target, asset_dir) or not _is_inside(target, spec_paths.spec_content_root(repo)):
+    return None
+  return target
+
+
 def _resolve_target(job_dir: Path, asset_dir: Path) -> tuple[Path | None, str]:
   """
   Resolve the path one dispatched job's result document takes, with the reason when there is none.
@@ -410,8 +457,11 @@ def _resolve_target(job_dir: Path, asset_dir: Path) -> tuple[Path | None, str]:
   # created, by the side that knows the ladder. What comes back is only content: an expert
   # returning a file under some other name has misunderstood its job, not relocated it, and no
   # mapping from the step's label to a filename could stand in for the dispatch's own statement
-  # anyway — a cascade job writes into a different asset's folder entirely. A job that never said
-  # where its document goes has nowhere to put it and stays undelivered.
+  # anyway. That statement places a document only inside the job's own asset folder. A document
+  # that belongs to another asset, as a cascade fold's does, is not placed from the dispatch's
+  # statement: the coordinator names the target itself, inside the catalog, and the landing then
+  # spends the job. A job that never said where its document goes has nowhere to put it and stays
+  # undelivered.
 
   # guard: a dispatch payload that cannot be read names no target at all
   try:
@@ -739,10 +789,15 @@ def main(argv: list[str]) -> int:
   caller names the target itself — the coordinator's cascade landing, whose document belongs to
   another asset — and the only bound left is the spec catalog's own content root.
 
+  Guarantees:
+    - With `--target`, the job bundle is retired after a `landed` or `empty` landing and never after a `refused` one.
+
   Notes:
     - Without `--target`, prints the answer of `land_job` and exits 0: `refused` when the dispatch names
       no usable target but the response declares files, `empty` when it declares none.
     - Otherwise prints the result of the landing: `landed`, `empty` or `refused`.
+    - With `--target`, a `landed` or `empty` landing also retires the job bundle through the dispatch queue, so its
+      dedup key frees; a `refused` one leaves the bundle unretired.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -751,6 +806,11 @@ def main(argv: list[str]) -> int:
     Exit code: 0 on success, 2 when the job directory does not exist or an overridden target
     falls outside the catalog.
   """
+
+  # Contract:
+  # A landing run with `--target` retires the job bundle, freeing its dedup key for re-dispatch, when it ends
+  # `landed` or `empty`; a `refused` landing leaves the bundle unretired, kept for diagnostics.
+
   # the CLI surface: a job bundle, the asset folder that anchors it, and the optional override
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs land-result")
@@ -788,7 +848,13 @@ def main(argv: list[str]) -> int:
     return 0
 
   # run the overridden landing and report it the same way every other lazycortex-specs worker does
-  print(json.dumps(land_result(job_dir, target)))
+  result = land_result(job_dir, target)
+
+  # a delivered or empty landing spends the bundle: retire it so its dedup key frees; a refused one stays unretired
+  # for diagnostics
+  if result.get(_ACTION_KEY) != _ACTION_REFUSED:
+    gate_dispatch.consume_stale_job(flip_gate.repo_root(asset_dir), job_dir.parent.name, job_dir.name)
+  print(json.dumps(result))
   return 0
 
 

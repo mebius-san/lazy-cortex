@@ -23,7 +23,10 @@ Subcommands:
                  own entrypoint.
 - `start`    — delegate to :mod:`start`.
 - `submit`   — delegate to :mod:`submit` (skip opening writer round).
-- `stop`     — delegate to :mod:`stop`.
+- `stop`     — delegate to :mod:`stop` (cancel the jobs in flight, then park the review; `--json` prints a
+                 report naming the jobs cancelled and the jobs already over).
+- `raise-wake` — raise a document's `job-done` wake in the runtime sidecar and dispatch the
+                 coordinator for it (no commit) — run to restore a review whose job a caller cancelled.
 - `finalize` — delegate to :mod:`finalize`.
 - `strip-markup` — print the document body, without frontmatter, with its edit-annotation
                  markup resolved (the markup-final view validation / terminal dispatches use as source).
@@ -31,6 +34,9 @@ Subcommands:
                  left as it is (the view a main-writer dispatch uses as source).
 - `fold-markup` — fold the document's edit-annotation markup in place, frontmatter untouched,
                  printing `{"changed": bool}` — run on an operator approve gesture.
+- `strip-status` — remove every `#status/<state>` callout from the document body outside code fences in
+                 place, frontmatter untouched, no commit, printing `{"changed": bool}` — run by a caller
+                 abandoning the document.
 - `repair-structure` — delegate to :mod:`structure_repair` (repair an unclosed fence or frontmatter
                  delimiter and strip lone edit-annotation opening marks (the mark characters only, outside
                  sections another plugin owns) in place when no guess is needed, no commit; `--check` only reports).
@@ -51,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -381,8 +388,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
   """
   Delegate the `stop` subcommand to the stop module.
 
+  The review is stopped either way; with `--no-commit` the commit is left to the caller.
+
   Args:
-    args: Parsed namespace with a `file` attribute.
+    args: Parsed namespace with `file`, `no_commit`, `strip_banner` and `json` attributes; each set flag is
+      forwarded, `json` asking the stop module for its JSON report.
 
   Returns:
     Exit code from the stop module.
@@ -390,7 +400,74 @@ def cmd_stop(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import stop  # type: ignore  # pylint: disable=import-error
-  return stop.main([args.file])
+  forward = [ args.file ]
+  if args.no_commit:
+    # waiver: argparse CLI signature forwarded verbatim to the stop module
+    forward.append("--no-commit")
+
+  # a caller abandoning the document asks for its banner to come down with the review
+  if args.strip_banner:
+    # waiver: argparse CLI signature forwarded verbatim to the stop module
+    forward.append("--strip-banner")
+
+  # a caller acting on what the stop cancelled asks for the JSON report
+  if args.json:
+    # waiver: argparse CLI signature forwarded verbatim to the stop module
+    forward.append("--json")
+  return stop.main(forward)
+
+
+def cmd_raise_wake(args: argparse.Namespace) -> int:
+  """
+  Raise a document's `job-done` wake and dispatch the review coordinator for it.
+
+  Guarantees:
+    - The wake is raised before the coordinator is dispatched, so a failed dispatch exits 1 with the wake left
+      raised.
+    - A file that does not exist exits 2 with nothing written.
+
+  Args:
+    args: Parsed namespace with `file`, `repo` and `hint` attributes.
+
+  Returns:
+    Exit code: 0 when the wake was dispatched or a live coordinator already owns the document, 1 when the dispatch
+    failed, an OS or subprocess error included, with the wake left raised, 2 when the file does not exist (nothing
+    written).
+  """
+
+  # Contract:
+  # The document's `job-done` wake is raised BEFORE the coordinator is dispatched, so a dispatch failure exits 1
+  # with the wake left raised for a later tick.
+
+  # Contract:
+  # A file that does not exist exits 2 and nothing is written.
+
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import coordinator_dispatch  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import job_markers  # type: ignore  # pylint: disable=import-error
+
+  # a relative file path names a document inside the repository the wake acts in
+  repo = Path(args.repo).resolve()
+  file_path = (repo / args.file).resolve()
+
+  # guard: target file does not exist — no review to wake
+  if not file_path.is_file():
+    sys.stderr.write(f"file not found: {file_path}\n")
+    return 2
+
+  # the flag goes up first, so a failed dispatch still leaves the wake for a later tick
+  job_markers.update(repo, file_path, { JobMarker.PENDING_WAKE: JobMarker.JOB_DONE })
+  try:
+    # waiver: the whole-project mypy run resolves the bare name to lazycortex-specs' same-named module, which has no
+    # `dispatch_job_done`; at runtime the sys.path.insert above loads this bin's own sibling
+    coordinator_dispatch.dispatch_job_done(repo, file_path, args.hint)  # type: ignore[attr-defined]
+  except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
+    sys.stderr.write(f"raise-wake: {error}\n")
+    return 1
+  return 0
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
@@ -599,6 +676,62 @@ def cmd_fold_markup(args: argparse.Namespace) -> int:
   changed = folded != body
   if changed:
     _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(fm_text + folded, ending))
+  print(json.dumps({ "changed": changed }))
+  return 0
+
+
+def cmd_strip_status(args: argparse.Namespace) -> int:
+  """
+  Remove every `#status/<state>` callout from the document body in place, with no commit.
+
+  Backs the `strip-status` verb, run by a caller that abandons the document so its terminal-state callout no longer
+  claims a state the document has left.
+
+  Guarantees:
+    - Frontmatter bytes are left untouched, and a callout inside a code fence survives.
+    - The file is rewritten, atomically, only when a callout was removed; no commit is made.
+
+  Notes:
+    - Prints one JSON line, `{"changed": bool}`, to stdout on success.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code: 0 on success, 1 when the file is missing (nothing written).
+  """
+
+  # Contract:
+  # The document's frontmatter MUST be left byte-for-byte untouched and a fenced status callout survives.
+
+  # Contract:
+  # The file MUST be rewritten only when a callout was removed, atomically, and no commit is ever made.
+
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import body as _body  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
+
+  # resolve the file against --repo; an absolute file argument wins over the repo root
+  file_path = (Path(args.repo).resolve() / args.file).resolve()
+
+  # guard: only an existing file has a body to strip
+  if not file_path.is_file():
+    sys.stderr.write(f"file not found: {file_path}\n")
+    return 1
+
+  # split the document once — the frontmatter half is written back byte-for-byte
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
+  _meta, body = _fm.parse(lf_text)
+  fm_text = lf_text[: len(lf_text) - len(body)]
+
+  # write only when a callout came off, so a repeat call is a no-op on disk
+  stripped = _body.strip_every_status_callout(body)
+  changed = stripped != body
+  if changed:
+    _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(fm_text + stripped, ending))
   print(json.dumps({ "changed": changed }))
   return 0
 
@@ -854,7 +987,32 @@ def build_parser() -> argparse.ArgumentParser:
   p_stop = sub.add_parser("stop", help="opt a file out of review")
   # waiver: argparse CLI signature, not a domain key
   p_stop.add_argument("file")
-  p_stop.set_defaults(func=cmd_stop)
+  # waiver: argparse CLI signature, not a domain key
+  p_stop.add_argument("--no-commit", action="store_true",
+                      # waiver: one-off human-facing message -- argparse help text
+                      help="stop the review but leave the commit to the caller")
+  # waiver: argparse CLI signature, not a domain key
+  p_stop.add_argument("--strip-banner", action="store_true",
+                      # waiver: one-off human-facing message -- argparse help text
+                      help="also remove the review banner and its approval gestures")
+  # waiver: argparse CLI signature, not a domain key
+  p_stop.add_argument("--json", action="store_true",
+                      # waiver: one-off human-facing message -- argparse help text
+                      help="print the outcome, the cancelled jobs included, as one JSON object")
+  p_stop.set_defaults(func=cmd_stop, no_commit=False, strip_banner=False, json=False)
+
+  # `raise-wake` — raise a document's job-done wake and dispatch the coordinator for it, no commit
+  # waiver: argparse CLI signature, not a domain key
+  p_wake = sub.add_parser("raise-wake", help="raise a job-done wake and dispatch the review coordinator")
+  # waiver: argparse CLI signature, not a domain key
+  p_wake.add_argument("file")
+  # waiver: argparse CLI signature, not a domain key
+  p_wake.add_argument("--repo", default=".")
+  # waiver: argparse CLI signature, not a domain key
+  p_wake.add_argument("--hint", default="wake",
+                      # waiver: one-off human-facing message -- argparse help text
+                      help="stable token folded into the dispatch's dedup key")
+  p_wake.set_defaults(func=cmd_raise_wake)
 
   # `finalize` — strip the review's markup from an approved document
   # waiver: argparse CLI signature, not a domain key
@@ -885,6 +1043,15 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   p_fold.add_argument("--repo", default = ".")
   p_fold.set_defaults(func=cmd_fold_markup)
+
+  # `strip-status` — remove every terminal-state status callout in place, no commit
+  # waiver: argparse CLI signature, not a domain key
+  p_strip_status = sub.add_parser("strip-status", help="remove every #status/<state> callout from the doc body")
+  # waiver: argparse CLI signature, not a domain key
+  p_strip_status.add_argument("file")
+  # waiver: argparse CLI signature, not a domain key
+  p_strip_status.add_argument("--repo", default = ".")
+  p_strip_status.set_defaults(func=cmd_strip_status)
 
   # `repair-structure` — the guess-free mechanical repair, written in place with no commit
   p_repair = sub.add_parser(_REPAIR_VERB, help = _REPAIR_HELP)

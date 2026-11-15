@@ -8,7 +8,8 @@ non-empty body line after the frontmatter — as a `#review/<tag>` token, so the
 read from there rather than from a frontmatter key. `review_phase: awaiting-operator`,
 which the submit entry writes, counts as awaiting the operator.
 
-Two wrapper symlinks point here; the question is the invoked name:
+Two wrapper symlinks point here; the question is the invoked name (a document whose review is stopped is out of
+the loop and never counts as waiting):
 
 - `review-awaits-operator` — the document needs a human gesture before anything moves.
   A folder note (`<dir>/<dir>.md`) answers for its whole folder: it matches when any
@@ -90,6 +91,9 @@ class Key:
 # the `review_phase` value the submit entry leaves behind while it waits for the operator
 AWAITING_PHASE = "awaiting-operator"
 
+# the frontmatter line that keeps a document in the review loop
+REVIEW_ACTIVE_RE = re.compile(r"^review_active:\s*true\s*$")
+
 # the banner is a callout whose first line carries the state tag
 BANNER_TAG_RE = re.compile(r"^>\s*\[!\w+\][^#\n]*#review/([a-z-]+)\s*$")
 
@@ -136,6 +140,31 @@ def _banner_tag(text: str) -> str | None:
   return None
 
 
+def _is_review_active(text: str) -> bool:
+  """
+  Report whether a document's frontmatter keeps it in the review loop.
+
+  Args:
+    text: Full document text.
+
+  Returns:
+    True when the leading frontmatter block carries `review_active: true`.
+  """
+  lines = text.splitlines()
+
+  # guard: a document without a leading frontmatter block is not in review
+  if not lines or lines[0].strip() != "---":
+    return False
+
+  # only the lines up to the closing fence are frontmatter
+  for line in lines[1:]:
+    if line.strip() == "---":
+      break
+    if REVIEW_ACTIVE_RE.match(line):
+      return True
+  return False
+
+
 def _is_folder_note(path: str) -> bool:
   """
   Report whether a path is the note standing in for its own folder.
@@ -163,8 +192,16 @@ def _has_waiting_sibling(root: Path, path: str) -> bool:
     path: Folder note's own vault-relative path; its parent directory is what gets scanned.
 
   Returns:
-    True when at least one sibling markdown file is parked for a human gesture.
+    True when at least one sibling markdown file still in review is parked for a human gesture; a sibling whose
+    review is stopped never counts, whatever banner it still carries.
   """
+
+  # Domain(review.lifecycle):
+  # # A stopped review never makes its folder wait
+  # A folder reads as waiting on the operator when a document in it is in review and parked for a human gesture. A
+  # document whose review is stopped is out of the loop and asks for nothing, whatever banner it still carries, so
+  # it never makes its folder read as waiting.
+
   folder = (root / path).parent
   try:
     entries = sorted(folder.iterdir())
@@ -182,7 +219,7 @@ def _has_waiting_sibling(root: Path, path: str) -> bool:
       text = entry.read_text(encoding = "utf-8")
     except OSError:
       continue
-    if _banner_tag(text) in { WaitTag.ACTION_NEEDED, WaitTag.READY }:
+    if _is_review_active(text) and _banner_tag(text) in { WaitTag.ACTION_NEEDED, WaitTag.READY }:
       return True
   return False
 

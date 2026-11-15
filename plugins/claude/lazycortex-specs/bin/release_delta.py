@@ -5,7 +5,8 @@ The verb names the assets a product's next release carries — every approved, u
 the product that owns releases and of the nested products that ship with it, for a change once its cascade into
 the target designs is done — finds the product's open release, if any, and reports the two facts a release start
 waits on: whether the owner's `architecture.md` is approved later than every design the release carries, and
-which notes carry an open coherence conflict.
+which notes carry an open coherence conflict. A product with no architecture document, or a run with
+`--no-architecture`, holds no design back.
 """
 from __future__ import annotations
 
@@ -68,6 +69,12 @@ _DOC = "doc"
 _APPROVED_AT = "approved_at"
 _BEHIND = "behind"
 _CONFLICTED = "conflicted"
+
+# The wikilink delimiters a `spec_includes` member carries around its target, and what may follow the target inside
+WIKILINK_OPEN = "[["
+WIKILINK_CLOSE = "]]"
+_WIKILINK_DISPLAY = "|"
+_WIKILINK_ANCHOR = "#"
 
 
 # ----------------------------------------------------------------------------------------
@@ -277,24 +284,27 @@ def find_all_delta_entries(repo: Path, key: str) -> tuple[list[DeltaEntry], list
 
 def find_architecture_lag(repo: Path,
                           owner_key: str,
-                          included: list[DeltaEntry]) -> tuple[Path, str | None, list[str]]:
+                          included: list[DeltaEntry], *,
+                          waived: bool = False) -> tuple[Path, str | None, list[str]]:
   """
   Name the delta's assets the owner's architecture document does not cover yet.
 
   Guarantees:
     - The lagging tokens come back in the order of `included`.
-    - While the architecture is absent, not approved, or approved with no recorded moment, every included asset
-      lags.
+    - A product with no `architecture.md` file, or a call that waives the architecture, reports no asset behind.
+    - While a present architecture document is not approved, or is approved with no recorded moment, every included
+      asset lags.
 
   Args:
     repo: Repository root.
     owner_key: The release owner's product key.
     included: The delta's included entries, in the order they are reported.
+    waived: When True, the architecture holds no asset back, whatever the document says.
 
   Returns:
     The path of `architecture.md` in the owner's root, its approval moment — `None` when the document is absent,
     not approved, or approved with no recorded moment — and the tokens of the included assets it is behind, in
-    the order of `included`.
+    the order of `included`; empty when the file is absent or the architecture is waived.
   """
 
   # Contract:
@@ -302,7 +312,11 @@ def find_architecture_lag(repo: Path,
   # the same way on every run.
 
   # Contract:
-  # While the architecture document is absent, not approved, or approved with no recorded moment,
+  # When the owner product has no architecture document file at all, or the caller waives the architecture,
+  # no asset is reported as lagging.
+
+  # Contract:
+  # While a present architecture document is not approved, or is approved with no recorded moment,
   # every included asset is reported as lagging; a release MUST NEVER start from such a document.
 
   # Domain(spec.lifecycle):
@@ -313,6 +327,9 @@ def find_architecture_lag(repo: Path,
   # not approved covers nothing, and a design whose approval moment is unknown cannot be shown to be covered, so
   # both count against it. Two approvals at the same moment are covered. A release starts only from an
   # architecture that is behind none of the designs it would carry.
+  # The rule binds only a product that keeps an architecture. A product with no architecture document at all holds
+  # no design back, and neither does a product whose own rules waive the document, even while a stale document
+  # still exists. A document that is present but not approved is no such exception: it still covers nothing.
 
   # the owner's architecture document, named whether or not it exists
   doc = spec_paths.spec_content_root(repo) / resolve_product.load_products(repo)[owner_key][_SPEC_PATH_KEY] \
@@ -324,6 +341,10 @@ def find_architecture_lag(repo: Path,
     fm_values, _end = spec_frontmatter.parse(doc.read_text(encoding = _ENCODING))
     if fm_values.get(StageKey.STAGE, "").strip() == Stage.APPROVED:
       approved_at = str(fm_values.get(SpecMomentKey.APPROVED_AT, "")).strip() or None
+
+  # guard: a product with no architecture document, or whose rules waive it, holds no design back
+  if waived or not doc.is_file():
+    return doc, approved_at, []
 
   # guard: an architecture with no approval moment covers no design at all
   if approved_at is None:
@@ -424,6 +445,27 @@ def find_open_release(repo: Path, key: str) -> Path | None:
   return None
 
 
+def resolve_included_notes(vault: Path, release_text: str) -> list[Path]:
+  """
+  Resolve the status notes a release's `spec_includes` links to.
+
+  Args:
+    vault: The vault root holding `.claude/lazy.settings.json`.
+    release_text: The release note's text.
+
+  Returns:
+    One note path per wikilink, in the order listed; display text and anchors are ignored.
+  """
+  notes: list[Path] = []
+
+  # each member loses its brackets first, then whatever follows the target inside them
+  for link in spec_frontmatter.read_list(release_text, ReleaseKey.INCLUDES):
+    bare = link.strip().removeprefix(WIKILINK_OPEN).removesuffix(WIKILINK_CLOSE)
+    target = bare.split(_WIKILINK_DISPLAY, 1)[0].split(_WIKILINK_ANCHOR, 1)[0].strip()
+    notes.append(spec_paths.resolve_wikilink(target, vault))
+  return notes
+
+
 def main(argv: list[str]) -> int:
   """
   Print the delta of a product's next release.
@@ -436,6 +478,7 @@ def main(argv: list[str]) -> int:
       release start is held while `behind` or `conflicted` is non-empty.
     - `behind` lists the tokens of the included assets in the order of `included`; `conflicted` lists
       repo-relative note paths, sorted.
+    - The `--no-architecture` flag empties `behind`.
 
   Notes:
     - Prints a JSON summary on stdout with the keys `owner`, `open_release` (repo-relative note path or null),
@@ -443,9 +486,11 @@ def main(argv: list[str]) -> int:
       the repo-relative path of the owner's `architecture.md`; `approved_at`, its approval moment or null; and
       `behind`, the tokens of the included assets it does not cover yet) and `conflicted` (repo-relative paths of
       the notes that carry an open coherence conflict).
+    - With `--no-architecture`, `behind` is always empty, so a product's own rules can waive the architecture.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--no-architecture` reports no asset as behind the
+      architecture.
 
   Returns:
     Exit code: 0 on success, 1 when no product in the key's chain owns releases.
@@ -455,12 +500,15 @@ def main(argv: list[str]) -> int:
   # The printed JSON summary always carries the key `architecture`, an object with `doc`, `approved_at` and
   # `behind`, and the key `conflicted`; the product coordinator parses them to decide whether a release may
   # start, and a start is held while `behind` or `conflicted` is non-empty. `behind` lists the tokens of the
-  # included assets in the order of `included`; `conflicted` lists repo-relative note paths, sorted.
+  # included assets in the order of `included`; `conflicted` lists repo-relative note paths, sorted. The flag
+  # `--no-architecture` empties `behind`.
 
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs release-delta")
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("product")
+  # waiver: argparse CLI signature -- option flag + standard argparse action
+  parser.add_argument("--no-architecture", action = "store_true")
   args = parser.parse_args(argv)
   repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
 
@@ -477,7 +525,7 @@ def main(argv: list[str]) -> int:
   note = find_open_release(repo, owner_key)
 
   # the two facts a release start waits on: the architecture's lag and the open conflicts
-  doc, approved_at, behind = find_architecture_lag(repo, owner_key, included)
+  doc, approved_at, behind = find_architecture_lag(repo, owner_key, included, waived = args.no_architecture)
   print(json.dumps({
       _OWNER: owner_key,
       _OPEN_RELEASE: note.relative_to(repo).as_posix() if note is not None else None,

@@ -148,22 +148,9 @@ When a skill declares a restricting `allowed-tools:` frontmatter field, `Agent` 
 
 ## 10. Research-marker convention (search/pull skills)
 
-A **research skill** is any skill that exposes a mode whose contract is to return a bounded knowledge slice on demand — given a question or a path, hand back the matched slice of an existing map, tree, dictionary, or index, never the whole document (`lazy-wiki.structure`'s `query [<path>]` mode is the canonical shape). A skill that only ever writes or rebuilds, with no such query mode, does not qualify; one mixing a rebuild mode and a query mode qualifies on the strength of its query mode alone.
+A **research skill** exposes a mode that returns a bounded knowledge slice on demand: given a question or a path, it hands back the matched slice of an existing map, tree, dictionary, or index, never the whole document. Such a skill carries `research: true` in frontmatter and the word "research" in the trigger sentence of its `description:`, both together, and documents the query mode that returns the slice. A consumer of research skills never names them: it spots the word in the skill listing.
 
-### Marker
-
-Every research skill carries the discipline in two places, both mandatory together:
-
-- Frontmatter: `research: true`.
-- `description:`: the word "research" appears in the trigger sentence, so the marker is visible in the skill listing a consuming agent already sees — no extra `Read` needed to spot a candidate.
-
-### Discovery, not enumeration
-
-Nothing that consumes research skills — an aspect, a rule, another skill's body — may hardcode the current set by name; the set grows and a hardcoded list goes stale the day after the next one lands. Every consumer discovers the live set the same way. Primary, portable to any executor: spot the word "research" in a skill's `description:` in the ambient skill listing every session already carries. Secondary, dev-vault verification: `Glob` `.claude/skills/*/SKILL.md`, `plugins/claude/*/skills/*/SKILL.md`, and, for installed plugins (the first two globs alone miss them), the `installPath` of each record in `~/.claude/plugins/installed_plugins.json`, then `<installPath>/skills/*/SKILL.md`; `Grep` each frontmatter for `research: true`. Globs alone are not portable to a consumer session, which never sees the dev-vault tree — the skill listing is the one route every executor has.
-
-### Obligation
-
-Marking a skill `research: true` without also documenting a query-mode contract (an invocation shape that returns a bounded slice, not the whole tree) is a broken marker — it tells a consumer "ask me a question" with no way to actually ask one narrowly.
+Full convention (which skills qualify, the discovery routes, the broken-marker case): `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.research-marker.md` — read it before marking a skill or writing a consumer of research skills.
 
 ## 11. Every question carries its context
 

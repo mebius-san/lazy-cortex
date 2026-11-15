@@ -14,22 +14,30 @@ Store shape — `<repo>/.runtime/lazy-specs.jobs.json`, keyed by the note's repo
         "coordinator_job": {"trigger": ..., "expert": ..., "job_id": ...} | null,
         "active_job":      {"checkbox": ..., "expert": ..., "job_id": ...} | null,
         "pending_wake":    "job-done" | "declined" | null,
+        "last_job":        {"checkbox": ..., "expert": ..., "job_id": ..., "outcome": ..., "marker": ...,
+                             "unlanded": true, "retired_by_cancel": true} | null,
         "coherence_jobs":  [{"doc": ..., "expert": ..., "job_id": ..., "dropped": ...}, ...] | null
       }
     }
 
-Both job fields carry native JSON objects validated against the closed sub-schema their key
-declares, and every member of the `coherence_jobs` list is validated the same way, so a malformed
-value refuses at write time rather than crashing a later tick. A `coherence_jobs` member's `dropped` is
-optional. An absent key and an all-null entry mean the same thing; `update` prunes an entry once every
-field is null, so an untouched note leaves no row. Writes are atomic (temp file + rename) — the daemon's main loop is serial by
-contract, so nothing beyond atomicity is needed.
+The three job fields (`coordinator_job`, `active_job` and `last_job`, the launch job last retired on the note) carry
+native JSON objects validated against the closed sub-schema their key declares, and every member of the
+`coherence_jobs` list is validated the same way, so a malformed value refuses at write time rather than crashing a
+later tick. A `coherence_jobs` member's `dropped` is optional, and so are `last_job`'s two flags, each the literal
+true when present: `unlanded` marks a job let go before its result landed, `retired_by_cancel` a job whose result the
+asset's cancellation kept from landing. An absent key and an all-null entry mean the same thing; `update` prunes an
+entry once every field is null, so an untouched note leaves no row. Writes are atomic (temp file + rename) — the
+daemon's main loop is serial by contract, so nothing beyond atomicity is needed.
+
+A job let go is kept as the note's `last_job`: helpers read the terminal marker its bundle carries, build the record
+from it and tell a record of a cancelled job from the rest.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,6 +55,31 @@ if str(_BIN) not in sys.path:
 from spec_keys import CoordinatorTrigger, JobMarker  # noqa: E402
 
 
+# The core CLI verb that cancels an expert job, and the variable naming the repository the core CLI acts on.
+_CANCEL_JOB = "cancel-job"
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+
+# The seconds one `cancel-job` call may run before the cancel counts as unconfirmed.
+CANCEL_TIMEOUT_S = 60
+
+# The core job store under the repository root, a bundle's response file and the response's outcome key.
+_JOBS_BASE = ".experts/.jobs"
+_RESPONSE_FILE = "response.json"
+_RESPONSE_OUTCOME = "outcome"
+
+# The terminal marker files a finished job bundle carries, in the order they are looked for.
+_TERMINAL_MARKERS = ( "DONE", "DEAD", "CANCELLED" )
+
+# The marker file core's `consume-job` leaves in a bundle its consumer retired, and the lowercased `done` marker.
+_CONSUMED_MARKER = "CONSUMED"
+_DONE = "done"
+
+# The outcome and marker a job carries when the call that retires it is the one that cancelled it.
+_CANCELLED = "cancelled"
+
+# How the core CLI's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
+
 # The gitignored per-repo runtime directory and this plugin's own sidecar filename inside it.
 # `lazy-core.install` creates the directory and puts it in `.gitignore`; a sibling plugin's
 # sidecar lives beside this one under its own name.
@@ -58,10 +91,13 @@ _STAGE_LAG_SIDECAR = "lazy-specs.stage-lag.json"
 
 # The closed field schema of one note's entry. A field outside it is refused the way `note-set-key`
 # refuses a frontmatter key outside its own schema — a typo must not become state.
-_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE, JobMarker.COHERENCE_JOBS)
+_FIELDS = (
+    JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE, JobMarker.COHERENCE_JOBS,
+    JobMarker.LAST_JOB,
+)
 
-# The two dict-valued fields, whose values are validated against a closed sub-schema below.
-_DICT_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB)
+# The dict-valued fields, whose values are validated against a closed sub-schema below.
+_DICT_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.LAST_JOB)
 
 # The list-valued field, each member of which is validated against the field's closed sub-schema below.
 _LIST_FIELDS = (JobMarker.COHERENCE_JOBS,)
@@ -114,11 +150,28 @@ _SUB_SCHEMAS: dict[str, tuple[frozenset[str], dict[str, frozenset[str]]]] = {
         frozenset({ JobMarker.DOC, JobMarker.EXPERT, JobMarker.JOB_ID }),
         {},
     ),
+    JobMarker.LAST_JOB: (
+        frozenset({ JobMarker.CHECKBOX, JobMarker.EXPERT, JobMarker.JOB_ID, JobMarker.OUTCOME, JobMarker.MARKER }),
+        {},
+    ),
 }
 
 # The optional keys a field's object may carry beside its required ones, each a positive count when present
 _OPTIONAL_COUNTS: dict[str, frozenset[str]] = {
     JobMarker.COHERENCE_JOBS: frozenset({ JobMarker.DROPPED }),
+}
+
+# waiver: the sidecar's own `last_job` sub-key, private to this store; not a frontmatter key in `spec_keys`
+# The optional `last_job` key a cancel writes on the record of a job it let go before its result landed.
+_UNLANDED = "unlanded"
+
+# waiver: the sidecar's own `last_job` sub-key, private to this store; not a frontmatter key in `spec_keys`
+# The optional `last_job` key stamped on the record of a job whose result the asset's cancellation kept from landing.
+_RETIRED_BY_CANCEL = "retired_by_cancel"
+
+# The optional keys a field's object may carry beside its required ones, each the literal `True` when present
+_OPTIONAL_FLAGS: dict[str, frozenset[str]] = {
+    JobMarker.LAST_JOB: frozenset({ _UNLANDED, _RETIRED_BY_CANCEL }),
 }
 
 
@@ -191,10 +244,12 @@ def check_sub_schema(field: str, value: dict) -> str | None:
   which labels exist, and how a playbook parameterises one by tool, is the playbook's decision,
   so the label is validated for shape alone. A member of the `coherence_jobs` list is checked the
   same way, as one object of that field. Beside its required keys such a member may carry the optional
-  `dropped` key, which must be a positive integer (a boolean is refused); any other extra key is refused.
+  `dropped` key, which must be a positive integer (a boolean is refused). A `last_job` record may carry the
+  optional `unlanded` and `retired_by_cancel` keys, each of which must be the literal `True` (any other value is
+  refused); any other extra key is refused.
 
   Args:
-    field: The entry field being written (`coordinator_job` / `active_job` / `coherence_jobs`).
+    field: The entry field being written (`coordinator_job` / `active_job` / `last_job` / `coherence_jobs`).
     value: The candidate job-metadata object — for `coherence_jobs`, one member of the list.
 
   Returns:
@@ -217,16 +272,21 @@ def check_sub_schema(field: str, value: dict) -> str | None:
   if sub_schema is None:
     return None
   required_keys, closed_fields = sub_schema
-  optional_keys = _OPTIONAL_COUNTS.get(field, frozenset())
+  optional_flags = _OPTIONAL_FLAGS.get(field, frozenset())
+  optional_keys = _OPTIONAL_COUNTS.get(field, frozenset()) | optional_flags
   if not required_keys <= value.keys() <= required_keys | optional_keys:
     optional = f" plus optionally {sorted(optional_keys)}" if optional_keys else ""
     return f"expected exactly the keys {sorted(required_keys)}{optional}, got {sorted(value.keys())}"
-  for name in sorted(optional_keys & value.keys()):
+  for name in sorted((optional_keys - optional_flags) & value.keys()):
     count = value[name]
 
     # guard: an optional count is a positive integer or absent; a bool is no count
     if isinstance(count, bool) or not isinstance(count, int) or count < 1:
       return f"{name} must be a positive integer, got {count!r}"
+  for name in sorted(optional_flags & value.keys()):
+    # guard: an optional flag is the literal `True` or absent; any other value marks nothing
+    if value[name] is not True:
+      return f"{name} must be true, got {value[name]!r}"
   for name, allowed in closed_fields.items():
     if value[name] not in allowed:
       return f"{name} must be one of {sorted(allowed)}, got {value[name]!r}"
@@ -575,6 +635,234 @@ def clear(repo: Path, note: Path) -> None:
 
   # clearing every field of the schema at once is what prunes the row from the store
   update(repo, note, dict.fromkeys(_FIELDS))
+
+
+def cancel_job(repo: Path, cli: Path, job_info: Mapping[str, object]) -> bool:
+  """
+  Cancel one expert job through the core `cancel-job` verb.
+
+  Guarantees:
+    - The result is True only when the core `cancel-job` verb exits cleanly within the cancel timeout; any other
+      outcome returns False.
+    - A verb that runs out of time or cannot be launched returns False and never raises.
+
+  Args:
+    repo: Repository root the job runs in.
+    cli: The resolved `lazycortex-core` CLI.
+    job_info: The tracked job marker, carrying `expert` and `job_id`.
+
+  Returns:
+    True when the verb exits zero in time (the job is cancelled or was already over); False when the job may still
+    run.
+  """
+
+  # Contract:
+  # The result is True only when the core `cancel-job` verb exits cleanly within the cancel timeout; any other
+  # outcome returns False, so a caller may treat True as proof the job no longer runs.
+
+  # Contract:
+  # A verb that runs out of time or cannot be launched returns False and NEVER raises, so a stuck or missing core
+  # cannot hang or break the caller.
+
+  # the core CLI resolves the job against this repo's runtime, named through the environment
+  env = { **os.environ, _ENV_REPO_ROOT: str(repo) }
+
+  # the cancel request names the job by its expert and id
+  request = json.dumps({
+      JobMarker.EXPERT: job_info.get(JobMarker.EXPERT), JobMarker.JOB_ID: job_info.get(JobMarker.JOB_ID),
+  })
+
+  # only a clean exit in time counts as cancelled
+  try:
+    done = subprocess.run(
+        [ sys.executable, str(cli), _CANCEL_JOB ],
+        input = request,
+        capture_output = True, text = True, cwd = str(repo), env = env, check = False, encoding = "utf-8",
+        errors = _DECODE_ERRORS, timeout = CANCEL_TIMEOUT_S,
+    )
+  except (OSError, subprocess.TimeoutExpired):
+    return False
+  return done.returncode == 0
+
+
+def find_terminal_marker(repo: Path, job_info: Mapping[str, object]) -> str | None:
+  """
+  Name the terminal marker a tracked job's bundle carries.
+
+  Args:
+    repo: Repository root holding the job store.
+    job_info: The tracked job marker, carrying `expert` and `job_id`.
+
+  Returns:
+    The marker file name found (`DONE`, `DEAD` or `CANCELLED`), None while the job has not ended.
+  """
+  # the bundle sits under the expert it ran for, named by its id
+  job_dir = repo / _JOBS_BASE / str(job_info.get(JobMarker.EXPERT)) / str(job_info.get(JobMarker.JOB_ID))
+  return next((marker for marker in _TERMINAL_MARKERS if (job_dir / marker).is_file()), None)
+
+
+def build_retired_record(repo: Path, job_info: Mapping[str, object], finished: str | None) -> dict:
+  """
+  Build the `last_job` record of a tracked job being let go.
+
+  Guarantees:
+    - A job that had not ended before the call let it go (`finished` None) is recorded with outcome and marker
+      `cancelled`.
+    - A job that had already ended is recorded with the lowercased marker, and with the outcome its `response.json`
+      reports, the marker standing in when the bundle holds no response naming one.
+    - The record always carries `unlanded: true`, whichever way the job ended.
+
+  Args:
+    repo: Repository root holding the job store.
+    job_info: The tracked job marker, carrying `checkbox`, `expert` and `job_id`.
+    finished: The terminal marker the bundle carried before the call let the job go, None when it had none.
+
+  Returns:
+    The `{checkbox, expert, job_id, outcome, marker, unlanded}` record, `unlanded` always true.
+  """
+
+  # Contract:
+  # A job that had not ended before the call let it go is recorded with outcome and marker `cancelled`; one that had
+  # ended is recorded with the lowercased marker and the outcome its response reports, the marker standing in. The
+  # record always carries `unlanded: true`, whichever way the job ended.
+
+  # a job the caller cancelled itself has no response of its own to report
+  marker = finished.lower() if finished else _CANCELLED
+  outcome = _read_response_outcome(repo, job_info) if finished else None
+  return {
+      JobMarker.CHECKBOX: job_info.get(JobMarker.CHECKBOX), JobMarker.EXPERT: job_info.get(JobMarker.EXPERT),
+      JobMarker.JOB_ID: job_info.get(JobMarker.JOB_ID), JobMarker.OUTCOME: outcome or marker,
+      JobMarker.MARKER: marker, _UNLANDED: True,
+  }
+
+
+def mark_unlanded(record: Mapping[str, object]) -> dict:
+  """
+  Mark a `last_job` record as let go before its result landed.
+
+  Args:
+    record: The stored `last_job` record.
+
+  Returns:
+    A copy of the record carrying `unlanded: true`.
+  """
+  # the record keeps every field and gains the flag
+  return { **record, _UNLANDED: True }
+
+
+def is_unlanded_record(record: object) -> bool:
+  """
+  Tell whether a `last_job` record names a job let go before its result landed.
+
+  Args:
+    record: The stored `last_job` value.
+
+  Returns:
+    True when the record is an object whose `unlanded` is the literal `True`.
+  """
+  # only an object carrying the literal flag counts
+  return isinstance(record, dict) and record.get(_UNLANDED) is True
+
+
+def mark_retired_by_cancel(record: Mapping[str, object]) -> dict:
+  """
+  Stamp a `last_job` record as retired by the asset's cancellation.
+
+  Args:
+    record: The `last_job` record.
+
+  Returns:
+    A copy of the record carrying `retired_by_cancel: true`.
+  """
+  # the record keeps every field and gains the stamp
+  return { **record, _RETIRED_BY_CANCEL: True }
+
+
+def is_retired_by_cancel(record: object) -> bool:
+  """
+  Tell whether a `last_job` record carries the stamp of the asset's cancellation.
+
+  Args:
+    record: The stored `last_job` value.
+
+  Returns:
+    True when the record is an object whose `retired_by_cancel` is the literal `True`.
+  """
+  # only an object carrying the literal stamp counts
+  return isinstance(record, dict) and record.get(_RETIRED_BY_CANCEL) is True
+
+
+def drop_retired_by_cancel(record: Mapping[str, object]) -> dict:
+  """
+  Remove the cancellation's stamp from a `last_job` record.
+
+  Args:
+    record: The `last_job` record.
+
+  Returns:
+    A copy of the record without `retired_by_cancel`, every other field kept.
+  """
+  # every field but the stamp is kept
+  return { key: value for key, value in record.items() if key != _RETIRED_BY_CANCEL }
+
+
+def is_result_landed(repo: Path, record: object) -> bool:
+  """
+  Tell whether a `last_job` record names a finished job whose result has landed.
+
+  Args:
+    repo: Repository root holding the job store.
+    record: The stored `last_job` value.
+
+  Returns:
+    True when the record is an object with marker `done` and no `unlanded` flag, and its job bundle is marked
+    consumed; False for any other value, a job that is still unfinished or flagged `unlanded` included.
+  """
+  # guard: only a finished job not already marked unlanded can have landed
+  if not isinstance(record, dict) or record.get(JobMarker.MARKER) != _DONE or is_unlanded_record(record):
+    return False
+
+  # the landing retires the bundle, so a consumed bundle is a landed result
+  job_dir = repo / _JOBS_BASE / str(record.get(JobMarker.EXPERT)) / str(record.get(JobMarker.JOB_ID))
+  return (job_dir / _CONSUMED_MARKER).is_file()
+
+
+def is_cancelled_record(record: object) -> bool:
+  """
+  Tell whether a `last_job` record names a job that was cancelled before it ended.
+
+  Args:
+    record: The stored `last_job` value.
+
+  Returns:
+    True when the record's outcome and marker both read `cancelled`.
+  """
+  # only a record naming the cancellation in both fields counts
+  return isinstance(record, dict) and record.get(JobMarker.OUTCOME) == _CANCELLED \
+      and record.get(JobMarker.MARKER) == _CANCELLED
+
+
+def _read_response_outcome(repo: Path, job_info: Mapping[str, object]) -> str | None:
+  """
+  Read the outcome a finished job's response reports.
+
+  Args:
+    repo: Repository root holding the job store.
+    job_info: The tracked job marker, carrying `expert` and `job_id`.
+
+  Returns:
+    The response's non-empty `outcome` string, None when the bundle holds no readable response naming one.
+  """
+  # a missing or unreadable response names no outcome
+  job_dir = repo / _JOBS_BASE / str(job_info.get(JobMarker.EXPERT)) / str(job_info.get(JobMarker.JOB_ID))
+  try:
+    response = json.loads((job_dir / _RESPONSE_FILE).read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return None
+
+  # only a JSON object naming a non-empty outcome reports one
+  outcome = response.get(_RESPONSE_OUTCOME) if isinstance(response, dict) else None
+  return outcome.strip() if isinstance(outcome, str) and outcome.strip() else None
 
 
 def main(argv: list[str]) -> int:

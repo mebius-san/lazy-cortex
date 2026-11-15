@@ -18,7 +18,11 @@ cascades into its targets. This worker keeps only the four concerns no LLM needs
   instead set `spec_halted: true` and append a persistent `[!failure]` callout to `# Gates`
   (un-halting is a manual operator act, out of scope here), leaving the bundle unretired for
   diagnostics; a refused landing also reports a `plugin_error` warning to the core error ledger,
-  fire-and-forget. Every clear also raises `pending_wake: job-done` in the sidecar, and that
+  fire-and-forget. A `DONE` whose document belongs to a declared `spec_targets` asset (a cascade fold) is
+  neither landed nor halted: it is retired with `last_job` recorded without `unlanded`, and its bundle stays for
+  the coordinator's `land-result --target`. A `DONE` on a cancelled note is retired with no landing and no wake,
+  `last_job` recorded `unlanded` and `retired_by_cancel`. Every other clear also raises `pending_wake: job-done`
+  in the sidecar, and that
   flag is the whole wake: the `collect-tick` postman sweep dispatches the coordinator on it directly, with no
   commit behind it. This worker opens no review itself; the
   coordinator opens it with `lazy-review.submit` on the `job-done` wake this same poll raises.
@@ -61,6 +65,8 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
+  from types import ModuleType
+
   from collections.abc import Iterable, Mapping
 
 
@@ -93,6 +99,7 @@ import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-impo
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     LEVEL_ROLES,
+    Gate,
     HaltReason,
     HistoryEvent,
     JobMarker,
@@ -100,6 +107,7 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     PluginErrorCause,
     SpecCoordinatorDocStateKey,
     SpecKey,
+    SpecTargetsKey,
     TickAction,
 )
 
@@ -172,6 +180,9 @@ _JOB_ARTIFACT_CLAIM_HEAD = "claim_head"
 
 # Mirrored job-bundle directory layout: `<repo>/.experts/.jobs/<expert>/<job_id>/`.
 _JOBS_BASE = ".experts/.jobs"
+# The finished job's response envelope inside its bundle, and the field naming how the job ended
+_RESPONSE_FILE = "response.json"
+_RESPONSE_OUTCOME = "outcome"
 
 # Bot identity for this worker's own commits (job-marker application + History line).
 _PROMOTE_AUTHOR_NAME = "lazy-spec.gate-tick"
@@ -292,6 +303,22 @@ def read_job_claim_head(repo_root: Path, expert: str, job_id: str) -> str | None
   return value or None
 
 
+def _load_collector() -> ModuleType:
+  """
+  Load the `land-result` collector module on demand.
+
+  Returns:
+    The `land_result` module.
+
+  Raises:
+    ImportError: If the `land_result` module is missing or fails to import.
+  """
+  # waiver: local import inside the try on purpose -- a broken or missing `land_result` module
+  # degrades into a refused landing like any other landing failure instead of crashing the tick
+  import land_result  # pylint: disable=import-error
+  return land_result
+
+
 def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str) -> dict:
   """
   Put one finished job's document in the asset folder through the `land-result` collector.
@@ -318,10 +345,7 @@ def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str)
   if not job_dir.is_dir():
     return { _LANDING_ACTION_KEY: _LANDING_EMPTY, _LANDED_KEY: [] }
   try:
-    # waiver: local import inside the try on purpose -- a broken or missing `land_result` module
-    # degrades into a refused landing like any other landing failure instead of crashing the tick
-    import land_result  # pylint: disable=import-error
-    return land_result.land_job(job_dir, asset_dir)
+    return _load_collector().land_job(job_dir, asset_dir)
   # waiver: the tick survives ANY landing failure — it is turned into a refused landing the caller
   # halts the asset on, rather than an exception that stops the tick mid-marker
   except Exception as error:
@@ -330,6 +354,46 @@ def _land_job_result(repo_root: Path, asset_dir: Path, expert: str, job_id: str)
         _LANDING_ACTION_KEY: _LANDING_REFUSED, _LANDED_KEY: [],
         _LANDING_REASON_KEY: str(error) or type(error).__name__,
     }
+
+
+def _is_cascade_fold(text: str, fm_end: int, *, asset_dir: Path, repo_root: Path, expert: str, job_id: str) -> bool:
+  """
+  Tell whether a finished job is a cascade fold, whose document the coordinator lands into a target asset itself.
+
+  Notes:
+    - A collector that will not import, or a dispatch or catalog settings that cannot be read, reads as no fold: one
+      `gate-tick: fold check <expert>/<job_id>: <error>` line is written to stderr and nothing is raised.
+
+  Args:
+    text: The folder-note's full text as last read from disk.
+    fm_end: Index just past the frontmatter's closing `---` fence in `text`.
+    asset_dir: The asset folder the job was dispatched from.
+    repo_root: The repository root holding the job queue.
+    expert: The dispatched expert's name.
+    job_id: The finished job's id.
+
+  Returns:
+    True when the job's `target_doc` lies outside the asset folder, inside the spec catalog, and inside the folder of
+    one of the asset's declared `spec_targets`; False otherwise.
+  """
+  # guard: a collector that will not import, or a catalog root that cannot be read, leaves the target unknown, so
+  # the job is no fold and the landing below decides its fate
+  try:
+    target = _load_collector().foreign_target(repo_root / _JOBS_BASE / expert / job_id, asset_dir)
+  except (ImportError, OSError, ValueError) as error:
+    sys.stderr.write(f"gate-tick: fold check {expert}/{job_id}: {error}\n")
+    return False
+
+  # guard: a document meant for the asset's own folder, or for no catalog place at all, is no fold
+  if target is None:
+    return False
+
+  # only a document belonging to one of the asset's own declared cascade targets is a fold
+  for token in read_fm_list(text[:fm_end], SpecTargetsKey.TARGETS):
+    folder = target_asset_dir(asset_dir, token)
+    if folder is not None and target.is_relative_to(folder.resolve()):
+      return True
+  return False
 
 
 def _apply_coherence_result(repo_root: Path, job_dir: Path) -> int | None:
@@ -601,6 +665,34 @@ def _run_note_check(asset_note: Path) -> list[dict]:
   return result.get(_VIOLATIONS_KEY, [])
 
 
+def _read_response_outcome(repo_root: Path, expert: str, job_id: str) -> str | None:
+  """
+  Read the outcome a finished job's response reports.
+
+  Args:
+    repo_root: The repository root holding the job store.
+    expert: The expert the job ran under.
+    job_id: The job's id.
+
+  Returns:
+    The response's non-empty `outcome` string, or None when the bundle holds no readable response naming one.
+  """
+
+  # Decision: chose reading core's job bundle directly, not `collect-job` — `collect-job` withholds a DEAD or
+  # CANCELLED job's response, which `last_job` records; revisit when core's `collect-job` returns the response for
+  # every status.
+
+  # the finished job's response; a missing or unreadable one names no outcome
+  try:
+    response = json.loads((repo_root / _JOBS_BASE / expert / job_id / _RESPONSE_FILE).read_text(encoding = "utf-8"))
+  except (OSError, json.JSONDecodeError):
+    return None
+
+  # only a JSON object naming a non-empty outcome reports one
+  outcome = response.get(_RESPONSE_OUTCOME) if isinstance(response, dict) else None
+  return outcome.strip() if isinstance(outcome, str) and outcome.strip() else None
+
+
 def apply_job_marker(
     asset_note: Path, text: str, fm_end: int, *,
     body: str, asset_dir: Path, repo_root: Path, marker: str, job_info: dict, today_str: str,
@@ -608,9 +700,15 @@ def apply_job_marker(
   """
   Apply an active expert job's terminal bundle marker to the asset.
 
-  Every marker retires the tracked job and raises a `job-done` wake for the coordinator to act
-  on. `DONE` lands the job's `result/` into the asset folder and leaves the folder-note untouched
-  when the result was delivered or the job left nothing to land; `CANCELLED` leaves everything
+  Every marker retires the tracked job and records it as the asset's last job, a `DONE` retired on a cancelled
+  asset and a `DONE` whose delivery was refused recording it as unlanded; every marker except a
+  `DONE` on a cancelled asset raises a `job-done` wake for the coordinator to act on. `DONE` lands the
+  job's `result/` into the asset folder and leaves the folder-note untouched when the result was
+  delivered or the job left nothing to land; a `DONE` cascade fold, whose `target_doc` lies inside the folder of
+  one of the note's declared `spec_targets` assets, is neither landed nor halted: it is retired with `last_job`
+  recorded without `unlanded`, the `job-done` wake is raised, and its bundle is left for the coordinator's
+  `land-result --target` landing. On an asset whose note carries `spec_cancelled: true` a `DONE` is retired
+  with no landing and no wake, and recorded as unlanded and retired by the cancel. `CANCELLED` leaves everything
   untouched but the job's own records. `DEAD`, and a `DONE` whose delivery was refused, instead
   halt the asset, appending a persistent `[!failure]` callout to `# Gates` that stays until an
   operator resolves it by hand, and leave the job bundle in place for diagnostics; a refused
@@ -622,11 +720,21 @@ def apply_job_marker(
     - On a `CANCELLED` marker, and on a `DONE` marker whose result was delivered or was
       legitimately empty, the job bundle is retired, freeing its dedup key for re-dispatch while
       its files stay on disk.
-    - On a `DEAD` marker, and on a `DONE` marker whose delivery was refused, the job bundle is
-      left unretired, kept on disk for diagnostics.
+    - On a `DEAD` marker, on a `DONE` marker whose delivery was refused, and on a `DONE` marker that is a cascade
+      fold, the job bundle is left unretired, kept on disk for diagnostics or for the coordinator's landing.
+    - A `DONE` job whose `target_doc` lies outside the asset folder but inside the folder of one of the note's
+      declared `spec_targets` assets is neither landed nor halted: its `job-done` wake is raised, and the pass
+      reports `job-done`. Any other `target_doc` outside the asset folder is a refused delivery.
     - The asset is halted with a persistent failure callout in `# Gates` exactly when the job
       ended `DEAD` or ended `DONE` with its delivery refused; every other terminal marker leaves
       the folder-note untouched.
+    - A `DONE` job on a note carrying `spec_cancelled: true` is retired without landing its result and
+      without raising a wake, and the pass reports `job-cancelled`.
+    - Every retirement of the tracked job records `last_job` with `checkbox`, `expert`, `job_id`, `outcome` and
+      `marker`: `outcome` is the outcome the job's `response.json` reports, or the lowercased marker when the
+      bundle holds no response naming one; `marker` is always the lowercased marker. A `DONE` whose landing was
+      refused records `last_job` with `unlanded: true`; a `DONE` retired on a cancelled asset records it with
+      `unlanded: true` and `retired_by_cancel: true`; a cascade fold records it with neither.
 
   Args:
     asset_note: The status folder-note path.
@@ -642,8 +750,8 @@ def apply_job_marker(
 
   Returns:
     A result dict naming the applied `TickAction` plus the job's `checkbox` and `job_id`. The
-    action is the asset-halted one whenever the asset was halted, the cancelled one for
-    `CANCELLED`, and the job-done one otherwise.
+    action is the asset-halted one whenever the asset was halted, the job-cancelled one for
+    `CANCELLED` and for a `DONE` retired on a cancelled asset, and the job-done one otherwise.
 
   Raises:
     RuntimeError: Propagated from `history_journal.append` when the core verb refuses or cannot
@@ -655,28 +763,97 @@ def apply_job_marker(
   # Contract:
   # The job bundle is retired, freeing its dedup key so the same checkbox can be re-dispatched,
   # on a `CANCELLED` marker and on a `DONE` marker whose result was delivered or was legitimately
-  # empty; its files stay on disk for the coordinator's job-done wake to read. On a `DEAD` marker
-  # and on a `DONE` marker whose delivery was refused, the bundle is deliberately left unretired,
-  # kept for diagnostics.
+  # empty; its files stay on disk for the coordinator's job-done wake to read. On a `DEAD` marker,
+  # on a `DONE` marker whose delivery was refused, and on a `DONE` marker that is a cascade fold,
+  # the bundle is deliberately left unretired: kept for diagnostics, or for the coordinator's landing.
+
+  # Contract:
+  # A `DONE` job whose `target_doc` lies outside the asset folder but inside the folder of one of the note's
+  # declared `spec_targets` assets is a cascade fold: it is neither landed nor halted. The tracked job is retired,
+  # a `job-done` wake is raised for the coordinator, which lands the document into the target asset and retires
+  # the bundle, and the pass reports `job-done`. Any other `target_doc` outside the asset folder is a refused
+  # delivery.
 
   # Contract:
   # The asset is halted with a persistent failure callout in its `# Gates` section exactly when
-  # the job ended `DEAD` or ended `DONE` with its delivery refused; every other terminal marker
-  # leaves the asset's folder-note untouched.
+  # the job ended `DEAD` or ended `DONE` with its delivery refused; every other terminal marker,
+  # a cascade fold included, leaves the asset's folder-note untouched.
+
+  # Contract:
+  # A `DONE` job on a note carrying `spec_cancelled: true` is retired without landing its result and without
+  # raising a wake, and the pass reports `job-cancelled`.
+
+  # Contract:
+  # Every retirement of the tracked job records `last_job` with `checkbox`, `expert`, `job_id`, `outcome` and
+  # `marker`. `outcome` is the outcome the job's `response.json` reports, falling back to the lowercased marker when
+  # the bundle holds no response naming one; `marker` is always the lowercased marker. A `DONE` whose landing was
+  # refused records `last_job` with `unlanded: true`; a `DONE` retired on a cancelled asset records it with
+  # `unlanded: true` and `retired_by_cancel: true`; a cascade fold records it with neither.
 
   checkbox_label = job_info[JobMarker.CHECKBOX]
   job_id = job_info[JobMarker.JOB_ID]
+  expert = job_info[JobMarker.EXPERT]
+
+  # the retired job stays readable as the note's last job, so the coordinator's wake can find its response
+  # its outcome is the one the job's response reports, the marker standing in when the job left none
+  last_job = { JobMarker.CHECKBOX: checkbox_label, JobMarker.EXPERT: expert, JobMarker.JOB_ID: job_id,
+               JobMarker.OUTCOME: _read_response_outcome(repo_root, expert, job_id) or marker.lower(),
+               JobMarker.MARKER: marker.lower() }
+
+  # Domain(spec.lifecycle):
+  # # A cancelled asset takes no finished work
+  # Work that finishes after its asset was cancelled belongs to nothing that is still going on. Its result is not
+  # placed in the asset and nobody is woken to act on it; the job is only retired, so the cancelled asset stays
+  # exactly as the cancellation left it. Such work is recorded as never landed, whatever outcome it reported, and as
+  # withheld by the cancellation, so that taking the asset back can owe the work again. This holds for finished work
+  # alone: a job that died is still reported.
+
+  # a finished job on a cancelled asset is retired without its result and without a wake
+  values, _end = flip_gate.parse_frontmatter(text)
+  if marker == JOB_MARKER_DONE and flip_gate.is_true(values, Gate.SPEC_CANCELLED):
+    spec_job_markers.update(
+        repo_root, asset_note,
+        {
+            JobMarker.ACTIVE_JOB: None,
+            JobMarker.LAST_JOB: spec_job_markers.mark_retired_by_cancel(spec_job_markers.mark_unlanded(last_job)),
+        },
+    )
+    gate_dispatch.consume_stale_job(repo_root, expert, job_id)
+    return {
+        TickAction.ACTION: TickAction.JOB_CANCELLED, JobMarker.CHECKBOX: checkbox_label, JobMarker.JOB_ID: job_id,
+    }
+
+  # Domain(spec.lifecycle):
+  # # A cascade fold is landed by the coordinator, not by the collector
+  # A change folds its delta into documents that belong to other assets, its declared targets. The finished fold
+  # is not placed by the collector of finished work, which only ever writes into the asset the job came from, and it
+  # is not treated as a failure either: the job is recorded as finished, the coordinator is woken, and the
+  # coordinator places the document in the target asset by naming that target itself, after which the landing
+  # spends the job. A document meant for any other place outside the asset, inside the catalog or beyond it, is
+  # still a failed delivery and halts the asset.
+
+  # a cascade fold's document belongs to a target asset: the coordinator lands it and retires the bundle on the
+  # wake raised here, so the tick neither lands it nor halts, and the record stays landed-pending, never unlanded
+  if marker == JOB_MARKER_DONE and _is_cascade_fold(
+      text, fm_end, asset_dir = asset_dir, repo_root = repo_root, expert = expert, job_id = job_id):
+    spec_job_markers.update(
+        repo_root, asset_note,
+        { JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE, JobMarker.LAST_JOB: last_job },
+    )
+    return { TickAction.ACTION: TickAction.JOB_DONE, JobMarker.CHECKBOX: checkbox_label, JobMarker.JOB_ID: job_id }
 
   # the job is over on every branch: retire the marker and raise the wake the coordinator's
   # `job-done` trigger reads; the postman sweep delivers it, so no note write has to carry it
   spec_job_markers.update(
       repo_root, asset_note,
-      { JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE },
+      {
+          JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE,
+          JobMarker.LAST_JOB: last_job,
+      },
   )
 
   # the clause a halt of this asset carries; stays None on every branch that leaves the note as it is
   halt_reason: str | None = None
-  expert = job_info[JobMarker.EXPERT]
 
   # a dead job, or a finished one whose result could not be placed, halts the asset; every other
   # ending leaves the note untouched
@@ -690,6 +867,10 @@ def apply_job_marker(
     # a failed delivery leaves the work in the bundle, kept unretired for diagnostics, and halts
     # the asset on the collector's own reason; a delivered or empty one retires the bundle
     if landing.get(_LANDING_ACTION_KEY) == _LANDING_REFUSED:
+      # the job's result never reached the asset, so its record says so whatever outcome the job reported
+      spec_job_markers.update(
+          repo_root, asset_note, { JobMarker.LAST_JOB: spec_job_markers.mark_unlanded(last_job) },
+      )
       action = TickAction.ASSET_HALTED
       halt_reason = HaltReason.LANDING_REFUSED.format(
           job_id = job_id, label = checkbox_label, reason = landing.get(_LANDING_REASON_KEY),

@@ -153,9 +153,10 @@ def promote_approved(note: Path, *,
   """
   Promote every accepted document of a status folder-note's ladder in one pass.
 
-  An accepted draft becomes `approved`; an already approved document named in `transitioned` is restamped with a
-  fresh approval time. A document in its own review or parked as deferred is passed over with a reason, and
-  attachments follow their owner's stage. A refusal on one document never stops the others.
+  An accepted draft, or an accepted document still at `empty`, becomes `approved`; an already approved document
+  named in `transitioned` is restamped with a fresh approval time. A document in its own review or parked as
+  deferred is passed over with a reason, and attachments follow their owner's stage. A refusal on one document
+  never stops the others.
 
   Guarantees:
     - Never commits; every written path is listed once in `touched_paths`, in first-write order.
@@ -188,9 +189,10 @@ def promote_approved(note: Path, *,
   # Only an authored document that carries an accepted review verdict is a candidate for promotion; a document
   # without one has nothing to promote. An attachment is never promoted on its own: it follows the stage of the
   # document that owns it. A document that is in its own review is skipped until that review ends, and a deferred
-  # document is passed over even when its verdict is accepted. An accepted draft becomes approved. An approved
-  # document that the wake names as transitioned is a renewed approval and is restamped with a fresh approval time.
-  # After the documents are settled, every attachment catches up with the stage its owner now holds.
+  # document is passed over even when its verdict is accepted. An accepted draft becomes approved, and so does an
+  # accepted document still at the not-yet-started stage. An approved document that the wake names as transitioned is
+  # a renewed approval and is restamped with a fresh approval time. After the documents are settled, every
+  # attachment catches up with the stage its owner now holds.
 
   result = PromoteResult()
   documents = _ladder_documents(note)

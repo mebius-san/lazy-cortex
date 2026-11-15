@@ -26,7 +26,12 @@ import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_keys import Gate, GATE_ORDER, AssetTypeKey, ReleaseKey, SpecKey, SpecValue  # noqa: E402
+from spec_keys import (  # noqa: E402
+    Gate, GATE_ORDER, AssetState, AssetTypeKey, LangId, ReleaseKey, SpecHaltKey, SpecKey, SpecStateKey, SpecValue,
+)
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_lockit import Lockit  # noqa: E402
 
 
 SUMMARY_TAG = "#protected/spec/summary"
@@ -38,6 +43,7 @@ _STATS_END = "<!-- spec:stats:end -->"
 _BUCKET_RELEASED = "released"
 _BUCKET_CANCELLED = "cancelled"
 _BUCKET_IN_PROGRESS = "in_progress"
+_BUCKET_READY = "ready"
 _BUCKET_NOT_STARTED = "not_started"
 _BUCKET_PRODUCT = "product"
 _BUCKET_SHELF = "shelf"
@@ -50,22 +56,41 @@ _BUCKET_RELEASE_CANCELLED = "release_cancelled"
 _STATS_LINE_SEPARATOR = "\n"
 _STATS_ITEM = "- {count} {label}"
 _STATS_SUB_ITEM = "  - {count} {label}"
-_STATS_ASSET_ONE = "asset"
-_STATS_ASSET_MANY = "assets"
-_STATS_PRODUCT_ONE = "product"
-_STATS_PRODUCT_MANY = "products"
+# The lockit key of a stats label is the prefix, the label, then its plural form
+_STATS_LABEL_KEY = "stats.{label}.{form}"
+_STATS_ASSET = "asset"
+_STATS_PRODUCT = "product"
+_STATS_RELEASE = "release"
+_STATS_REQUEST = "request"
 _STATS_RELEASED = "released"
-_STATS_IN_PROGRESS = "in progress"
-_STATS_NOT_STARTED = "not started"
+_STATS_READY = "ready"
+_STATS_IN_PROGRESS = "in-progress"
+_STATS_NOT_STARTED = "not-started"
 _STATS_CANCELLED = "cancelled"
-_STATS_RELEASE_ONE = "release"
-_STATS_RELEASE_MANY = "releases"
 _STATS_OPEN = "open"
-# The requests-inbox stats block's wording: the request total, then one item per non-zero status
-_STATS_REQUEST_ONE = "request"
-_STATS_REQUEST_MANY = "requests"
+# The plural forms a stats label carries in the lockit
+_FORM_ONE = "one"
+_FORM_FEW = "few"
+_FORM_MANY = "many"
+# The lockit key of each stats label in each of its plural forms, by (label, form) — the only route from a label
+# to its text, so a label missing here fails loudly instead of reading a key no locale carries
+_STATS_LABEL_KEYS = {
+    (label, form): _STATS_LABEL_KEY.format(label = label, form = form)
+    for label in ( _STATS_ASSET, _STATS_PRODUCT, _STATS_RELEASE, _STATS_REQUEST, _STATS_RELEASED, _STATS_READY,
+                   _STATS_IN_PROGRESS, _STATS_NOT_STARTED, _STATS_CANCELLED, _STATS_OPEN )
+    for form in ( _FORM_ONE, _FORM_FEW, _FORM_MANY )
+}
+# The asset states that read as work under way, and as work finished and waiting to ship
+_STATES_IN_PROGRESS = frozenset({
+    AssetState.DRAFT, AssetState.IN_REVIEW, AssetState.WAITS_OPERATOR, AssetState.IMPLEMENTATION,
+    AssetState.TESTING,
+})
+_STATES_READY = frozenset({ AssetState.AWAITING_RELEASE, AssetState.IN_RELEASE })
 # Request statuses the requests-inbox stats block counts, in the order their items appear.
 _REQUEST_STATUSES = ("draft", "accepted", "rejected")
+# The lockit key of each request status's localised label in the requests-inbox stats block, by status — the only
+# route from a status to its text, so a status missing here fails loudly instead of reading a key no locale carries.
+_REQUEST_STATUS_KEYS = { status: f"stats.request-status.{status}" for status in _REQUEST_STATUSES }
 # waiver: one-off CLI usage string -- argparse-style usage printed to stderr by main()
 _USAGE = "usage: lazycortex-specs render-container-stats <note_path>\n"
 
@@ -101,20 +126,86 @@ SUMMARY_SKELETON_ASSET = summary_skeleton_asset()
 SUMMARY_SKELETON_CONTAINER = summary_skeleton_container()
 
 
-def _read_gate(fm: str, key: str) -> bool:
+def _read_gate(frontmatter: str, key: str) -> bool:
   """
   Read a boolean gate value from a frontmatter string.
 
   Args:
-    fm: Frontmatter text.
+    frontmatter: Frontmatter text.
     key: Gate key.
 
   Returns:
     True when the key is present and set to `true`.
   """
-  m = re.search(rf"^{re.escape(key)}:\s*(\w+)\s*$", fm, re.MULTILINE)
+  match = re.search(rf"^{re.escape(key)}:\s*(\w+)\s*$", frontmatter, re.MULTILINE)
   # waiver: magic literal 'true' -- the YAML boolean spelling is a fixed protocol token, not a domain constant
-  return m is not None and m.group(1).lower() == "true"
+  return match is not None and match.group(1).lower() == "true"
+
+
+def _read_scalar(frontmatter: str, key: str) -> str:
+  """
+  Read a bare scalar value from a frontmatter string.
+
+  Args:
+    frontmatter: Frontmatter text.
+    key: Frontmatter key.
+
+  Returns:
+    The value with surrounding quotes stripped, or the empty string when the key is absent.
+  """
+  match = re.search(rf"^{re.escape(key)}:[ \t]*(.*?)[ \t]*$", frontmatter, re.MULTILINE)
+  return match.group(1).strip("\"'") if match is not None else ""
+
+
+def _plural_form(count: int, lang: str) -> str:
+  """
+  Choose the plural form a count takes in a language.
+
+  Args:
+    count: The number the label follows.
+    lang: The note's authoring language.
+
+  Returns:
+    `one`, `few` or `many`.
+  """
+
+  # Domain(spec.notes):
+  # # A counter's word agrees with its number
+  # A counter shows a number followed by a word, and the word takes the form the language's grammar asks for
+  # after that number. English has two forms: one thing, and every other count. Russian has three: the singular
+  # form after a number ending in one, unless it ends in eleven; the paucal form after a number ending in two,
+  # three or four, unless it ends in twelve, thirteen or fourteen; and the plural form after every other number,
+  # zero included.
+
+  # Russian distinguishes three forms by the last one and two digits
+  if lang == LangId.RU:
+    # waiver: magic literals 10 / 100 and the digit bounds -- the Russian plural rule's own fixed numbers
+    tens, units = count % 100, count % 10
+    # waiver: magic literal 11 -- the teen the Russian singular form excludes, a fixed number of the rule
+    if units == 1 and tens != 11:
+      return _FORM_ONE
+    # waiver: magic literals -- the paucal digits two to four and the teens twelve to fourteen of the same rule
+    if 2 <= units <= 4 and not 12 <= tens <= 14:
+      return _FORM_FEW
+    return _FORM_MANY
+
+  # every other language follows English: one thing, and every other count
+  return _FORM_ONE if count == 1 else _FORM_MANY
+
+
+def _format_label(label: str, count: int, lang: str) -> str:
+  """
+  Give a stats label in the form its count takes.
+
+  Args:
+    label: The label's name in the lockit.
+    count: The number the label follows.
+    lang: The note's authoring language; a language with no text falls back to English.
+
+  Returns:
+    The label's text.
+  """
+  return Lockit.text(_STATS_LABEL_KEYS[(label, _plural_form(count, lang))], lang)
 
 
 def _frontmatter(note_text: str) -> str:
@@ -168,11 +259,14 @@ def classify(note_text: str) -> str:
   """
   Classify one asset status note into a ladder bucket.
 
+  Below cancellation and release, the state an asset reports for itself decides its bucket; a paused asset, or one
+  reporting no known state, is read from its ladder gates instead.
+
   Args:
     note_text: Full status folder-note text.
 
   Returns:
-    One of `released` / `cancelled` / `in_progress` / `not_started`, `product` for a nested
+    One of `released` / `ready` / `cancelled` / `in_progress` / `not_started`, `product` for a nested
     product's own level note, or `shelf` for a folder-note that is neither and for a release's
     status note, which is counted apart from the assets.
   """
@@ -182,14 +276,14 @@ def classify(note_text: str) -> str:
   # A container's summary stats read a child's ROLE first — a nested product runs its own
   # ladder and is counted apart from the assets, and a folder-note claiming neither the status
   # nor the product role is a shelf the stats do not count at all. An asset is then sorted
-  # into exactly one of four buckets by checking cancellation first, then release, then whether
-  # any ladder step at all has opened, and only calling an asset not started when none of those
-  # hold. Cancellation always wins the reading because a cancelled asset stopped counting toward
-  # progress the moment it was cancelled, whatever it had reached before; release is checked
-  # next because it is the more informative fact about where an asset stands than merely being
-  # under way. A release is the product's own unit of shipping, not one of the assets it ships,
-  # so for the asset reading its note is read like a shelf: it is not one of the assets and is
-  # counted apart from them.
+  # into exactly one bucket by checking cancellation first, then release, then the state the
+  # asset reports for itself, and only when that says nothing, whether any ladder step at all
+  # has opened; an asset is called not started only when none of those hold. Cancellation always
+  # wins the reading because a cancelled asset stopped counting toward progress the moment it
+  # was cancelled, whatever it had reached before; release is checked next because it is the
+  # more informative fact about where an asset stands than merely being under way. A release is
+  # the product's own unit of shipping, not one of the assets it ships, so for the asset reading its note is read
+  # like a shelf: it is not one of the assets and is counted apart from them.
 
   fm = _frontmatter(note_text)
 
@@ -213,6 +307,24 @@ def classify(note_text: str) -> str:
 
   # released is the next highest-priority bucket
   if _read_gate(fm, Gate.RELEASED):
+    return _BUCKET_RELEASED
+
+  # Domain(spec.lifecycle):
+  # # An asset's own state says where its work stands
+  # Below cancellation and release, an asset is counted by the state it reports for itself, because that state
+  # names the work the gates alone cannot tell apart. A design being written, reviewed or waiting on the
+  # operator, and an implementation or test under way, is work in progress. An approved design waiting for a
+  # release, or already carried by one, is ready: its own work is finished and only shipping remains. A shipped
+  # asset is released. A paused asset, a parked backlog, a note that reports no state, or one whose state is not
+  # known, is counted by whether any step of its ladder has opened.
+
+  # the asset's own state decides, unless it is paused
+  state = "" if _read_gate(fm, SpecHaltKey.HALTED) else _read_scalar(fm, SpecStateKey.STATE)
+  if state in _STATES_IN_PROGRESS:
+    return _BUCKET_IN_PROGRESS
+  if state in _STATES_READY:
+    return _BUCKET_READY
+  if state == AssetState.DONE:
     return _BUCKET_RELEASED
 
   # any true ladder gate means work has started
@@ -322,16 +434,17 @@ def _is_requests_inbox(container_dir: Path) -> bool:
   return has_request_file or dir_name == "requests"
 
 
-def _render_requests_stats(container_dir: Path) -> str:
+def _render_requests_stats(container_dir: Path, lang: str) -> str:
   """
   Compute the stats block for a requests inbox.
 
   Args:
     container_dir: The requests inbox folder.
+    lang: The language the request total's label and each status's label are written in.
 
   Returns:
     A multi-line markdown list headed by a request total item, with one nested item per non-zero
-    request status beneath it. An empty inbox yields the single item `- 0 requests`.
+    request status beneath it. An empty inbox yields the request total item alone, with a zero count.
   """
   dir_name = container_dir.name
   counts: dict[str, int] = dict.fromkeys(_REQUEST_STATUSES, 0)
@@ -354,9 +467,10 @@ def _render_requests_stats(container_dir: Path) -> str:
 
   # the request total heads the block, each non-zero status nests under it in the fixed status order
   total = sum(counts.values())
-  lines = [ _STATS_ITEM.format(count = total, label = _STATS_REQUEST_ONE if total == 1 else _STATS_REQUEST_MANY) ]
+  lines = [ _STATS_ITEM.format(count = total, label = _format_label(_STATS_REQUEST, total, lang)) ]
   lines.extend(
-      _STATS_SUB_ITEM.format(count = count, label = status) for status, count in counts.items() if count
+      _STATS_SUB_ITEM.format(count = count, label = Lockit.text(_REQUEST_STATUS_KEYS[status], lang))
+      for status, count in counts.items() if count
   )
   return _STATS_LINE_SEPARATOR.join(lines)
 
@@ -453,7 +567,7 @@ def _tally_children(container_dir: Path, buckets: dict[str, int], *,
     buckets[bucket] += 1
 
 
-def render_container_stats(container_dir: Path) -> str:
+def render_container_stats(container_dir: Path, *, lang: str = LangId.EN) -> str:
   """
   Compute the stats block for a group container from the assets below it.
 
@@ -465,12 +579,15 @@ def render_container_stats(container_dir: Path) -> str:
 
   Args:
     container_dir: The group folder (e.g. `bugs/`) or requests inbox.
+    lang: The language the total and state labels are written in, request statuses included; a language with no
+      text falls back to English.
 
   Returns:
     A multi-line markdown list. Total items sit at the top level and their breakdown items nest one
     level beneath them; zero-count breakdown items are omitted. A products item comes first when
     nested products exist, then a releases item when releases exist, and the asset item is left
-    out when its count is zero beside products or releases.
+    out when its count is zero beside products or releases. Asset breakdown items run released, ready,
+    in progress, not started, cancelled.
   """
 
   # Domain(spec.notes):
@@ -488,11 +605,11 @@ def render_container_stats(container_dir: Path) -> str:
 
   # delegate to requests mode when the inbox heuristic matches
   if _is_requests_inbox(container_dir):
-    return _render_requests_stats(container_dir)
+    return _render_requests_stats(container_dir, lang)
 
   # every other container is tallied into asset, product and release buckets
   buckets = {
-      _BUCKET_RELEASED: 0, _BUCKET_IN_PROGRESS: 0,
+      _BUCKET_RELEASED: 0, _BUCKET_READY: 0, _BUCKET_IN_PROGRESS: 0,
       _BUCKET_NOT_STARTED: 0, _BUCKET_CANCELLED: 0, _BUCKET_PRODUCT: 0,
       _BUCKET_RELEASE_RELEASED: 0, _BUCKET_RELEASE_OPEN: 0, _BUCKET_RELEASE_CANCELLED: 0,
   }
@@ -503,8 +620,7 @@ def render_container_stats(container_dir: Path) -> str:
   products = buckets[_BUCKET_PRODUCT]
   lines = []
   if products:
-    lines.append(_STATS_ITEM.format(
-        count = products, label = _STATS_PRODUCT_ONE if products == 1 else _STATS_PRODUCT_MANY))
+    lines.append(_STATS_ITEM.format(count = products, label = _format_label(_STATS_PRODUCT, products, lang)))
 
   # releases are counted beside the assets too, their total followed by each non-zero release state
   release_labels = [
@@ -513,23 +629,26 @@ def render_container_stats(container_dir: Path) -> str:
   ]
   releases = sum(buckets[key] for key, _label in release_labels)
   if releases:
-    lines.append(_STATS_ITEM.format(
-        count = releases, label = _STATS_RELEASE_ONE if releases == 1 else _STATS_RELEASE_MANY))
+    lines.append(_STATS_ITEM.format(count = releases, label = _format_label(_STATS_RELEASE, releases, lang)))
     lines.extend(
-        _STATS_SUB_ITEM.format(count = buckets[key], label = label) for key, label in release_labels if buckets[key]
+        _STATS_SUB_ITEM.format(count = buckets[key], label = _format_label(label, buckets[key], lang))
+        for key, label in release_labels if buckets[key]
     )
 
   # the asset total is left out when it is zero beside products or releases; an empty container still shows it
   labels = [
-      (_BUCKET_RELEASED, _STATS_RELEASED), (_BUCKET_IN_PROGRESS, _STATS_IN_PROGRESS),
+      (_BUCKET_RELEASED, _STATS_RELEASED), (_BUCKET_READY, _STATS_READY), (_BUCKET_IN_PROGRESS, _STATS_IN_PROGRESS),
       (_BUCKET_NOT_STARTED, _STATS_NOT_STARTED), (_BUCKET_CANCELLED, _STATS_CANCELLED),
   ]
   total = sum(buckets[key] for key, _label in labels)
   if total or not (products or releases):
-    lines.append(_STATS_ITEM.format(count = total, label = _STATS_ASSET_ONE if total == 1 else _STATS_ASSET_MANY))
+    lines.append(_STATS_ITEM.format(count = total, label = _format_label(_STATS_ASSET, total, lang)))
 
   # each non-zero lifecycle bucket nests under the asset total
-  lines.extend(_STATS_SUB_ITEM.format(count = buckets[key], label = label) for key, label in labels if buckets[key])
+  lines.extend(
+      _STATS_SUB_ITEM.format(count = buckets[key], label = _format_label(label, buckets[key], lang))
+      for key, label in labels if buckets[key]
+  )
   return _STATS_LINE_SEPARATOR.join(lines)
 
 
@@ -537,7 +656,8 @@ def apply_container_stats(note_path: Path) -> bool:
   """
   Rewrite the `spec:stats` region of a container note from its sibling children.
 
-  The region is replaced by the multi-line markdown stats list the container's children produce.
+  The region is replaced by the multi-line markdown stats list the container's children produce, with its labels
+  written in the note's own language.
 
   Args:
     note_path: The container folder-note (e.g. `bugs/bugs.md`).
@@ -551,9 +671,11 @@ def apply_container_stats(note_path: Path) -> bool:
   # guard: no stats markers, nothing this function owns
   if _STATS_START not in text or _STATS_END not in text:
     return False
+
+  # the freshly rendered stats replace whatever the marker pair held
+  stats = render_container_stats(note_path.parent, lang = note_explainers.lang_for_note(note_path))
   new = re.sub(
-      re.escape(_STATS_START) + r".*?" + re.escape(_STATS_END),
-      f"{_STATS_START}\n{render_container_stats(note_path.parent)}\n{_STATS_END}",
+      re.escape(_STATS_START) + r".*?" + re.escape(_STATS_END), f"{_STATS_START}\n{stats}\n{_STATS_END}",
       text, flags = re.DOTALL,
   )
 

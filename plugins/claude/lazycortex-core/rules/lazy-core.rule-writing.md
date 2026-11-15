@@ -48,6 +48,8 @@ Budget depends on load profile:
 - `paths:`-scoped rules > 10 KB → `WARN`. They load only when matching files are touched, so some breathing room is fine — but content > 10 KB should still move to `<plugin>/skills/<skill>/references/*.md` and be `Read` on demand.
 - `paths:`-scoped rules > 25 KB → `FAIL` regardless of scope.
 
+The installed `lazy-core.scaffold.md` is graded on its authored text alone. Install writes its `## Registry` block from the enabled plugins' manifests and the repo's `_local` entries, so the block's size follows the repo's configuration, not an author's choice. Those bytes still count toward the always-loaded total.
+
 ## 3. No large code blocks
 
 Any code block > 10 lines → `FAIL`. Put runnable templates in `<plugin>/templates/` or a skill reference and link to them.

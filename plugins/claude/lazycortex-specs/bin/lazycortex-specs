@@ -76,6 +76,7 @@ _SUB_MIGRATE_REQUESTS = "migrate-requests"
 _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
 _SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
+_SUB_CANCEL_SWEEP = "cancel-sweep"
 _SUB_LOCKIT_TEXT = "lockit-text"
 _SUB_LOCKIT_KEYS = "lockit-keys"
 # waiver: usage string -- help text printed to stderr; not a domain constant
@@ -90,8 +91,8 @@ _USAGE = (
     "                                  print one fixed text of the plugin, in the given language, else the\n"
     "                                  note's resolved language, else the repo's\n"
     "  lockit-keys                    list the keys of every fixed text the plugin carries\n"
-    "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate; spec_cancelled --off also\n"
-    "                                  returns the asset's cancelled documents to draft\n"
+    "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate; spec_cancelled also\n"
+    "                                  cancels the asset's documents, and with --off returns each to its stage\n"
     "  gate-tick <asset_note> [--today YYYY-MM-DD]   clear finished job markers, run structural note-check\n"
     "  land-result <job_dir> <asset_dir> [--target <doc>]\n"
     "                                  put one finished job's result/ in place and commit it\n"
@@ -99,7 +100,9 @@ _USAGE = (
     "  scaffold-asset <product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]\n"
     "                                  deterministic scaffold of a new asset folder\n"
     "  seed-doc (<product> <folder-note-path> | --root <folder-note-path>) --doc <name>:<type>\n"
-    "                                  seed one authored doc beside an existing folder-note\n"
+    "           [--replace-cancelled]  seed one authored doc beside an existing folder-note;\n"
+    "                                  --replace-cancelled replaces a target at spec_stage: cancelled\n"
+    "  seed-doc --refresh-sources <release-plan>   re-derive a release plan's sources, no commit\n"
     "  apply-request <file>           deterministic post-finalize apply transition for a request file\n"
     "  render-container-stats <note>  recompute a container note's stats region\n"
     "  coordinator-dispatch <asset_note> [--today YYYY-MM-DD]   wake spec.coordinator on activity\n"
@@ -144,13 +147,15 @@ _USAGE = (
     "  review-rows <note>              reconcile the Review <doc> checkbox blocks of a folder note's\n"
     "                                  # Gates section and lay the section out\n"
     "  release-version <note> --set <v> | --bump <part> --product <key>\n"
-    "                                  write a release's version and its mirror tag onto its note\n"
-    "  release-delta <product-key>     print the assets the product's next release carries, the ones held\n"
+    "                                  write a release's version and its mirror tag onto its note;\n"
+    "                                  --set pins it, and a later --bump leaves a pinned version alone\n"
+    "  release-delta <product-key> [--no-architecture]\n"
+    "                                  print the assets the product's next release carries, the ones held\n"
     "                                  back, and the open release\n"
-    "  release-scaffold <product-key> --bump <part> | --refresh <release-note>\n"
+    "  release-scaffold <product-key> --bump <part> | --refresh <release-note> [--no-architecture]\n"
     "                                  create the next release from the delta, or pull new approvals\n"
     "                                  into an open release\n"
-    "  release-deploy <release-note> <staging|production>\n"
+    "  release-deploy <release-note> <staging|production> [--build <k>]\n"
     "                                  run one deploy target of the release's product and journal the outcome\n"
     "  release-publish <release-note>  the Publish tick: deploy to production when declared, release the carried\n"
     "                                  assets, tag them, write the manifest, one commit\n"
@@ -205,6 +210,10 @@ _USAGE = (
     "                                  regroup the flat # History list of upstream unit notes under day headings\n"
     "                                  (no commit); --check exits 0 when a note would change, 1 when none\n"
     "                                  would, 2 on failure\n"
+    "  cancel-sweep [--dry-run | --check] [--cwd DIR]\n"
+    "                                  apply the cancel cascade to cancelled assets whose documents an earlier\n"
+    "                                  version left behind, one commit per asset; --check exits 0 when an asset\n"
+    "                                  is left behind, 1 when none is, 2 on failure\n"
 )
 
 # The entry function name most sibling modules route their subcommand to.
@@ -267,6 +276,7 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_SOURCE_LINKS: ( "source_link_migrate", _MAIN ),
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
     _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),
+    _SUB_CANCEL_SWEEP: ( "cancel_sweep", _MAIN ),
     _SUB_LOCKIT_TEXT: ( "note_explainers", "main_lockit_text" ),
     _SUB_LOCKIT_KEYS: ( "note_explainers", "main_lockit_keys" ),
 }

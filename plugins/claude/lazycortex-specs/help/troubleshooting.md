@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-11-13
+last_regen: 2026-11-15
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 854c86a8ab2345d3e23b1f7139f14d715d5435ad
-surface_sha: b0f67b91cfa13ec3deb370696dd9ea3af0f89854fc1d68b00929ac304188506e
+source_sha: 4ec5f482431aeb70bacd871dc822b45e6987d7ea
+surface_sha: 0cd2bcbd3f4c6fb2238f0aa9de1f796a1c705eb59ccc6adb79890e7b45ef4fbd
 ---
 # Troubleshooting
 
@@ -252,11 +252,31 @@ surface_sha: b0f67b91cfa13ec3deb370696dd9ea3af0f89854fc1d68b00929ac304188506e
 
 ## `/lazy-spec.audit` FAILs a cancelled document
 
-**Symptom**: The report includes a FAIL on an asset's start document (for example `design.md` of a feature, `bug.md` of a bug) or a product's `architecture.md` carrying `spec_stage: cancelled`.
+**Symptom**: The report includes a FAIL on an asset's start document (for example `design.md` of a feature, `bug.md` of a bug) carrying `spec_stage: cancelled` while the asset's own note reads `spec_cancelled: false`, or on a product's `architecture.md` carrying `spec_stage: cancelled` at all.
 
-**Likely cause**: An asset is abandoned as a whole, never through the document that defines it. `/lazy-spec.set-stage` refuses `cancelled` on those documents, so the value arrived by a hand edit. A `tech` document, an asset's `test-plan.md` and a release's plan documents (`code-plan`, `test-plan`) may legitimately be cancelled.
+**Likely cause**: An asset is abandoned as a whole, never through the document that defines it alone. A start document is legitimately `cancelled` only together with its asset: when `spec_cancelled` is on, the cancel moves the start document to `cancelled` itself. `/lazy-spec.set-stage` refuses `cancelled` on these documents, so a start document cancelled on its own arrived by a hand edit. A product's `architecture.md` is never cancelled — a level is not cancelled. A `tech` document, an asset's `test-plan.md` and a release's plan documents (`code-plan`, `test-plan`) may legitimately be cancelled.
 
-**Fix**: Move the document out of `cancelled` with `/lazy-spec.set-stage`. If the whole asset is abandoned, cancel it with `/lazy-spec.flip-gate <asset> spec_cancelled`. Then re-run `/lazy-spec.audit`.
+**Fix**: Move the document out of `cancelled` with `/lazy-spec.set-stage`. If the whole asset is abandoned, cancel it with `/lazy-spec.flip-gate <asset> spec_cancelled`, which carries the documents with it. Then re-run `/lazy-spec.audit`.
+
+---
+
+## `/lazy-spec.audit` FAILs a cancelled asset whose documents or reviews were left behind
+
+**Symptom**: The report includes a FAIL on an asset whose note reads `spec_cancelled: true` while one of its staged documents is not at `cancelled`, or still carries `review_active: true`.
+
+**Likely cause**: The flag was written without the cancel verb. `/lazy-spec.flip-gate <asset> spec_cancelled` is the move that stops the asset's reviews, strips their banners, moves its staged documents to `cancelled`, and cancels its running job in one commit; a hand-set flag skips all of that.
+
+**Fix**: Follow the repair route the finding names (the common coordinator playbook's "A cancel the verb did not make"), or un-cancel with `/lazy-spec.flip-gate <asset> spec_cancelled --off` and cancel again through the verb. Then re-run `/lazy-spec.audit`.
+
+---
+
+## `/lazy-spec.audit` reports a draft document nobody opened for review
+
+**Symptom**: The report includes a FAIL naming a document at `spec_stage: draft` that carries neither `review_active: true` nor a `review_result`.
+
+**Likely cause**: The document was never submitted for review. The one exception the audit makes is a draft whose asset note hangs a `Review <doc>` row in its `# Gates` section — for example a draft an un-cancel just restored — which waits for the next tick and is not a finding.
+
+**Fix**: Submit the document for review (`/lazy-review.submit`, or `/lazy-review.start` when the experts should write it first); the audit only proposes it and never runs it. If the document is meant to wait, park it with `/lazy-spec.set-stage <doc> deferred`.
 
 ---
 
@@ -466,7 +486,27 @@ surface_sha: b0f67b91cfa13ec3deb370696dd9ea3af0f89854fc1d68b00929ac304188506e
 
 **Likely cause**: `spec_cancelled: true` on the asset's status folder-note freezes all gate progression. No flip — on or off — is allowed while an asset is cancelled.
 
-**Fix**: Uncancel the asset by running `/lazy-spec.flip-gate <asset> spec_cancelled --off` if you want to resume it (its cancelled documents return to `draft`), or leave it cancelled if the work is truly abandoned. After uncancelling, gate flips proceed normally.
+**Fix**: Uncancel the asset by running `/lazy-spec.flip-gate <asset> spec_cancelled --off` if you want to resume it (each document the cancel marked returns to the stage it had; a previously approved one returns to `draft` with its review reopened at the writer round), or leave it cancelled if the work is truly abandoned. After uncancelling, gate flips proceed normally.
+
+---
+
+## `/lazy-spec.flip-gate <asset> spec_cancelled` refuses and writes nothing
+
+**Symptom**: The cancel is refused, saying the asset's running job could not be cancelled or a review in the asset folder could not be stopped.
+
+**Likely cause**: The cancel does everything in one commit or not at all — it stops every review in the asset folder, moves the staged documents to `cancelled`, and cancels the running job last. When one of those steps cannot complete, nothing is left written: reviews already stopped get their bytes back.
+
+**Fix**: Find the job (`/lazy-expert.list-jobs`) or the review (`/lazy-review.status`) the result names, settle it, then cancel again. If the result reports `killed_job`, the running job was already killed before the refusal: the asset has no active job, the job is recorded as cancelled, and the coordinator sees it gone on its next wake.
+
+---
+
+## `/lazy-spec.flip-gate` refuses to cancel or restore a release
+
+**Symptom**: The cancel is refused because the release is published, or either direction is refused because the release sits under `releases/archive/`; or the un-cancel is refused because another release of the same owner is open.
+
+**Likely cause**: A published release is frozen and an archived one is closed history. Only one release is open per product at a time, so a cancelled release cannot be reopened beside another open one.
+
+**Fix**: For a published or archived release there is nothing to cancel or restore — changes go into the next release. For the open-release conflict, cancel or publish the open release first, then un-cancel.
 
 ---
 

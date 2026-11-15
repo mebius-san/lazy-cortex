@@ -402,7 +402,8 @@ def has_open_command(text: str) -> bool:
     otherwise, including for a document whose frontmatter does not parse.
   """
   # the same callout reading the coordinator's command wake trigger uses
-  # waiver: 'callouts'/'type'/'tag'/'body' are build_report's own wire-shape keys (module docstring), not keys.py constants
+  # waiver: 'callouts'/'type'/'tag'/'body' are build_report's own wire-shape keys (module docstring), not keys.py
+  # constants
   return any(
       callout["type"] == _COMMAND_MARKER and callout["tag"] == _COMMAND_TAG and callout["body"].strip()
       # waiver: 'callouts' is build_report's own wire-shape key (module docstring), not a keys.py constant
@@ -583,7 +584,8 @@ def resolve_language(file_path: Path) -> str:
 
   # Contract:
   # A document inside a vault MUST resolve only to the language the `lazycortex-core` language chain answers.
-  # When core cannot be reached or answers nothing, resolution raises `RuntimeError` and NEVER substitutes a language.
+  # When core cannot be reached or answers nothing, resolution raises `RuntimeError` and NEVER substitutes a
+  # language.
 
   # walk up to the nearest settings root; a doc outside any vault keeps the floor
   root = next((cand for cand in file_path.resolve().parents if (cand / _SETTINGS_REL).is_file()), None)
@@ -610,7 +612,8 @@ def resolve_language(file_path: Path) -> str:
 
 def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId.EN) -> str:
   """
-  Recompute and repaint the top banner from the document's current frontmatter state.
+  Recompute and repaint the top banner from the document's current frontmatter state, or take it down when the
+  review is not active.
 
   The banner state is driven by frontmatter (`review_approved`, `review_phase`,
   `review_validation_round`, `review_autorun`, `review_autorun_cycles`) plus the
@@ -624,6 +627,8 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
       same `job_in_flight` value, returns identical text.
     - Never paints the ready banner on an unapproved document whose `review_phase` is `main` or
       that carries a non-empty `[!todo] #review/command` callout.
+    - When `review_active` is not `true` the text comes back with no banner: an existing banner is stripped and none
+      is inserted. A document with no frontmatter block and no banner comes back unchanged.
 
   Args:
     text: Full document text, frontmatter included.
@@ -634,9 +639,8 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
       its own paints the shipped English wording.
 
   Returns:
-    `text` with its banner replaced (or inserted, if absent) to match the current frontmatter.
-    Returned unchanged when the document carries no frontmatter block. A second call over the
-    unchanged document returns the identical text.
+    `text` with its banner replaced (or inserted, if absent) to match the current frontmatter, or with no banner
+    when the review is not active. A second call over the unchanged document returns the identical text.
 
   Raises:
     ParseError: If the document has an opening frontmatter fence with no matching closing fence.
@@ -650,11 +654,21 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
   # The ready banner is NEVER painted on an unapproved document whose `review_phase` is
   # `main` or that carries a non-empty `[!todo] #review/command` callout.
 
+  # Contract:
+  # When `review_active` is not `true` the text comes back with no banner: an existing banner is stripped and none is
+  # inserted. A document with no frontmatter block and no banner comes back unchanged.
+
+  # Domain(review.markup):
+  # # A document out of review carries no banner
+  # The banner belongs to a review that is running. A document whose review is not active, stopped or never started,
+  # carries no banner at all. A repaint, such as a coordinator wake still in flight while the review is being
+  # stopped, never puts one back, and removes one it finds left there.
+
   meta, body = _fm.parse(text)
 
-  # guard: no frontmatter — nothing to derive a banner state from
-  if not meta:
-    return text
+  # a document out of review comes back with its banner stripped, so a repaint racing a stop never puts one back
+  if not _is_flag_true(meta, ReviewKey.ACTIVE):
+    return text[: len(text) - len(body)] + _banner.strip_banner(body)
 
   # read the approve flag and the review phase from the frontmatter; `job_in_flight` decides the dispatch
   # state, because a job in flight means an agent still works on the document and the operator waits

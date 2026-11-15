@@ -654,3 +654,30 @@ def replace_banner(
   # drop every old banner and anchor the fresh one at the top of the remaining content
   rest = _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", rest).lstrip("\n")
   return fm_prefix + new_banner + rest
+
+
+def strip_banner(body: str) -> str:
+  """
+  Return `body` without its banner.
+
+  Guarantees:
+    - Text inside code fences and a leading frontmatter block come back byte for byte.
+    - Only banner blocks outside code fences are removed.
+
+  Args:
+    body: Full document or post-frontmatter body.
+
+  Returns:
+    The body with every banner block outside code fences removed, a leading frontmatter block kept in place.
+  """
+
+  # Contract:
+  # Text inside code fences and a leading frontmatter block come back byte for byte; only banner blocks outside
+  # code fences are removed.
+
+  # split off a leading frontmatter block so only the body below it is searched
+  fm_prefix = _leading_frontmatter(body)
+  rest = body[len(fm_prefix):]
+
+  # drop every banner outside a fence, with the blank lines that trail it
+  return fm_prefix + _parser.sub_outside_fences(_BANNER_BLOCK_RE, "", rest)

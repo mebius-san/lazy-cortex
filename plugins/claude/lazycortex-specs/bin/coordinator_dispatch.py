@@ -91,6 +91,8 @@ import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-impor
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import release_delta  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import review_rows  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -111,6 +113,7 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     LevelDoc,
     PluginErrorCause,
     ReleaseKey,
+    ReviewResultValue,
     Section,
     SpecCoordinatorDocStateKey,
     SpecCoordinatorReadyStateKey,
@@ -170,7 +173,8 @@ _WIRE_PROTOCOLS = "protocols"
 
 # The two keys of the snapshot whose change of value wakes the release owner above the asset
 _APPROVAL_EDGES = ( Gate.DESIGN_DONE, Gate.SPEC_CANCELLED )
-# Prefix of the error-ledger incident key a failed release-owner wake opens, followed by the level note's path
+# Prefix of the error-ledger incident key a failed release-owner or release-member wake opens, followed by the
+# woken note's path
 _WAKE_INCIDENT_PREFIX = "spec-wake:"
 
 # Settings-section keys for the vault-wide coordination-rules doc (`lazy-spec.config-protocol.md`).
@@ -1329,6 +1333,48 @@ def wake_release_owner_on_publish(repo_root: Path, release_dir: Path, *, today: 
                       dispatch = _dispatch_release_published, today = today)
 
 
+def wake_release_members(repo_root: Path, members: list[Path], *, today: str | None) -> None:
+  """
+  Wake the coordinator of every asset a release just painted, so each one brings its own summary up to date.
+
+  Notes:
+    - The caller invokes this only after its own commit has landed, never before.
+    - Each wake is best-effort on its own: a failure is reported as a warning to the core error ledger, one
+      incident per member note, and never stops the next member or reaches the caller; a successful wake closes
+      that member's incident.
+
+  Args:
+    repo_root: The repository root the member notes live under.
+    members: The status notes of the assets the release carries, in the order they are woken.
+    today: Optional ISO date forwarded into each member note's own `# History` line.
+  """
+
+  # Domain(spec.lifecycle):
+  # # A release tells every asset it carries
+  # When a release takes assets in, and again when it is published, it repaints each of them: in the release,
+  # then done. Those repaints are made by the release machinery, not by the operator, so on their own they wake
+  # nobody, and each asset's own summary of where it stands would keep describing the state before. The release
+  # therefore tells every asset it carries, once per change and only after the change has landed, so each one
+  # brings its own summary up to date. Telling one asset is independent of telling the next: a failure is noted
+  # and never stops the others, and never undoes the release's own change.
+
+  # one wake per member, each with its own incident, so one broken member never strands the rest
+  for member in members:
+    incident = f"{_WAKE_INCIDENT_PREFIX}{_to_rel_path(repo_root, member)}"
+    try:
+      coordinator_dispatch(member, {}, today = today, release_member = True)
+    # waiver: best-effort boundary — the release's own commit has landed, so a failed wake is reported, not raised
+    except Exception as error:
+      error_report.report_marked_warning(
+          repo_root, cause = PluginErrorCause.RELEASE_MEMBER_WAKE_FAILED, incident = incident,
+          detail = f"{CoordinatorTrigger.RELEASE_MEMBER}: {error}",
+      )
+      continue
+
+    # a wake that went through proves an earlier failure of the same member cleared
+    error_report.resolve_marked(repo_root, incident)
+
+
 def _dispatch_asset_approved(level_note: Path, asset_dir: Path, today: str | None) -> None:
   """
   Dispatch the `ASSET_APPROVED` job on the level note, naming the asset folder relative to the owner's root.
@@ -1423,7 +1469,8 @@ def _wake_release_owner(repo_root: Path,
   incident = f"{_WAKE_INCIDENT_PREFIX}{_to_rel_path(repo_root, level_note)}"
   try:
     dispatch(level_note, target_dir, today)
-  # waiver: best-effort boundary — the change that raised the wake has landed, so a failed wake is reported, not raised
+  # waiver: best-effort boundary — the change that raised the wake has landed, so a failed wake is reported, not
+  # raised
   except Exception as error:
     error_report.report_marked_warning(repo_root, cause = PluginErrorCause.RELEASE_OWNER_WAKE_FAILED,
                                        incident = incident, detail = f"{trigger}: {error}")
@@ -1431,6 +1478,148 @@ def _wake_release_owner(repo_root: Path,
 
   # a wake that went through proves an earlier failure of the same owner cleared; with no marker, no core call
   error_report.resolve_marked(repo_root, incident)
+
+
+def _read_accepted_verdicts(repo_root: Path,
+                            asset_dir: Path,
+                            asset_type: str,
+                            *,
+                            transitions: Mapping[str, str],
+                            recorded: Mapping[str, str]) -> tuple[list[Path], bool]:
+  """
+  Name the stage-bearing documents whose verdict this tick newly turned accepted.
+
+  Args:
+    repo_root: The repository root the product records resolve under.
+    asset_dir: The asset folder holding the documents.
+    asset_type: The asset's `spec_asset_type`.
+    transitions: Every transitioned document's basename mapped to its new `review_result`.
+    recorded: Every document's `review_result` as it stood before this tick.
+
+  Returns:
+    The accepted documents in name order, and whether one of them is the asset's start document already standing
+    approved — a re-approval. A release asset never reports a re-approval.
+  """
+  key, record = resolve_product.effective_record_by_path(repo_root, _to_rel_path(repo_root, asset_dir))
+  start_name, _start_type = asset_types.start_doc(asset_type, record or {})
+  accepted: list[Path] = []
+  start_reapproved = False
+  for name, value in sorted(transitions.items()):
+    doc = asset_dir / name
+
+    # guard: only a fresh accepted verdict counts — a re-fire of the recorded one over a lagging stage is no news
+    if value not in ReviewResultValue.ACCEPTED or recorded.get(name) == value or not doc.is_file():
+      continue
+
+    # the document type's declaration says whether it carries a stage
+    declaration = spec_doc_types.resolve(repo_root, spec_doc_types.doc_type_of(doc), key)
+
+    # guard: a document whose type carries no stage is never approved, so its verdict wakes nobody
+    if not (declaration and declaration.get(spec_doc_types.DocTypeFlag.STAGES)):
+      continue
+
+    # a fresh verdict on a staged document is news
+    accepted.append(doc)
+
+    # the start document standing approved before this verdict was approved once already
+    if name == start_name and asset_type != ReleaseKey.ASSET_TYPE:
+      doc_fm, _doc_end = flip_gate.parse_frontmatter(doc.read_text(encoding = "utf-8"))
+      start_reapproved = str(doc_fm.get(StageKey.STAGE, "")).strip() == Stage.APPROVED
+
+  # the documents in name order, and the re-approval flag of the start document
+  return accepted, start_reapproved
+
+
+def _is_release_member(repo_root: Path, release_note: Path, asset_note: Path) -> bool:
+  """
+  Tell whether a release lists an asset among its `spec_includes` members.
+
+  Args:
+    repo_root: The repository root the release's wikilinks resolve under.
+    release_note: The release's status note.
+    asset_note: The asset's status note.
+
+  Returns:
+    True when one of the release's wikilinks resolves to the asset's status note.
+  """
+  # one member resolving to the asset's own note is enough
+  target = asset_note.resolve()
+  return any(note.resolve() == target
+             for note in release_delta.resolve_included_notes(repo_root, spec_paths.read_text(release_note)))
+
+
+def _wake_open_release(repo_root: Path, asset_dir: Path, asset_note: Path, *, today: str | None) -> None:
+  """
+  Wake the open release whose `spec_includes` lists an asset with the `release-start` hop, best-effort.
+
+  Notes:
+    - A failure is reported to the error ledger, one incident per note, and never raised; a successful wake closes
+      the release note's incident.
+
+  Args:
+    repo_root: The repository root the product records resolve under.
+    asset_dir: The asset folder.
+    asset_note: The asset's status note.
+    today: Optional ISO date forwarded into the release note's own `# History` line.
+  """
+  # the open release of the asset's release owner, woken when it carries the asset; best-effort, one incident per
+  # note
+  key, _record = resolve_product.resolve_product_by_path(repo_root, _to_rel_path(repo_root, asset_dir))
+  release_note = None
+  try:
+    release_note = release_delta.find_open_release(repo_root, key) if key else None
+    if release_note is not None and _is_release_member(repo_root, release_note, asset_note):
+      coordinator_dispatch(release_note, {}, today = today, release_start = True)
+      error_report.resolve_marked(repo_root, f"{_WAKE_INCIDENT_PREFIX}{_to_rel_path(repo_root, release_note)}")
+  # waiver: best-effort boundary — the asset's own change has landed, so a failed wake is reported, not raised
+  except Exception as error:
+    woken = _to_rel_path(repo_root, release_note) if release_note is not None else _to_rel_path(repo_root, asset_dir)
+    error_report.report_marked_warning(
+        repo_root, cause = PluginErrorCause.RELEASE_START_WAKE_FAILED, incident = f"{_WAKE_INCIDENT_PREFIX}{woken}",
+        detail = f"{CoordinatorTrigger.RELEASE_START}: {error}",
+    )
+
+
+def _wake_on_accepted_verdict(repo_root: Path,
+                              asset_dir: Path,
+                              asset_note: Path,
+                              *,
+                              start_reapproved: bool,
+                              owner_woken: bool,
+                              today: str | None) -> None:
+  """
+  Wake the open release that carries an asset, and its release owner, after a document of the asset was approved.
+
+  Notes:
+    - The open release is woken with the `release-start` hop only when its `spec_includes` lists the asset.
+    - The release owner's level note is woken with `asset-approved` only for a re-approved start document, and
+      not when a gate crossing this tick already woke it.
+    - Both wakes are best-effort: a failure is reported to the error ledger and never raised.
+
+  Args:
+    repo_root: The repository root the product records resolve under.
+    asset_dir: The asset folder whose document was approved.
+    asset_note: The asset's status note.
+    start_reapproved: Whether the approved document is the asset's start document, approved once already.
+    owner_woken: Whether a gate crossing this tick already woke the release owner.
+    today: Optional ISO date forwarded into the woken notes' own `# History` lines.
+  """
+
+  # Domain(spec.lifecycle):
+  # # An approval reaches the release and the product even when no gate moves
+  # Approving a document again leaves every gate where it was, yet what the open release would build changed. When
+  # a document of an asset the open release carries is approved, first time or again, the release is told once, so
+  # it can offer a rebuild. When the asset's starting document is approved again, the product that owns releases is
+  # told too, exactly as on a first approval; a first approval reaches it through the gate it closes instead, so the
+  # product is never told twice. Both are told only after the asset's own wake has landed, and a failure to tell
+  # either is noted and never undoes the approval.
+
+  # the open release of the asset's release owner, woken when it carries the asset
+  _wake_open_release(repo_root, asset_dir, asset_note, today = today)
+
+  # a re-approved start document crosses no gate, so the owner hears of it here unless a crossing already told it
+  if start_reapproved and not owner_woken:
+    wake_release_owner_on_approval(repo_root, asset_dir, today = today)
 
 
 def _to_rel_path(repo_root: Path, target: Path) -> str:
@@ -1888,6 +2077,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
                          asset_approved: str | None = None,
                          release_start: bool = False,
                          release_published: bool = False,
+                         release_member: bool = False,
                          job_done: bool = False) -> dict:
   """
   Detect operator activity on one coordinated folder-note and dispatch its expert when it wakes.
@@ -1940,10 +2130,23 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       normally flipped by a bot-authored commit that wakes nothing on the asset, so the crossing
       is evaluated before the no-trigger exit, recorded on the note, and dispatched onward from
       that exit too.
+    - A changed `Gate.SPEC_CANCELLED` on an asset that is not a release also wakes the open release whose
+      `spec_includes` lists it, with the `release-start` hop, since a member's cancellation changes what that
+      release builds. The wake is best-effort, runs only after this asset's own dispatch has landed, and runs on
+      the no-trigger exit too; a failure is reported to the error ledger and never raised to the caller.
     - A changed `Gate.SPEC_CANCELLED` on a note that is not a level note, in either direction,
       also wakes the note's own coordinator with `CoordinatorTrigger.OPERATOR_EDIT` whoever
       authored the commit, when no other trigger resolved for the tick and the note is not
       halted. A changed `Gate.DESIGN_DONE` alone dispatches no job on the asset itself.
+    - On a sibling-item tick, a sibling document of a stage-bearing type whose `review_result` newly turns
+      accepted (`approved` or `approved-with-concerns`), and whose DOC_TRANSITION wakes the asset, also wakes
+      the open release whose `spec_includes` lists the asset, with the `release-start` hop, once per tick. That
+      wake runs only after the asset's own dispatch has landed, fresh or stale.
+    - When that accepted document is the asset's start document already at stage `approved` (a re-approval) on
+      an asset that is not a release, the release owner's level note is also woken with `asset-approved`,
+      unless a gate crossing this tick already woke it. A re-approval crosses no gate, so this is the only
+      route by which the owner hears of it.
+    - Both wakes are best-effort: a failure is reported to the error ledger and never raised to the caller.
 
   Args:
     asset_note: The status folder-note path; its parent is the asset dir.
@@ -1980,6 +2183,11 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       product owning releases after a release was published. Accepted only by a level note — any other note
       refuses it; trigger resolution short-circuits to `CoordinatorTrigger.RELEASE_PUBLISHED` (honoring the
       halt override); `item` is `{}` on this path.
+    release_member: True when this call is the wake a release raises on one asset it carries, after its scaffold
+      or publish commit painted the asset. Accepted only by the status note of an asset that is neither a release
+      nor a level note — any other note refuses it; trigger resolution short-circuits to the `release-member`
+      trigger (honoring the halt override), and a member busy with a job keeps the wake as a declined one; `item`
+      is `{}` on this path.
     job_done: True when this call is the postman sweep's direct wake after a launch-checkbox job finished,
       with no commit behind it. The trigger is resolved from the note's current state and its raised
       `job-done` flag alone, the way a remembered wake is redeemed; with no flag raised the call does
@@ -1987,7 +2195,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
 
   Returns:
     `{"action": "refused", "reason"}` when `release_start` names a note that is not a release, or
-    `release_published` names a note that is not a level note;
+    `release_published` names a note that is not a level note, or `release_member` names a release or a level
+    note;
     `{"action": "noop"}`; `{"action": "dispatch-stale", "trigger", "job_id"}` when the dispatch
     matched an already-finished bundle — the trigger is retired, not retried, since the
     git-watch routine's own cursor has already advanced past this item regardless (N2); or
@@ -2045,6 +2254,13 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     return {
         TickAction.ACTION: TickAction.REFUSED,
         TickAction.REASON: f"release-published on a note that is not a level note: {asset_note.name}",
+    }
+
+  # guard: a release-member wake belongs to the status note of an asset a release carries and to nothing else
+  if release_member and (is_level or asset_type == ReleaseKey.ASSET_TYPE):
+    return {
+        TickAction.ACTION: TickAction.REFUSED,
+        TickAction.REASON: f"release-member on a note that is not an asset a release carries: {asset_note.name}",
     }
 
   # Domain(spec.lifecycle):
@@ -2124,12 +2340,14 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       wake_note_changed = (
           _has_group_note_changed(item, asset_note, repo_root) if group_members is not None else True
       )
+      # a release-member wake carries no item to judge, and the release's repaint it reports is real, so a busy
+      # member always keeps it as a declined wake to redeem once the running job finishes
       if (
           markers.get(JobMarker.PENDING_WAKE) is None
-          and _has_group_wake(
+          and (release_member or _has_group_wake(
               frontmatter, body, item, wake_members, raised_lags = raised_lags,
               note_changed = wake_note_changed, basenames = doc_basenames,
-          )
+          ))
       ):
         spec_job_markers.update(repo_root, asset_note, { JobMarker.PENDING_WAKE: JobMarker.DECLINED })
       # limit: an approval crossing waits for the job too, evaluate it before this branch if the wait costs
@@ -2205,6 +2423,9 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   elif release_published:
     # halt silences the upward release-published wake the same way; `item` is empty on this synthetic path
     trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.RELEASE_PUBLISHED
+  elif release_member:
+    # halt silences the release's member wake the same way; `item` is empty on this synthetic path
+    trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.RELEASE_MEMBER
   elif job_done:
     # the postman's direct wake carries no git item, so nothing here may read as an operator edit: the
     # raised flag alone decides, through the same redemption a remembered wake takes below
@@ -2280,6 +2501,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   cur_ready = None
   owner_edge_crossed = False
   cancel_crossed = False
+  member_cancel_crossed = False
   prev_ready: dict = {}
   if not is_level:
     prev_ready = _read_marker_dict(frontmatter, SpecCoordinatorReadyStateKey.STATE)
@@ -2296,7 +2518,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     # new one. The approval of a release's own design is never such a change, since a release is created with
     # that gate already closed. A cancellation also changes the cancelled note's own state, so the note's own
     # coordinator is woken to put it in order, whoever made the change — unless the note is halted, which
-    # silences every wake but an explicit command.
+    # silences every wake but an explicit command. Cancelling an asset, or lifting its cancellation, also tells
+    # the open release that carries it, since what that release builds has changed.
 
     # the approval edge rides the same marker too, in both directions; a recorded marker from before the
     # approval keys existed reads as matching on them, so the upgrade itself raises no hop
@@ -2310,6 +2533,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       crossed.discard(Gate.DESIGN_DONE)
     owner_edge_crossed = bool(crossed)
     cancel_crossed = Gate.SPEC_CANCELLED in crossed
+    member_cancel_crossed = cancel_crossed and asset_type != ReleaseKey.ASSET_TYPE
 
   # a cancellation crossing nothing else woke on still wakes the note's own coordinator, halt excepted
   if trigger is None and cancel_crossed and not flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
@@ -2346,7 +2570,22 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     # the hop runs after the record lands, so a failing release owner can't lose the stamp
     if owner_edge_crossed:
       wake_release_owner_on_approval(repo_root, asset_dir, today = today)
+
+    # a member's cancellation changes what its open release builds, so that release is told too
+    if member_cancel_crossed:
+      _wake_open_release(repo_root, asset_dir, asset_note, today = today)
     return { TickAction.ACTION: TickAction.NOOP }
+
+  # an accepted verdict on one of the asset's documents, read before the dispatch while every stage still stands as
+  # the verdict found it; the hops it raises run only once this asset's own dispatch has landed
+  accepted_docs: list[Path] = []
+  start_reapproved = False
+  if trigger == CoordinatorTrigger.DOC_TRANSITION and doc_transition is not None and not is_level:
+    accepted_docs, start_reapproved = _read_accepted_verdicts(
+        repo_root, asset_dir, asset_type,
+        transitions = group_transitions or dict([ doc_transition ]),
+        recorded = _read_doc_state(frontmatter),
+    )
 
   # assemble and queue the coordinator job's wire bundle — the level branch reads the level
   # ladder's own layers instead of the asset's type, tools and targets
@@ -2378,6 +2617,12 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   if len(group_transitions) > 1:
     # waiver: payload wire-key literal, same wire-schema dict as `_build_bundle`'s own wire-key literals
     payload["docs"] = sorted(group_transitions)
+
+  # a job-done wake names the launch job that just finished, so the coordinator can read its response
+  if trigger == CoordinatorTrigger.JOB_DONE and isinstance(last_job := markers.get(JobMarker.LAST_JOB), dict):
+    payload[JobMarker.LAST_JOB] = last_job
+
+  # the wire bundle names the expert, the payload, the source and the dedup key
   bundle = {
       gate_dispatch.WireKey.EXPERT: expert,
       gate_dispatch.WireKey.PAYLOAD: payload,
@@ -2393,6 +2638,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   # which is how one routine serves two ladders with two playbooks
   if protocols:
     bundle[_WIRE_PROTOCOLS] = protocols
+
+  # queue the coordinator job through core; its answer names the queued job
   response = gate_dispatch.core_dispatch_job(repo_root, bundle)
   job_id = str(response.get(gate_dispatch.WireKey.JOB_ID))
 
@@ -2482,6 +2729,15 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     if owner_edge_crossed:
       wake_release_owner_on_approval(repo_root, asset_dir, today = today)
 
+    # a member's cancellation changes what its open release builds, so that release is told too
+    if member_cancel_crossed:
+      _wake_open_release(repo_root, asset_dir, asset_note, today = today)
+
+    # an accepted verdict wakes the open release carrying the asset, and the owner on a re-approved start document
+    if accepted_docs:
+      _wake_on_accepted_verdict(repo_root, asset_dir, asset_note, start_reapproved = start_reapproved,
+                                owner_woken = owner_edge_crossed, today = today)
+
     # this tick's own trigger was retired, not dispatched — see the guard above
     return { TickAction.ACTION: TickAction.DISPATCH_STALE, TickAction.TRIGGER: trigger, TickAction.JOB_ID: job_id }
 
@@ -2522,6 +2778,15 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   # dispatch has landed, one hop, best-effort, so a broken release owner can't strand it (N2)
   if owner_edge_crossed:
     wake_release_owner_on_approval(repo_root, asset_dir, today = today)
+
+  # a member's cancellation changes what its open release builds, so that release is told too
+  if member_cancel_crossed:
+    _wake_open_release(repo_root, asset_dir, asset_note, today = today)
+
+  # an accepted verdict wakes the open release carrying the asset, and the owner on a re-approved start document
+  if accepted_docs:
+    _wake_on_accepted_verdict(repo_root, asset_dir, asset_note, start_reapproved = start_reapproved,
+                              owner_woken = owner_edge_crossed, today = today)
 
   # the fresh dispatch this tick queued
   return {

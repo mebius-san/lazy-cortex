@@ -40,8 +40,8 @@ import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-pos
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
-    GATE_ROW_ORDER, LEVEL_ROLES, ConflictCallout, GateCheckbox, GateRowGroup, LevelDoc, Section, SpecHaltKey,
-    SpecKey, Stage, StageKey,
+    GATE_ROW_ORDER, LEVEL_ROLES, AssetTypeKey, ConflictCallout, Gate, GateCheckbox, GateRowGroup, LevelDoc,
+    ReleaseKey, Section, SpecHaltKey, SpecKey, Stage, StageKey,
 )
 
 
@@ -195,15 +195,17 @@ def read_review_candidates(repo: Path, note: Path) -> list[str]:
   Guarantees:
     - The documents come back in scope order: the level ladder order (vision, use-cases, design, ui-design, tech) on
       a level note, alphabetical order on an asset note.
-    - A halted note yields an empty list; an untyped document, an undeclared or non-reviewed type, an append-only
-      type, a cancelled document and a document already under review are never listed.
+    - A halted note, a cancelled asset's note and a published release's note yield an empty list; an untyped
+      document, an undeclared or non-reviewed type, an append-only type, a cancelled document and a document
+      already under review are never listed.
 
   Args:
     repo: Repository root.
     note: Path of the folder note, located inside the repository.
 
   Returns:
-    File names, relative to the note's folder, in scope order. Empty when the note carries `spec_halted: true`.
+    File names, relative to the note's folder, in scope order. Empty when the note carries `spec_halted: true` or
+    `spec_cancelled: true`, or is a release note (`spec_asset_type: release`) carrying `spec_released: true`.
 
   Raises:
     ValueError: If the note lies outside the repository.
@@ -215,8 +217,10 @@ def read_review_candidates(repo: Path, note: Path) -> list[str]:
   # it never changes with how the scope is listed.
 
   # Contract:
-  # A halted note yields an empty list. An untyped document, an undeclared or non-reviewed type, an append-only
-  # type, a cancelled document and a document already under review are never listed.
+  # A halted note, a cancelled asset's note (`spec_cancelled: true`) and a published release's note yield an empty
+  # list. An untyped document, an undeclared or
+  # non-reviewed type, an append-only type, a cancelled document and a document already under review are never
+  # listed.
 
   # Domain(spec.notes):
   # # Halted note owes no review checkbox
@@ -228,6 +232,26 @@ def read_review_candidates(repo: Path, note: Path) -> list[str]:
 
   # guard: a halted note hangs no checkbox row at all
   if flip_gate.is_true(note_fm, SpecHaltKey.HALTED):
+    return []
+
+  # Domain(spec.notes):
+  # # Cancelled asset owes no review checkbox
+  # A cancelled asset is abandoned with its documents, so it never asks the operator to review anything. Its note
+  # hangs no open-review checkbox row, whatever documents sit beside it and whatever stage they were left at — an
+  # asset cancelled before its documents were moved with it included.
+
+  # guard: a cancelled asset is abandoned, so none of its documents is offered a review
+  if flip_gate.is_true(note_fm, Gate.SPEC_CANCELLED):
+    return []
+
+  # Domain(spec.notes):
+  # # A published release owes no review checkbox
+  # A published release is frozen: its plans and reports are the record of what shipped, and nothing about it is
+  # reviewed again. Its note therefore hangs no open-review checkbox row, whatever documents sit beside it.
+
+  # guard: a published release is frozen, so none of its documents is offered a review
+  if (note_fm.get(AssetTypeKey.TYPE, "").strip() == ReleaseKey.ASSET_TYPE
+      and flip_gate.is_true(note_fm, Gate.RELEASED)):
     return []
 
   # the owning product, whose own document types extend the shipped registry
@@ -619,8 +643,8 @@ def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) 
   # rebuild, publish, revise, or any other first word — sit together in one callout titled by that verb exactly as
   # the rows write it, whatever language the note is written in. The callout lists one checkbox per
   # row in ladder order, and the callouts themselves follow the ladder position of their first row. The explanation
-  # is written once, at the bottom of the callout, never per row: write, review, start, rebuild and publish rows carry
-  # a fixed explanation of what a tick does, in the note's language, and any other verb keeps the distinct
+  # is written once, at the bottom of the callout, never per row: write, review, start, rebuild and publish rows
+  # carry a fixed explanation of what a tick does, in the note's language, and any other verb keeps the distinct
   # explanations its rows brought along. A ticked row is the operator's gesture and stays in its verb's callout as a
   # ticked checkbox. An older note that kept every row in a block of its own is read the same way and folded into
   # this shape.

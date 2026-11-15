@@ -28,11 +28,11 @@ design.md approved in lazy-review (review_result: approved)
   → coordinator calls `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> flip-gate <asset> spec_design_done --auto`
        (unconditional flip; spec_design_done_at stamp + atomic commit — flip_gate's own work, Part 2)
   → the flip has landed, so `coordinator_dispatch.py` raises one `asset-approved` hop onto the
-    level note of the product that owns releases (Part 3, "Wake hops between notes");
+    level note of the product that owns releases (`lazy-spec.launch-checkbox-protocol.md` § Wake hops between notes);
     spec.catalog-coordinator recomputes the delta and hangs `Start release` there. The asset
     itself is design-only: no build runs in its folder
   → coordinator reconciles the asset's own checkbox set the type playbook declares (the
-    protocol's Part 3 is only the block SHAPE): a `Write` row whose condition now holds is hung
+    `lazy-spec.launch-checkbox-protocol.md` § Checkbox block shape is only the block SHAPE): a `Write` row whose condition now holds is hung
     in # Gates. A tick on one is never a writer job — the coordinator seeds the document with
     `seed-doc` and opens its review with lazy-review.start (feature playbook, "Seed-then-start")
   → the daemon's `_git_post` pushes both commits; the operator's own pull (or their vault's
@@ -50,10 +50,11 @@ design.md approved in lazy-review (review_result: approved)
     is journaled until the job ends
   → the job runs on its own branch, returns `code-report.md`, reports DONE
   → gate_tick's active-job poll (Part 2's pure-poller pass) clears the active_job marker, runs
-    the `land-result` collector, raises pending_wake: job-done, and logs the outcome; that raised
+    the `land-result` collector, records the retired job as `last_job` with its outcome, and raises pending_wake: job-done; that raised
     flag wakes the release's spec.coordinator again (`CoordinatorTrigger.JOB_DONE`, Part 2 —
     fires whoever authored the commit)
-  → on that wake the coordinator calls lazy-review.submit on the landed report — the ONLY thing
+  → on that wake the coordinator reads the finished job from `last_job` and, unless its outcome is
+    `error` (a failed build, a `Rebuild` reason), calls lazy-review.submit on the landed report — the ONLY thing
     that opens review on a job's result (playbook Chapter 6); nothing scans for it and gate_tick
     opens nothing
   → the report is accepted in review → the approval commit is pushed and pulled the same way as

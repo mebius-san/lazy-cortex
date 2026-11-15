@@ -70,6 +70,8 @@ _DECODE_ERRORS = "replace"
 _VERB_ERROR_EXIT = 2
 # The seconds a plugin verb may run before it counts as broken.
 _VERB_TIMEOUT_S = 120
+# The environment variable naming the repository a plugin verb works in.
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 
 # ----------------------------------------------------------------------------------------
@@ -681,6 +683,10 @@ def _run_verb(argv: list[str], repo: Path, home: Path) -> tuple[bool, str]:
   """
   Run a plugin verb in the consumer repository and judge its exit code.
 
+  Notes:
+    - The verb runs with `LAZY_REPO_ROOT` set to `repo`, overriding any value inherited from the caller's
+      environment, so it judges the repository it is asked about.
+
   Args:
     argv: The plugin name, the verb, and its arguments.
     repo: The consumer repository root, the verb's working directory.
@@ -708,11 +714,13 @@ def _run_verb(argv: list[str], repo: Path, home: Path) -> tuple[bool, str]:
   if not cli.is_file():
     return False, _ReasonKind.PLUGIN_MISSING
 
-  # the CLI runs under this interpreter, never through its exec bit, and a hung verb is a broken one
+  # the CLI runs under this interpreter, never through its exec bit, and a hung verb is a broken one; the repository
+  # it judges is named to it outright, so an inherited `LAZY_REPO_ROOT` never points it at another one
   try:
     proc = subprocess.run(
       [ sys.executable, str(cli), verb, *args ], cwd = str(repo), stdin = subprocess.DEVNULL,
       capture_output = True, text = True, check = False, timeout = _VERB_TIMEOUT_S,
+      env = { **os.environ, _ENV_REPO_ROOT: str(repo) },
     )
   except subprocess.TimeoutExpired as exc:
     raise ValueError(f"{plugin} {verb} timed out after {_VERB_TIMEOUT_S}s") from exc

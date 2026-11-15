@@ -29,6 +29,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -41,6 +42,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -49,16 +52,21 @@ import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-impor
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import summary_render  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_FALSE,
     BOOL_TRUE,
     FLIPPABLE_GATES,
+    GATE_ORDER,
     LEVEL_GATES,
     LEVEL_ROLES,
     PROTECTED_ATTACHMENTS,
@@ -93,6 +101,9 @@ class _Kind:
     LIST: The YAML block-list shape, or the empty inline-list shape (`key: []`), that
       `gate_tick.write_fm_list` writes.
     DICT: The compact single-line JSON object shape `gate_tick.set_fm_json` writes.
+    INT: A bare non-negative integer scalar, written by this module's own `set_fm_scalar`.
+    MOMENT: An ISO 8601 UTC moment to the second, `YYYY-MM-DDTHH:MM:SSZ`, written by this module's own
+      `set_fm_scalar`.
   """
 
   # The `true`/`false` literal shape written by `flip_gate.set_bool`.
@@ -103,6 +114,10 @@ class _Kind:
   LIST = "list"
   # The compact single-line JSON object shape `gate_tick.set_fm_json` writes.
   DICT = "dict"
+  # A bare non-negative integer scalar, written by this module's own `set_fm_scalar`.
+  INT = "int"
+  # An ISO 8601 UTC moment to the second, `YYYY-MM-DDTHH:MM:SSZ`, written by this module's own `set_fm_scalar`.
+  MOMENT = "moment"
 
 
 # ----------------------------------------------------------------------------------------
@@ -228,7 +243,8 @@ _SPEC_KEY_PREFIX = "spec_"
 # per `lazy-spec.coordinator.md`'s verb table: the six gate booleans plus `spec_cancelled`, the
 # halt flag, the cascade-target list (`spec_targets`), the change-cascade keys, the
 # derived `spec_state` token the coordinator rewrites on every wake that rebuilds `# Status brief`,
-# and the `spec_tools` verdict list the coordinator determines once the defining documents settle.
+# the `spec_tools` verdict list the coordinator determines once the defining documents settle, and the
+# `spec_asset_type` the coordinator records, held to the types its product scope declares.
 # Every other frontmatter key on a status folder-note is written by a different worker's own
 # primitive and stays out of this verb's reach; the two job markers are written through `mark-job`
 # into the runtime sidecar instead.
@@ -248,9 +264,25 @@ _WRITABLE_SCHEMA = {
     # the release note's own two keys: its bare SemVer version and the wikilinks of the assets it carries
     ReleaseKey.VERSION: _Kind.STR,
     ReleaseKey.INCLUDES: _Kind.LIST,
+    # the release's build bookkeeping the coordinator writes in a build dispatch: the build's number, its moment,
+    # and the flag a `Rebuild` tick raises until the next build is dispatched
+    ReleaseKey.BUILD: _Kind.INT,
+    ReleaseKey.BUILD_AT: _Kind.MOMENT,
+    ReleaseKey.REBUILD_OWED: _Kind.BOOL,
+    # the implementation build's own number and moment, which a test-only rebuild leaves standing, the moment of the
+    # last `Test` dispatch, and the pin an operator-set version carries
+    ReleaseKey.IMPL_BUILD: _Kind.INT,
+    ReleaseKey.IMPL_BUILD_AT: _Kind.MOMENT,
+    ReleaseKey.TEST_DISPATCHED_AT: _Kind.MOMENT,
+    # the job ids of the last `Build` and the last `Test` dispatch, so a failed job is told from a later one
+    ReleaseKey.BUILD_JOB: _Kind.STR,
+    ReleaseKey.TEST_JOB: _Kind.STR,
+    ReleaseKey.VERSION_PINNED: _Kind.BOOL,
     # the coordinator's tool verdict — LIST of open-vocabulary tool names (products declare
     # their own beyond the shipped four), so no member regex; an empty list is a legal verdict
     AssetTypeKey.TOOLS: _Kind.LIST,
+    # the asset's kind the coordinator records, held to the types declared in the note's product scope
+    AssetTypeKey.TYPE: _Kind.STR,
     # the level ladder's own five gates, spread from the closed set so the schema cannot drift
     # from it; `spec_design_done` is already above and the two ladders share that one key name
     **dict.fromkeys(LEVEL_GATES, _Kind.BOOL),
@@ -262,6 +294,17 @@ _WRITABLE_SCHEMA = {
 # (`spec_cascade_targets_done`, `spec_tools`, `tags`, `spec_source_requests`) keeps its own
 # shape and is unchecked here (M8).
 _ASSET_PATH_TOKEN_RE = re.compile(r"^[^/]+(/[^/]+)*$")
+
+# The one spelling of a frontmatter moment: an ISO 8601 UTC moment to the second, `Z`-suffixed, so moments compare
+# by their text
+_UTC_MOMENT_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+_UTC_MOMENT_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+# The keys whose value decides which bucket a container's stats count the asset in: every write of one of them
+# recounts the containers above the asset
+_CLASSIFYING_KEYS = frozenset({
+    SpecStateKey.STATE, SpecHaltKey.HALTED, Gate.SPEC_CANCELLED, Gate.RELEASED, *GATE_ORDER,
+})
 _TOKEN_LIST_KEYS = frozenset({ SpecTargetsKey.TARGETS })
 
 
@@ -297,7 +340,6 @@ _NOTE_SCHEMA = {
     AnsweredQuestionKey.FINGERPRINT: _Kind.STR,
     SpecCoordinatorDocStateKey.STATE: _Kind.DICT,
     SpecCoordinatorReadyStateKey.STATE: _Kind.DICT,
-    AssetTypeKey.TYPE: _Kind.STR,
     ICONIZE_ICON_KEY: _Kind.STR,
     ICONIZE_COLOR_KEY: _Kind.STR,
     _WIKI_PINNED_TOPICS_KEY: _Kind.LIST,
@@ -392,20 +434,44 @@ def is_asset_path_token(member: str) -> bool:
   return not any(segment in (".", "..") for segment in member.split("/"))
 
 
+def is_utc_moment(raw: str) -> bool:
+  """
+  Tell whether a value is an ISO 8601 UTC moment to the second, written `YYYY-MM-DDTHH:MM:SSZ`.
+
+  Args:
+    raw: The value to check.
+
+  Returns:
+    True when the value has exactly that shape and names a real calendar moment.
+  """
+
+  # guard: any other spelling — a bare date, an offset, a space separator, fractions — is not the one shape
+  if _UTC_MOMENT_RE.fullmatch(raw) is None:
+    return False
+
+  # the shape alone admits a 13th month or a 31st of February; the calendar decides
+  try:
+    datetime.strptime(raw, _UTC_MOMENT_FORMAT)
+  except ValueError:
+    return False
+  return True
+
+
 def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
   """
   Parse and validate a CLI-supplied value string against a schema key's expected shape.
 
   Args:
     kind: The `_Kind` token naming the expected shape.
-    raw: The raw CLI argument — `true`/`false` for `_Kind.BOOL`, a bare string for `_Kind.STR`, a
-      JSON array of strings for `_Kind.LIST`.
+    raw: The raw CLI argument — `true`/`false` for `_Kind.BOOL`, a bare string for `_Kind.STR`, a run of digits
+      for `_Kind.INT`, a UTC moment `YYYY-MM-DDTHH:MM:SSZ` for `_Kind.MOMENT`, a JSON array of strings for
+      `_Kind.LIST`.
     key: The frontmatter key being written — threaded through to the member-shape check the two
       product-relative path token list carries.
 
   Returns:
-    A `(value, error)` pair — `value` is the parsed Python object (bool / str / list[str]) on
-    success with `error` None; on failure `value` is None and `error` names what was wrong.
+    A `(value, error)` pair — `value` is the parsed Python object (bool / str / list[str]; an integer or a moment
+    kept as its text) on success with `error` None; on failure `value` is None and `error` names what was wrong.
   """
   if kind == _Kind.BOOL:
     # guard: only the two literal tokens `flip_gate.set_bool` writes are accepted
@@ -416,6 +482,16 @@ def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
     # guard: an empty scalar is never a legitimate value for a str-typed key
     if not raw:
       return None, "expected a non-empty string"
+    return raw, None
+  if kind == _Kind.INT:
+    # guard: only a bare run of digits is a build number; a sign, a fraction or a word is not
+    if not (raw.isascii() and raw.isdigit()):
+      return None, f"expected a non-negative integer, got {raw!r}"
+    return raw, None
+  if kind == _Kind.MOMENT:
+    # guard: only a real UTC moment to the second, `Z`-suffixed, compares against the other moments by its text
+    if not is_utc_moment(raw):
+      return None, f"expected an ISO 8601 UTC moment YYYY-MM-DDTHH:MM:SSZ, got {raw!r}"
     return raw, None
 
   # only _Kind.LIST remains — every key in `_WRITABLE_SCHEMA` maps to one of the three kinds
@@ -467,7 +543,7 @@ def _apply_value(fm_text: str, key: str, kind: str, value: object) -> str:
   """
   if kind == _Kind.BOOL and isinstance(value, bool):
     return flip_gate.set_bool(fm_text, key, value)
-  if kind == _Kind.STR and isinstance(value, str):
+  if kind in ( _Kind.STR, _Kind.INT, _Kind.MOMENT ) and isinstance(value, str):
     return set_fm_scalar(fm_text, key, value)
   if kind == _Kind.LIST and isinstance(value, list):
     return gate_tick.write_fm_list(fm_text, key, [str(item) for item in value])
@@ -484,7 +560,7 @@ def _format_value(kind: str, value: object) -> str:
 
   Returns:
     `"true"`/`"false"` for `_Kind.BOOL`, the compact JSON text for `_Kind.LIST`, or the bare
-    string itself for `_Kind.STR`.
+    string itself for `_Kind.STR`, `_Kind.INT` and `_Kind.MOMENT`.
   """
   if kind == _Kind.BOOL:
     return str(value).lower()
@@ -493,9 +569,10 @@ def _format_value(kind: str, value: object) -> str:
   return str(value)
 
 
-def _commit(asset_dir: Path, note: Path, key: str, value_str: str) -> None:
+def _commit(asset_dir: Path, note: Path, key: str, value_str: str, *, containers: list[Path] | None = None) -> None:
   """
-  Commit the rewritten status folder-note under the `lazy-spec.note-set-key` bot identity.
+  Commit the rewritten status folder-note, with the container notes its write moved, under the
+  `lazy-spec.note-set-key` bot identity.
 
   Skipped silently when the asset lives in a vault outside a git checkout — the file write
   remains, and is the entire mutation that case observes.
@@ -505,6 +582,7 @@ def _commit(asset_dir: Path, note: Path, key: str, value_str: str) -> None:
     note: The folder-note path that was just rewritten.
     key: The frontmatter key that was set, folded into the commit subject.
     value_str: The value's rendering, folded into the commit subject.
+    containers: The container notes whose stats region the write moved, carried by the same commit.
 
   Raises:
     subprocess.CalledProcessError: If the commit fails.
@@ -531,9 +609,31 @@ def _commit(asset_dir: Path, note: Path, key: str, value_str: str) -> None:
   # commit the note by pathspec under the dedicated bot identity, its icon repaint folded in, so the tree is
   # clean for the next daemon iteration and the operator's authorship and staging stay untouched
   flip_gate.commit_paths(
-      repo, [ note ], subject = f"{_AUTHOR_NAME}: {key} → {value_str} on {asset_dir.name}",
+      repo, [ note, *(containers or []) ], subject = f"{_AUTHOR_NAME}: {key} → {value_str} on {asset_dir.name}",
       author_name = _AUTHOR_NAME, author_email = _AUTHOR_EMAIL,
   )
+
+
+def _find_undeclared_type_reason(asset_dir: Path, asset_type: str) -> str | None:
+  """
+  Say why an asset type cannot be recorded on a note in a folder.
+
+  Args:
+    asset_dir: The asset folder holding the note.
+    asset_type: The asset type about to be written.
+
+  Returns:
+    The reason when neither the plugin nor the product covering the folder, its ancestors included, declares the
+    type; None when the type is declared there.
+  """
+  # the covering product's effective record names the types visible in its scope, the shipped ones included
+  vault = spec_paths.find_settings_root(asset_dir.resolve())
+  _key, record = resolve_product.effective_record_by_path(vault, asset_dir.resolve().relative_to(vault).as_posix())
+
+  # a type the scope declares is recordable
+  if asset_types.resolve(asset_type, record or {}) is not None:
+    return None
+  return f"undeclared asset type: {asset_type}"
 
 
 def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
@@ -541,48 +641,68 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
   Validate and write one frontmatter key on an asset's status folder-note.
 
   Refuses (no file mutation) when `key` is outside the coordinator's closed writable schema, or
-  when `raw_value` does not parse into the key's expected shape. A value that already matches
+  when `raw_value` does not parse into the key's expected shape, or when `key` is `spec_asset_type` and the type is
+  not declared in the note's product scope. A value that already matches
   what is on disk is a no-op — no write, no commit. On a genuine change, the frontmatter is
   rewritten and the note is committed under the `lazy-spec.note-set-key` bot identity — the key
-  and its new value ride in the commit subject; no `# History` line is appended.
+  and its new value ride in the commit subject; no `# History` line is appended. A key that decides which
+  bucket the asset counts in also brings the stats of every container above the asset up to date, in that
+  same commit.
 
   Guarantees:
     - A key outside the coordinator's closed writable schema is always refused with no file
       mutation.
+    - An asset type that no declaration in the note's product scope names, shipped or declared by the product or
+      one of its ancestors, is always refused with no file mutation.
     - A value that already matches what is on disk is a no-op: no write and no commit occur.
+    - A write of a key that decides the asset's bucket carries every container note above the asset whose stats
+      region changed in the same commit as the asset's note, so no container is left counting the asset's old
+      state.
 
   Args:
     asset_dir: The asset folder holding `<asset_dir.name>.md`.
     key: The `spec_*` frontmatter key to set.
     raw_value: The value as a CLI argument string — `true`/`false` for a bool-typed key, a bare
-      string for a str-typed key, a JSON array of strings for a list-typed key.
+      string for a str-typed key, a run of digits for an int-typed key, a JSON array of strings for a
+      list-typed key.
 
   Returns:
     `{"status": "set", "key", "value"}` on a fresh write, `{"status": "noop", "key"}` when the
-    value already matched, or `{"status": "refused", "key", "reason"}` when the key is unknown
-    or the value fails to parse.
+    value already matched, or `{"status": "refused", "key", "reason"}` when the key is unknown, the value fails to
+    parse, or the asset type is not declared in the note's product scope.
 
   Raises:
-    subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
-      from `_commit`.
+    subprocess.CalledProcessError: When the commit of the rewritten note fails.
   """
 
   # Domain(spec.notes):
   # # Closed vocabulary for coordinator-owned frontmatter
   # An asset's status note carries state contributed by several independent workers sharing one
   # file, and the coordinator's own share of it is a fixed, closed set of keys — the lifecycle
-  # gates, the halt flag, the cascade lists, the draft flag, the derived state
-  # token, and the tool verdict. A key outside that set is never the coordinator's to set,
+  # gates, the halt flag, the cascade lists, the draft flag, the derived state token, the tool verdict, the asset's
+  # kind, and a release's build bookkeeping. A key outside that set is never the coordinator's to set,
   # however plausible its name looks, because writing it would silently overwrite state another
-  # worker owns and relies on staying exactly as it left it.
+  # worker owns and relies on staying exactly as it left it. The asset's kind is held to the kinds declared for the
+  # asset's product: a kind that no declaration in that product's scope names is refused, so the note never claims
+  # a kind the product does not know.
 
   # Contract:
   # A key outside the coordinator's closed writable schema is always refused with no file
   # mutation — this verb NEVER writes a key it does not itself own.
 
   # Contract:
+  # An asset type that no declaration in the note's product scope names, whether shipped with the plugin or declared
+  # by the product or one of its ancestors, is always refused with no file mutation; only a declared type is ever
+  # recorded as the note's asset type.
+
+  # Contract:
   # A value that already matches what is on disk is treated as a no-op: no frontmatter write
   # and no commit occur.
+
+  # Contract:
+  # A write of a key that decides which bucket the asset counts in carries every container note above the asset
+  # whose stats region changed in the same commit as the asset's note; no commit of such a write leaves a container
+  # counting the asset's old state.
 
   # guard: key outside the coordinator's closed writable schema — clean refusal, no write
   if (kind := _WRITABLE_SCHEMA.get(key)) is None:
@@ -594,6 +714,10 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
 
   # guard: value does not parse into the key's expected shape — clean refusal, no write
   if error is not None:
+    return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, _ResultKey.KEY: key, _ResultKey.REASON: error}
+
+  # guard: an asset type no declaration in the note's product scope names — clean refusal, no write
+  if key == AssetTypeKey.TYPE and (error := _find_undeclared_type_reason(asset_dir, raw_value)) is not None:
     return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, _ResultKey.KEY: key, _ResultKey.REASON: error}
 
   # read the note's current frontmatter so the value write lands precisely
@@ -615,7 +739,12 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
   value_str = _format_value(kind, value)
   spec_paths.write_text_atomic(
       note, new_fm_text + note_explainers.ensure_explainers(text[fm_end:], note_explainers.lang_for_note(note)))
-  _commit(asset_dir, note, key, value_str)
+
+  # a key that decides the asset's bucket moves the counts of every container above it; those that changed ride
+  # the note's commit, so no container ever reads a count the note no longer matches
+  containers = [ container for container in flip_gate.containers_above(asset_dir)
+                 if summary_render.apply_container_stats(container) ] if key in _CLASSIFYING_KEYS else []
+  _commit(asset_dir, note, key, value_str, containers = containers)
   return {_ResultKey.STATUS: _SetKeyStatus.SET, _ResultKey.KEY: key, _ResultKey.VALUE: value_str}
 
 
@@ -746,6 +875,10 @@ def _is_value_ok(raw: str, kind: str) -> bool:
     return raw.lower() in (BOOL_TRUE, BOOL_FALSE)
   if kind == _Kind.STR:
     return bool(raw)
+  if kind == _Kind.INT:
+    return raw.isascii() and raw.isdigit()
+  if kind == _Kind.MOMENT:
+    return is_utc_moment(raw.strip("\"'"))
   if kind == _Kind.LIST:
     # an empty same-line value is the block-list form — accepted without a body re-walk
     if not raw:

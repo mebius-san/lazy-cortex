@@ -1,10 +1,12 @@
 """
-Logic behind the `lazycortex-specs release-scaffold (<product-key> --bump <part> | --refresh <release-note>)` verb.
+Logic behind the `lazycortex-specs release-scaffold (<product-key> --bump <part> | --refresh <release-note>
+[--no-architecture])` verb.
 
 The verb creates a product's next release from its delta — the release folder under `releases/`, its status note
 with the delta's wikilinks in `spec_includes` and its version, and the refreshed stats of the `releases` group
-note — and moves the closed releases into the archive. On a rebuild, it pulls the new approvals into an open
-release's `spec_includes` without dropping anyone already carried.
+note — and moves the closed releases into the archive. On a rebuild, it pulls the new approvals the owner's
+architecture covers into an open release's `spec_includes` without dropping anyone already carried; a product with
+no architecture document, or a refresh with `--no-architecture`, holds no approval back.
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -52,14 +56,12 @@ SCAFFOLD_NAME = "lazy-spec.release-scaffold"
 _GROUP_NOTE = "group_note"
 _MD_SUFFIX = ".md"
 _SPEC_PATH_KEY = "spec_path"
-_WIKILINK_OPEN = "[["
-_WIKILINK_CLOSE = "]]"
 
 # Refusal and usage messages
 _MSG_EMPTY_DELTA = "the delta is empty: no approved, unreleased asset to carry"
 _MSG_PUBLISHED = "release is published; its members are frozen"
 _MSG_SLOT_TAKEN = "an archive slot is already taken, or two releases would move into the same one"
-_MSG_USAGE = "usage: release-scaffold <product-key> --bump <part> | --refresh <release-note>\n"
+_MSG_USAGE = "usage: release-scaffold <product-key> --bump <part> | --refresh <release-note> [--no-architecture]\n"
 
 # Result keys
 _STATUS = "status"
@@ -72,6 +74,7 @@ _VERSION = "version"
 _INCLUDED = "included"
 _ADDED = "added"
 _KEPT = "kept"
+_BEHIND = "behind"
 
 
 def read_next_slug(releases_dir: Path) -> str:
@@ -211,19 +214,56 @@ def _render_include_link(repo: Path, note: Path) -> str:
     The content-root-relative link without its `.md` suffix, in wikilink brackets.
   """
   rel = note.resolve().relative_to(spec_paths.spec_content_root(repo).resolve()).as_posix()
-  return f"{_WIKILINK_OPEN}{rel[: -len(_MD_SUFFIX)]}{_WIKILINK_CLOSE}"
+  return f"{release_delta.WIKILINK_OPEN}{rel[: -len(_MD_SUFFIX)]}{release_delta.WIKILINK_CLOSE}"
 
 
-def _save_in_release_state(notes: list[Path]) -> None:
+def _update_in_release_state(notes: list[Path]) -> list[Path]:
   """
-  Paint each included asset's note `in-release`, so the folder colour changes before the asset's own next wake.
+  Paint each included asset's note `in-release`, so the folder colour changes before the asset's own next wake, and
+  recount every container above a repainted asset.
 
   Args:
     notes: The included assets' status notes.
+
+  Returns:
+    The container notes whose stats region changed, each once, in the order first met.
   """
+
+  # Domain(spec.lifecycle):
+  # # A release taking assets in refreshes every summary that counted them
+  # When a release takes assets in, each of them moves into the in-release state, and every summary that counted
+  # such an asset is recounted in the same change. These are the same places that read an asset's move along its
+  # ladder, up to the one that answers for its own contents, so no total above the asset keeps stating a
+  # distribution in which the asset still waits outside the release.
+
+  # each included asset reads in-release from now on
   for note in notes:
     text = note.read_text(encoding = _ENCODING)
     spec_paths.write_text_atomic(note, spec_frontmatter.set_scalar(text, SpecStateKey.STATE, AssetState.IN_RELEASE))
+
+  # every container counting a repainted asset reads its new state in the same commit
+  changed: list[Path] = []
+  above = ( container for note in notes for container in flip_gate.containers_above(note.parent) )
+  for container in dict.fromkeys(above):
+    if summary_render.apply_container_stats(container):
+      changed.append(container)
+  return changed
+
+
+def _wake_members(repo: Path, notes: list[Path]) -> None:
+  """
+  Wake the coordinator of each release member once, after the commit that repainted it has landed.
+
+  Args:
+    repo: Repository root.
+    notes: The members' status notes.
+  """
+  # best-effort: the release is already committed, so a failed wake only reaches stderr
+  try:
+    coordinator_dispatch.wake_release_members(repo, notes, today = None)
+  # waiver: the scaffold is already committed — no failure waking a member may change its outcome
+  except Exception as error:
+    sys.stderr.write(f"release-scaffold: member wake failed after the commit: {error}\n")
 
 
 def _create_refusal(reason: str) -> dict:
@@ -248,14 +288,15 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
 
   Guarantees:
     - Every file the verb writes lands in its single commit: the new release note, the members repainted as
-      in-release, every closed release moved into the archive (its old paths as deletions), the archive's group
-      note when the verb wrote it or its stats region changed, and the `releases` group note when the scaffold
-      created it or its stats region changed.
+      in-release, every container note above a repainted member whose stats region changed, every closed release
+      moved into the archive (its old paths as deletions), the archive's group note when the verb wrote it or its
+      stats region changed, and the `releases` group note when the scaffold created it or its stats region changed.
     - A successful run leaves none of the verb's own writes uncommitted.
-    - Refuses with nothing written when an archive slot a closed release would move into is already taken, when two
-      closed releases would claim the same slot, or when the archive's group note has to be written and no
-      group-note template resolves: no release folder is created, no member is repainted, no closed release is
-      moved and nothing is committed. The refusal is returned, never raised.
+    - Refuses with nothing written when the previous version cannot be read or bumped (an unreadable or missing
+      manifest, a version that is not bare SemVer, an unknown bump part), when an archive slot a closed release
+      would move into is already taken, when two closed releases would claim the same slot, or when the archive's
+      group note has to be written and no group-note template resolves: no release folder is created, no member
+      is repainted, no closed release is moved and nothing is committed. The refusal is returned, never raised.
 
   Notes:
     - The archive's group note, `releases/archive/archive.md`, an operator-zone group note, is written whenever
@@ -270,32 +311,31 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   Returns:
     `{"status": "set", "folder", "folder_note", "version", "included"}` with repo-relative paths and the included
     tokens, or `{"status": "refused", "reason"}` when a release is already open, the delta is empty, no product in
-    the chain owns releases, an archive slot is already taken on disk or would be claimed by two closed releases at
-    once (the reason names the slots and nothing has been written), no group-note template resolves for the archive's
-    note, or the scaffold of the release folder is refused.
+    the chain owns releases, the previous version cannot be read or bumped, an archive slot is already taken on
+    disk or would be claimed by two closed releases at once (the reason names the slots and nothing has been
+    written), no group-note template resolves for the archive's note, or the scaffold of the release folder is
+    refused.
 
   Raises:
-    ValueError: If `bump` is not one of the three parts, the settings file is not valid JSON, or the previous
-      version, read from the manifest or the published releases, is not a bare SemVer version or the manifest has an
-      unknown format or no version field.
+    ValueError: If the settings file is not valid JSON.
     subprocess.CalledProcessError: If staging or committing the release fails.
-    OSError: If a note or the manifest cannot be read or written, or a closed release folder cannot be moved into
-      the archive for a filesystem reason other than a taken or doubly claimed slot.
+    OSError: If a note cannot be read or written, or a closed release folder cannot be moved into the archive for a
+      filesystem reason other than a taken or doubly claimed slot.
   """
 
   # Contract:
   # Every file the verb writes MUST land in its single commit: the new release note, the members repainted
-  # as in-release, every closed release moved into the archive (its old paths as deletions), the archive's
-  # group note when the verb wrote it or its stats region changed, and the `releases` group note when the
-  # scaffold created it or its stats region changed. A successful run therefore leaves none of the verb's
-  # own writes uncommitted.
+  # as in-release, every container note above a repainted member whose stats region changed, every closed
+  # release moved into the archive (its old paths as deletions), the archive's group note when the verb wrote
+  # it or its stats region changed, and the `releases` group note when the scaffold created it or its stats
+  # region changed. A successful run therefore leaves none of the verb's own writes uncommitted.
 
   # Contract:
-  # When an archive slot a closed release would move into is already taken, or two closed releases would
-  # claim the same slot, or the archive's group note has to be written and no group-note template resolves,
-  # the verb MUST refuse before it writes anything: no release folder is created, no member is repainted,
-  # no closed release is moved and nothing is committed. The refusal is returned as a result, never raised,
-  # so callers MUST handle it.
+  # When the previous version cannot be read or bumped, when an archive slot a closed release would move into is
+  # already taken, or two closed releases would claim the same slot, or the archive's group note has to be
+  # written and no group-note template resolves, the verb MUST refuse before it writes anything: no release
+  # folder is created, no member is repainted, no closed release is moved and nothing is committed. The refusal
+  # is returned as a result, never raised, so callers MUST handle it.
 
   # resolve who owns the product's releases
   owner = resolve_product.find_release_owner_key(repo, key)
@@ -319,6 +359,13 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   record = resolve_product.load_products(repo)[owner]
   releases_dir = spec_paths.spec_content_root(repo) / record[_SPEC_PATH_KEY] / ReleaseKey.FOLDER
   slug = read_next_slug(releases_dir)
+
+  # the version the release carries, raised over the previous published one; read before anything is written, so a
+  # manifest that cannot be read or carries no bare version refuses without leaving a half-created release behind
+  try:
+    version = release_version.bump(release_version.read_previous_version(repo, record, releases_dir), bump)
+  except (ValueError, OSError) as error:
+    return _create_refusal(f"the release's version cannot be computed: {error}")
 
   # the releases already there are the ones the new release sends to the archive
   moves = _read_archive_moves(releases_dir)
@@ -352,16 +399,15 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   links = [ _render_include_link(repo, entry.note) for entry in included ]
   spec_paths.write_text_atomic(note, spec_frontmatter.write_list(text, ReleaseKey.INCLUDES, links))
 
-  # the version the release carries, raised over the previous published one
-  version = release_version.bump(release_version.read_previous_version(repo, record, releases_dir), bump)
+  # the release is versioned from the moment it exists, so its version tag already names it in the vault
   release_version.set_release_version(note, version)
 
-  # the members read in-release from now on
-  _save_in_release_state([ entry.note for entry in included ])
+  # the members read in-release from now on, and the containers above them count them so
+  recounted = _update_in_release_state([ entry.note for entry in included ])
 
   # the closed releases beside the new one move into the archive here; the paths written so far are the release
-  # note, the repainted members and every path the move touched
-  written = [ note, *( entry.note for entry in included ), *_apply_archive_moves(moves) ]
+  # note, the repainted members, the containers recounted above them and every path the move touched
+  written = [ note, *( entry.note for entry in included ), *recounted, *_apply_archive_moves(moves) ]
 
   # Domain(spec.notes):
   # # The archive counts its releases and the releases folder counts them all
@@ -383,36 +429,70 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   group_note = releases_dir / f"{ReleaseKey.FOLDER}{_MD_SUFFIX}"
   if group_note.is_file():
     stats_moved = summary_render.apply_container_stats(group_note)
-    if stats_moved or created.get(_GROUP_NOTE):
+    if (stats_moved or created.get(_GROUP_NOTE)) and group_note not in written:
       written.append(group_note)
 
   # one commit under this verb's identity carries every written path
   release_version.commit_paths(repo, written, author = SCAFFOLD_NAME,
                                subject = f"{SCAFFOLD_NAME}: {slug} ({version}) under {owner}")
+
+  # every member painted in-release is told once the release has landed, so its brief follows its new state
+  _wake_members(repo, [ entry.note for entry in included ])
   return {
       _STATUS: _STATUS_SET, _FOLDER: created[_FOLDER], _FOLDER_NOTE: created[_FOLDER_NOTE], _VERSION: version,
       _INCLUDED: [ entry.token for entry in included ],
   }
 
 
-def refresh_includes(repo: Path, release_note: Path) -> dict:
+def refresh_includes(repo: Path, release_note: Path, *, waived: bool = False) -> dict:
   """
   Pull the delta's new members into an open release's `spec_includes`.
+
+  A new delta asset the owner's architecture does not cover yet stays out. Each newly listed member is woken once
+  the commit that lists it has landed.
+
+  Guarantees:
+    - Every file the verb writes lands in its single commit: the release note, the members repainted as in-release
+      and every container note above a repainted member whose stats region changed. A run that adds no member
+      writes and commits nothing.
+    - A new delta asset the architecture holds behind is named in `behind` and never listed; a product with no
+      architecture document, or a call that waives the architecture, holds none behind.
 
   Args:
     repo: Repository root.
     release_note: The release's status note.
+    waived: When True, the architecture holds no new asset out of the release.
 
   Returns:
-    `{"added": [tokens], "kept": [tokens]}` — the members newly listed and the delta members already listed; a
-    member listed earlier and no longer in the delta stays listed. `{"status": "refused", "reason"}` when the
-    release is published or no product in the note's chain owns releases.
+    `{"added": [tokens], "kept": [tokens], "behind": [tokens]}` — the members newly listed, the delta members
+    already listed, and the new delta assets held out while the owner's architecture document exists, is not waived
+    and is not approved after them; a member listed earlier and no longer in the delta stays listed.
+    `{"status": "refused", "reason"}` when the release is published or no product in the note's chain owns releases.
 
   Raises:
     OSError: If the release note or an included asset's note cannot be read or written.
     ValueError: If `release_note` does not lie under `repo`.
     subprocess.CalledProcessError: If the commit of the new members fails.
   """
+
+  # Contract:
+  # Every file the verb writes MUST land in its single commit: the release note, the members repainted as
+  # in-release and every container note above a repainted member whose stats region changed. A run that adds no
+  # member writes nothing and commits nothing.
+
+  # Contract:
+  # A new delta asset is listed in the release only while the owner's architecture holds it behind no longer;
+  # an asset the architecture holds behind is named in `behind` and never listed. A product with no architecture
+  # document, or a call that waives the architecture, holds no asset behind.
+
+  # Domain(spec.lifecycle):
+  # # A release takes in only what its architecture covers
+  # A release open for new members takes in an approved design only once the product's architecture covers it, as
+  # a release starts only from an architecture behind none of its designs. A design the architecture is behind waits
+  # outside the release until the architecture is approved after it; it is named as waiting, never added.
+  # A product with no architecture document, or whose rules waive the document, holds no design back: a new
+  # approved design joins the open release at once.
+
   text = release_note.read_text(encoding = _ENCODING)
   fm_values, _end = spec_frontmatter.parse(text)
 
@@ -424,26 +504,32 @@ def refresh_includes(repo: Path, release_note: Path) -> dict:
   key, _record = resolve_product.effective_record_by_path(repo, release_note.relative_to(repo).as_posix())
 
   # guard: a release note under a product that owns no releases has no delta to refresh from
-  if key is None or resolve_product.find_release_owner_key(repo, key) is None:
+  if key is None or (owner := resolve_product.find_release_owner_key(repo, key)) is None:
     return _create_refusal(f"no release owner above the release note {release_note.name!r}")
 
-  # the delta as it stands now, against the members already listed
+  # the delta as it stands now, against the members already listed; a new asset the owner's architecture does not
+  # cover yet is held out
   included, _excluded = release_delta.find_all_delta_entries(repo, key)
   existing = spec_frontmatter.read_list(text, ReleaseKey.INCLUDES)
-  added = [ entry for entry in included if _render_include_link(repo, entry.note) not in existing ]
+  fresh = [ entry for entry in included if _render_include_link(repo, entry.note) not in existing ]
+  _doc, _approved_at, behind = release_delta.find_architecture_lag(repo, owner, fresh, waived = waived)
+  added = [ entry for entry in fresh if entry.token not in behind ]
   kept = [ entry.token for entry in included if _render_include_link(repo, entry.note) in existing ]
 
   # the new members join the list and are repainted in-release, all in one commit
   if added:
     links = existing + [ _render_include_link(repo, entry.note) for entry in added ]
     spec_paths.write_text_atomic(release_note, spec_frontmatter.write_list(text, ReleaseKey.INCLUDES, links))
-    _save_in_release_state([ entry.note for entry in added ])
+    recounted = _update_in_release_state([ entry.note for entry in added ])
     release_version.commit_paths(
-        repo, [ release_note, *( entry.note for entry in added ) ], author = SCAFFOLD_NAME,
+        repo, [ release_note, *( entry.note for entry in added ), *recounted ], author = SCAFFOLD_NAME,
         subject = f"{SCAFFOLD_NAME}: {len(added)} new member(s) in {release_note.parent.name}")
 
+    # only the newly listed members changed state, so only they are told
+    _wake_members(repo, [ entry.note for entry in added ])
+
   # the members newly listed and the delta members already there
-  return { _ADDED: [ entry.token for entry in added ], _KEPT: kept }
+  return { _ADDED: [ entry.token for entry in added ], _KEPT: kept, _BEHIND: behind }
 
 
 def main(argv: list[str]) -> int:
@@ -457,7 +543,8 @@ def main(argv: list[str]) -> int:
     - Prints the JSON result of `scaffold_release` or `refresh_includes` on stdout.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--no-architecture` is meaningful with `--refresh`
+      and holds no new asset out of the release.
 
   Returns:
     Exit code: 0 on success, 1 on a refusal, 2 when the arguments name no product or no existing note.
@@ -470,6 +557,8 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--bump", choices = release_version.PARTS, default = "")
   # waiver: argparse CLI signature -- option name
   parser.add_argument("--refresh", default = "")
+  # waiver: argparse CLI signature -- option flag + standard argparse action
+  parser.add_argument("--no-architecture", action = "store_true")
   args = parser.parse_args(argv)
   repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
 
@@ -483,7 +572,7 @@ def main(argv: list[str]) -> int:
       return 2
 
     # the refresh pulls the delta's new members into the open release
-    result = refresh_includes(repo, note)
+    result = refresh_includes(repo, note, waived = args.no_architecture)
   elif args.product and args.bump:
     result = scaffold_release(repo, args.product, bump = args.bump)
   else:

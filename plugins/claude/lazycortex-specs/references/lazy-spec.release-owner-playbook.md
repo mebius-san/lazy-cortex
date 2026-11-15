@@ -23,7 +23,7 @@ The row joins the catalog playbook's launch-checkbox table (§ 3) on this produc
 
 **What holds `Start release`.** Both facts come from `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> release-delta <product-key>`, never from reading the tree by hand:
 
-- **The architecture is current** when `architecture.behind` is empty: `architecture.md` is `approved`, and approved later than the start document of every asset in the delta. A product whose `# Coordinator rules` declare that it carries no architecture document is always current, whatever the verb reports.
+- **The architecture is current** when `architecture.behind` is empty: `architecture.md` is `approved`, and approved later than the start document of every asset in the delta. A product whose `# Coordinator rules` declare that it carries no architecture document is always current: call the verb there as `release-delta <product-key> --no-architecture`, which reports nothing in `architecture.behind` even while an `architecture.md` file exists. A product with no `architecture.md` file gets nothing behind without the flag.
 - **No conflict is open** when `conflicted` is empty: neither the product's level notes nor the notes of the delta's assets carry an open coherence conflict. The operator closes one with `Resolve here` or `Not a conflict` (`lazy-spec.coordination-playbook.md` Chapter 19).
 
 While either holds the row down, `# Status brief` says so in plain words: which approved designs the architecture does not cover yet and that `Revise architecture` waits for a tick — or `Write architecture`, when the document does not exist — and which notes carry a conflict.

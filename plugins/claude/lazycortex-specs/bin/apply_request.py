@@ -282,8 +282,6 @@ class _K:
     PROG: CLI program name shown in `--help` output.
     CLI_LAZYCORTEX_SPECS: Plugin name used to resolve the `lazycortex-specs` CLI.
     CLI_LAZYCORTEX_REVIEW: Plugin name used to resolve the `lazycortex-review` CLI.
-    ENV_REPO_ROOT: Env var passed to the `lazycortex-core` CLI naming the repo it should
-      resolve settings and job storage against.
     REVIEW_STOP_TIMEOUT_S: Seconds the best-effort `lazycortex-review stop` subprocess may run.
     MD_SUFFIX: The markdown file extension.
     BOT_NAME_DEFAULT: Default git author name for the apply-transition commit.
@@ -443,8 +441,6 @@ class _K:
   SEED_DOC_FLAG = "--doc"
   # The `<name>:<type>` token seeding a level's own vision document.
   VISION_DOC_TOKEN = f"{LevelDoc.VISION}:system-vision"
-  # Env var passed to the `lazycortex-core` CLI naming the repo it should resolve settings and job storage against.
-  ENV_REPO_ROOT = "LAZY_REPO_ROOT"
   # Seconds the best-effort `lazycortex-review stop` subprocess may run.
   REVIEW_STOP_TIMEOUT_S = 60
   # The markdown file extension.
@@ -2370,24 +2366,8 @@ class _Apply:
     Raises:
       SystemExit: When no lookup stage can find the `lazycortex-core` sibling CLI.
     """
-    # the core CLI resolves the job against this repo's runtime, named through the environment
-    env = os.environ.copy()
-    env[_K.ENV_REPO_ROOT] = str(self.repo)
-
-    # the cancel request names the job by its expert and id; only a clean exit counts as cancelled
-    res = subprocess.run(
-        [ sys.executable, str(_resolve_core(self.repo)), "cancel-job" ],
-        input = json.dumps({
-            "expert": job_info.get(JobMarker.EXPERT),
-            "job_id": job_info.get(JobMarker.JOB_ID),
-        }),
-        capture_output = True,
-        text = True,
-        cwd = str(self.repo),
-        env = env,
-        check = False, encoding = "utf-8",
-    )
-    return res.returncode == 0
+    # the shared core-verb call; only a clean exit counts as cancelled
+    return spec_job_markers.cancel_job(self.repo, _resolve_core(self.repo), job_info)
 
   def _stop_review_best_effort(self, doc_path: Path) -> None:
     """

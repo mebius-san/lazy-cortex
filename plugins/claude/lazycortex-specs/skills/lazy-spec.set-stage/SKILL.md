@@ -7,7 +7,7 @@ execution-discipline-waiver: "Single-purpose primitive — one call of the `set-
 
 Primitive skill that updates an authored doc's per-file `spec_stage`. Other `spec.*` skills delegate to this rather than edit frontmatter directly. The work itself is the `set-stage` verb of this plugin's CLI; this skill calls it once and reads its answer.
 
-The authoritative definition of per-file stage semantics lives in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`. This skill never restates the semantics — point at it for what each stage means.
+The authoritative definition of per-file stage semantics lives in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.doc-stage-protocol.md`. This skill never restates the semantics — point at it for what each stage means.
 
 ## Input
 

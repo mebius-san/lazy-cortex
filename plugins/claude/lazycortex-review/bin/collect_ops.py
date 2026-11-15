@@ -83,7 +83,7 @@ import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
 import reapply as _reapply  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, Tag,
+    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, ReviewKey, Tag,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from errors import PayloadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -658,9 +658,27 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
 # ---------------------------------------------------------------------- tick
 
 
+def _is_review_active(doc: Path) -> bool:
+  """
+  Tell whether a document is in the review loop.
+
+  Args:
+    doc: The review document.
+
+  Returns:
+    True when its frontmatter reads `review_active: true`; False otherwise, a missing or unreadable file included.
+  """
+  # a document gone or unreadable is in no review
+  try:
+    meta, _body = _fm.parse(_atomic_io.read_text(doc))
+  except OSError:
+    return False
+  return str(meta.get(ReviewKey.ACTIVE, "")).strip().lower() == "true"  # waiver: frontmatter literal
+
+
 def collect_tick(repo: Path) -> dict:
   """
-  Raise a `job-done` wake and dispatch the coordinator for every document with finished work.
+  Raise a `job-done` wake and dispatch the coordinator for every document in the review loop with finished work.
 
   The postman sweep no longer lands payloads or commits anything. For each target file
   carrying at least one DONE-and-not-CONSUMED job it clears the `active_job` marker, raises
@@ -677,6 +695,8 @@ def collect_tick(repo: Path) -> dict:
     - A DONE job bundle that cannot be resolved to a target file belongs to another
       plugin's pipeline and is skipped silently: never counted, never written to stderr,
       and never surfaced as an `error` in the sweep summary.
+    - A document whose frontmatter does not read `review_active: true` is skipped: no wake, no dispatch, not
+      counted in `files`, and its finished job bundle is left unconsumed.
 
   Args:
     repo: Absolute path to the repository root.
@@ -737,6 +757,22 @@ def collect_tick(repo: Path) -> dict:
       # no `_target_file` and no marker link — the job belongs to another plugin's
       # pipeline (every review dispatch writes one or the other), so it is skipped silently
       if resolved is None:
+        continue
+
+      # Contract:
+      # A document whose frontmatter does not read `review_active: true` is skipped: no wake is raised, no
+      # coordinator is dispatched, it is not counted in `files`, and its finished job bundle is left unconsumed so a
+      # resumed review still lands it.
+
+      # Domain(review.jobs):
+      # # A document out of the review loop earns no wake
+      # A document taken out of the review loop, for instance because its review was stopped, is not worked on:
+      # finished work addressed to it raises no wake and is not landed. The finished work is kept, not discarded,
+      # so that when the review is resumed the work still lands then.
+
+      # guard: a document out of the review loop, e.g. stopped by its asset's cancel, takes no landing and no
+      # wake; its bundle stays unconsumed so a resumed review still lands it
+      if not _is_review_active(resolved):
         continue
 
       # only an outcome `collect-job` consumes is deliverable — everything else stays

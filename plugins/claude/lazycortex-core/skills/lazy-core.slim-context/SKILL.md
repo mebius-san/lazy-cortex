@@ -52,7 +52,7 @@ Append the **wiki companion note** when it applies (report-only, never a questio
 
 ## Phase 2: Fix oversized rules files
 
-For each rules file **over 3 KB**:
+For each rules file **over 3 KB** (an `always_loaded` entry that carries `authored_bytes` is judged on that value: it is the installed scaffold rule, and its generated `## Registry` block is not text to slim):
 
 1. Read the rules file and identify its corresponding agent(s):
    - Check if the rules file mentions an agent file path

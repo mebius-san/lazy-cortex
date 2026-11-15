@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Mirror external design repos into your vault and keep a spec doc's visible source list matching its frontmatter.
-last_regen: 2026-11-10
+last_regen: 2026-11-15
 diagram_spec:
   anchor: "How an upstream unit becomes part of a spec"
   request: "flow diagram: upstream-run mirrors and diffs a unit from a foreign repo, an operator ticks its Take into work / Process update checkbox, a body-only request opens and freezes the unit to in-review, the request lands against an asset (recorded in spec_source_requests), and refresh-sources re-projects that attachment into the asset doc's visible Sources list"
@@ -27,6 +27,8 @@ Registering a source is a one-time, hand-edited step: you add a `<repo-key>` ent
 A unit landing as `new` or `drifted` doesn't do anything on its own; it waits on its checkbox. Tick `Take into work` (or `Process update`) on that unit's folder-note under `upstream/<repo-key>/<mount>/<unit-path>/` and re-run the pass — or let the next scheduled tick catch it — and the unit opens a body-only request under `requests/`, freezing itself to `in-review` until that request's review concludes. From there the request travels through the standard review pipeline on its own schedule; `/lazy-spec.upstream-run` never dispatches an expert job itself.
 
 Once a request from an upstream unit lands against one of your assets, that asset's `spec_source_requests` frontmatter gains the request's wikilink — but the doc body doesn't update itself. Run `/lazy-spec.refresh-sources <doc-path>` on that asset's authored doc and the `## Requests` list under its `# Sources` section catches up: the newly attached request appears as a bullet, any bullet whose wikilink is no longer in frontmatter drops out, and everything else you or another skill wrote there stays untouched. Nothing outside that section moves: the one-line descriptions on the asset's own note and on the product root are the coordinators' to keep current, and the counts on container notes are refreshed by their own event-driven writes.
+
+`/lazy-spec.upstream-run` never asks you a question and always finishes cleanly: a source that can't be reached is reported in the result and the other sources still run. It is also idempotent — re-running it with nothing changed upstream reports every previously processed unit as `processed` again.
 
 In practice: reach for `/lazy-spec.upstream-run` when you want to know right now what changed in a mirrored source instead of waiting on the schedule. Reach for `/lazy-spec.refresh-sources` any time you've hand-edited a doc's `spec_source_docs` / `spec_source_requests`, or after a request — upstream-derived or otherwise — has landed and you want the doc's visible Sources section to actually say so.
 

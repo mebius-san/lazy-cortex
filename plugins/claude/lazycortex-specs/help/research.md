@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Answer one question against the spec tree without loading whole documents into your context.
-last_regen: 2026-11-12
+last_regen: 2026-11-15
 no_diagram: true
 source_skills:
   - lazy-spec.lookup

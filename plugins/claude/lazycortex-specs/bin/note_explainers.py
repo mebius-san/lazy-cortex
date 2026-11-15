@@ -91,6 +91,7 @@ GATE_HELPER_KEYS: dict[str, str] = {
     GateCheckbox.START_VERB: "gate-helper.start",
     GateCheckbox.BUILD_VERB: "gate-helper.build",
     GateCheckbox.REBUILD_VERB: "gate-helper.rebuild",
+    GateCheckbox.TEST_VERB: "gate-helper.test",
     GateCheckbox.PUBLISH_VERB: "gate-helper.publish",
 }
 

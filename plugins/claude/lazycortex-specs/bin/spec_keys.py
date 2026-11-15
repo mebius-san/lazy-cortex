@@ -438,14 +438,24 @@ ROLE_GATES = {
 # ----------------------------------------------------------------------------------------
 class StageKey:
   """
-  Per-file frontmatter key carried by authored spec docs.
+  Per-file frontmatter keys carried by authored spec docs.
 
   Attributes:
     STAGE: The `spec_stage` key naming a doc's lifecycle stage.
+    CANCELLED_WITH_ASSET: The `spec_cancelled_with_asset` key marking a doc moved to `cancelled` together with its
+      asset, so un-cancelling the asset brings back only what the asset took with it.
+    REVIEW_STOPPED_WITH_ASSET: The `spec_review_stopped_with_asset` key marking a doc whose review the asset's
+      cancellation stopped, so un-cancelling the asset re-opens exactly those reviews.
   """
 
   # The `spec_stage` key naming a doc's lifecycle stage.
   STAGE = "spec_stage"
+  # The `spec_cancelled_with_asset` key marking a doc moved to `cancelled` together with its asset, so un-cancelling
+  # the asset brings back only what the asset took with it.
+  CANCELLED_WITH_ASSET = "spec_cancelled_with_asset"
+  # The `spec_review_stopped_with_asset` key marking a doc whose review the asset's cancellation stopped, so
+  # un-cancelling the asset re-opens exactly those reviews.
+  REVIEW_STOPPED_WITH_ASSET = "spec_review_stopped_with_asset"
 
 
 # ----------------------------------------------------------------------------------------
@@ -600,6 +610,8 @@ class HistoryEvent:
     REQUEST_PROCESSED: An upstream request reached its processed state.
     DEPLOYED: A release was deployed to one of the product's targets.
     DEPLOY_FAILED: A release's deploy command exited non-zero.
+    DEPLOYED_BUILD: A named build of a release was deployed to one of the product's targets.
+    DEPLOY_FAILED_BUILD: A named build's deploy command exited non-zero.
     PUBLISHED: A release was published — its version frozen and its assets released.
     VERSION_SET: An operator set a release's version outright.
     COHERENCE_CHECKED: A coherence check of a document finished and its conflicts were hung.
@@ -624,6 +636,10 @@ class HistoryEvent:
   DEPLOYED = "deployed"
   # A release's deploy command exited non-zero.
   DEPLOY_FAILED = "deploy-failed"
+  # A named build of a release was deployed to one of the product's targets.
+  DEPLOYED_BUILD = "deployed-build"
+  # A named build's deploy command exited non-zero.
+  DEPLOY_FAILED_BUILD = "deploy-failed-build"
   # A release was published — its version frozen and its assets released.
   PUBLISHED = "published"
   # An operator set a release's version outright.
@@ -849,6 +865,7 @@ class GateCheckbox:
     START_RESEARCH: Label for the `research` tool's launch checkbox.
     START_RELEASE: Label for the product note's checkbox that creates a release from the current delta.
     REBUILD: Label for the release note's checkbox that pulls new approvals in and builds again.
+    TEST: Label for the release note's checkbox that starts the tester job of the current build.
     PUBLISH: Label for the publish checkbox the coordinator hangs on a release note once its `spec_built`
       closes — unlike the other fixed labels, its tick never dispatches an expert job (it runs
       `release-publish` directly) and so never carries an `active_job` entry of its own.
@@ -862,6 +879,7 @@ class GateCheckbox:
     BUILD_VERB: The verb, the first word of a label, of the release note's first-build row.
     START_VERB: The verb, the first word of a label, shared by the `Start release` and `Start research` rows.
     REBUILD_VERB: The verb, the first word of a label, of the release note's rebuild row.
+    TEST_VERB: The verb, the first word of a label, of the release note's test row.
     PUBLISH_VERB: The verb, the first word of a label, of the release note's publish row.
     GATE_CALLOUT_MARK: Markdown callout prefix marking a gate-readiness block.
   """
@@ -883,6 +901,9 @@ class GateCheckbox:
   START_RELEASE = "Start release"
   # Label for the release note's checkbox that pulls new approvals in and builds again.
   REBUILD = "Rebuild"
+  # Label for the release note's checkbox that starts the tester job of the current build — the operator's tick is
+  # the only way the test run of a build starts.
+  TEST = "Test"
   # Label for the publish checkbox the release coordinator hangs on a release note once its `spec_built` closes —
   # its tick runs `release-publish` (the production deploy, then every included asset's release and tag, the manifest
   # and one commit) and never dispatches an expert job, so it never carries an `active_job` entry of its own.
@@ -903,6 +924,8 @@ class GateCheckbox:
   START_VERB = "Start"
   # The verb of the release note's rebuild row.
   REBUILD_VERB = "Rebuild"
+  # The verb of the release note's test row.
+  TEST_VERB = "Test"
   # The verb of the release note's publish row.
   PUBLISH_VERB = "Publish"
   # Markdown callout prefix marking a gate-readiness block.
@@ -1025,6 +1048,7 @@ GATE_ROW_ORDER = [
     GateCheckbox.START_RELEASE,
     GateCheckbox.BUILD,
     GateCheckbox.REBUILD,
+    GateCheckbox.TEST,
     GateCheckbox.PUBLISH,
 ]
 
@@ -1126,6 +1150,11 @@ class JobMarker:
     COHERENCE_JOBS: The coherence checks in flight for the note's documents, one per checked document.
     DOC: The checked-document field of one coherence-job member.
     DROPPED: The optional field of one coherence-job member counting the neighbours dropped over the text budget.
+    LAST_JOB: The launch-checkbox job the poller last retired on the note, kept so the coordinator's `job-done` wake
+      can find the finished job's response.
+    OUTCOME: The field of the `LAST_JOB` dict naming how the job ended — the outcome the job's response reports,
+      or the bundle marker when it left no response.
+    MARKER: The field of the `LAST_JOB` dict holding the terminal bundle marker the poller found, lowercased.
   """
 
   # The coordinator job currently in flight on the asset.
@@ -1160,6 +1189,14 @@ class JobMarker:
   DOC = "doc"
   # The optional field of one coherence-job member counting the neighbours dropped over the text budget.
   DROPPED = "dropped"
+  # The launch-checkbox job the poller last retired on the note, kept so the coordinator's `job-done` wake can find
+  # the finished job's response.
+  LAST_JOB = "last_job"
+  # The field of the `LAST_JOB` dict naming how the job ended — the outcome the job's response reports, or the
+  # bundle marker when it left no response.
+  OUTCOME = "outcome"
+  # The field of the `LAST_JOB` dict holding the terminal bundle marker the poller found, lowercased.
+  MARKER = "marker"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1173,6 +1210,10 @@ class PluginErrorCause:
     ICON_REPAINT_FAILED: A best-effort icon repaint of the notes a commit carries that failed; the commit went
       ahead without the repaint.
     LANDING_REFUSED: A finished job's result could not be put in the asset folder; the asset was halted.
+    RELEASE_MEMBER_WAKE_FAILED: A best-effort wake of an asset a release carries raised after the release's own
+      scaffold, refresh or publish commit had already landed.
+    RELEASE_START_WAKE_FAILED: A best-effort wake of an open release raised after the approval of a document of
+      one of its members had already landed.
   """
 
   # A best-effort wake of a release owner's level note raised after the change that triggered it had already landed.
@@ -1181,6 +1222,12 @@ class PluginErrorCause:
   ICON_REPAINT_FAILED = "icon-repaint-failed"
   # A finished job's result could not be put in the asset folder; the asset was halted.
   LANDING_REFUSED = "landing-refused"
+  # A best-effort wake of an asset a release carries raised after the release's own scaffold, refresh or publish
+  # commit had already landed.
+  RELEASE_MEMBER_WAKE_FAILED = "release-member-wake-failed"
+  # A best-effort wake of an open release raised after the approval of a document of one of its members had already
+  # landed.
+  RELEASE_START_WAKE_FAILED = "release-start-wake-failed"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1225,6 +1272,8 @@ class CoordinatorTrigger:
       derived from `item`.
     DOC_LANDED: A level document entered review while the level note still hangs its `Write` row, regardless of
       the commit's author.
+    RELEASE_MEMBER: A release painted the asset `in-release`, `awaiting-release` or done; raised on the asset's
+      status note after the release's own commit landed. Synthetic, never derived from `item`.
   """
 
   # A non-`@bot.`-authored commit that changed the asset note, or — on a grouped tick — a sibling doc not carrying
@@ -1253,8 +1302,8 @@ class CoordinatorTrigger:
   DOC_TRANSITION = "doc-transition"
   # An asset's start document reached `approved` (or was re-approved, or the asset was cancelled), dispatched one hop
   # upward onto the level note of the product that owns releases, so it can rehang `Start release` and rewrite its
-  # brief. Carries `payload["asset"]` naming the asset's token relative to the root of the product that owns releases,
-  # not to the asset's own product. Synthetic, never derived from `item`; it creates and launches nothing.
+  # brief. Carries `payload["asset"]` naming the asset's token relative to the root of the product that owns
+  # releases, not to the asset's own product. Synthetic, never derived from `item`; it creates and launches nothing.
   ASSET_APPROVED = "asset-approved"
   # A release's own coordinator is woken one hop downward after `Start release`, and again when the product's
   # `architecture.md` turns approved while a release is open. Synthetic, never derived from `item`.
@@ -1267,6 +1316,10 @@ class CoordinatorTrigger:
   # from outside the level's own ladder. Wakes the level note whoever authored the commit; the coordinator takes
   # the row down and creates nothing.
   DOC_LANDED = "doc-landed"
+  # A release painted the asset `in-release`, `awaiting-release` or done, dispatched onto the asset's status note
+  # after the release's own scaffold, refresh or publish commit landed, so the asset brings its own summary up to
+  # date. Synthetic, never derived from `item`; it creates and launches nothing.
+  RELEASE_MEMBER = "release-member"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1460,6 +1513,24 @@ class ReleaseKey:
   Attributes:
     VERSION: The `spec_version` frontmatter key on a release note, a bare SemVer string.
     INCLUDES: The `spec_includes` frontmatter key — wikilinks to the status notes of the assets the release carries.
+    BUILD: The `spec_build` frontmatter key — the number of the release's last dispatched build, absent or 0 before
+      the first.
+    BUILD_AT: The `spec_build_at` frontmatter key — the ISO 8601 UTC moment of the last `Build` or `Rebuild`
+      dispatch.
+    REBUILD_OWED: The `spec_rebuild_owed` frontmatter key — true from a `Rebuild` tick until the next build is
+      dispatched.
+    IMPL_BUILD: The `spec_impl_build` frontmatter key — the number of the release's last implementation build; a
+      test-only rebuild leaves it as it is.
+    IMPL_BUILD_AT: The `spec_impl_build_at` frontmatter key — the ISO 8601 UTC moment of the last implementation
+      build dispatch.
+    TEST_DISPATCHED_AT: The `spec_test_dispatched_at` frontmatter key — the ISO 8601 UTC moment of the last `Test`
+      dispatch.
+    BUILD_JOB: The `spec_build_job` frontmatter key — the job id of the last `Build` dispatch, written by the
+      coordinator in the dispatch commit.
+    TEST_JOB: The `spec_test_job` frontmatter key — the job id of the last `Test` dispatch, written by the
+      coordinator in the dispatch commit.
+    VERSION_PINNED: The `spec_version_pinned` frontmatter key — true once an operator set the version outright, so a
+      bump leaves it standing.
     TAG_PREFIX: Prefix of the mirror tag of a version, written with the dots replaced by hyphens.
     ASSET_TYPE: The asset type name a release note carries in `spec_asset_type`.
     FOLDER: The reserved folder under a product root where releases live.
@@ -1471,6 +1542,28 @@ class ReleaseKey:
   VERSION = "spec_version"
   # The `spec_includes` frontmatter key — wikilinks to the status notes of the assets the release carries.
   INCLUDES = "spec_includes"
+  # The `spec_build` frontmatter key — the number of the release's last dispatched build, absent or 0 before any.
+  BUILD = "spec_build"
+  # The `spec_build_at` frontmatter key — the ISO 8601 UTC moment of the last `Build` or `Rebuild` dispatch.
+  BUILD_AT = "spec_build_at"
+  # The `spec_rebuild_owed` frontmatter key — true from a `Rebuild` tick until the next build is dispatched.
+  REBUILD_OWED = "spec_rebuild_owed"
+  # The `spec_impl_build` frontmatter key — the number of the release's last implementation build; a test-only
+  # rebuild leaves it as it is.
+  IMPL_BUILD = "spec_impl_build"
+  # The `spec_impl_build_at` frontmatter key — the ISO 8601 UTC moment of the last implementation build dispatch.
+  IMPL_BUILD_AT = "spec_impl_build_at"
+  # The `spec_test_dispatched_at` frontmatter key — the ISO 8601 UTC moment of the last `Test` dispatch.
+  TEST_DISPATCHED_AT = "spec_test_dispatched_at"
+  # The `spec_build_job` frontmatter key — the job id of the last `Build` dispatch, written by the coordinator in
+  # the dispatch commit.
+  BUILD_JOB = "spec_build_job"
+  # The `spec_test_job` frontmatter key — the job id of the last `Test` dispatch, written by the coordinator in the
+  # dispatch commit.
+  TEST_JOB = "spec_test_job"
+  # The `spec_version_pinned` frontmatter key — true once an operator set the version outright, so a bump leaves it
+  # standing.
+  VERSION_PINNED = "spec_version_pinned"
   # Prefix of the mirror tag of a version, written with the dots replaced by hyphens.
   TAG_PREFIX = "release/"
   # The asset type name a release note carries in `spec_asset_type`.
@@ -1515,6 +1608,22 @@ class ReleaseConfigKey:
   COMMAND = "command"
   # A target's address, shown beside `Publish` as the place to check the build.
   URL = "url"
+
+
+# ----------------------------------------------------------------------------------------
+class MemberBuildState(StrEnum):
+  """
+  How an included asset stands against the release's last implementation build.
+
+  Attributes:
+    BUILT: The build carried the asset's approved change.
+    REAPPROVED: The asset's change was approved again after the build.
+    UNBUILT: The asset never had an approved change for the build to carry.
+  """
+
+  BUILT = "built"
+  REAPPROVED = "reapproved"
+  UNBUILT = "unbuilt"
 
 
 # ----------------------------------------------------------------------------------------

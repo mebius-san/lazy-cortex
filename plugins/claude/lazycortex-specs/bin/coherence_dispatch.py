@@ -87,6 +87,9 @@ _FINGERPRINT_LEN = 16
 NO_NEIGHBOURS = "no-neighbours"
 # The skip reason when not even the first neighbour fits the check's text budget
 OVER_BUDGET = "over-budget"
+# The skip reason when the document's type is append-only: a journal only ever grows, so no approval of it is a
+# design to check
+APPEND_ONLY = "append-only"
 
 
 def _wiki_neighbours(repo: Path, doc: str) -> list[str] | None:
@@ -243,6 +246,23 @@ def _is_eligible(repo: Path, rel: str) -> bool:
   declaration = spec_doc_types.resolve(repo, doc_type, key)
   return bool(declaration and declaration.get(spec_doc_types.DocTypeFlag.STAGES)) and \
       str(fm_values.get(StageKey.STAGE, "")).strip() == Stage.APPROVED
+
+
+def _is_append_only(repo: Path, rel: str) -> bool:
+  """
+  Tell whether a document's type is declared append-only.
+
+  Args:
+    repo: The repository root.
+    rel: The repo-relative document.
+
+  Returns:
+    True when the document's `spec_doc_type` resolves to a declaration carrying `append_only: true`.
+  """
+  fm_values, _end = spec_frontmatter.parse((repo / rel).read_text(encoding = _ENCODING))
+  key, _record = resolve_product.resolve_product_by_path(spec_paths.find_settings_root(repo), rel)
+  declaration = spec_doc_types.resolve(repo, str(fm_values.get(_DOC_TYPE_KEY, "")).strip(), key)
+  return bool(declaration and declaration.get(spec_doc_types.DocTypeFlag.APPEND_ONLY))
 
 
 def collect_neighbours(repo: Path, doc: str) -> list[str]:
@@ -442,10 +462,11 @@ def dispatch(repo: Path, doc: str) -> dict:
   Queue a coherence check of a document against its neighbours and record the job on its folder-note.
 
   A document whose check is already listed on its folder-note is queued again like any other; a document is left
-  unqueued only when it has no neighbour to be checked against or when not even the first neighbour fits the text
-  budget. In that case the check already listed for the document is retired like a replaced one, since it read a text
-  the new approval replaced: it is cancelled when it has not finished and its entry is dropped from the list, while
-  the entries of other documents are kept. When a cancel fails, only a line is written to stderr and the entry is
+  unqueued only when its type is append-only, it has no neighbour to be checked against, or not even the first
+  neighbour fits the text budget. An append-only document leaves the folder-note's list as it is. In the other two
+  cases the check already listed for the document is retired like a replaced one, since it read a text the new
+  approval replaced: it is cancelled when it has not finished and its entry is dropped from the list, while the
+  entries of other documents are kept. When a cancel fails, only a line is written to stderr and the entry is
   still replaced or dropped. The folder-note's text is never written or committed here; the number of neighbours
   dropped over the budget is only reported to the caller and, for a queued check, kept with its entry.
 
@@ -466,6 +487,8 @@ def dispatch(repo: Path, doc: str) -> dict:
     - `{"checked", "neighbours", "job_id"}` for the queued job, where `neighbours` lists only what was named,
       sorted, plus `"dropped": n` only when n neighbours were dropped over the budget; the job's entry on the
       folder-note carries the same `"dropped": n` then.
+    - `{"checked", "status": "skipped", "reason": "append-only"}` when the document's type is declared
+      `append_only: true`; nothing is queued and the folder-note's list is left as it is.
     - `{"checked", "status": "skipped", "reason": "no-neighbours"}` when the document has no neighbour; nothing is
       queued, and the check listed for the document, if any, is retired and dropped from the folder-note's list.
     - `{"checked", "status": "skipped", "reason": "over-budget", "dropped": n}` when not even the first neighbour
@@ -487,6 +510,10 @@ def dispatch(repo: Path, doc: str) -> dict:
   # document has no neighbours or not even the first neighbour fits the text budget, retires the listed check the
   # same way: the old check read a text the new approval replaced, and a new approval voids the earlier verdict, so
   # its result must never land.
+  # A document of an append-only kind is never checked at all. Such a document is a journal that only grows, not a
+  # design, so its neighbours cannot contradict it. A document is append-only when the declaration of its document
+  # kind for the product marks that kind append-only. The request is answered as skipped, no check is queued, and
+  # a check listed earlier for the document is left as it was.
 
   # Contract:
   # The folder-note lists at most one entry per document. A new job for a document replaces that document's earlier
@@ -512,6 +539,12 @@ def dispatch(repo: Path, doc: str) -> dict:
   # guard: without a folder-note nothing tracks the job
   if not note.is_file():
     raise ValueError(f"no folder-note beside {doc}")
+
+  # guard: an append-only document is a journal, never a design the neighbours could contradict
+  if _is_append_only(repo, doc):
+    return { _CHECKED: doc, _STATUS: _STATUS_SKIPPED, _REASON: APPEND_ONLY }
+
+  # the neighbours the document is checked against, ranked
   ranked = _ranked_neighbours(repo, doc)
 
   # guard: with nothing to compare against there is nothing to check, and the earlier check read a text now replaced
@@ -554,7 +587,8 @@ def main(argv: list[str]) -> int:
   Notes:
     - Prints the `dispatch` summary on stdout, or `{"status": "refused", "reason"}` when the document or its
       folder-note is missing, a product record lacks `spec_path`, or the dispatch failed.
-    - A document already listed on its folder-note is queued again; a skip happens only for lack of neighbours.
+    - A document already listed on its folder-note is queued again; a skip happens only for an append-only document,
+      for lack of neighbours, or when no neighbour fits the text budget.
 
   Args:
     argv: Command-line arguments, excluding the program name.

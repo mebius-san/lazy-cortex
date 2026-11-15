@@ -16,7 +16,7 @@ spec_released: false
 spec_cancelled: false
 spec_version: ""
 spec_includes: []
-spec_state: implementation
+spec_state: waits-operator
 ---
 # Summary
 #protected/spec/summary

@@ -28,6 +28,8 @@ Two kinds of folders exist under the content-root:
 
 There is **no `backlog/` folder** (removed), **no `human-tasks.md` loose file** (removed — there is no plugin-managed human-attention dashboard; container index dataview is operator-zone), and **no `changelog.md` loose file** (removed — history is recorded per-doc via `# History` H1 sections written by lazy-review.coordinator, and per-asset via the status folder-note's `# History` H1 section, written only through the `note-history` verb — operator commands, expert-job outcomes, answered questions, halts; never stage moves or gate flips, whose moments live in frontmatter as `spec_approved_at` / `spec_<gate>_at`. There is no separate product-wide changelog).
 
+**The container tallies read `spec_state`.** The asset counts on a product or group folder-note classify each design-only asset by its `spec_state`: `draft`, `in-review` and `waits-operator` count as in progress; `awaiting-release` and `in-release` count as ready — designed and waiting for, or carried by, a release; `done` counts as released.
+
 **A product folder may contain another product folder.** The inner product's tree is its own: every path under it belongs to the inner product — the longest matching `spec_path` wins — never to the enclosing one.
 
 ### Asset types — shipped + operator-defined

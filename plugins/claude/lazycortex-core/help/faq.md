@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, daemon setup, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-11-12
+last_regen: 2026-11-15
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -45,8 +45,8 @@ source_skills:
   - lazy-log.summary
   - lazy-log.timeline
   - lazy-runtime.doctor
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: c0b1a6bf95badf122552d618b9d47e9902e4be9c18a5853ac66acd848e2734f2
+source_sha: 494619259e7847aea24c9e8872901f2525b1f188
+surface_sha: ee78866e840bd60d8f300dc2c21c50ec444e9a8502d7429dfed51b46f262589d
 ---
 # FAQ
 
@@ -494,7 +494,7 @@ A provider-bound expert job never receives your own Anthropic credentials — ev
 
 `lazy.settings.json` carries several language keys — the root `language`, `spec.language`, `wiki.language`, `wiki.domains.language`, and each `products[<key>].language` — and every one of them is meant to hold a plain two- or three-letter code (`ru`, `en`), never a free-form name. The code that reads these values compares them directly against codes; a value like `"russian"` or `"english"` doesn't match anything, and the language setting silently stops taking effect anywhere downstream, with no error to tell you.
 
-`/lazy-core.doctor` scans every one of those keys in the project's `lazy.settings.json` and flags `settings.language-not-a-code` (WARN) on any value that isn't a code. The finding names the offending key and its current value, plus a `detail:` line saying what code that value maps to under a small built-in compatibility table (`russian` → `ru`, `english` → `en`) — or `no known mapping` if it doesn't match anything in that table. Only a value with a known mapping is offered as a fix during the doctor's per-finding walkthrough; an unmapped value is reported and left for you to correct by hand, never guessed at. An absent key is never a finding — every place that reads these keys falls back to a default.
+`/lazy-core.doctor` scans every one of those keys in the project's `lazy.settings.json` and flags `settings.language-not-a-code` (WARN) on any value that isn't a code. The finding names the offending key and its current value, plus a `detail:` line giving the ISO 639-1 code of the language the value plainly names (`russian` → `ru`, `english` → `en`) — or `no known mapping` if the value doesn't name a language at all. There is no fixed lookup table behind this; the doctor reads the value and names the language it means. Only a value with a known mapping is offered as a fix during the doctor's per-finding walkthrough; an unmapped value is reported and left for you to correct by hand, never guessed at. An absent key is never a finding — every place that reads these keys falls back to a default.
 
 A separate `settings.language-review-key` (INFO) fires if `review.language` is still present anywhere in your settings — that key is inert now, since review derives its working language from the document itself rather than a setting. The fix is simply to remove it.
 

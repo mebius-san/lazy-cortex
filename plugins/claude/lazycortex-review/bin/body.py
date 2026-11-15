@@ -388,6 +388,29 @@ def strip_status_callout(body: str) -> str:
   return _parser.sub_outside_fences(_STATUS_CALLOUT_BLOCK_RE, "", body, count = 1).lstrip("\n")
 
 
+def strip_every_status_callout(body: str) -> str:
+  """
+  Remove every `#status/<state>` callout block from a body, whatever its state and wherever it sits.
+
+  Guarantees:
+    - A callout inside a code fence survives verbatim.
+    - A body without a `#status/<state>` callout outside fences is returned unchanged.
+
+  Args:
+    body: Document body text, without frontmatter.
+
+  Returns:
+    `body` without any `#status/<state>` callout block outside fences.
+  """
+
+  # Contract:
+  # A callout inside a code fence MUST survive verbatim, and a body with no status callout outside fences MUST be
+  # returned unchanged.
+
+  # fenced examples of a status callout are literal content and stay
+  return _parser.sub_outside_fences(_STATUS_CALLOUT_BLOCK_RE, "", body)
+
+
 def strip_status_callouts_in_states(body: str, *, states: Collection[str]) -> str:
   """
   Remove every `#status/<state>` callout block whose state is one of `states`.

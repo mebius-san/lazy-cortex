@@ -99,7 +99,7 @@ Measure everything that loads at conversation start with one call, `Bash("${LAZY
 
 Also emit `[WARN]` findings for:
 
-- Any rules file > 3 KB (suggest `/lazy-core.slim-context`).
+- Any rules file > 3 KB (suggest `/lazy-core.slim-context`). An entry that carries `authored_bytes` is judged on that value, never on `bytes`: it is the installed scaffold rule, whose `## Registry` block install generates (`lazy-core.rule-writing § 2`).
 - `MEMORY.md` > 5 KB (suggest consolidation).
 
 The same call returns `descriptions`: one entry per skill, agent and command description a session lists, with `path`, `kind`, `chars`, `single_caller`, `has_example` and a `level`, longest first, plus their character sum in `descriptions_total`. Emit one finding per entry whose `level` is not `PASS`, at that level: `[WARN] description <chars> chars over its <400|150> ceiling | <path>`, `[WARN] description carries an <example> block | <path>`, or `[FAIL] description <chars> chars over the 1024 field limit | <path>`. The ceiling and the grade are the verb's; do not re-measure. These entries never count toward `always_total`.
@@ -227,7 +227,7 @@ Missing files are a silent no-op — the verb prints a stub with `_version` inta
 1. **Frontmatter present** — YAML frontmatter with at minimum `description:`. Absent → `[FAIL]`.
 2. **Scope or waiver** — frontmatter must carry EITHER `paths:` (YAML block-list of globs, per Claude Code docs) OR `always_loaded: "<reason>"`. Neither present → `[FAIL]`. `always_loaded: true` / `always_loaded: ""` → `[FAIL]` (invalid waiver).
 3. **Canonical `paths:` shape** — when `paths:` is present, it MUST be a YAML **block-list** (one `- "<glob>"` per line). Inline-array shape (`paths: ["<glob>", ...]`) → `[FAIL]`. Detection: any line in the frontmatter matching `^paths:\s*\[`. This includes single-element inline arrays (`paths: ["x"]`); the canonical form has the `paths:` key on its own line followed by hyphen-prefixed entries. Per `lazy-core.rule-writing § 1`. Finding text: `non-canonical paths: shape — inline-array form, must be block-list per code.claude.com/docs/en/memory#path-specific-rules`.
-4. **Size budget** — `always_loaded:` rule > 3 KB → `[FAIL]`. `paths:`-scoped rule > 10 KB → `[WARN]`. `paths:`-scoped rule > 25 KB → `[FAIL]`.
+4. **Size budget** — `always_loaded:` rule > 3 KB → `[FAIL]`. `paths:`-scoped rule > 10 KB → `[WARN]`. `paths:`-scoped rule > 25 KB → `[FAIL]`. An installed `lazy-core.scaffold.md` is measured without its generated `## Registry` block: take its size from the `authored_bytes` of its `always_loaded` entry in `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" context-scan --section weight`, never from `wc -c`.
 5. **Code-block size** — any fenced code block > 10 lines → `[FAIL]`. **Exemption** per `lazy-core.rule-writing § 3`: fenced `yaml`, `json`, or `toml` blocks that constitute the rule's primary payload (e.g. a registry or schema the rule exists to publish) are not subject to the cap. Heuristic for "primary payload": the rule's prose introduces the block as authoritative content (phrases like "registry", "schema", "canonical mapping") rather than as an example or illustration.
 6. **Dot-namespace filename** — filename without dot separator → `[WARN]`.
 7. **Broken artifact reference** — slash-commands, subagent-types, rule filenames, `references/…` paths, hook paths, `skills/<name>/SKILL.md` paths that don't resolve on disk → `[WARN]`. Markdown section headings (`## Phase 2.5`) are NOT checked.
@@ -708,7 +708,7 @@ One line per entry. Below the table:
 - **Missing frontmatter** (FAIL) — one line per rule without YAML frontmatter; route: add at minimum a `description:` key per `lazy-core.rule-writing § 1`.
 - **Missing scope or waiver** (FAIL) — neither `paths:` nor `always_loaded:`, or invalid `always_loaded` (true/empty); route: add a `paths:` block-list (preferred) or a concrete `always_loaded: "<reason>"` per `lazy-core.rule-writing § 1` — `/lazy-core.doctor` asks per rule which of the two the rule's audience calls for.
 - **Non-canonical `paths:` shape** (FAIL) — one line per rule using inline-array form (`paths: [...]`) instead of the canonical YAML block-list; route: migrate to the block-list shape — `/lazy-core.doctor` applies that migration in place, preserving every glob.
-- **Size over budget** (FAIL / WARN) — `always_loaded:` > 3 KB; `paths:` > 10 KB (WARN) or > 25 KB (FAIL); route: move the long guidance into `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`, or run `/lazy-core.slim-context`.
+- **Size over budget** (FAIL / WARN) — `always_loaded:` > 3 KB (the scaffold rule on its `authored_bytes`); `paths:` > 10 KB (WARN) or > 25 KB (FAIL); route: move the long guidance into `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`, or run `/lazy-core.slim-context`.
 - **Code block > 10 lines** (FAIL) — one line per match; route: shorten the block, or move it to a reference the rule points at, per `lazy-core.rule-writing § 3`.
 - **Filename lacks dot separator** (WARN) — one line per match; route: rename to `<namespace>.<name>.md` and update every reference.
 - **Broken artifact reference** (WARN) — one line per unresolved reference; route: correct the reference, or delete it when the artifact is retired.

@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 11.1.2 — 2026-11-15 UTC
+
+- The audit no longer fails the installed scaffold rule for a registry it did not write. The rule is now judged on its authored text alone against the 3 KB budget, and its full size still counts toward the always-loaded total. `lazy-core.audit` and `lazy-core.slim-context` both use this.
+- A migration step's verb now runs with the repository root in its environment, so a verb that needs the root finds it without a flag. This overrides any root inherited from the caller.
+
 ### 11.1.1 — 2026-11-13 UTC
 
 - A git-watch routine whose worker fails to start, for example on a timeout, no longer loses finished work. The unit that failed and every unit not yet attempted are recorded for retry, finished units are not replayed, and the cursor still advances. A worker that keeps timing out no longer makes the scanned range grow tick after tick.
@@ -817,6 +822,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-log.audit` verifies the logging rule is installed and coherent.
 
 ## lazycortex-specs
+
+### 12.0.0 — 2026-11-15 UTC
+
+- **Breaking:** Assets cancelled by an earlier version still have their documents at the old stages. Their reviews, banners and expert job may still be running, and none of their documents carries the mark an un-cancel reads. The update sweeps every such asset: it stops the reviews, cancels the job, moves each staged document to `cancelled` and records the stage it had. It makes one commit per asset under the flip-gate bot identity and leaves the `spec_cancelled` flag as it is. Run `/lazy-core.setup` to apply it.
+- Cancelling an asset now cascades into all of its documents. It stops every review in the asset folder, cancels the asset's running expert job, and moves each staged document to `cancelled`. Each document keeps its previous stage, so an un-cancel brings it back.
+- Releases now run the plan, test and publish stages. Their coordination, versioning and summary handling were reworked, and the audit and flip-gate skills were updated to match.
 
 ### 11.1.1 — 2026-11-14 UTC
 
@@ -1662,6 +1673,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.15.0 — 2026-11-15 UTC
+
+- `/lazy-review.stop` now cancels the coordinator and expert jobs still running on the document before it parks the review, so no stray job writes to a document you have stopped. If a job can't be confirmed cancelled, the review is left as it was. New options let a caller skip the commit, take down the review banner and its approval checkboxes, or get a JSON report of which jobs were cancelled and which had already finished.
+- New `lazy_review` commands for callers that abandon or restore a review. `strip-status` removes the `#status/<state>` callouts from a document body without a commit. `raise-wake` re-raises a document's `job-done` wake and dispatches the review coordinator, which restores a review whose job was cancelled.
+
 ### 6.14.3 — 2026-11-13 UTC
 
 - A validator with nothing to report no longer sends the document back for another review round. Validator sections now carry findings only, with no "document is sound" statements, confirmations or retellings. A clean validation leaves the section empty, which clears findings from earlier rounds and sends no concerns to the writer.
@@ -2109,6 +2125,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.10.4 — 2026-11-15 UTC
+
+- The designer no longer builds on architecture mechanisms it finds in an approved parent document. It takes only the behaviour the mechanism serves, derives no principle, scenario or risk from the mechanism itself, and reports it to the operator as a defect of the parent document. The architect's remit now also covers when the system does its work, what it checks before it starts, and whether it reuses a result it already built.
+- The research aspect now lets a release plan cite the level documents it is derived from. A release `code-plan.md` cites the owner's root `architecture.md`, and a release `test-plan.md` cites the owner's root `test-plan.md`.
+
 ### 1.10.3 — 2026-11-14 UTC
 
 - Technical experts now keep a widely known English term such as URL, e-mail or API as it is in a document of any language. They no longer translate it, swap it for a descriptive phrase or coin a native word for it.
@@ -2335,6 +2356,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.14.1 — 2026-11-15 UTC
+
+- Coding guidelines now define a `make_` method-name prefix for helper-object factories (property descriptors, query filters, test doubles), and rank it with `build_` in the prefix conflict-resolution order.
 
 ### 4.14.0 — 2026-11-13 UTC
 
