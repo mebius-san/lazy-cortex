@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 4ec5f482431aeb70bacd871dc822b45e6987d7ea
-surface_sha: 0cd2bcbd3f4c6fb2238f0aa9de1f796a1c705eb59ccc6adb79890e7b45ef4fbd
+source_sha: 6b70bf1e2c99c61b6804a85c6a37d4ecf0432cca
+surface_sha: 512ca1e29837cf06272db2d50afc5d0365e6db20c1b089d346f114c74726ba1b
 ---
 # Troubleshooting
 
@@ -184,9 +184,9 @@ surface_sha: 0cd2bcbd3f4c6fb2238f0aa9de1f796a1c705eb59ccc6adb79890e7b45ef4fbd
 
 **Symptom**: Agent D's `note-check` delegation reports a FAIL naming `unknown-key` on `spec_doc_type` for the product folder-note (`<spec_path>/<leaf>.md`) or the catalog root's own note — even though nothing was hand-edited.
 
-**Likely cause**: An older `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
+**Likely cause**: An older typing run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
 
-**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this audit pass ever reports it. Re-run `/lazy-spec.audit` afterward to confirm the FAIL clears.
+**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doctor --apply`, which strips the key off every level note. For a single note, run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this audit pass ever reports it. Re-run `/lazy-spec.audit` afterward to confirm the FAIL clears.
 
 ---
 
@@ -196,7 +196,7 @@ surface_sha: 0cd2bcbd3f4c6fb2238f0aa9de1f796a1c705eb59ccc6adb79890e7b45ef4fbd
 
 **Likely cause**: `/lazy-spec.audit` is read-only in every invocation — it reports and stops, and it has no apply mode at all. Repair is a separate move you make.
 
-**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-set-key` / `note-drop-key` for a frontmatter key, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill` / `asset-type backfill` / `pins` for a missing key across the catalog, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> upstream-doctor --apply` for a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
+**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-set-key` / `note-drop-key` for a frontmatter key, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doctor --apply` for a missing `spec_doc_type` / `spec_asset_type` / `wiki_pinned_topics` pin, a stage/tag mirror drift, a cancelled asset with documents left behind, level-note schema drift, a `spec_conflicted` mismatch, or a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
 
 ---
 

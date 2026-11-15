@@ -477,23 +477,23 @@ def is_sweep_due(asset_dir: Path) -> bool:
   Tell whether a cancelled asset still holds documents its cancel did not take with it.
 
   Guarantees:
-    - True exactly when `sweep_cancelled` has something to abandon on the asset; never True for a live asset, a note
-      that is not a status note, or a published or archived release.
+    - True exactly when `sweep_cancelled` has something to abandon on the asset; never True for a live asset or a
+      note that is not a status note. A cancelled release counts whether or not it was later published or archived.
     - A job still tracked as running, or a wake still pending, on the cancelled asset counts as left behind.
 
   Args:
     asset_dir: The asset folder holding its status note `<asset_dir.name>.md`.
 
   Returns:
-    True when the folder's status note reads `spec_cancelled: true` and is neither a published nor an archived
-    release, and the asset has a job still tracked as running or a wake still pending, or a markdown file directly
-    in the folder is under review or is a staged document, attachments aside, that the stage primitive would move
-    to `cancelled` with the asset; False otherwise.
+    True when the folder's status note reads `spec_cancelled: true`, whether or not the asset is a release that was
+    later published or archived, and the asset has a job still tracked as running or a wake still pending, or a
+    markdown file directly in the folder is under review or is a staged document, attachments aside, that the stage
+    primitive would move to `cancelled` with the asset; False otherwise.
   """
 
   # Contract:
-  # It is True exactly when `sweep_cancelled` has something to abandon on the asset, and never for a live asset, a
-  # note that is not a status note, or a published or archived release.
+  # It is True exactly when `sweep_cancelled` has something to abandon on the asset, and never for a live asset or a
+  # note that is not a status note. A cancelled release counts whether or not it was later published or archived.
 
   # Contract:
   # A job still tracked as running, or a wake still pending, on a cancelled asset counts as left behind, so the
@@ -506,10 +506,9 @@ def is_sweep_due(asset_dir: Path) -> bool:
     return False
   fm_values, _end = spec_frontmatter.parse(spec_paths.read_text(note))
 
-  # guard: a live asset, a note that is not a status note, and a closed release have nothing left behind
+  # guard: a live asset and a note that is not a status note have nothing left behind
   if not flip_gate.is_true(fm_values, Gate.SPEC_CANCELLED) \
-      or flip_gate.note_role(fm_values) != SpecValue.ROLE_STATUS \
-      or _find_closed_release(asset_dir, fm_values) is not None:
+      or flip_gate.note_role(fm_values) != SpecValue.ROLE_STATUS:
     return False
 
   # a job the cancel would have stopped or a wake it would have dropped is left behind, and so is any document it
@@ -616,8 +615,9 @@ def sweep_cancelled(asset_dir: Path, *, today: str | None = None) -> dict:
   # had already stopped stays recorded as cancelled and as withheld by the cancellation, with no wake, since the
   # asset stays cancelled. The swept documents lose their status callouts, as in the cancel. A document the stage
   # rules would never move to cancelled is not left behind. An asset with nothing left behind is not touched, so
-  # sweeping twice changes nothing. A live asset, a note that is not an asset's own, and a published or archived
-  # release are never swept.
+  # sweeping twice changes nothing. A live asset and a note that is not an asset's own are never swept. A cancelled
+  # release is swept even when it was later published or archived, because the sweep finishes a cancel that already
+  # happened; the rule that a closed release cannot be cancelled refuses only a new cancel.
 
   note = asset_dir / f"{asset_dir.name}.md"
 

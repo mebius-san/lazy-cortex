@@ -98,6 +98,7 @@ class _K:
     STATUS_ROLE: The `spec_role` value marking a status folder-note.
     TOUCHED: Result field counting notes the backfill wrote to.
     SKIPPED: Result field counting notes the backfill left alone.
+    PATHS: Result field listing the notes the backfill wrote, or would write.
   """
 
   # Settings key holding a product's own asset-type declarations.
@@ -124,6 +125,8 @@ class _K:
   TOUCHED = "touched"
   # Result field counting notes the backfill left alone.
   SKIPPED = "skipped"
+  # Result field listing the notes the backfill wrote, or would write.
+  PATHS = "paths"
 
 
 _TYPE_KEY = spec_keys.AssetTypeKey.TYPE
@@ -473,7 +476,7 @@ def _insert_type(fm_text: str, asset_type: str) -> tuple[str, int]:
   return _FM_ANCHOR_RE.subn(lambda hit: f"{hit.group(0)}\n{line}", fm_text, count = 1)
 
 
-def backfill(repo: Path) -> dict:
+def backfill(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> dict:
   """
   Walk the spec content-root and add `spec_asset_type` to every status folder-note missing it.
 
@@ -486,12 +489,17 @@ def backfill(repo: Path) -> dict:
   Guarantees:
     - A note that already carries `spec_asset_type` is left unchanged and counted as skipped.
     - The run never stages or commits its changes; the caller owns the commit.
+    - A dry run writes no file and reports the same counts, and the same paths, a real run would.
 
   Args:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
+    dry_run: When True, count what would change and write nothing.
+    with_paths: When True, add the `paths` key to the result.
 
   Returns:
-    `{"touched": N, "skipped": M}` — `N` notes gained the key, `M` already carried it.
+    `{"touched": N, "skipped": M}` — `N` notes gained (or would gain) the key, `M` already carried it. With
+    `with_paths`, the result also carries `paths`: the sorted, settings-root-relative posix paths of the notes
+    written, or on a dry run due to be written; without it the key is absent.
   """
 
   # Contract:
@@ -501,11 +509,16 @@ def backfill(repo: Path) -> dict:
   # Contract:
   # The run NEVER stages or commits its changes; the caller owns the commit.
 
+  # Contract:
+  # A dry run MUST write no file and MUST report the same counts, and the same `paths`, a real run over the same
+  # tree would; a caller relies on the listed paths being exactly the notes a real run writes.
+
   settings_root = spec_paths.find_settings_root(repo)
   content_root = spec_paths.spec_content_root(settings_root)
   mapping = folder_map(settings_root)
   touched = 0
   skipped = 0
+  written: list[str] = []
   for dirpath, _dirnames, filenames in os.walk(content_root):
     folder = Path(dirpath)
     name = f"{folder.name}{_K.MD_SUFFIX}"
@@ -532,9 +545,18 @@ def backfill(repo: Path) -> dict:
     if count != 1:
       skipped += 1
       continue
-    spec_paths.write_text_atomic(note, new_fm + text[fm_end:])
+
+    # a dry run only names the note it would write
+    if not dry_run:
+      spec_paths.write_text_atomic(note, new_fm + text[fm_end:])
+    written.append(note.relative_to(settings_root).as_posix())
     touched += 1
-  return { _K.TOUCHED: touched, _K.SKIPPED: skipped }
+
+  # the counts, and on request the notes written or due to be written
+  result: dict = { _K.TOUCHED: touched, _K.SKIPPED: skipped }
+  if with_paths:
+    result[_K.PATHS] = sorted(written)
+  return result
 
 
 def _repo_from_args(cwd: str | None) -> Path:

@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 4ec5f482431aeb70bacd871dc822b45e6987d7ea
-surface_sha: 7cfc6c9edb4002ceea79866cc13684b20b1e3e5b6dd0b6cbd42c008f23ebcb2e
+source_sha: 6b70bf1e2c99c61b6804a85c6a37d4ecf0432cca
+surface_sha: fac74c53f1f1ec5073bdee740800cba6e26e5370f7c4d2633649a3e2c761c525
 ---
 # Frequently asked questions
 
@@ -305,7 +305,7 @@ Run `/lazy-spec.audit <product>` — it names each obsolete field and the verb t
 
 ## `/lazy-spec.audit` reports a `spec_doc_type` FAIL on a product or catalog folder-note. How do I clear it?
 
-A folder-note never carries `spec_doc_type` — not an asset's status note, not a product's or the catalog root's own level note. Both directions are the same finding: the key missing from an authored document, or the key present on a note that must not have one. Run `Bash("${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doc-type backfill)` (the primitive `/lazy-spec.install`'s Step 7c also calls during a fresh install) — it walks the spec content-root, writes the missing key onto authored documents that lack it, and strips a stray key off any level note that carries one, reporting `touched` / `skipped` / `cleaned` counts. A `cleaned` count above zero means the note was typed by an earlier release that derived a type from the `product` / `catalog` role and wrote it onto the level note itself, which no level-note schema has room for; the same backfill walk takes it back off. For a single note, `Bash("${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-drop-key <note_dir> spec_doc_type)` does the same strip without touching the rest of the catalog — it's the exact verb `spec.coordinator` and `spec.catalog-coordinator` reach for themselves the moment their own structural check spots the stray key, so a level note under an active coordinator often clears itself before you ever need to run backfill or doctor again. The backfill leaves its writes in the worktree — committing them is yours to do.
+A folder-note never carries `spec_doc_type` — not an asset's status note, not a product's or the catalog root's own level note. Both directions are the same finding: the key missing from an authored document, or the key present on a note that must not have one. Run `Bash("${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doctor --apply)` — the repair verb `/lazy-spec.audit` itself names as the fix for this finding. The audit only reports and never writes, so the repair is yours to run. In one walk of the catalog `doctor --apply` fixes the missing key on authored documents and strips a stray key off every level note that carries one; the same verb also repairs the other drift the audit reports (a missing `spec_asset_type`, a stage tag out of step with its stage, a `spec_conflicted` flag that disagrees with the callouts, a level note short of its schema). A stray key on a level note usually means an earlier release derived a type from the `product` / `catalog` role and wrote it onto the note itself, which no level-note schema has room for. For a single note, `Bash("${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-drop-key <note_dir> spec_doc_type)` does the same strip without touching the rest of the catalog — it's the exact verb `spec.coordinator` and `spec.catalog-coordinator` reach for themselves the moment their own structural check spots the stray key, so a level note under an active coordinator often clears itself before you ever need to run `doctor --apply`. Re-run `/lazy-spec.audit` afterwards to confirm the finding is gone.
 
 ---
 

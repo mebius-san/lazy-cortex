@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 11.1.3 — 2026-11-15 UTC
+
+- `/lazy-core.doctor` now repairs the spec catalog on its own through the specs plugin's `doctor` verb, instead of only listing the audit's findings for you to fix by hand. A gate orphaned by gate precedence is still asked about per finding.
+
 ### 11.1.2 — 2026-11-15 UTC
 
 - The audit no longer fails the installed scaffold rule for a registry it did not write. The rule is now judged on its authored text alone against the 3 KB budget, and its full size still counts toward the always-loaded total. `lazy-core.audit` and `lazy-core.slim-context` both use this.
@@ -822,6 +826,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-log.audit` verifies the logging rule is installed and coherent.
 
 ## lazycortex-specs
+
+### 12.1.0 — 2026-11-15 UTC
+
+- New `doctor` command in the `lazycortex-specs` CLI lists the spec catalog's mechanical drift (missing `spec_doc_type` or `spec_asset_type`, level notes without a role, stale `spec_conflicted` flags, missing doc-kind pins, dangling upstream request links) as JSON findings. `doctor --apply` repairs it. `lazy-spec.audit` now names this command as the fix for those findings.
+- Fixed: approving or restamping a document that already carries its approved stage on a closed asset now works instead of failing.
+- Fixed: the cancel sweep now finishes the cancel of an asset whose release was published or archived later.
+- Fixed: `spec.coherence-checker` is now declared among the plugin's provided experts, so it is registered alongside the two coordinators.
 
 ### 12.0.0 — 2026-11-15 UTC
 

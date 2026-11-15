@@ -143,6 +143,7 @@ _MD_SUFFIX = ".md"
 _TOUCHED = "touched"
 _SKIPPED = "skipped"
 _CLEANED = "cleaned"
+_PATHS = "paths"
 
 # The frontmatter anchors the new key lands against: below `spec_role` when the document has one
 # (a scalar key — the next line is free), otherwise above `tags` — a block-mapping key whose list
@@ -395,7 +396,7 @@ def _remove_type(fm_text: str) -> str:
   return _FM_DOC_TYPE_LINE_RE.sub("", fm_text, count = 1)
 
 
-def backfill(repo: Path) -> dict:
+def backfill(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> dict:
   """
   Reconcile every spec document's `spec_doc_type` key against what the file is.
 
@@ -407,14 +408,19 @@ def backfill(repo: Path) -> dict:
     - Running this twice in a row leaves the second run reporting `touched == 0` and
       `cleaned == 0`, with every file byte-identical.
     - No git command is ever run; every change is left in the worktree for the caller to commit.
+    - A dry run writes no file and reports the same counts, and the same paths, a real run would.
 
   Args:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
+    dry_run: When True, count what would change and write nothing.
+    with_paths: When True, add the `paths` key to the result.
 
   Returns:
-    `{"touched": N, "skipped": M, "cleaned": K}` — `N` documents gained the key, `M` candidates
+    `{"touched": N, "skipped": M, "cleaned": K}` — `N` documents gained (or would gain) the key, `M` candidates
     were left as they are (they already carried the key, or have no frontmatter fence to write it
-    into), `K` level notes had a stale one taken back off.
+    into), `K` level notes had (or would have) a stale one taken back off. With `with_paths`, the result also
+    carries `paths`: the sorted, settings-root-relative posix paths of the files written, or on a dry run due to
+    be written; without it the key is absent.
   """
 
   # Contract:
@@ -423,11 +429,17 @@ def backfill(repo: Path) -> dict:
   # result into their own commit, so a hidden commit here would land unreviewed content under
   # the caller's identity.
 
-  # walk every markdown document under the content root, counting each outcome
-  content_root = spec_paths.spec_content_root(spec_paths.find_settings_root(repo))
+  # Contract:
+  # A dry run MUST write no file and MUST report the same counts, and the same `paths`, a real run over the same
+  # tree would; a caller relies on the listed paths being exactly the files a real run writes.
+
+  # walk every markdown document under the content root, counting each outcome and naming each file written
+  settings_root = spec_paths.find_settings_root(repo)
+  content_root = spec_paths.spec_content_root(settings_root)
   touched = 0
   skipped = 0
   cleaned = 0
+  written: list[str] = []
   for dirpath, _dirnames, filenames in os.walk(content_root):
     for name in filenames:
       # guard: only markdown files carry spec frontmatter
@@ -445,7 +457,11 @@ def backfill(repo: Path) -> dict:
         # guard: no stale key on this level note — nothing to take back
         if _K.DOC_TYPE not in fm_values:
           continue
-        spec_paths.write_text_atomic(path, _remove_type(text[:fm_end]) + text[fm_end:])
+
+        # the stale key is taken off, and a dry run only names the note it would write
+        if not dry_run:
+          spec_paths.write_text_atomic(path, _remove_type(text[:fm_end]) + text[fm_end:])
+        written.append(path.relative_to(settings_root).as_posix())
         cleaned += 1
         continue
       doc_type = _derive_type(path, role)
@@ -464,9 +480,18 @@ def backfill(repo: Path) -> dict:
       if count != 1:
         skipped += 1
         continue
-      spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
+
+      # a dry run only names the document it would write
+      if not dry_run:
+        spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
+      written.append(path.relative_to(settings_root).as_posix())
       touched += 1
-  return { _TOUCHED: touched, _SKIPPED: skipped, _CLEANED: cleaned }
+
+  # the counts, and on request the files written or due to be written
+  result: dict = { _TOUCHED: touched, _SKIPPED: skipped, _CLEANED: cleaned }
+  if with_paths:
+    result[_PATHS] = sorted(written)
+  return result
 
 
 def doc_type_of(path: Path) -> str:

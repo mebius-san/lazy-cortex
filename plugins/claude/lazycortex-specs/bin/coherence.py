@@ -826,6 +826,160 @@ def _find_all_marked_notes(repo: Path) -> list[Path]:
   return notes
 
 
+def _is_flag_drifted(state: _NoteState) -> bool:
+  """
+  Tell whether a note's conflict flag disagrees with the conflict callouts it holds.
+
+  Args:
+    state: The note in memory.
+
+  Returns:
+    True when the flag is raised without a callout, or a callout is held while the flag is down.
+  """
+  flagged = flip_gate.is_true(spec_frontmatter.parse(state.text)[0], ConflictKey.CONFLICTED)
+  return flagged != bool(state.blocks)
+
+
+def find_all_conflicted_drift(repo: Path) -> list[Path]:
+  """
+  List the folder-notes whose conflict flag disagrees with the conflict callouts they hold.
+
+  Guarantees:
+    - Writes nothing.
+    - A folder-note without a `# Gates` section is never listed.
+
+  Args:
+    repo: The repository root.
+
+  Returns:
+    The drifted folder-notes, sorted.
+  """
+
+  # Contract:
+  # The listing MUST write nothing, so a doctor's dry run can call it freely.
+
+  # Contract:
+  # A folder-note without a `# Gates` section is NEVER listed, so a caller
+  # can merge this listing with the gateless-flag listing without overlap.
+
+  root = spec_paths.spec_content_root(spec_paths.find_settings_root(repo))
+  drifted: list[Path] = []
+  for dirpath, dirs, files in os.walk(root):
+    dirs[:] = [ name for name in dirs if name != _GIT_DIR ]
+    note = Path(dirpath) / f"{Path(dirpath).name}{_MD_SUFFIX}"
+
+    # guard: only a folder-note holds conflict callouts and the flag
+    if note.name not in files:
+      continue
+
+    # guard: a note without a `# Gates` section holds no callout to agree with
+    try:
+      state = _load_note(repo, note)
+    except ValueError:
+      continue
+
+    # a note whose flag disagrees with its callouts is drifted
+    if _is_flag_drifted(state):
+      drifted.append(note)
+  return sorted(drifted)
+
+
+def find_all_gateless_flags(repo: Path) -> list[Path]:
+  """
+  List the folder-notes that raise the conflict flag while having no `# Gates` section to hold a callout.
+
+  Guarantees:
+    - Writes nothing.
+
+  Args:
+    repo: The repository root.
+
+  Returns:
+    The folder-notes carrying such a flag, sorted.
+  """
+
+  # Contract:
+  # The listing MUST write nothing, so a doctor's dry run can call it freely.
+
+  root = spec_paths.spec_content_root(spec_paths.find_settings_root(repo))
+  flagged: list[Path] = []
+  for dirpath, dirs, files in os.walk(root):
+    dirs[:] = [ name for name in dirs if name != _GIT_DIR ]
+    note = Path(dirpath) / f"{Path(dirpath).name}{_MD_SUFFIX}"
+
+    # guard: only a folder-note carries the flag
+    if note.name not in files:
+      continue
+
+    # a raised flag on a note with no `# Gates` section names a callout that cannot exist
+    text = note.read_text(encoding = _ENCODING)
+    fm_values, fm_end = spec_frontmatter.parse(text)
+    if flip_gate.is_true(fm_values, ConflictKey.CONFLICTED) and _gates_bounds(text[fm_end:].split(_LF)) is None:
+      flagged.append(note)
+  return sorted(flagged)
+
+
+def update_conflicted_flag(repo: Path, note: Path) -> bool:
+  """
+  Bring a folder-note's conflict flag in line with the conflict callouts it holds.
+
+  Guarantees:
+    - A note whose flag already agrees with its callouts is left byte for byte.
+    - Nothing is staged or committed; the caller owns the commit.
+
+  Args:
+    repo: The repository root.
+    note: The folder-note.
+
+  Returns:
+    True when the note was rewritten, False when it already agreed.
+
+  Raises:
+    ValueError: If the note has a `# Gates` section but cannot be read as a note holding conflict callouts.
+  """
+
+  # Contract:
+  # A note whose flag already agrees with its callouts MUST be left byte for byte.
+
+  # Contract:
+  # The call MUST NOT stage or commit anything; the caller owns the commit.
+
+  text = note.read_text(encoding = _ENCODING)
+  fm_values, fm_end = spec_frontmatter.parse(text)
+
+  # Domain(spec.coherence):
+  # # A raised conflict flag on a note that cannot hold callouts is taken down
+  # Conflict callouts live only in the gates section of a folder-note. A folder-note without that section can hold no
+  # callout, so a raised conflict flag on it names a conflict that cannot exist and is taken down; a note without the
+  # section and without the flag already agrees and is left as it is.
+
+  # a note with no `# Gates` section holds no callout, so a raised flag on it is taken down
+  if _gates_bounds(text[fm_end:].split(_LF)) is None:
+    # guard: an unflagged note without the section already agrees
+    if not flip_gate.is_true(fm_values, ConflictKey.CONFLICTED):
+      return False
+    spec_paths.write_text_atomic(note, gate_tick.del_fm_key(text[:fm_end], ConflictKey.CONFLICTED) + text[fm_end:])
+    return True
+
+  # the note holds a gates section, read as a note holding conflict callouts
+  state = _load_note(repo, note)
+
+  # guard: a flag already in line with the callouts is left byte for byte
+  if not _is_flag_drifted(state):
+    return False
+
+  # the coherence writer renders the note with the flag its callouts call for
+  text = _render_note(repo, state)
+
+  # guard: a render that changed nothing has nothing to write
+  if text == state.text:
+    return False
+
+  # the rendered note replaces the old one
+  spec_paths.write_text_atomic(note, text)
+  return True
+
+
 def apply_result(repo: Path, job_dir: Path) -> dict:
   """
   Hang the conflicts a coherence check found as callouts on the folder-notes, replacing the checked document's.

@@ -77,6 +77,7 @@ _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
 _SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
 _SUB_CANCEL_SWEEP = "cancel-sweep"
+_SUB_DOCTOR = "doctor"
 _SUB_LOCKIT_TEXT = "lockit-text"
 _SUB_LOCKIT_KEYS = "lockit-keys"
 # waiver: usage string -- help text printed to stderr; not a domain constant
@@ -214,6 +215,10 @@ _USAGE = (
     "                                  apply the cancel cascade to cancelled assets whose documents an earlier\n"
     "                                  version left behind, one commit per asset; --check exits 0 when an asset\n"
     "                                  is left behind, 1 when none is, 2 on failure\n"
+    "  doctor [--apply] [--cwd DIR]\n"
+    "                                  list the spec catalog's mechanical drift as JSON findings; --apply\n"
+    "                                  repairs it, the repairs that do not commit on their own in one bot\n"
+    "                                  commit; exits 2 when a repair or the run failed\n"
 )
 
 # The entry function name most sibling modules route their subcommand to.
@@ -277,6 +282,7 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
     _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),
     _SUB_CANCEL_SWEEP: ( "cancel_sweep", _MAIN ),
+    _SUB_DOCTOR: ( "spec_doctor", _MAIN ),
     _SUB_LOCKIT_TEXT: ( "note_explainers", "main_lockit_text" ),
     _SUB_LOCKIT_KEYS: ( "note_explainers", "main_lockit_keys" ),
 }

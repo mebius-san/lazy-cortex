@@ -76,6 +76,7 @@ class Keys:
     WIKI_PINNED_TOPICS: Frontmatter key the pin block is written under.
     TOUCHED: Result-dict key counting documents a pin was added to or whose stale product values were repaired.
     SKIPPED: Result-dict key counting role-bearing documents left untouched.
+    PATHS: Result-dict key listing the documents written, or due to be written.
     MD_SUFFIX: Markdown file extension, used to filter the content-root walk.
     ENCODING: File encoding used throughout this module.
     ARG_CWD: CLI flag overriding the repository root.
@@ -101,6 +102,8 @@ class Keys:
   TOUCHED = "touched"
   # Result-dict key counting role-bearing documents left untouched.
   SKIPPED = "skipped"
+  # Result-dict key listing the documents written, or due to be written.
+  PATHS = "paths"
   # Markdown file extension, used to filter the content-root walk.
   MD_SUFFIX = ".md"
   # File encoding used throughout this module.
@@ -233,7 +236,7 @@ def _repair_owner(fm_text: str, products: dict, product: str | None) -> str:
   return "".join(out)
 
 
-def backfill(repo: Path, *, dry_run: bool = False) -> dict:
+def backfill(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> dict:
   """
   Walk the spec content-root, add `wiki_pinned_topics` where missing, and repair stale product values.
 
@@ -247,25 +250,33 @@ def backfill(repo: Path, *, dry_run: bool = False) -> dict:
   product/asset context resolution the `decide` primitive uses, raising `ValueError`).
 
   Guarantees:
-    - A dry run writes no file and reports the same counts a real run would.
+    - A dry run writes no file and reports the same counts, and the same paths, a real run would.
 
   Args:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
     dry_run: When True, count what would change and write nothing.
+    with_paths: When True, add the `paths` key to the result.
 
   Returns:
     `{"touched": N, "skipped": M}` — `N` documents gained (or would gain) the pin or had stale product
-    values repaired, `M` role-bearing documents were left alone (already correct, or unresolvable).
+    values repaired, `M` role-bearing documents were left alone (already correct, or unresolvable). With
+    `with_paths`, the result also carries `paths`: the sorted, settings-root-relative posix paths of the
+    documents written, or on a dry run due to be written; without it the key is absent.
   """
 
   # Contract:
   # A dry run MUST write no file and MUST report the same counts a real run over the same tree would, so
   # `--check` answers exactly whether a real run has work.
 
+  # Contract:
+  # A dry run MUST report the same `paths` a real run over the same tree would write, so a caller can list the
+  # files a repair is about to touch before it runs.
+
   settings_root = spec_paths.find_settings_root(repo)
   products = resolve_product.load_products(settings_root)
   touched = 0
   skipped = 0
+  written: list[str] = []
   for dirpath, _dirnames, filenames in os.walk(spec_paths.spec_content_root(settings_root)):
     for name in filenames:
       # guard: only markdown files can carry spec_role frontmatter
@@ -304,8 +315,14 @@ def backfill(repo: Path, *, dry_run: bool = False) -> dict:
       # a dry run only counts the document it would rewrite
       if not dry_run:
         spec_paths.write_text_atomic(path, new_fm + text[fm_end:])
+      written.append(path.relative_to(settings_root).as_posix())
       touched += 1
-  return { Keys.TOUCHED: touched, Keys.SKIPPED: skipped }
+
+  # the counts, and on request the documents written or due to be written
+  result: dict = { Keys.TOUCHED: touched, Keys.SKIPPED: skipped }
+  if with_paths:
+    result[Keys.PATHS] = sorted(written)
+  return result
 
 
 def main(argv: list[str]) -> int:

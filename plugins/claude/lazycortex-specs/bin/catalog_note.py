@@ -378,7 +378,7 @@ def _apply_keys(text: str, role: str, record: dict) -> tuple[str, list[str]]:
   return fm_text + text[fm_end:], [ key for key, _value in missing ]
 
 
-def backfill(repo: Path, *, product: str | None, root: bool) -> dict:
+def backfill(repo: Path, *, product: str | None, root: bool, dry_run: bool = False) -> dict:
   """
   Bring one level note up to the level schema, creating it when it is not there yet.
 
@@ -391,16 +391,18 @@ def backfill(repo: Path, *, product: str | None, root: bool) -> dict:
       what the note lacks, so existing content survives byte-for-byte.
     - A run over a note that already carries the full schema writes nothing to disk and reports
       `unchanged`.
+    - A dry run writes nothing, not even a directory, and returns the same result a real run would.
 
   Args:
     repo: The settings root holding `.claude/lazy.settings.json`.
     product: The product compound-key whose level note is the target, or None for the root form.
     root: True to target the catalog root note instead of a product's own.
+    dry_run: When True, write nothing and return what a real run would.
 
   Returns:
     `{"outcome": "created" | "updated" | "unchanged", "note": <repo-relative path>,
-    "added": [...]}` — `added` names the frontmatter keys and section headings the run inserted,
-    and is empty for a created note and for an unchanged one.
+    "added": [...]}` — `added` names the frontmatter keys and section headings the run inserted
+    (or would insert), and is empty for a created note and for an unchanged one.
 
   Raises:
     ScaffoldRefusal: When the product form names an unregistered product, or no layer of the
@@ -414,6 +416,9 @@ def backfill(repo: Path, *, product: str | None, root: bool) -> dict:
   # Contract:
   # A run over a note that already carries the full schema writes nothing to disk and reports
   # `unchanged`.
+
+  # Contract:
+  # A dry run MUST write nothing, not even a directory, and MUST return the same result a real run would.
 
   # which note this call names, the role it carries, and whether it is there yet
   note, role, record = _resolve_target(repo, product, root)
@@ -435,6 +440,11 @@ def backfill(repo: Path, *, product: str | None, root: bool) -> dict:
   if not created and not added:
     return { _Out.OUTCOME: _Outcome.UNCHANGED, _Out.NOTE: str(note.relative_to(repo)),
              _Out.ADDED: [] }
+
+  # a dry run reports what the run would do and writes nothing
+  if dry_run:
+    return { _Out.OUTCOME: _Outcome.CREATED if created else _Outcome.UPDATED,
+             _Out.NOTE: str(note.relative_to(repo)), _Out.ADDED: added }
 
   # a created note is healed whole — there is no operator text its explainer pass could disturb
   if created:

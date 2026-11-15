@@ -533,10 +533,14 @@ def apply_stage(doc: Path, stage: str, *,
       `spec_approved_at` stamp, so the stamp exists only while the document is `approved`.
     - A category-mandatory type (design, system design, bug, system architecture) is moved to `cancelled` only
       together with its asset; asked alone, the move is refused and nothing is written.
+    - Approving a document that is already `approved` always rewrites its stage marks (stage tag, attachments and
+      containers), even on a cancelled, halted or released asset; a registry refusal then skips only the hand-off
+      of the document's decisions.
 
   Notes:
-    - Approving a living document is first put to the decision registry; on its refusal nothing is written, the
-      document keeps its previous stage, and `touched_paths` is empty.
+    - A real approval of a living document, a move into `approved` from another stage, is first put to the decision
+      registry; on its refusal nothing is written, the document keeps its previous stage, and `touched_paths` is
+      empty.
 
   Args:
     doc: The document to move.
@@ -586,6 +590,12 @@ def apply_stage(doc: Path, stage: str, *,
   # A category-mandatory type (design, system design, bug, system architecture) is moved to `cancelled` only
   # when `with_asset` is true; without it the move is refused in the result and nothing is written.
 
+  # Contract:
+  # Approving a document that is already `approved` always rewrites its stage marks (stage tag, attachments and
+  # containers), even when the owning asset is cancelled, halted or released. A refusal by the decision registry
+  # then skips only the hand-off of the document's decisions, so the spec doctor can repair stage-tag drift on a
+  # closed asset.
+
   try:
     validated = validate(doc, stage, restamp = restamp, with_asset = with_asset,
                          restore_from_cancel = restore_from_cancel)
@@ -597,17 +607,24 @@ def apply_stage(doc: Path, stage: str, *,
   # Vision, design, bug, tech and architecture documents live on after approval, so the decisions written inside
   # them are kept in the decision registry rather than in the text. Approving one of them moves its decisions
   # there. Before anything is written, the registry is asked whether it will accept the transfer. It may refuse,
-  # for example because the owning asset is cancelled, halted or already released. A refusal means the approval
-  # does not happen at all: no file is written, the document keeps its previous stage, and the outcome is reported
-  # as a refusal with the registry's reason. When the registry accepts, the stage is written and the decisions are
-  # moved into the registry.
+  # for example because the owning asset is cancelled, halted or already released. A refusal of a real approval,
+  # a move into approved from any other stage, means the approval does not happen at all: no file is written, the
+  # document keeps its previous stage, and the outcome is reported as a refusal with the registry's reason.
+  # Approving a document that is already approved is not a promotion. It rewrites the document's stage marks at the
+  # stage it has, so drift left by older versions is repaired even on a closed asset; when the registry refuses
+  # there, only the hand-off of decisions is skipped and the write goes ahead. When the registry accepts, the stage
+  # is written and the decisions are moved into the registry.
 
   # an approved living doc hands its decisions to the registry, so the registry is asked before any write
   promotes = stage == Stage.APPROVED and validated.role in _LIVING_ROLES
+  refusal = spec_decisions.promote_refusal(doc) if promotes else None
 
-  # guard: a registry refusal leaves every file as it was
-  if promotes and (reason := spec_decisions.promote_refusal(doc)) is not None:
-    return StageResult(status = StageStatus.REFUSED, stage = stage, reason = reason)
+  # guard: a registry refusal of a real promotion leaves every file as it was
+  if refusal is not None and validated.current_stage != Stage.APPROVED:
+    return StageResult(status = StageStatus.REFUSED, stage = stage, reason = refusal)
+
+  # a document already approved is only restamped, so a registry refusal skips the hand-off instead of the write
+  promotes = promotes and refusal is None
 
   # Domain(spec.lifecycle):
   # # Approval stamp
