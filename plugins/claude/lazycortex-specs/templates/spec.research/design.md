@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Overview
 <!-- What is being investigated and for whom. A few sentences of prose that open with a link to the sibling vision when one exists. Why the answer is needed lives in Goals. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Questions
 <!-- The questions the research has to answer. One bullet per question, in the order the report answers them; an expected answer follows its question as a second sentence, the hypothesis with what it rests on, and the report's conclusion confirms or refutes it outright. A question that needs its own scope or its own routes is a separate research asset. -->
 

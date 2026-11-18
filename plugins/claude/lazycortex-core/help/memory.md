@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert memory tracked in git: consult notes before work, write new ones as a job side-effect, consolidate via reflect passes.
-last_regen: 2026-11-10
+last_regen: 2026-11-18
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."

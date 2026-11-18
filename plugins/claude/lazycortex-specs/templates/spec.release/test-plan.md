@@ -13,7 +13,7 @@ spec_source_requests: []
 spec_source_docs: []
 ---
 # {{slug}} — test-plan
-<!-- How this release is accepted: what is under test, the mechanisms the repository ships, the criteria for finishing, and the tests themselves. It is composed from the product's standing test-plan, the test cases of every asset the release carries, and the product's regression, in that order. What the run returned lives in the test-report. -->
+<!-- How the deployed release is accepted: what is under test, the mechanisms the repository ships for testing a running product, the criteria for finishing, and the tests themselves. It is composed from the product's standing test-plan, the test cases of every asset the release carries, and the product's regression, in that order. The unit tests of the code live in the build and its code-report, and what the run returned lives in the test-report. -->
 
 ## Scope
 <!-- What is under test and what is deliberately left out of this run. One bullet per item in and per item out. What proves the run complete lives in Exit criteria. -->
@@ -22,7 +22,7 @@ spec_source_docs: []
 <!-- The documents this run's tests are drawn from: the product's standing test-plan and the test-plan of every asset in the release's `spec_includes`. One wikilink per document, product first. What those documents say is not repeated here. -->
 
 ## Mechanisms
-<!-- The testing mechanisms this repository actually ships: runners, fixtures, harnesses, CI targets. One bullet per mechanism, verified present before the tests below were written. A mechanism the repository does not ship does not belong here. -->
+<!-- The mechanisms this repository actually ships for testing the deployed product: runners, fixtures, harnesses and CI targets that exercise a running instance. One bullet per mechanism, verified present before the tests below were written. A mechanism the repository does not ship does not belong here, and neither does the unit-test runner, which belongs to the build. -->
 
 ## Preconditions
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The state the test item and its environment must be in before any test runs. One bullet per condition. A condition specific to one test lives in that test's block. -->
@@ -31,7 +31,7 @@ spec_source_docs: []
 <!-- The conditions under which the run counts as complete. One bullet per condition, checkable from the report. What is in or out of the run lives in Scope. -->
 
 ## Tests
-<!-- The test cases, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority. The mechanisms the tests use live in Mechanisms. -->
+<!-- The test cases run against the deployed product, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority. The mechanisms the tests use live in Mechanisms, and a unit test, a test run entirely on stubs or a check that reads the sources belongs to the build, never here. -->
 
 ### _Test name_
 - **Type**: _one of the tester's test types._

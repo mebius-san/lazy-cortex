@@ -15,9 +15,6 @@ spec_source_docs: []
 # {{product}} — tech
 <!-- The technologies the product is built with, and nothing else. A product-level tech names only what differs from the content-root tech and never repeats what the root already commits to. What the product does lives in the sibling design, and how the code is arranged lives in an asset's architecture. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Stack
 <!-- The languages, runtimes, frameworks, libraries, the unit-test framework with the command that runs it, and build and deployment tooling the product depends on. One bullet per technology, with the version the product commits to. A choice between alternatives is a `[!decision]` callout and lands in `decisions.md`. -->
 

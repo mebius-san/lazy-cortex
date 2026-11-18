@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Intent
 <!-- What the product's interface as a whole gives its users: the shared look and the recurring jobs every screen serves. A few sentences of prose, stated against the sibling design rather than restating it. A single asset's screens live in that asset's own ui-design. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Design system
 <!-- The shared visual vocabulary every asset-level ui-design draws from: tokens, typography, colour roles, spacing and components. One list per kind, each item named once. Recurring screen shapes live in Screen patterns. -->
 

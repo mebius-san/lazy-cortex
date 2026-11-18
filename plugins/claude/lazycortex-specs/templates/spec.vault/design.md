@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Overview
 <!-- What the project is. A few sentences of prose that open with a link to the sibling vision. Why it exists, its goals and its value live in the vision and are not restated here. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Design
 <!-- How the catalog is put together as a whole and why, at the root's own altitude. Prose, part by part, each part with its reason. A product's internals live in that product's own documents. -->
 

@@ -19,8 +19,7 @@ tick normally arrives in an operator commit, wakes `operator-edit`, and the coor
 out of the document's own report. A tick that a bot commit carried in still wakes `operator-edit`
 — a tick is an operator gesture by system invariant (bots never tick), so a fresh `- [x]` appearing
 between the pre-commit blob and the current text fires the trigger regardless of the commit's
-author (the same per-transition author exemption the specs coordinator's `job-done` /
-`doc-transition` triggers already carry).
+author.
 
 Both markers this worker reads live in `job_markers.py`'s gitignored runtime sidecar rather than
 in the document, so neither writing nor clearing one costs a commit and neither is reachable by an
@@ -56,10 +55,7 @@ import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-i
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-import note_ops as _note_ops  # type: ignore[import-not-found] # noqa: E402
-# waiver: `plugins/claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
-# `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
-# own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
+import note_ops as _note_ops  # noqa: E402
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import parser as _parser  # noqa: E402  # pylint: disable=wrong-import-position,deprecated-module,import-error
@@ -77,7 +73,7 @@ _COORDINATOR_EXPERT = "review.coordinator"
 
 # The routine's own attached protocol, folded into every dispatched job's config.json on top of
 # whatever the daemon already unions in from the routine registration (`dev.plugin-boundaries.md`
-# § 1c) — see `lazy-review.coordination-playbook.md` (Task 9).
+# § 1c) — see `lazy-review.coordination-playbook.md`.
 _COORDINATION_PLAYBOOK_PROTOCOL = "lazycortex-review:lazy-review.coordination-playbook"
 
 # `[!todo] #review/command` callout detection — trigger 3 (`lazy-review.coordination-playbook.md` §
@@ -108,6 +104,10 @@ _WINDOW_SCAN_CAP = 50
 # Terminal markers `lazycortex-core` writes into a job bundle. A bundle carrying any of them has
 # stopped running, whatever the sidecar's `coordinator_job` still claims.
 _TERMINAL_MARKERS = (JobFile.DONE, JobFile.DEAD, JobFile.CANCELLED)
+
+# A ticked option line inside any callout — the shape every operator gesture takes (the approve
+# checkbox, a question option, a decision-candidate verdict). Bots never tick, by system invariant.
+_TICKED_LINE_RE = re.compile(r"^>\s*-\s*\[x\]", re.IGNORECASE)
 
 # Error raised for a settings layer that is not valid JSON, filled with the repo's `.claude` dir and core's own report.
 UNPARSEABLE_SETTINGS_TEMPLATE = "unparseable settings under {path}: {detail}"
@@ -200,11 +200,7 @@ def _bot_emails(settings: dict) -> set[str]:
   """
   Collect every registered `git_author.email` from the experts and the routines tables alike.
 
-  Every registered system identity counts, whatever review class a document belongs to. A
-  deterministic routine carries the same `git_author` block an expert does and commits under
-  it, so a routine's own commits are system-authored exactly as an expert's are; reading only
-  the experts table would classify them as operator edits and wake this coordinator on every
-  one of them.
+  Every registered system identity counts, whatever review class a document belongs to.
 
   Args:
     settings: Parsed `lazy.settings.json` contents.
@@ -212,16 +208,18 @@ def _bot_emails(settings: dict) -> set[str]:
   Returns:
     Set of non-empty `git_author.email` values across every registered expert and routine.
   """
+
   emails: set[str] = set()
 
-  # one loop over both registries — the entry shape (`git_author.email`) is identical in each
+  # one loop over both registries, the entry shape (`git_author.email`) being identical in each; routines must be
+  # included because a routine commits under its own `git_author`, and leaving it out would read its commits as
+  # operator edits and wake this coordinator on every one
   for block in (JobKey.EXPERTS, JobKey.ROUTINES):
     for name, entry in settings.get(block, {}).items():
       # guard: the version sentinel and any malformed (non-dict) entry carry no email to collect
       if name == JobKey.VERSION or not isinstance(entry, dict):
         continue
-      email = (entry.get(JobKey.GIT_AUTHOR) or {}).get(JobKey.EMAIL, "")
-      if email:
+      if email := (entry.get(JobKey.GIT_AUTHOR) or {}).get(JobKey.EMAIL, ""):
         emails.add(email)
   return emails
 
@@ -308,7 +306,14 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
   # window, even though the watch item itself points at a later, system-authored commit. The
   # scan is conservative: it stops without a finding at the first phase-trailered commit, since
   # that commit's own wake already judged everything older, and after a fixed number of commits
-  # examined, so an unusually deep window is never walked in full.
+  # examined, so an unusually deep window is never walked in full. A commit carrying the git
+  # trailer `Lazy-Watch` with the value `skip` (compared case-insensitively) is automated
+  # bookkeeping: whoever authored it, it is never counted as an operator edit. It neither ends
+  # the scan nor counts as a coordinator commit; the scan passes over it to the older commits,
+  # and it takes no place among the commits examined, so a long run of such commits can never
+  # push an operator edit out of the window. The phase trailer is checked first: a
+  # phase-trailered commit ends the scan even when it also carries the skip trailer. Commits
+  # without the skip trailer are judged exactly as described above.
 
   sha = item.get(_ITEM_SHA, "")
 
@@ -328,25 +333,25 @@ def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_em
     # reached the cursor — everything older was judged by an earlier invocation
     if record.sha == last_seen:
       return False
+
+    # a coordinator commit proves everything older in the window was already handled
+    if Trailer.PHASE in record.trailers:
+      return False
+
+    # a `Lazy-Watch: skip` commit is automated bookkeeping, never an operator edit, whoever authored it; it takes no
+    # place among the commits examined, so a long run of them cannot push an operator edit out of the window
+    if Trailer.WATCH_SKIP in [ val.lower() for val in _git_ops.parse_trailer_values(record.body, Trailer.WATCH) ]:
+      continue
     scanned += 1
 
     # guard: window implausibly deep — stop rather than walk unbounded history
     if scanned > _WINDOW_SCAN_CAP:
       return False
 
-    # a coordinator commit proves everything older in the window was already handled
-    if Trailer.PHASE in record.trailers:
-      return False
-
     # a trailerless non-bot author inside the window is the buried operator edit
     if not _is_bot_email(record.author_email, bot_emails):
       return True
   return False
-
-
-# A ticked option line inside any callout — the shape every operator gesture takes (the approve
-# checkbox, a question option, a decision-candidate verdict). Bots never tick, by system invariant.
-_TICKED_LINE_RE = re.compile(r"^>\s*-\s*\[x\]", re.IGNORECASE)
 
 
 def _has_fresh_tick(blob_text: str, current_text: str) -> bool:
@@ -548,11 +553,10 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
   Raises:
     RuntimeError: When the CLI can't be resolved or exits non-zero.
   """
-  cli = _git_ops.require_core_cli()
   env = os.environ.copy()
   env[EnvVar.LAZY_REPO_ROOT] = str(repo)
   proc = subprocess.run(
-      [sys.executable, str(cli), CoreCommand.DISPATCH_JOB],
+      [ sys.executable, str(_git_ops.require_core_cli()), CoreCommand.DISPATCH_JOB ],
       input = json.dumps(bundle), capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
   )
 
@@ -568,7 +572,7 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
 # ------------------------------------------------------------------------------------- worker
 
 
-def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
+def dispatch_coordinator(repo: Path, asset_note: Path, item: dict) -> dict:
   """
   Dispatch a coordinator job for one document when its wake trigger fires.
 
@@ -604,8 +608,7 @@ def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   result = _resolve_and_dispatch(repo, asset_note, item)
 
   # stamp the cursor last, so this invocation's own window scan used the previous value
-  sha = item.get(_ITEM_SHA, "")
-  if sha:
+  if sha := item.get(_ITEM_SHA, ""):
     _job_markers.update(repo, asset_note, { JobMarker.LAST_SEEN_SHA: sha })
   return result
 
@@ -653,14 +656,15 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   # can legitimately fire, so the wake ends here before any settings read or blob fetch
   if not _is_under_review(current_report, markers):
     return {"action": "noop"}
-  settings = _load_settings(repo)
+
+  # the document as it stood before the woken commit, for the fresh-tick comparison
   blob_text = _read_blob(repo, item.get(_ITEM_SHA, ""), item.get(_ITEM_PATH, ""))
 
   # a fresh tick is an operator gesture whoever committed it — bots never tick, so a tick
   # transition overrides the author-based suppression exactly like a review_result transition;
   # an operator commit buried under a later bot commit in the same watch window is rescued by
   # the cursor-bounded window scan
-  bot_emails = _bot_emails(settings)
+  bot_emails = _bot_emails(_load_settings(repo))
   is_operator_edit = (
       not _is_system_commit(repo, asset_note, item, bot_emails)
       or _has_fresh_tick(blob_text or "", current_text)
@@ -740,8 +744,7 @@ def _dispatch(repo: Path, asset_note: Path, trigger: str, dedup_key: str) -> dic
       JobKey.DEDUP_KEY: dedup_key,
       JobKey.PROTOCOLS: [_COORDINATION_PLAYBOOK_PROTOCOL],
   }
-  response = _core_dispatch_job(repo, bundle)
-  job_id = str(response.get(JobKey.JOB_ID, ""))
+  job_id = str(_core_dispatch_job(repo, bundle).get(JobKey.JOB_ID, ""))
 
   # stamp the dedup marker in runtime state — no document write, so no commit and nothing an
   # operator editing the document can break
@@ -819,7 +822,7 @@ def _dispatch_path(repo: Path, raw_path: str, item: dict) -> dict:
   # guard: the note was deleted or moved between the git-watch scan and this dispatch
   if not asset_note.is_file():
     return {"action": "noop"}
-  return coordinator_dispatch(repo, asset_note, item)
+  return dispatch_coordinator(repo, asset_note, item)
 
 
 def _rekey_path_item(repo: Path, item: dict, raw_path: str) -> dict:
@@ -980,7 +983,7 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"git-watch item carries no {_ITEM_PATH!r}: {item!r}\n")
     return 2
 
-  # run the tick and report the result the same way every other lazy-review CLI verb does
+  # run the tick and report its result as one JSON line on stdout
   print(json.dumps(_dispatch_path(repo, raw_path, item)))
   return 0
 

@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Overview
 <!-- What is being changed. A few sentences of prose that open with a link to the sibling vision. Why it changes, its goals and its value live in the vision and are not restated here. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Current State
 <!-- How it is now: the architecture, configuration or structure the change starts from, not only the behaviour. Prose, part by part. How it will be lives in Target State. -->
 

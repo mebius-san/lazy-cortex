@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-12
+last_regen: 2026-11-18
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: ad0af4b3de1d6d94702b63bf41f28c5c902e3fc4
-surface_sha: c4be401b57128c44c3fb001e49d1992d434a6a1813c46fc5cab71f7beaed87d2
+source_sha: 48d0c91bdebc3dc4278dddd0dcaea32e85d3b100
+surface_sha: 8991daa39c64a5c68d148fbbc6cddd5c2b0857faa48221ed51ec962186e43595
 ---
 # Troubleshooting
 
@@ -47,6 +47,16 @@ surface_sha: c4be401b57128c44c3fb001e49d1992d434a6a1813c46fc5cab71f7beaed87d2
 **Likely cause**: The plugin was enabled in settings but the local cache directory has not been populated, so the rule-file glob found nothing.
 
 **Fix**: Run `/plugin update lazycortex-wiki@lazycortex` in Claude Code to fetch the plugin files, then re-run `/lazy-wiki.install`.
+
+---
+
+## `/lazy-wiki.install` stops while seeding settings
+
+**Symptom**: `/lazy-wiki.install` stops at the step that seeds the `wiki`, `structure` and `terms` sections with an error from the settings write.
+
+**Likely cause**: The target `lazy.settings.json` is not valid JSON. The write refuses to overwrite a file it cannot parse rather than risk losing its contents.
+
+**Fix**: Repair the file so it parses (restoring it from git is the quickest route), then re-run `/lazy-wiki.install`.
 
 ---
 
@@ -156,27 +166,57 @@ surface_sha: c4be401b57128c44c3fb001e49d1992d434a6a1813c46fc5cab71f7beaed87d2
 
 **Likely cause**: Terms 6 registers the scan routine unconditionally, the same as any other wiki routine — `registered`/`re-registered`/`unregistered` describes only whether the registration step itself changed anything. What's actually missing is a daemon: like every wiki routine, the scan routine only fires on its own once the project's background daemon is supervising this checkout.
 
-**Fix**: `/lazy-wiki.terms` still answers lookups against whatever the dictionary already holds — reading is unaffected. To keep the dictionary itself current without a daemon, run the terms section of `/lazy-wiki.audit` by hand after documents change, or set `daemon.enabled` and `daemon.run_here` in `lazy.settings.json` and re-run `/lazy-core.install` so the already-registered routine actually ticks.
+**Fix**: `/lazy-wiki.terms` still answers lookups against whatever the dictionary already holds — reading is unaffected. To keep the dictionary itself current without a daemon, tick the routine by hand with `/lazy-runtime.tick` after documents change, or run `/lazy-core.daemon-setup` so the already-registered routine ticks on its own. `/lazy-wiki.audit` only reports on the dictionary; it never adds a term.
+
+---
+
+## `/lazy-wiki.configure terms` refuses to move the dictionary directory
+
+**Symptom**: Editing a terms scope and trying to point it at a different dictionary directory is refused.
+
+**Likely cause**: Documents link to the term files at their current path, so moving the directory would break every one of those links.
+
+**Fix**: Keep the directory where it is. A move has to carry the term files, the scope's directory setting and the links in the documents together, which the wizard does not do for you.
+
+---
+
+## `/lazy-wiki.configure terms` stops removing a scope: a git repository lives inside the dictionary directory
+
+**Symptom**: Removing a terms scope stops before it asks what to do with the dictionary directory, because the directory holds a `.git`.
+
+**Likely cause**: A nested repository inside the dictionary directory means a delete would destroy more than term files.
+
+**Fix**: Check what that repository is and remove it yourself if it is not needed, or answer `keep` so the directory stays in the worktree, no longer served.
+
+---
+
+## `/lazy-wiki.configure terms` reports the first curator sweep as `failed`
+
+**Symptom**: After creating a terms scope, the summary line shows `sweep=failed` instead of `queued`, `deferred` or `no-documents`.
+
+**Likely cause**: The sweep that has the terms curator read the scope's existing documents could not be queued — core was unreachable, the daemon gate could not be read, or a job was refused. No sweep marker was written, so nothing records the sweep as done.
+
+**Fix**: Fix the cause named in the error, then run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-sweep --dispatch --mark --scope <id>` by hand and commit the marker it writes.
 
 ---
 
 ## `/lazy-wiki.terms` says no scope matches the document
 
-**Symptom**: Invoking `/lazy-wiki.terms` while writing a document reports that no terms scope matches the document's path, or that the `terms` section itself is missing, instead of returning a definition or a "not found" answer.
+**Symptom**: Invoking `/lazy-wiki.terms` while writing a document says no dictionary serves the document, so it gets no term links, instead of returning a definition or a "not found" answer.
 
-**Likely cause**: The document's path doesn't match any terms scope's `paths` globs, or the project's `lazy.settings.json` has no `terms` section at all — the terms dictionary mechanism was never configured for this document's location.
+**Likely cause**: One of three things. The document's path doesn't match any terms scope's `paths` globs; the project's `lazy.settings.json` has no `terms` section at all; or the matching scope still carries a `legacy_file`, meaning its dictionary was never migrated from one file to a directory of term files and the wiki serves nothing from it. A document that matches one of the scope's link-exclusion globs is a fourth case: the lookup still answers with words and definitions, but returns no link target, and the writer places no term link.
 
-**Fix**: Run `/lazy-wiki.configure terms` to create a scope whose `paths` globs cover the document, or check that the document's path matches an already-configured scope's globs. If `lazy.settings.json` predates the terms mechanism entirely, run `/lazy-wiki.install` first to seed the `terms` section.
+**Fix**: Run `/lazy-wiki.configure terms` to create a scope whose `paths` globs cover the document, or check that the document's path matches an already-configured scope's globs. If `lazy.settings.json` predates the terms mechanism entirely, run `/lazy-wiki.install` first to seed the `terms` section. For a scope with a `legacy_file`, run `/lazy-core.setup`, whose migration step converts the dictionary to a directory.
 
 ---
 
-## `/lazy-wiki.terms` says the dictionary file itself is missing
+## `/lazy-wiki.terms` finds nothing, or the scope's dictionary directory is missing
 
-**Symptom**: A scope matches the document, but `/lazy-wiki.terms` reports that the dictionary file named by the scope's `file` key does not exist on disk, instead of returning a definition or a "not found" answer.
+**Symptom**: A scope matches the document, but every lookup answers that the term is absent, and the scope's dictionary directory does not exist on disk. `/lazy-wiki.audit` reports it as `INFO`.
 
-**Likely cause**: `/lazy-wiki.configure terms` creates the dictionary file automatically, empty, the first time a scope is set up — so a missing file usually means it was deleted from the worktree afterward, or the scope's `file` path was hand-edited in `lazy.settings.json` to point somewhere nothing has created yet. The lookup skill deliberately never creates the file itself, so a genuinely missing dictionary is never silently reseeded empty.
+**Likely cause**: This is an empty dictionary, not a fault. The dictionary is a directory with one markdown file per term, and git keeps no empty directory, so a scope with no terms yet has none. The directory appears with the first term.
 
-**Fix**: Re-run `/lazy-wiki.configure terms` in edit mode for that scope — it creates the file empty if it's still absent, and leaves an existing file untouched. Then re-run the lookup.
+**Fix**: Nothing to repair. Every name you check against it is new, and the terms curator enters it after reading the finished document. If you expected terms to be there, confirm the scope's `dir` in `/lazy-wiki.configure terms` edit mode points at the directory your term files live in.
 
 ---
 
@@ -227,6 +267,36 @@ surface_sha: c4be401b57128c44c3fb001e49d1992d434a6a1813c46fc5cab71f7beaed87d2
 **Likely cause**: The scope's `paths` glob reaches into the generated domain-spec tree (`docs/domains/` by default). That tree is excluded from every wiki scope structurally — it's `/lazy-wiki.domain-sync`'s output, not a wiki-curated node — so the glob claims coverage over files nothing there ever populates, and no file ends up with two writers only because the check catches the overlap first.
 
 **Fix**: Narrow the scope's `paths` glob via `/lazy-wiki.configure` so it no longer reaches the domain-spec output directory, and matches only the material the scope is meant to curate.
+
+---
+
+## `/lazy-wiki.audit` reports `scope-self-nullified`
+
+**Symptom**: `/lazy-wiki.audit` warns that every path a scope's `paths` admits is also excluded by one of its exclusion globs.
+
+**Likely cause**: The scope is switched off. It indexes nothing, its topics index is never built, and sessions the navigation rule sends there find nothing.
+
+**Fix**: Fix the scope through `/lazy-wiki.configure`. Removing the offending exclusion wakes a curator job for every file the scope then covers, so make that change deliberately.
+
+---
+
+## `/lazy-wiki.audit` reports `structure-watch-filter`
+
+**Symptom**: `/lazy-wiki.audit` fails with `structure-watch-filter` naming one of the three structure-scan routines, with an expected and a found value.
+
+**Likely cause**: That routine watches something the structure map does not describe, or it splits one tick's changes into several jobs instead of one job carrying every changed path (a retired grouping key is still on it). A single large commit would then dispatch hundreds of jobs.
+
+**Fix**: For a drifted `path_filter`, re-run `/lazy-wiki.install`; it brings the filter current on every registered structure-scan routine. A lingering grouping key is rewritten by the core `routine-migrate` verb. `/lazy-wiki.configure structure` re-registers the drifted routines whole and fixes either.
+
+---
+
+## `/lazy-wiki.audit` reports a terms scope that was never migrated, or a leftover `## Terms` section
+
+**Symptom**: The terms section of `/lazy-wiki.audit` reports a `config` finding for a scope that names no dictionary directory and still carries a `legacy_file`, or a `legacy` finding for a document that still has a `## Terms` heading.
+
+**Likely cause**: The dictionary predates the one-file-per-term directory shape, or a document still carries the old in-document terms list that the curator removes once it has passed the document.
+
+**Fix**: For the scope, run `/lazy-core.setup`, whose migration step runs the conversion, then commit what it changed. For a leftover `## Terms` section, the finding names the one-curator-job route (`terms-sweep --dispatch` on that document, run in the checkout where the daemon runs; without a daemon, follow it with `/lazy-runtime.tick --drain`). A document under an open review waits for the review to end. A document excluded as a term source is reported as `INFO`; the migration step removes its section.
 
 ---
 

@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Intent
 <!-- What this interface gives the user: the job the screens below exist to do. A few sentences of prose, stated against the goals the approved design settled rather than restating them. The screens themselves live in Screens. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Screens
 <!-- Every screen or view the asset introduces or changes. One bullet per screen: what it is for, and which product-level pattern it follows. The states a screen passes through live in States. -->
 

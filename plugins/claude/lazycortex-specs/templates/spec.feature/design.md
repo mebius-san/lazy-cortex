@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Overview
 <!-- What the feature is. A few sentences of prose that open with a link to the sibling vision. Why it exists, its goals and its value live in the vision and are not restated here. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Design
 <!-- What the feature is made of and why it is shaped this way. Prose, decision by decision: the alternative chosen, the alternatives rejected, and the grounds. How the feature behaves at runtime lives in Behavior. -->
 

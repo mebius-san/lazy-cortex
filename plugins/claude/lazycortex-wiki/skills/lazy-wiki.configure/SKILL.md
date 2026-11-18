@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.configure
 description: "Use when the user wants to add a wiki scope or change what one covers — paths, axes, exclusions, topics index — or to set up domain specs (`domains`), a foreign-repo mirror (`mirror`), a terms dictionary (`terms`), the structure map (`structure`), or the vault-wide wiki keys (`vault`). Defines coverage only; bootstrapping the plugin is `/lazy-wiki.install`."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git commit *), Bash(mv *), Bash(test *), Bash(rm *), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(mv *), Bash(test *), Bash(find *), Bash(rm *), Agent
 ---
 # lazy-wiki.configure
 
@@ -13,7 +13,7 @@ Prerequisite: `/lazy-wiki.install` has run (the `wiki` settings section exists).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has six mutually exclusive branches; exactly one runs per invocation. The **scope branch** (default) has 9 ordered steps plus Report; the **domains branch** (argument `domains`, or the operator asks to configure domain specs) has 5 ordered steps plus Report; the **mirror branch** (argument `mirror`, or the operator asks to mirror a foreign repo into the wiki) has 5 ordered steps plus Report; the **terms branch** (argument `terms`, or the operator asks to set up a terms dictionary) has 7 ordered steps plus Report; the **structure branch** (argument `structure`, or the operator asks to configure the structure map) has 6 ordered steps plus Report; the **vault branch** (argument `vault`, or the operator asks to edit the axis vocabulary, the repository-wide exclusions, or the wiki's own language) has 5 ordered steps plus Report. The executing agent MUST NOT skip, merge, reorder, or silently omit any step of the chosen branch. To make dropped steps structurally impossible:
+This skill has six mutually exclusive branches; exactly one runs per invocation. The **scope branch** (default) has 9 ordered steps plus Report; the **domains branch** (argument `domains`, or the operator asks to configure domain specs) has 5 ordered steps plus Report; the **mirror branch** (argument `mirror`, or the operator asks to mirror a foreign repo into the wiki) has 5 ordered steps plus Report; the **terms branch** (argument `terms`, or the operator asks to set up a terms dictionary) has 8 ordered steps plus Report; the **structure branch** (argument `structure`, or the operator asks to configure the structure map) has 6 ordered steps plus Report; the **vault branch** (argument `vault`, or the operator asks to edit the axis vocabulary, the repository-wide exclusions, or the wiki's own language) has 5 ordered steps plus Report. The executing agent MUST NOT skip, merge, reorder, or silently omit any step of the chosen branch. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, decide the branch from the invocation, then write out the step ledger — one line per step of that branch, each marked `pending` — no merging, no abbreviation, no renaming, and no entries from another branch. The scope branch's canonical list (use these titles verbatim; each other branch's list is in its own section below):
    - `Phase 1 — Verify install + load settings`
@@ -353,15 +353,16 @@ Outcome: `written` and `coverage-<refreshed|unchanged|absent>`.
 
 ## Terms branch — `/lazy-wiki.configure terms`
 
-Configures one scope of `lazy.settings.json[terms.scopes]` — the terms dictionary that keeps one concept from growing a second name. A scope declares which documents the dictionary serves, which file holds it, and which of those documents are **not** term sources. Canonical task list for this branch (create these instead of the scope phases, titles verbatim):
+Configures one scope of `lazy.settings.json[terms.scopes]` — the terms dictionary that keeps one concept from growing a second name. A scope declares which documents the dictionary serves, which directory holds it — one markdown file per term — and which of those documents are **not** term sources. The wiki code keeps every dictionary directory out of the wiki scan, the structure watch, the term sources and the curator's link edits on its own; nothing here fences it. Canonical task list for this branch (create these instead of the scope phases, titles verbatim):
 
 - `Terms 1 — Verify install + pick scope + mode`
 - `Terms 2 — Collect paths globs`
-- `Terms 3 — Collect dictionary file + create`
+- `Terms 3 — Derive dictionary directory + create`
 - `Terms 4 — Collect source_exclude`
-- `Terms 5 — Write back + exclude from wiki scopes`
+- `Terms 5 — Write back`
 - `Terms 6 — Register the scan routine`
-- `Terms 7 — Pointers`
+- `Terms 7 — Queue the curator sweep`
+- `Terms 8 — Pointers`
 - `Report`
 
 ### Terms 1 — Verify install + pick scope + mode
@@ -370,9 +371,9 @@ Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"
 
 Context (print before asking):
 - Where: /lazy-wiki.configure terms · Terms 1 — Verify install + pick scope + mode; target `lazy.settings.json[terms.scopes]`
-- Found: terms scopes on record `<id: file, … or none>`
+- Found: terms scopes on record `<id: dir, … or none>`
 - Why asking: create, edit, or remove is the operator's intent
-- Answers: `create` — a new id is collected next, the scope written in Terms 5, its scan routine registered in Terms 6; `edit` — persisted values shown per field, Enter keeps each, the routine re-registered when `paths` change; `remove` — the entry deleted, its routine unregistered, the dictionary file's fate asked in Terms 5; not persisted, asked on every run
+- Answers: `create` — a new id is collected next, the scope written in Terms 5, its scan routine registered in Terms 6, the curator sweep over its documents queued in Terms 7; `edit` — persisted values shown per field, Enter keeps each, the routine re-registered when `paths` change; `remove` — the entry deleted, its routine unregistered, its sweep marker deleted, the dictionary directory's fate asked in Terms 5; not persisted, asked on every run
 AskUserQuestion: header "Terms scope mode", question "Create a new terms scope, edit an existing one, or remove one (existing: `<ids>`)?", options `create` / `edit` / `remove` with the descriptions above. With no scopes on record, `create` is the only option; do not offer the other two.
 
 On `create`, collect the id.
@@ -385,6 +386,8 @@ Context (print before asking):
 AskUserQuestion: header "Terms scope id", question "Id for the new terms scope (lowercase slug; taken: `<ids>`)?"; free text — must match `^[a-z][a-z0-9_-]*$`, must not collide with an existing id; re-ask on either failure.
 
 On `remove`, jump straight to the removal path in `Terms 5`; `Terms 2`–`Terms 4` are marked `skipped-per-user-choice`.
+
+A scope that still carries `legacy_file` has not had its dictionary migrated from one file to a directory, and the wiki code serves nothing from it until it is. Say so before any question and name the repair — `/lazy-core.setup`, which runs the plugin's migration steps; the wizard never migrates. `edit` carries `legacy_file` over untouched.
 
 Outcome: `verified` + `mode-<create|edit|remove>`.
 
@@ -403,40 +406,30 @@ Split on commas, trim, discard empties; at least one entry, re-ask if empty.
 
 Outcome: `collected`.
 
-### Terms 3 — Collect dictionary file + create
+### Terms 3 — Derive dictionary directory + create
 
-**New mode does not ask**: take the shipped default `docs/terms.md` — the project's own documentation tree, never the tree the dictionary serves. A dictionary written inside a served scope is material that scope then scans, which is why the wizard has to fence it out of every covering scope's `exclude_paths` below; `docs/` needs no fence. Print one line naming it, outcome `derived`. Moving it is an edit-mode change or a hand edit of `lazy.settings.json`.
+**Nothing is asked here.** New mode takes the shipped default `docs/terms` — a directory in the project's own documentation tree, one markdown file per term. Print one line naming it. `Bash(test -d <repo-root>/<dir>)`; when absent, `Bash(mkdir -p <repo-root>/<dir>)` and `Write` an empty `<repo-root>/<dir>/.gitkeep`, so git tracks the empty directory; Terms 7 commits it. An existing directory is never touched — its term files are the dictionary.
 
-Edit mode asks:
+Edit mode keeps the `dir` on record and never offers to change it. Print one line naming it. When the operator asks to move the dictionary, refuse and say why: every document of the scope links to the term files at their current path, so a moved directory would leave each of those links pointing at nothing and the new dictionary empty. Moving it is a hand job — the files, the setting and every link together.
 
-Context (print before asking):
-- Where: Terms 3 — Collect dictionary file + create; target `terms.scopes[<id>].file`
-- Found: current `file`: `<current file>` (file `<present|absent>`)
-- Why asking: the path is on record and only the operator can decide to move the dictionary
-- Answers: a repo-relative path — written to `terms.scopes[<id>].file`; an absent file is created empty now, a present one is never touched or truncated; Enter — the current value kept; re-asked only on the next edit run
-AskUserQuestion (edit mode only): header "Dictionary file", question "Dictionary path for terms scope `<id>` (current: `<current file>`; Enter to keep)?"; free text.
-
-Trim whitespace; re-ask if blank. Then `Bash(test -f <repo-root>/<file>)`; when absent, `Bash(mkdir -p <parent-dir>)` and `Write` an empty file. An existing file is never touched or truncated — a quiet recreation would destroy every term it holds.
-
-Outcome: `derived` (new mode) / `collected` (edit mode) + `dictionary-<created|already-present>`.
+Outcome: `derived` (new mode) / `kept` (edit mode) + `dictionary-<created|already-present>`.
 
 ### Terms 4 — Collect source_exclude
 
 `source_exclude` names the documents the dictionary still **serves** but never **takes terms from**. It is deliberately not the wiki's `exclude_paths`: an excluded document may still consult the dictionary, which is what a test report writer needs.
 
-Seed the array with the dictionary itself plus every tool-report glob, and show them as the default:
+Seed the array with every tool-report glob, and show them as the default — the dictionary directory needs no entry, since a term file is never a term source:
 
-- the dictionary itself (`<file>`) — without it every term trivially "occurs in a document of the scope" and the dead-term check can never fire once;
 - `**/code-report.md`, `**/data-report.md`, `**/docs-report.md`, `**/test-report.md` — the tool-type build journals, appended dozens of times per implementation, setting no terminology. An operator-declared tool type brings its own `report_doc`; when the repo declares one beyond the shipped journals, offer its glob in the same seed only if that report type is declared `append_only: true` — a stage-bearing report such as the `research` tool's `research-report` is content and is never offered for exclusion.
 
 Add `<upstream-mirror-glob>/**` to the seed when the repo carries an upstream mirror tree whose files fall under the collected `paths` — mirrored foreign markdown would otherwise fill the dictionary with another studio's vocabulary, and the audit would then report term repairs against mirrors that must not be edited.
 
 Context (print before asking):
 - Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`
-- Found: seed so far `<file>`, `<report globs>`, `<upstream mirror glob when present>`; edit mode — current `source_exclude`: `<current source_exclude joined>`; plan docs under `paths`: `<count>`
+- Found: seed so far `<report globs>`, `<upstream mirror glob when present>`; edit mode — current `source_exclude`: `<current source_exclude joined>`; plan docs under `paths`: `<count>`
 - Why asking: whether plan documents set terminology is an editorial choice
 - Answers: `yes, take terms from them` — plan docs stay term sources, the seed is written as is; `no, exclude them` — `**/code-plan.md`, `**/test-plan.md`, and every declared `plan_doc` glob are appended before the write in Terms 5; re-asked only on the next edit run
-AskUserQuestion: header "Plan docs as sources", question "Are plan documents (`code-plan.md`, `test-plan.md`) sources of terminology for dictionary `<file>` of terms scope `<id>`?", options `yes, take terms from them` / `no, exclude them` with the descriptions above. On `no`, add `**/code-plan.md` and `**/test-plan.md` to the array, plus the `plan_doc` glob of any operator-declared tool type that names one.
+AskUserQuestion: header "Plan docs as sources", question "Are plan documents (`code-plan.md`, `test-plan.md`) sources of terminology for dictionary `<dir>` of terms scope `<id>`?", options `yes, take terms from them` / `no, exclude them` with the descriptions above. On `no`, add `**/code-plan.md` and `**/test-plan.md` to the array, plus the `plan_doc` glob of any operator-declared tool type that names one.
 
 Context (print before asking):
 - Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`
@@ -447,7 +440,7 @@ AskUserQuestion: header "More source excludes", question "Anything else under `<
 
 Outcome: `collected`.
 
-### Terms 5 — Write back + exclude from wiki scopes
+### Terms 5 — Write back
 
 **Create / edit.** Set `lazy.settings.json[terms.scopes][<id>]` to:
 
@@ -455,26 +448,28 @@ Outcome: `collected`.
 {
   "paths": ["<...>"],
   "source_exclude": ["<...>"],
-  "file": "<path>"
+  "dir": "<path>"
 }
 ```
 
+In edit mode carry over untouched every key the wizard does not collect — `link_exclude` (seeded by a neighbouring plugin or written by the operator) and `legacy_file` when present.
+
 `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --value '<scope object as JSON>' --cwd <repo-root>)`.
 
-Then **protect the dictionary from the wiki curator**: for every `wiki.scopes` entry whose `paths` globs cover `<file>`, append `<file>` to that scope's `exclude_paths` when it is not already there. The dictionary carries no frontmatter by design, so it has none of the `wiki_role` self-defence `topics.md` has; without this entry the wiki curator appends a `# See also` block to it within a scan tick and the file stops being its own truth.
-
-**Any scope whose `exclude_paths` this step touched needs its rendered Coverage back in step.** The navigation rule's `## Coverage` is derived from `paths` / `exclude_paths`, so an entry added or dropped here leaves it stating an exclusion the settings no longer carry — and every session reads that rule, not the settings. Write each touched scope's list with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<sid>/exclude_paths' --value '<array as JSON>' --cwd <repo-root>)`. When this step changed any scope's `exclude_paths`, refresh the section exactly as Phase 9 does, naming the terms scope in the commit subject instead of a wiki scope. Unchanged `exclude_paths` — nothing to refresh.
-
-**Remove.** Delete the `terms.scopes[<id>]` entry with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --delete --cwd <repo-root>)`, and drop from every `wiki.scopes` entry's `exclude_paths` the entries this wizard put there for that scope's dictionary, writing each list as above. Then ask about the file.
+**Remove.** Count the term files first: `Bash(git ls-files -- '<dir>/*.md')` from `<repo-root>`, and hold the list — the commit below names each path. Delete the `terms.scopes[<id>]` entry with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --delete --cwd <repo-root>)`. Delete the scope's sweep marker: `Bash(test -f <repo-root>/.state/lazy-wiki.terms-sweep.<id>.json)`, and when present `Bash(rm <repo-root>/.state/lazy-wiki.terms-sweep.<id>.json)` — a marker left behind would tell a later scope under the same id that its sweep already ran. Then ask about the directory.
 
 Context (print before asking):
-- Where: Terms 5 — remove path; target `<repo-root>/<file>`
-- Found: `terms.scopes[<id>]` removed from settings; the dictionary at `<file>` `<is absent | holds <n> terms>`
-- Why asking: deleting the file is destructive and nothing in settings can restore its terms
-- Answers: `keep` — the file stays in the worktree, no longer served or scanned; `delete` — `rm <repo-root>/<file>` now, the terms are gone; not persisted
-AskUserQuestion: header "Dictionary file", question "Keep the dictionary file `<file>` of removed terms scope `<id>`, or delete it?", options `keep` / `delete` with the descriptions above; on `delete`, `Bash(rm <repo-root>/<file>)`.
+- Where: Terms 5 — remove path; target `<repo-root>/<dir>`
+- Found: `terms.scopes[<id>]` removed from settings; the dictionary directory `<dir>` `<is absent | holds <n> term files>`
+- Why asking: deleting the directory is destructive and nothing in settings can restore its terms
+- Answers: `keep` — the directory stays in the worktree, no longer served; `delete` — the directory `<repo-root>/<dir>` and every term file in it are removed now, the terms are gone; not persisted
+AskUserQuestion: header "Dictionary directory", question "Keep the dictionary directory `<dir>` of removed terms scope `<id>` with its `<n>` term files, or delete it?", options `keep` / `delete` with the descriptions above.
 
-Outcome: `written` (or `removed`).
+On `delete`, first `Bash(find <repo-root>/<dir> -name .git -print -quit)`: any output means a git repository lives inside the directory — stop the removal, name the path the command printed, and leave the directory as it is. Empty output → `Bash(rm -r <repo-root>/<dir>)`, exactly that directory and nothing above it.
+
+Commit what the removal changed, naming every path: the term files held above and `<dir>/.gitkeep` when `delete` ran and git tracked them, and the marker when git tracked it — `Bash(git commit -m "chore(wiki): remove terms scope <id>" -- <path> <path> …)`. Nothing tracked changed → no commit. The settings removal itself stays uncommitted, as every settings write of this wizard does: a daemon running in another checkout keeps serving the scope until the operator commits and pushes `.claude/lazy.settings.json` and that checkout pulls it — say so in Terms 8.
+
+Outcome: `written` (or `removed`, suffixed `+dictionary-deleted` or `+dictionary-kept`).
 
 ### Terms 6 — Register the scan routine
 
@@ -490,15 +485,41 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.term
 
 **One job per tick, not per document.** The routine declares no `group`, so every path one tick observed reaches the curator as one job carrying all of them — the runtime's default unit of work. Documents changed together describe related subjects, so their terms are decided against each other rather than one at a time, and the request above is written against the list shape for exactly that reason.
 
-**Edit mode needs no unregister.** The registration above runs in reconcile mode, so a changed `paths` reaches the routine's `path_filter` on the next run of this branch — the key is one of the plugin's own. **Remove mode** unregisters and stops.
+**Edit mode needs no unregister.** The registration above runs in reconcile mode, so a changed `paths` reaches the routine's `path_filter` on the next run of this branch — the key is one of the plugin's own. **Remove mode** unregisters the routine.
 
 Outcome: `registered` / `refreshed` / `unchanged` / `unregistered`.
 
-### Terms 7 — Pointers
+### Terms 7 — Queue the curator sweep
 
-Print two pointers (no questions):
-- *"A writing expert consults this dictionary through `/lazy-wiki.terms`; the curator fills it from finished documents on its own."*
-- *"The corpus written before this scope existed was never seen by the routine — run the terms section of `/lazy-wiki.audit` for a full pass over it."*
+Create mode only; edit and remove mark this step `skipped-per-user-choice`. The scan routine sees only documents that change from now on. The documents the scope already covers get their terms and their term links only from a curator pass over each of them, so a new scope queues that pass once, now:
+
+Three moves, in this order.
+
+**1. Queue.**
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" terms-sweep --dispatch --mark --scope <id> --repo <repo-root>)
+```
+
+The verb queues one curator job per directory of the new scope's documents, no other scope's, and writes the scope's marker `.state/lazy-wiki.terms-sweep.<id>.json`, also when the scope has no documents. Without the marker the plugin's migration would queue the same sweep again on the next `/lazy-core.setup`. Hold its one JSON line and its exit code for move 3.
+
+**2. Commit** what this branch created, naming every path that exists: `<dir>/.gitkeep` when Terms 3 wrote it, and the marker when the verb wrote it. Register each new path with `Bash(git add -N <path>)`, then `Bash(git commit -m "chore(wiki): terms scope <id>" -- <path> <path> …)`. The marker has to reach every checkout, the daemon's included, through git — that is where it stops the migration from queueing the sweep a second time.
+
+**3. Show the answer** of move 1 to the operator:
+
+- `deferred_to` set — the daemon runs in another checkout, whose queue this checkout cannot reach, so nothing was queued here. That checkout does not know the new scope yet: the scope lives in `.claude/lazy.settings.json`, which this wizard writes but never commits. Name the daemon checkout's host and path and the order the operator follows: commit `.claude/lazy.settings.json` (it may hold other edits of theirs — they choose what goes in), push it together with the wizard's commit, `git pull` in the daemon checkout, then run there `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-sweep --dispatch --scope <id> --repo <daemon checkout>`, where `<wiki-cli>` is this plugin's `bin/lazycortex-wiki` as installed in that checkout's Claude Code. Outcome `deferred`.
+- `queued` / `already_queued` above zero — the jobs are queued; the daemon runs them one at a time, and without a daemon `/lazy-runtime.tick --drain` does. Outcome `queued`.
+- `directories` zero — the scope covers no document yet. Outcome `no-documents`.
+- exit 2, with an `error` key — the queueing failed and no marker was written. Show the error; re-running this branch in edit mode does not retry it, the command of move 1 does. Outcome `failed`.
+
+Outcome: `queued` / `deferred` / `no-documents` / `failed` / `skipped-per-user-choice`, suffixed `+committed`.
+
+### Terms 8 — Pointers
+
+Print the pointers of the mode that ran (no questions):
+- create, edit, remove — *"`.claude/lazy.settings.json` holds the scope change uncommitted; commit it yourself. A daemon running in another checkout serves the scope as that checkout's settings say until the change reaches it there."*
+- create — *"A writing expert consults this dictionary through `/lazy-wiki.terms` and links its own words to the term files; the curator fills the dictionary from finished documents and links every use of a term it finds."*
+- create — *"Until the curator jobs of the sweep have run, the documents carry no term links."*
 
 Outcome: `printed`.
 
@@ -693,7 +714,7 @@ Outcome: `written`.
 
 ## Report
 
-One line per task in the canonical list of the branch that ran, with its outcome word. Scope-branch summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`. Domains-branch summary line: `wiki.domains <created|updated>: code=<count>, dictionary=<path>, output=<path>, language=<code>`. Mirror-branch summary line: `scope <id> mirror <created|updated>: url=<url>, source_paths=<count>, exclude=<count>, mirror_path=<path>`. Terms-branch summary line: `terms scope <id> <created|updated|removed>: paths=<count>, file=<path>, source_exclude=<count>, routine=<registered|re-registered|unregistered>`. Structure-branch summary line: `structure <created|updated>: classes=<count>, exclude=<count>, routines=<registered|already-present>`. Vault-branch summary line: `wiki vault updated: tag_axes=[<axes>], exclude=<count>, language=<code | inherited>`.
+One line per task in the canonical list of the branch that ran, with its outcome word. Scope-branch summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`. Domains-branch summary line: `wiki.domains <created|updated>: code=<count>, dictionary=<path>, output=<path>, language=<code>`. Mirror-branch summary line: `scope <id> mirror <created|updated>: url=<url>, source_paths=<count>, exclude=<count>, mirror_path=<path>`. Terms-branch summary line: `terms scope <id> <created|updated|removed>: paths=<count>, dir=<path>, source_exclude=<count>, routine=<registered|re-registered|unregistered>, sweep=<queued|deferred|no-documents|failed|skipped>`. Structure-branch summary line: `structure <created|updated>: classes=<count>, exclude=<count>, routines=<registered|already-present>`. Vault-branch summary line: `wiki vault updated: tag_axes=[<axes>], exclude=<count>, language=<code | inherited>`.
 
 ## Failure modes
 
@@ -707,3 +728,6 @@ One line per task in the canonical list of the branch that ran, with its outcome
 - **Mirror 1 aborts: "no scopes configured"** — the mirror block nests inside an existing scope → create the scope with `/lazy-wiki.configure` first, then re-run `/lazy-wiki.configure mirror`.
 - **Terms 1 aborts: "the `terms` section is missing"** — `lazy.settings.json` predates the terms mechanism → run `/lazy-wiki.install`, then re-run `/lazy-wiki.configure terms`.
 - **Terms 2 re-asks on an overlapping glob** — another terms scope already serves a document the new globs would match, and one document belongs to one dictionary → narrow the globs, or edit the colliding scope instead.
+- **Terms 3 refuses to move the dictionary directory** — the documents link to the term files at their current path, so a move would break every link → move the files, the `dir` setting and the links together by hand, or keep the directory where it is.
+- **Terms 5 stops the removal: a git repository lives inside the dictionary directory** — the directory holds a `.git` → remove it by hand after checking what that repository is, or answer `keep`.
+- **Terms 7 reports `failed`** — the curator sweep could not be queued (core unreachable, daemon gate unreadable, a job refused) and no marker was written → fix the cause the error names, then run `terms-sweep --dispatch --mark --scope <id>` by hand and commit the marker it writes.

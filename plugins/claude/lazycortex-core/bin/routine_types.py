@@ -114,9 +114,25 @@ FAILED_PATHS_KEY = "failed_paths"
 SKIP_TRAILER_KEY = "Lazy-Watch"
 SKIP_TRAILER_VALUE = "skip"
 
+# The opening of git's trailer placeholder, which a git older than 2.22 prints as written instead of expanding it
+_TRAILER_PLACEHOLDER = "%(trailers"
+# One commit record of a message listing: its id, a NUL, the whole message, a record separator
+_MESSAGE_LOG_FORMAT = "--format=%H%x00%B%x1e"
+_RECORD_SEP = "\x1e"
+_FIELD_SEP = "\x00"
+# A paragraph break of a commit message, and one trailer line of its closing paragraph: a key, a colon, the value
+_PARAGRAPH_BREAK_RE = re.compile(r"\n[ \t]*\n")
+_TRAILER_LINE_RE = re.compile(r"^([A-Za-z0-9-]+)[ \t]*:[ \t]*(.*)$")
+_CONTINUATION = ( " ", "\t" )
+
 # maps a file-level diff status to the `git log --diff-filter=` flag that finds its
 # last-changing commit; "R" (renames) widens to the union of add/modify/delete/rename
 _DIFF_FILTER_FLAGS = { "A": "A", "M": "M", "D": "D", "R": "AMDR" }
+
+# a `git diff --name-status -z` listing: NUL-separated fields, each path printed as written (never quoted);
+# a rename or copy record carries two paths after its status, every other record one
+_NUL = "\0"
+_TWO_PATH_STATUSES = ( "R", "C" )
 
 # Per-type schemas. `command`, `expert`, `request` are all optional in every
 # type — the EITHER/OR invariant is enforced separately by
@@ -2080,17 +2096,18 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
   if watch == "new_commits":
     out = subprocess.check_output(
       [ "git", "log",
-        "--format=%H%x09%h%x09%s%x09%an%x09%ae%x09%ct",
+        "--format=%H%x09%h%x09%an%x09%ae%x09%ct%x09%s",
         rng, *pathspec ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
     ).strip()
     items: list[dict[str, object]] = []
     if out:
       for line in out.splitlines():
-        parts = line.split("\t")
+        # the subject comes last and keeps every tab it holds
+        parts = line.split("\t", 5)
         # waiver: inline numeric/default literal, not a domain constant
         if len(parts) >= 6:
-          sha, short_sha, subj, commit_author, commit_email, commit_time = parts[:6]
+          sha, short_sha, commit_author, commit_email, commit_time, subj = parts
           items.append({
             "sha": sha,
             "short_sha": short_sha,
@@ -2103,77 +2120,98 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
 
   # file-level watches read a name-status diff instead of the log
   if watch in ("new_files", "changed_files", "deleted_files"):
-    # use diff --name-status for added/modified/deleted classification
+    # use diff --name-status for added/modified/deleted classification, NUL-separated so paths come as written
     out = subprocess.check_output(
-      [ "git", "diff", "--name-status", rng, *pathspec ],
+      [ "git", "diff", "--name-status", "-z", rng, *pathspec ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
-    ).strip()
+    )
     wanted = {
       "new_files": { "A" },
       "changed_files": { "A", "M" },
       "deleted_files": { "D" },
     }[watch]
     items = []
-    if out:
-      for line in out.splitlines():
-        parts = line.split("\t")
+    for score, paths in _name_status_records(out):
+      # the status letter without the similarity score a rename or copy carries
+      status = score[:1]
 
-        # guard: malformed diff row — skip
-        if len(parts) < 2:
-          continue
-
-        # strip percent for renames etc.
-        status = parts[0][:1]
-
-        # only the requested statuses are collected
-        if status not in wanted:
-          continue
-        path = parts[1]
-        sha = _query_last_change_sha(work_dir, path, rng, status)
-        author_name, author_email = _query_last_change_author(work_dir, path, rng, status)
-        file_item: dict[str, object] = {
-          "path": path, "status": status, "sha": sha,
-          # the one-member list shape a grouped watch also emits, so a request template
-          # written against `paths` serves a grouped and an ungrouped item alike
-          "paths": [ path ],
-          "author_name": author_name, "author_email": author_email,
-        }
-        items.append(file_item)
+      # only the requested statuses are collected
+      if status not in wanted:
+        continue
+      path = paths[0]
+      sha = _query_last_change_sha(work_dir, path, rng, status)
+      author_name, author_email = _query_last_change_author(work_dir, path, rng, status)
+      items.append({
+        "path": path, "status": status, "sha": sha,
+        # the one-member list shape a grouped watch also emits, so a request template
+        # written against `paths` serves a grouped and an ungrouped item alike
+        "paths": [ path ],
+        "author_name": author_name, "author_email": author_email,
+      })
     return items
 
   # renames need the rename-detection pass to pair the old and new path
   # waiver: git CLI/output vocabulary, not a domain constant
   if watch == "renamed_files":
     out = subprocess.check_output(
-      [ "git", "diff", "--name-status", "--find-renames", rng, *pathspec ],
+      [ "git", "diff", "--name-status", "--find-renames", "-z", rng, *pathspec ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
-    ).strip()
+    )
     items = []
-    if out:
-      for line in out.splitlines():
-        parts = line.split("\t")
-        # waiver: git CLI/output vocabulary, not a domain constant
-        if len(parts) >= 3 and parts[0].startswith("R"):
-          old_path, new_path = parts[1], parts[2]
-          # waiver: git CLI/output vocabulary, not a domain constant
-          sha = _query_last_change_sha(work_dir, new_path, rng, "R")
-          # waiver: git CLI/output vocabulary, not a domain constant
-          author_name, author_email = _query_last_change_author(work_dir, new_path, rng, "R")
-          rename_item: dict[str, object] = {
-            "old_path": old_path,
-            "new_path": new_path,
-            # the one-member list shape a grouped watch also emits, both sides aligned
-            "paths": [ new_path ],
-            "old_paths": [ old_path ],
-            "sha": sha,
-            "author_name": author_name,
-            "author_email": author_email,
-          }
-          items.append(rename_item)
+    for score, paths in _name_status_records(out):
+      # only a rename record pairs an old and a new path
+      # waiver: git CLI/output vocabulary, not a domain constant
+      if not score.startswith("R"):
+        continue
+      old_path, new_path = paths
+      # waiver: git CLI/output vocabulary, not a domain constant
+      sha = _query_last_change_sha(work_dir, new_path, rng, "R")
+      # waiver: git CLI/output vocabulary, not a domain constant
+      author_name, author_email = _query_last_change_author(work_dir, new_path, rng, "R")
+      items.append({
+        "old_path": old_path,
+        "new_path": new_path,
+        # the one-member list shape a grouped watch also emits, both sides aligned
+        "paths": [ new_path ],
+        "old_paths": [ old_path ],
+        "sha": sha,
+        "author_name": author_name,
+        "author_email": author_email,
+      })
     return items
 
   # every watch value is handled above, so reaching here means the config is invalid
   raise RoutineConfigError(f"unknown git watch value: {watch!r}")
+
+
+def _name_status_records(listing: str) -> list[tuple[str, list[str]]]:
+  """
+  Split the output of `git diff --name-status -z` into one record per changed file.
+
+  Args:
+    listing: The NUL-separated output of `git diff --name-status -z`.
+
+  Returns:
+    One `(status, paths)` pair per record, in git's order. The status keeps its similarity score. The paths are
+    exactly as on disk, never quoted: the old and the new path of a rename or copy, or the single path of any
+    other record. A record cut short at the end of the listing is dropped.
+  """
+  fields = [ field for field in listing.split(_NUL) if field ]
+  records: list[tuple[str, list[str]]] = []
+  index = 0
+
+  # each record is its status followed by one path, or two for a rename or copy
+  while index < len(fields):
+    status = fields[index]
+    count = 2 if status.startswith(_TWO_PATH_STATUSES) else 1
+    paths = fields[index + 1:index + 1 + count]
+    index += 1 + count
+
+    # guard: a record cut short at the end of the listing names no complete change
+    if len(paths) < count:
+      break
+    records.append(( status, paths ))
+  return records
 
 
 def _git_dedup_key(routine: str, item: dict) -> str | None:
@@ -2491,13 +2529,16 @@ def _query_skipped_shas(work_dir: Path, rng: str) -> set[str]:
 
   Notes:
     - Spawns one `git log` subprocess over the range.
+    - When the git in use prints the trailer placeholder unexpanded (older than 2.22), the commits' whole
+      messages are read with one more `git log` and their trailer blocks are parsed instead.
 
   Args:
     work_dir: Path-like reference to the git working tree.
     rng: The `<last_seen>..<head>` range this tick scans.
 
   Returns:
-    The full shas of the marked commits; empty when none is marked or the log fails.
+    The full shas of the marked commits, read from git's own trailer output or, on a git older than 2.22, from the
+    parsed trailer blocks of the whole messages; empty when none is marked or the log fails.
   """
   # one log call reads every commit's trailer value; git resolves the trailer block itself
   try:
@@ -2509,6 +2550,10 @@ def _query_skipped_shas(work_dir: Path, rng: str) -> set[str]:
     # guard: an unreadable range hides nothing — the items stay as computed
     return set()
 
+  # guard: a git older than the trailer placeholder printed it as written, so the messages are read instead
+  if _TRAILER_PLACEHOLDER in out:
+    return _query_skipped_from_messages(work_dir, rng)
+
   # a commit is marked when any occurrence of the trailer spells the skip value
   marked: set[str] = set()
   for line in out.splitlines():
@@ -2516,6 +2561,75 @@ def _query_skipped_shas(work_dir: Path, rng: str) -> set[str]:
     if any(value.strip().lower() == SKIP_TRAILER_VALUE for value in values.split(",")):
       marked.add(sha)
   return marked
+
+
+def _query_skipped_from_messages(work_dir: Path, rng: str) -> set[str]:
+  """
+  Return the commits in `rng` whose trailer block carries the `Lazy-Watch: skip` trailer, read from whole messages.
+
+  Notes:
+    - Spawns one `git log` subprocess over the range.
+
+  Args:
+    work_dir: Path-like reference to the git working tree.
+    rng: The `<last_seen>..<head>` range this tick scans.
+
+  Returns:
+    The full shas of the marked commits; empty when none is marked or the log fails.
+  """
+  # one log call reads every commit's whole message, whose trailer block is parsed here
+  try:
+    out = subprocess.check_output(
+      [ "git", "log", _MESSAGE_LOG_FORMAT, rng ], cwd = str(work_dir), text = True, encoding = "utf-8",
+    )
+  except subprocess.CalledProcessError:
+    # guard: an unreadable range hides nothing — the items stay as computed
+    return set()
+
+  # a commit is marked when any value of its trailer spells the skip value
+  marked: set[str] = set()
+  for record in out.split(_RECORD_SEP):
+    sha, _sep, message = record.strip().partition(_FIELD_SEP)
+    if sha and any(
+      value.lower() == SKIP_TRAILER_VALUE for value in _parse_trailer_values(message, SKIP_TRAILER_KEY)
+    ):
+      marked.add(sha)
+  return marked
+
+
+def _parse_trailer_values(message: str, key: str) -> list[str]:
+  """
+  Return the values a commit message's trailer block gives to one trailer key.
+
+  Args:
+    message: The whole commit message.
+    key: The trailer key to read, compared without letter case.
+
+  Returns:
+    The stripped values in the order written; empty when the message has no trailer block, when its closing
+    paragraph is prose, or when the key does not occur.
+  """
+  # the closing paragraph is the trailer block, never the subject paragraph alone
+  paragraphs = [ part for part in _PARAGRAPH_BREAK_RE.split(message.strip()) if part.strip() ]
+
+  # guard: a message of one paragraph carries no trailer block
+  if len(paragraphs) < 2:
+    return []
+
+  # each line of the closing paragraph, read as a trailer where it is one
+  lines = paragraphs[-1].splitlines()
+  matches = [ _TRAILER_LINE_RE.match(line) for line in lines ]
+
+  # guard: a closing paragraph with a line that is neither a trailer nor its continuation is prose
+  if not all(
+    match is not None or line.startswith(_CONTINUATION) for match, line in zip(matches, lines, strict = True)
+  ):
+    return []
+
+  # every value of the key, compared without letter case as git compares trailer keys
+  return [
+    match.group(2).strip() for match in matches if match is not None and match.group(1).lower() == key.lower()
+  ]
 
 
 def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[dict]:

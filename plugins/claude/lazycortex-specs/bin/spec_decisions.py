@@ -72,6 +72,17 @@ _CALLOUT_HEAD_RE = re.compile(r"^> \[!")
 _WIKILINK_RE = re.compile(r"^\[\[([^#|\]]+)#D-(\d{3,})[^|\]]*(?:\|[^\]]*)?\]\]$")
 # The `**Supersedes.**` line of a decision callout, capturing the text after the label.
 _SUPERSEDES_LINE_RE = re.compile(r"^\*\*Supersedes\.\*\*\s*(.*)$")
+# Any wikilink inside running text, capturing its target and its display text, the latter absent on a link without
+# one; a table cell escapes the separator as `\|`.
+_LINK_IN_TEXT_RE = re.compile(r"\[\[(?P<target>[^\]|\n]*?)(?:\\?\|(?P<text>[^\]\n]*))?\]\]")
+_GROUP_TARGET = "target"
+_GROUP_TEXT = "text"
+# The mark opening a link target's heading anchor, and the separator between the target's segments.
+_ANCHOR = "#"
+_SLASH = "/"
+# Whitespace runs inside a compared field.
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+_SPACE = " "
 
 
 # ----------------------------------------------------------------------------------------
@@ -549,12 +560,47 @@ def _split(text: str) -> tuple[str, str]:
 
 def _normalize_text(value: str) -> str:
   """
-  Collapse a field's whitespace for dedup comparison.
+  Reduce a field to the plain text a reader sees, for dedup comparison.
 
   Returns:
-    `value` stripped and with internal runs of whitespace collapsed to a single space.
+    `value` with every wikilink replaced by what a reader sees, stripped and with internal runs of whitespace
+    collapsed to a single space. A `[[target|text]]` link, also in the table-cell form whose separator is
+    escaped with a backslash, becomes `text`; a `[[target]]` link without display text becomes the last non-empty
+    `/`-separated segment of its target's path, followed by its heading anchor (with `#`) when it carries one, so
+    links differing only in anchor stay different (`[[a/b/c]]` reads `c`, `[[a/b/c#H]]` reads `c#H`, `[[#H]]` reads
+    `#H`, `[[a/b/]]` reads `b`).
   """
-  return re.sub(r"\s+", " ", value.strip())
+
+  # a link reads as the text a reader sees: its display text, or, when it has none, the reading of its target
+  visible = _LINK_IN_TEXT_RE.sub(
+    lambda match: (
+      _compute_bare_link_text(match.group(_GROUP_TARGET))
+      if match.group(_GROUP_TEXT) is None else match.group(_GROUP_TEXT)
+    ),
+    value,
+  )
+
+  # incidental whitespace never tells two fields apart
+  return _WHITESPACE_RUN_RE.sub(_SPACE, visible.strip())
+
+
+def _compute_bare_link_text(target: str) -> str:
+  """
+  Return the text a reader sees for a link that carries no display text.
+
+  Args:
+    target: The link's target as written, heading anchor included.
+
+  Returns:
+    The last non-empty `/`-separated segment of the target's path, followed by the heading anchor with its `#`
+    when the target carries one.
+  """
+  path, mark, anchor = target.partition(_ANCHOR)
+
+  # the last segment that names something, and the anchor, so two links that differ only in their heading never read
+  # the same; the terms curator leaves this text when it unwraps a bare link whose target ends in a file name
+  last = next(( segment for segment in reversed(path.split(_SLASH)) if segment ), "")
+  return f"{last}{mark}{anchor}"
 
 
 def _dedup_key(thesis: str, body: str) -> str:
@@ -567,7 +613,7 @@ def _dedup_key(thesis: str, body: str) -> str:
       `Date:` / `Origin:` metadata lines).
 
   Returns:
-    A key equal for two records whose thesis + full body are the same modulo whitespace — the
+    A key equal for two records whose thesis + full body are the same modulo whitespace and link markup — the
     `**Supersedes.**` line is never part of the key (spec-decisions-design.md
     § on promoting a living doc's decisions, which consumes the Supersedes command rather than
     storing it), since it is stripped out before this is called.
@@ -576,10 +622,22 @@ def _dedup_key(thesis: str, body: str) -> str:
   # Domain(spec.decisions):
   # # What makes two decisions the same
   # Two records count as the same decision when their thesis and full body agree once incidental
-  # whitespace is ignored — reformatting never creates a duplicate, and two records that actually
-  # say something different are never folded together. A record's note about which earlier
-  # decision it replaces plays no part in this comparison: that note describes a relationship
-  # between two decisions, not the substance of either one.
+  # whitespace is ignored and every link is read as the text a reader sees — reformatting never
+  # creates a duplicate, and two records that actually say something different are never folded
+  # together. A link with display text reads as that text, also in the table-cell form whose
+  # separator is escaped with a backslash; a link without display text reads as the last
+  # non-empty `/`-separated segment of its target, followed by its heading anchor with the `#`
+  # when it has one (a link to `docs/terms/streaming writer#Usage` reads `streaming writer#Usage`,
+  # a link to a bare heading reads as that heading), so links that differ only in their heading
+  # never read the same. That is the same text the terms curator leaves in the document when it rejects
+  # a term and unwraps a bare link to a file, and when it moves a bare link onto another term it
+  # gives the link the words it showed as display text. A writer or the terms curator may
+  # turn a term into a link in one copy of a decision (the callout in the document) and not in
+  # the other (the registry record); the link must not make a re-promoted decision look new and
+  # create a duplicate record, so a rejected or retargeted term link in one copy still matches
+  # the other copy.
+  # A record's note about which earlier decision it replaces plays no part in this comparison:
+  # that note describes a relationship between two decisions, not the substance of either one.
 
   return "\x00".join(_normalize_text(v) for v in (thesis, body))
 

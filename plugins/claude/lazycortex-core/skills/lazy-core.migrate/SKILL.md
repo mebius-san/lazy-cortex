@@ -39,8 +39,8 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 3. A non-zero exit ends the plan: the outcome is `failed: <reason>` when stdout carries `{"status": "error", "reason": ...}`, and `failed: <stderr>` when stdout carries no JSON (an argument error prints its usage on stderr). Phase 2 and Phase 3 take the outcome `skipped`, and the run goes to Phase 4.
 4. Otherwise the output is `{"plugins": {<plugin>: {...}}}`. Per plugin keep:
-   - `applicable` — the steps to run, already in run order; each entry carries `path` (the absolute step file), `number`, `slug`, `since`, and `writes` (repo-relative globs, the spec root already expanded);
-   - `skipped` — steps left out, with `reason` (`stamped`, `superseded`, `not-applicable`, the last with a `detail` such as `no-spec-territory` when the repository has no spec catalog); they are not run and not listed in the report;
+   - `applicable` — the steps to run, already in run order; each entry carries `path` (the absolute step file), `number`, `slug`, `since`, and `writes` (repo-relative globs, the spec root and the `{terms}` token already expanded);
+   - `skipped` — steps left out, with `reason` (`stamped`, `superseded`, `not-applicable`, the last with a `detail` such as `no-spec-territory` when the repository has no spec catalog, or `no-terms-territory` when it has no usable terms dictionary settings); they are not run and not listed in the report;
    - `invalid` — step files, stamps, or conditions that could not be read or judged, with `reason`;
    - `installed_version` — the version the installed plugin records, or null.
 5. Name each applicable step `<NNN>-<slug>`, `<NNN>` being `number` padded to three digits; this is the step file's own basename without `.md`.
@@ -107,23 +107,23 @@ Then per step:
    ```
 
    and append `bin/lazycortex-<short>` to the root it prints. A non-zero exit is `failed: plugin-root: <stderr>`, with nothing written.
-4. **Run `## Steps`.** Execute the numbered steps in order, one command per `Bash` call, exactly as written apart from the CLI path resolved above and the `<repo-root>` placeholder, which stands for the resolved root, quotes kept. Never write a path outside `writes`, never ask the operator, never improvise a command the step does not name. A command that exits 3 ends the step with `not-applicable`: the rest of `## Steps` is not run and `## Done when` is not checked. A command that exits any other non-zero code ends the step with `failed: step <k>: <stderr>`, `<k>` being the step's number in `## Steps`.
+4. **Run `## Steps`.** Execute the numbered steps in order, one command per `Bash` call, exactly as written apart from the CLI path resolved above and the `<repo-root>` placeholder, which stands for the resolved root, quotes kept. Never write a path outside `writes`, never ask the operator, never improvise a command the step does not name. A command that exits 3 ends the step with `not-applicable`: the rest of `## Steps` is not run and `## Done when` is not checked. A command that exits any other non-zero code ends the step with `failed: step <k>: <stderr>`, `<k>` being the step's number in `## Steps`. Keep the last non-empty stdout line of the last command the step ran as the step's **closing line**; it is quoted in the report.
 5. **Check `## Done when`.** Verify every condition with read-only tools (`Read`, `Grep`, `Glob`, or the verb the condition names, `<repo-root>` substituted as in item 4). A condition that does not hold is `failed: not-done: <condition>`.
 6. **Collect the step's changes.** Run both status commands from item 1 again, whatever items 3–5 ended in:
    - the `writes`-restricted one: since it printed nothing before the step, every path it prints now is the step's own change inside `writes` — the **inside paths**;
    - the unrestricted one: every path it prints that is not in the before-snapshot and not among the inside paths is a write outside `writes` — the **outside paths**.
 
    Any outside path makes the outcome `failed: outside-writes: <paths>`, naming every outside path, unless items 3–5 already recorded a `failed` reason, which then stands with the outside paths appended. A `not-applicable` step with an outside path becomes `failed: outside-writes: <paths>` too.
-7. **Roll back a failed or not-applicable step.** When the step is `failed` or `not-applicable` and item 6 found inside or outside paths, undo exactly those paths, since none of them was dirty before the step: a modified or deleted path with `Bash(git -C "<repo-root>" restore --worktree -- "<path>")`, a new file with `Bash(rm "<repo-root>/<path>")`, one path per call. A before-snapshot path is never touched. The outcome stays the one already recorded, and a `not-applicable` step makes no commit.
+7. **Roll back a failed or not-applicable step.** When the step is `failed` or `not-applicable` and item 6 found inside or outside paths, undo exactly those paths, since none of them was dirty before the step: every modified or deleted path in one call, `Bash(git -C "<repo-root>" restore --worktree -- "<path>" "<path>" …)`, and every new file in one call, `Bash(rm "<repo-root>/<path>" "<repo-root>/<path>" …)`. A kind with no paths makes no call: a `git restore` with no pathspec is an error. A before-snapshot path is never touched. The outcome stays the one already recorded, and a `not-applicable` step makes no commit.
 8. **Commit an applied step.** For a step not already `failed` or `not-applicable`: when item 6 found no inside path and no outside path, the step changed nothing: the outcome is `applied` and no commit is made. Otherwise, with no outside path:
-   - register each new inside path without staging its content, one call per path: `Bash(git -C "<repo-root>" add -N -- "<path>")`. No other `git add` is ever run;
+   - register every new inside path without staging its content, all of them in one call, none when no inside path is new: `Bash(git -C "<repo-root>" add -N -- "<path>" "<path>" …)`. No other `git add` is ever run;
    - commit every inside path by name, deleted ones included — never a glob, a directory, or `.`:
 
      ```
      Bash(git -C "<repo-root>" commit -m "chore(migrate): <plugin> <NNN>-<slug>" -m "Lazy-Watch: skip" -- "<path>" "<path>" …)
      ```
 
-   The second paragraph is the `Lazy-Watch: skip` trailer, which keeps the commit out of every git routine's watch. A commit that exits zero makes the outcome `applied`. A commit the git guard or a hook refuses is `failed: commit-refused: <message>`, quoted verbatim, and the step is rolled back: each new inside path registered above leaves the index first, one call per path, `Bash(git -C "<repo-root>" restore --staged -- "<path>")`, then every inside path is undone exactly as item 7 undoes a failed step's paths. A before-snapshot path is never touched. The plugin's later steps are `blocked` as after any failure, the step is offered again on the next run, and the refusal is never rephrased around or bypassed.
+   The second paragraph is the `Lazy-Watch: skip` trailer, which keeps the commit out of every git routine's watch. A commit that exits zero makes the outcome `applied`. A commit the git guard or a hook refuses is `failed: commit-refused: <message>`, quoted verbatim, and the step is rolled back: every new inside path registered above leaves the index first, all of them in one call, none when no inside path is new: `Bash(git -C "<repo-root>" restore --staged -- "<path>" "<path>" …)`, then every inside path is undone exactly as item 7 undoes a failed step's paths. A before-snapshot path is never touched. The plugin's later steps are `blocked` as after any failure, the step is offered again on the next run, and the refusal is never rephrased around or bypassed.
 
 Outcome: `install-chain: <committed | none | skipped | failed: <reason>>; applied: <A>, not-applicable: <N>, failed: <F>, blocked: <B>`, or `skipped` when Phase 1 ended `up-to-date` or `failed`.
 
@@ -174,6 +174,8 @@ Phase 4 — Report: reported
 | <plugin> | <path> | invalid: <reason> |
 | <plugin> | stamp | stamped <version> / failed: <reason> |
 ```
+
+Under the table, one line per `applied` step, in run order, quoting its closing line from Phase 2 verbatim: `<plugin> <NNN>-<slug>: <closing line>`, or `<plugin> <NNN>-<slug>: (no output)` when its last command printed nothing.
 
 Then, in this order, each line only when it applies:
 

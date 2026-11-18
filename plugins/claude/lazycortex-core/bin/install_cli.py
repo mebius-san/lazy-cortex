@@ -6,12 +6,13 @@ This module backs the `install-phase`, `daemon-run-here` and `gitignore-ensure` 
 `install-phase <name>` runs one idempotent bootstrap phase from `lazy_install_phases` (or a
 one-line derivation such as the repo id) and prints the phase's outcome word, or for the
 `interpreter` phase the interpreter path a supervisor unit should record: the operator's pin,
-else the version-neutral `python3` on `PATH` outside a virtualenv, else the running interpreter; the `python-env` phase additionally requires `--command` naming the
-interpreter command an install probe resolved. `daemon-run-here` reads or writes the
-`daemon.run_here` host-to-checkout gate for the current host. The repository root follows
-the dispatcher convention: the `LAZY_REPO_ROOT` env var, falling back to the process
-working directory, overridable per-call with `--cwd`. `gitignore-ensure` adds ignore lines to the repository's
-`.gitignore`.
+else the version-neutral `python3` on `PATH` outside a virtualenv, else the running interpreter;
+the `python-env` phase additionally requires `--command` naming the interpreter command an install
+probe resolved. `daemon-run-here` reads or writes the `daemon.run_here` host-to-checkout gate for
+the current host; `daemon-run-here check --json` prints the verdict together with the gate entry it
+rests on as one JSON object. The repository root follows the dispatcher convention: the
+`LAZY_REPO_ROOT` env var, falling back to the process working directory, overridable per-call with
+`--cwd`. `gitignore-ensure` adds ignore lines to the repository's `.gitignore`.
 """
 from __future__ import annotations
 
@@ -275,8 +276,9 @@ def evaluate_run_here(root: Path) -> str:
 
   Returns:
     `unset` when no gate is configured, `invalid-shape` when it is not a mapping,
-    `not-this-host` when this host has no entry, `run-here` when the entry names this
-    checkout, `not-this-checkout` when it names another.
+    `not-this-host` when this host has no entry or its entry is not a non-empty string
+    (an empty string, a number, null), which counts as no entry, `run-here` when the entry
+    names this checkout, `not-this-checkout` when it names another.
 
   Raises:
     json.JSONDecodeError: If the tracked settings file is not valid JSON.
@@ -296,16 +298,50 @@ def evaluate_run_here(root: Path) -> str:
     # waiver: CLI outcome tokens read by the install skill, not reusable domain keys
     return "unset" if gate is None else "invalid-shape"
 
-  # a host absent from the gate never runs a daemon
-  if (mapped := _normalize_gate(gate).get(_read_short_host())) is None:
+  # a host absent from the gate, or mapped to anything but a non-empty string, never runs a daemon
+  if not isinstance(mapped := _normalize_gate(gate).get(_read_short_host()), str) or not mapped:
     # waiver: CLI outcome token read by the install skill, not a reusable domain key
     return "not-this-host"
 
   # the entry authorizes this checkout only when both paths resolve to the same location
   # waiver: CLI outcome tokens read by the install skill, not reusable domain keys
   return (
-    "run-here" if Path(str(mapped)).expanduser().resolve() == root.expanduser().resolve() else "not-this-checkout"
+    "run-here" if Path(mapped).expanduser().resolve() == root.expanduser().resolve() else "not-this-checkout"
   )
+
+
+def _read_run_here_entry(root: Path) -> tuple[str | None, str | None]:
+  """
+  Read the `daemon.run_here` entry that names where the daemon of this repository runs.
+
+  Args:
+    root: Checkout whose settings hold the gate.
+
+  Returns:
+    The host key and the checkout path as recorded, from the usable entries only (a path that is a
+    non-empty string): this host's entry when it is usable, else the gate's first usable entry;
+    `(None, None)` when the gate is missing, not a mapping, or holds no usable entry.
+
+  Raises:
+    json.JSONDecodeError: If the tracked settings file is not valid JSON.
+  """
+  gate = load_section(root / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.RUN_HERE)
+
+  # guard: a gate that is missing or not a mapping names no checkout at all
+  if not isinstance(gate, dict):
+    return None, None
+
+  # only an entry naming a checkout as a non-empty string is usable; any other value names no path
+  usable = { host: path for host, path in _normalize_gate(gate).items() if isinstance(path, str) and path }
+
+  # guard: no usable entry, so nothing names where the daemon runs
+  if not usable:
+    return None, None
+
+  # this host's usable entry wins; without one, the first usable entry names where the daemon runs
+  this_host = _read_short_host()
+  host = this_host if this_host in usable else next(iter(usable))
+  return host, usable[host]
 
 
 def update_run_here(root: Path, *, enable: bool) -> None:
@@ -348,9 +384,15 @@ def cmd_daemon_run_here(argv: list[str]) -> int:
   """
   Run the `daemon-run-here` subcommand: `check` prints the gate outcome, `set` rewrites it.
 
+  With `--json`, `check` prints one JSON object with the keys `state`, `host` and `path`: `state` is the gate
+  verdict, `host` and `path` name the usable gate entry (one whose path is a non-empty string) the verdict rests
+  on, this host's entry when usable, else the gate's first usable entry; an entry whose value is not a non-empty
+  string is skipped. Both are null when no usable entry exists (gate missing, not a mapping, or without a usable
+  entry).
+
   Args:
     argv: Argument vector after the subcommand name (`check`, or `set` with `--on` / `--off`,
-      plus optional `--cwd`).
+      plus optional `--cwd` and `--json`).
 
   Returns:
     Process exit code: 0 on success.
@@ -371,13 +413,18 @@ def cmd_daemon_run_here(argv: list[str]) -> int:
   switch.add_argument("--off", dest = "off", action = "store_true", help = "Drop this host from the gate")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--json", dest = "json", action = "store_true", help = "Print the verdict as JSON (check)")
   args = parser.parse_args(argv)
   root = resolve_repo_root(args.cwd)
 
-  # `check` prints the verdict and never writes
+  # `check` prints the verdict and never writes; as JSON it also names the gate entry the verdict rests on
   # waiver: action name is this verb's own vocabulary, matched against the argparse choices above
   if args.action == "check":
-    print(evaluate_run_here(root))
+    state = evaluate_run_here(root)
+    host, path = _read_run_here_entry(root) if args.json else ( None, None )
+    # waiver: CLI outcome fields read by the calling plugin, not reusable domain keys
+    print(json.dumps({ "state": state, "host": host, "path": path }) if args.json else state)
     return 0
 
   # guard: a write must say which way it goes

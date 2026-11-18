@@ -1,15 +1,15 @@
 ---
 chapter_type: block
 summary: Keep specs aligned with the product's code — sync the whole spec tree, one product or one asset with the code, and gap-scan for capabilities no asset documents.
-last_regen: 2026-11-15
+last_regen: 2026-11-18
 diagram_spec:
   anchor: "How the two skills relate"
   request: "Decision-tree showing when to reach for lazy-spec.sync-with-code vs lazy-spec.coverage — inputs are 'code changed since last sync' and 'looking for capabilities the spec tree never documented'; outputs are document rewrites, created and deleted assets, gate proposals, and gap-candidate reports with proposed category+slug."
 source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.coverage
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 7443616a8710e447555d3559c8814ed60787902a62557f15f3ad7bd87ed93ead
+source_sha: 22b60f591c6dadaac3ba59e66718ced42828a208
+surface_sha: dba397429648a92db4dd16274710430715ad769b1acbb02caa570fed200ec6dd
 ---
 # Keeping specs aligned with source code
 
@@ -25,6 +25,7 @@ For each product it finds the last-synced commit and lists every commit since th
 
 Beyond rewriting, a sync run:
 
+- **Links dictionary terms.** In every document a writer edits, each term of the repository's terms dictionary that appears in the prose is written as a link to its term file, in the rewritten sections and in the rest of the document alike.
 - **Refreshes diagrams, never adds them.** Only a diagram whose own heading was just rewritten is redrawn; a rewritten section with no diagram gets none.
 - **Creates assets for uncovered code.** Each feature-sized unit of code that no asset describes is scaffolded as a new feature asset, with its documents authored from the code. You review the new folders in the run's diff rather than answering a question per candidate.
 - **Deletes assets whose code is gone.** An asset none of whose described behavior exists in the code any more is removed; an asset with only part of its behavior gone is rewritten instead. A folder holding a nested asset that is not itself gone is reported, not deleted.

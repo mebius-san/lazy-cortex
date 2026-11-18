@@ -15,9 +15,6 @@ spec_source_docs: []
 # {{slug}} — use-cases
 <!-- What the users need from the asset, in their own language: who acts, what each is trying to accomplish, and the flows that get them there. It is written before any design starts and names no system internals. How the asset is built lives in the sibling design. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Actors
 <!-- The people, systems or devices that interact with the asset, each in a role. One bullet per actor: the role and what it wants from the asset. What each actor does lives in Use cases. -->
 

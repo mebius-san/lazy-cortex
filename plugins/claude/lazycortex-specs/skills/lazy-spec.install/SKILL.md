@@ -43,7 +43,7 @@ A stale install-managed value is therefore never a drift question and never an u
 
 **The one case reconcile cannot merge is a shape change.** The registrar validates the merged entry against the routine type's closed vocabulary, so an entry whose recorded `type` differs from the shipped one, or which still carries the older `expert:` + `request:` pair where the shipped shape has `command:`, raises `RoutineConfigError` instead of being written. That is the genuine conflict the File-sync policy means — surface it through the policy's conflict question: **Where** — this step, `routines.<name>` in `<settings-dir>/lazy.settings.json`; **Found** — the recorded entry against the shipped `cfg`; **Why asking** — the two shapes cannot be merged mechanically and the operator keys of the old entry would be discarded with it; **Answers** — `merge-shipped` (`/lazy-routine.unregister <name>`, then re-register the shipped `cfg`, carrying over the operator keys read back from the removed entry) / `keep-local` (the entry stays and the routine keeps running its old shape, raised again on the next run). Outcome: `shape-migrated` or `shape-kept-local`.
 
-**No routine of another plugin is reconciled from here.** Step 7b touches only the wiki scope that covers the catalog, through the wiki CLI's absent-key-only `ensure-scope-config` seed, and never a sibling plugin's routine: reasserting a sibling's `filter` block from this side would delete whatever that plugin, or the operator, put there.
+**No routine of another plugin is reconciled from here.** Step 7b touches only the wiki scope and the terms scope that cover the catalog, through the wiki CLI's absent-key-only `ensure-scope-config` and `terms-scope-config` seeds, and never a sibling plugin's routine: reasserting a sibling's `filter` block from this side would delete whatever that plugin, or the operator, put there.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -667,8 +667,8 @@ Under `review.classes` append each entry below whose `class:` token no existing 
         position: bottom
 # system-test-plan class — the product-root test-plan.md: the standing testing instructions
 # (mechanisms, environment, smoke, regression, exit criteria) every release's tester reads first.
-# Product roots only. The tester writes, the developer validates, as on the asset class; the glob
-# is the asset class's — a typed document routes by type.
+# Product roots only. The tester writes; no validators, as on the asset class; the glob is the
+# asset class's — a typed document routes by type.
 - class: system-test-plan
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
@@ -676,11 +676,6 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <tester-expert>
-    validation:
-      developer_review:
-        name: <developer-expert>
-        section: Developer review
-        position: bottom
 # ui-design.md class — ui-designer writes; one architect_review validation slot (screen/navigation
 # shape checked against the architecture before implementation). Opt-in sibling, created by a
 # ticked launch checkbox; deliberately no context_from_frontmatter — its
@@ -716,8 +711,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
         name: <architect-expert>
         section: Architect review
         position: bottom
-# code-plan.md class — planner writes; tester + architect validate (the plan is checked against
-# the architecture before execution)
+# code-plan.md class — planner writes; no validators
 - class: code-plan
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
@@ -725,16 +719,7 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <planner-expert>
-    validation:
-      tester_review:
-        name: <tester-expert>
-        section: Tester review
-        position: bottom
-      architect_review:
-        name: <architect-expert>
-        section: Architect review
-        position: bottom
-# test-plan.md class — tester writes; developer validates (never the tester itself)
+# test-plan.md class — tester writes; no validators
 - class: test-plan
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
   paths:
@@ -742,11 +727,6 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <tester-expert>
-    validation:
-      developer_review:
-        name: <developer-expert>
-        section: Developer review
-        position: bottom
 # code-report.md class — developer writes; no validators
 - class: code-report
   protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
@@ -855,7 +835,7 @@ The `design` and `test-plan` classes' `main` experts carry one dispatch beyond o
 
 `context_from_frontmatter` is a generic class-config key (not tied to any one document origin): at main-job dispatch, the dispatcher reads each named frontmatter key off the document under review, resolves wikilink (`[[path]]`) or bare repo-relative values to repo files, and folds every resolved file into the job bundle's `context/`. `spec_source_requests` reaches a doc two ways — `lazy-spec.request-apply`'s `ensure_source_request` writer stamps it onto an attach target's primary doc, and `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" seed-doc` copies the status folder-note's union (stamped there at apply) onto every checkbox-seeded doc — so carrying the key here means the design writer's job bundle includes the originating request file(s), the same distribution pattern plan 2 uses for guideline context. An unresolvable value is never silent — it surfaces as a warning on the tick summary, never a dispatch failure.
 
-Validator composition follows one rule: the architect is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`, and `code-plan` against the architecture), the designer validates the actors/flows that precede design (`use-cases`, `system-use-cases`), the developer validates the plans that will drive execution (`test-plan`) and the bug report (`bug`), the researcher validates the research design (`research-design`), the data writer validates a content asset's design (`content-design`) because an entity's design has no code structure for the architect to judge, only data to be expressed, and no class is validated by its own main writer. `system-architecture` keeps its `planner_review` slot (the planner checking whether the product's architecture holds enough decisions to write a release's plan against). The vision classes (`vision`, `system-vision`), the report classes (`code-report`, `test-report`, `data-report`, `docs-report`), `system-tech`, and `research-report` wire no validators — their doc is approved by the operator directly through the standard review UI. No class carries a `terminal` block — these classes have no post-approve routing (the apply transition completes the request lifecycle; downstream is the per-asset gate machine, not another review round). The settings-migration ladder's older steps (`_add_planner_review_to_design` in `lazycortex-core`'s `bin/lazy_settings_migrations/review.py`) predate this composition — they migrate old vaults to the pre-`system-design` shape; the current composition reaches an existing vault by manual migration, not by ladder.
+Validator composition follows one rule: the architect is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, `system-ui-design`), the designer validates the actors/flows that precede design (`use-cases`, `system-use-cases`), the developer validates the bug report (`bug`), the researcher validates the research design (`research-design`), the data writer validates a content asset's design (`content-design`) because an entity's design has no code structure for the architect to judge, only data to be expressed, and no class is validated by its own main writer. `system-architecture` keeps its `planner_review` slot (the planner checking whether the product's architecture holds enough decisions to write a release's plan against). The vision classes (`vision`, `system-vision`), the plan classes (`code-plan`, `test-plan`, `system-test-plan`), the report classes (`code-report`, `test-report`, `data-report`, `docs-report`), `system-tech`, and `research-report` wire no validators — their doc is approved by the operator directly through the standard review UI. No class carries a `terminal` block — these classes have no post-approve routing (the apply transition completes the request lifecycle; downstream is the per-asset gate machine, not another review round). The settings-migration ladder's older steps (`_add_planner_review_to_design` in `lazycortex-core`'s `bin/lazy_settings_migrations/review.py`) predate this composition — they migrate old vaults to the pre-`system-design` shape; the current composition reaches an existing vault by manual migration, not by ladder.
 
 **`tech.md` carries no review class, and gains no planner-validation slot here.** `ReviewClassName` (`lazycortex-core`'s `bin/constants.py`) is a closed set — `plan` and `dev-plan` / `dev-report` (legacy), `code-plan`, `test-plan`, `code-report`, `test-report`, `design`, `bug` — with no `tech` token, and no `class: tech` entry exists anywhere in this seed or in the settings-migration ladder (`lazycortex-core`'s `bin/lazy_settings_migrations/review.py`). A product's `tech.md` is authored inline by `lazy-spec.create-from-code` (product-level) or by hand, and kept true to the code by `lazy-spec.sync-with-code` (`lazy-spec.audit`'s own code-sync check reads it as a plain file, never as a review-dispatched one; no asset carries a `tech.md` of its own); it is never dispatched through review, so there is no review class for a planner-validation slot to attach to. Nothing in this seed changes for `tech`.
 
@@ -1006,7 +986,15 @@ Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" ensure-s
 
 A non-zero exit from either call is the same non-fatal case as above — count it under `cli-failed`, surface its stderr first line, continue.
 
-Outcome: `skipped-no-wiki`, or `axes-<added: N|unchanged>, preset-<seeded: N-scopes|unchanged> (no-scope: <M>, cli-failed: <K>)` — the parenthetical is omitted when every count is `0`.
+**Keep operator requests free of term links.** A request under `<vault_root>/requests/` is the operator's own text and stays verbatim: the terms curator may take new terms from it but never edits it, which the terms scope covering the catalog records as its `link_exclude`. Seed it through the wiki's absent-key-only verb in one call, independent of the product loop above — a catalog with no registered product still has a request intake. The probe is a path inside the intake itself; the verb matches it against the terms scopes' `paths` alone, so the file need not exist:
+
+```
+Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" terms-scope-config --repo <repo-root> <vault_root>/requests/request.md --link-exclude '<vault_root>/requests/**')
+```
+
+It prints one word: `seeded` — the terms scope covering the intake had no `link_exclude` and now carries this glob; `kept` — that scope already has a `link_exclude`, and it is left as it stands; `no-scope` — no terms scope covers the intake. Exit 1 is the same non-fatal case as above — count it under `cli-failed`, surface its stderr first line, continue. The seed runs before any terms migration of `/lazy-core.setup`, so the migration already leaves requests alone.
+
+Outcome: `skipped-no-wiki`, or `axes-<added: N|unchanged>, preset-<seeded: N-scopes|unchanged>, terms-link-exclude-<seeded|kept|no-scope> (no-scope products: <M>, cli-failed: <K>)` — the parenthetical is omitted when every count is `0`.
 
 ## Step 7c: Backfill `spec_doc_type` across the catalog
 
@@ -1104,6 +1092,7 @@ Outcome: **cli-allow-added**.
   - Installed, but `wiki.scopes` is empty AND `structure.depth_profiles` is empty AND `wiki.domains` is absent → `info: lazycortex-wiki is installed but nothing is configured — run /lazy-wiki.configure to give the spec experts a structure map, domain tree, or wiki scope to research against.`
   - Otherwise → no line.
 - When Step 7b resolved `$WIKI_CLI`: confirm, for every scope it reported `ensured` against, that `wiki.scopes[<id>].tag_axes` now includes both `product` and `category`. When Step 7b was `skipped-no-wiki`, there is nothing to confirm.
+- When Step 7b's terms seed printed `seeded` or `kept`: confirm the `terms.scopes[<id>]` covering `<vault_root>/requests/` carries a `link_exclude` list.
 - Report a summary line per task in the canonical Step list, plus:
   - Scope detected
   - Plugin version/commit from `installed_plugins.json` (`<version>` / `<gitCommitSha>`)
@@ -1119,7 +1108,7 @@ Outcome: **cli-allow-added**.
   - Step 6.7 outcome (`registered`, `refreshed`, `unchanged`, or `skipped-no-upstream-configured`)
   - Step 6.9 outcome (`seeded`, `already-present`, or `skipped-user-scope`)
   - Step 7 outcome (`already-registered` or `no-products`)
-  - Step 7b outcome (`skipped-no-wiki` or `ensured: <N-scopes> (no-scope: <M-products>, cli-failed: <K>)`)
+  - Step 7b outcome (`skipped-no-wiki`, or `axes-<added: N|unchanged>, preset-<seeded: N-scopes|unchanged>, terms-link-exclude-<seeded|kept|no-scope> (no-scope products: <M>, cli-failed: <K>)` — the parenthetical is omitted when every count is `0`)
   - Step 7c outcome (`backfilled: <touched>/<skipped>`)
   - Step 7d outcome (`migrated: <touched> typed, <docs> retyped, <files> renamed`)
   - Step 7e outcome (`readiness-migrated: <assets> assets, <releases> releases`, plus `unclassified: <N>` when any)

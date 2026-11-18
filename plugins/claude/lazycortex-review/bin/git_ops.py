@@ -56,6 +56,21 @@ if TYPE_CHECKING:
   from collections.abc import Mapping, Sequence
 
 
+# A trailer line the way this plugin writes it: a space after the colon.
+_TRAILER_RE = re.compile(r"^([A-Za-z][\w-]*):\s+(.*)$")
+
+# A trailer line the way git reads it: any case, and no whitespace required after the colon.
+_GIT_TRAILER_RE = re.compile(r"^([A-Za-z][\w-]*):\s*(.*)$")
+
+# One `git log` record: sha, author name, author email, subject and full body, NUL-separated and
+# closed by a record separator.
+_GIT_LOG_FORMAT = "%H%x00%an%x00%ae%x00%s%x00%B%x1e"
+
+# Claude Code's install registry, relative to the home directory.
+# waiver: external Claude Code registry path, not an internal key
+_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
+
+
 # -------------------------------------------------------- data structures
 
 
@@ -81,7 +96,7 @@ class CommitRecord:
   author_email: str
   subject: str
   body: str
-  trailers: dict[str, str] = field(default_factory=dict)
+  trailers: dict[str, str] = field(default_factory = dict)
 
 
 # ----------------------------------------------------------- internals
@@ -108,15 +123,14 @@ def _run_git(
   Raises:
     GitOpsError: If the `git` command exits with a non-zero status.
   """
-  cmd = ["git", "-C", str(repo), *args]
   try:
     proc = subprocess.run(
-        cmd,
-        check=True,
-        capture_output=capture,
-        text=True,
+        [ "git", "-C", str(repo), *args ],
+        check = True,
+        capture_output = capture,
+        text = True,
         # waiver: stdlib encoding/mode idiom
-        env={**os.environ, **(env or {})}, encoding = "utf-8",
+        env = { **os.environ, **(env or {}) }, encoding = "utf-8",
     )
   except subprocess.CalledProcessError as error:
     raise GitOpsError(
@@ -154,8 +168,8 @@ def _build_message(
   parts = [subject]
   if trailers:
     parts.append("")  # blank line separating body from trailers
-    for k, v in trailers:
-      parts.append(f"{k}: {v}")
+    for key, val in trailers:
+      parts.append(f"{key}: {val}")
   return "\n".join(parts) + "\n"
 
 
@@ -163,15 +177,16 @@ def _author_flags(author: Mapping[str, str]) -> list[str]:
   """
   Return git `-c` config overrides for a one-shot commit under the named identity.
 
+  Args:
+    author: Mapping with `name` and `email` keys for the commit author identity.
+
   Returns:
     List of `-c key=value` strings setting `user.name`, `user.email`, and
     `commit.gpgsign`, suitable for passing directly to a `git` invocation.
   """
-  name = author.get(JobKey.NAME, BotIdentity.NAME)
-  email = author.get(JobKey.EMAIL, BotIdentity.EMAIL)
   return [
-      "-c", f"user.name={name}",
-      "-c", f"user.email={email}",
+      "-c", f"user.name={author.get(JobKey.NAME, BotIdentity.NAME)}",
+      "-c", f"user.email={author.get(JobKey.EMAIL, BotIdentity.EMAIL)}",
       "-c", "commit.gpgsign=false",
   ]
 
@@ -186,10 +201,6 @@ def _add_and_commit(
 ) -> str:
   """
   Stage `path` and commit it — plus `extra_paths` — under an explicit pathspec.
-
-  The checkout's index is shared with concurrent writers (routines, expert subprocesses,
-  the operator), so the commit always names its paths: a bare commit would snapshot
-  whatever the index happens to hold and publish a stranger's parked work.
 
   Args:
     repo: Absolute path to the repository root.
@@ -223,7 +234,7 @@ def _add_and_commit(
   return _run_git(repo, "rev-parse", "HEAD")
 
 
-# ----------------------------------------------------------- commit_* api
+# ------------------------------------------------------- plugin resolution
 
 
 def _version_sort_key(name: str) -> tuple[int, ...]:
@@ -238,23 +249,18 @@ def _version_sort_key(name: str) -> tuple[int, ...]:
   """
   out: list[int] = []
   for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
+    digits = "".join(char for char in part if char.isdigit())
     out.append(int(digits) if digits else 0)
   return tuple(out)
 
 
-# waiver: external Claude Code registry path, not an internal key
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
-
-
-def installed_plugin_root(name: str) -> Path | None:
+def read_installed_plugin_root(name: str) -> Path | None:
   """
   Resolve a plugin's installed source root from Claude Code's plugin registry.
 
   The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
   version that installed the plugin, each naming its `installPath`; the highest recorded version
-  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
-  across it returns copies the registry no longer names.
+  wins.
 
   Args:
     name: Plugin name without its `@<marketplace>` suffix.
@@ -262,11 +268,14 @@ def installed_plugin_root(name: str) -> Path | None:
   Returns:
     The recorded install root when it exists on disk, else None.
   """
-  registry = Path.home() / _INSTALLED_PLUGINS_REL
+
+  # the registry file, never a walk of the plugin cache (it keeps every version ever installed); an unreadable or
+  # malformed one names no install
   try:
-    data = json.loads(registry.read_text(encoding = "utf-8"))
+    data = json.loads((Path.home() / _INSTALLED_PLUGINS_REL).read_text(encoding = "utf-8"))
   except (OSError, ValueError):
     return None
+
   # the registry nests its map under `plugins` in newer files and is the map itself in older ones
   # waiver: field of Claude Code's external registry schema, not an internal key
   plugins = data.get("plugins", data) if isinstance(data, dict) else {}
@@ -276,9 +285,12 @@ def installed_plugin_root(name: str) -> Path | None:
     # waiver: field of Claude Code's external registry schema, not an internal key
     for rec in (entries or []) if isinstance(rec, dict) and rec.get("installPath")
   ]
+
   # guard: the plugin was never installed on this machine
   if not records:
     return None
+
+  # the highest recorded version wins, and only when its root is still on disk
   # waiver: fields of Claude Code's external registry schema, not internal keys
   best = max(records, key = lambda rec: _version_sort_key(str(rec.get("version", ""))))
   # waiver: field of Claude Code's external registry schema, not an internal key
@@ -311,7 +323,7 @@ def resolve_core_cli() -> Path | None:
     return sibling
 
   # registry stage — the install root Claude Code's plugin registry records for core
-  root = installed_plugin_root(Plugin.CORE)
+  root = read_installed_plugin_root(Plugin.CORE)
 
   # guard: core was never installed on this machine — nothing further to try
   if root is None:
@@ -346,11 +358,8 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   """
   Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op.
 
-  Resolves the `lazycortex-obsidian` CLI through `$LAZYCORTEX_PLUGIN_DIRS` (the blessed
-  cross-plugin contract), falling back to the dev-vault sibling tree and then to the install
-  root Claude Code's plugin registry records, and asks it to refresh the named repo-relative notes, so the
-  caller can fold the repainted files into the commit it is about to make — no separate icons
-  commit, no operator-edit wake from one.
+  Lets the caller fold the repainted files into the commit it is about to make, so no separate icons
+  commit and no operator-edit wake results from the repaint.
 
   Notes:
     - Best-effort by design: a consumer without the obsidian plugin, an unset environment,
@@ -391,7 +400,7 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   # registry fallback — a session (hook, skill) has no daemon export to walk
   if cli is None:
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    root = installed_plugin_root("lazycortex-obsidian")
+    root = read_installed_plugin_root("lazycortex-obsidian")
     # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
     installed = None if root is None else root / "bin" / "lazycortex-obsidian"
     if installed is not None and installed.is_file():
@@ -405,8 +414,8 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   try:
     proc = subprocess.run(
         # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
-        [sys.executable, str(cli), "sync-paths", *paths],
-        cwd=repo, capture_output=True, text=True, check=False, encoding = "utf-8",
+        [ sys.executable, str(cli), "sync-paths", *paths ],
+        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
     # guard: a failing worker must never block the caller's commit
@@ -416,7 +425,10 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
     touched = json.loads(proc.stdout.strip().splitlines()[-1]).get("touched", [])
   except (OSError, ValueError, IndexError):
     return []
-  return [p for p in touched if isinstance(p, str)]
+  return [ path for path in touched if isinstance(path, str) ]
+
+
+# ----------------------------------------------------------- commit_* api
 
 
 def commit_mechanical(
@@ -463,12 +475,11 @@ def commit_mechanical(
     _run_git(repo, "add", "--", extra)
 
   # the mechanical-phase trailer marks the commit as the system's own for the recogniser
-  trailers = [(Trailer.PHASE, Phase.MECHANICAL)]
   return _add_and_commit(
       repo, path,
-      author=author,
-      message_text=_build_message(message, trailers),
-      extra_paths=extras,
+      author = author,
+      message_text = _build_message(message, [ ( Trailer.PHASE, Phase.MECHANICAL ) ]),
+      extra_paths = extras,
   )
 
 
@@ -491,18 +502,15 @@ def commit_final(
   Returns:
     Full SHA of the new commit.
   """
-  trailers = [(Trailer.PHASE, Phase.FINALIZE)]
+  # the finalize-phase trailer closes the cycle
   return _add_and_commit(
       repo, path,
-      author=author,
-      message_text=_build_message(message, trailers),
+      author = author,
+      message_text = _build_message(message, [ ( Trailer.PHASE, Phase.FINALIZE ) ]),
   )
 
 
 # ------------------------------------------------------- read_history_for_file
-
-
-_TRAILER_RE = re.compile(r"^([A-Za-z][\w-]*):\s+(.*)$")
 
 
 def _parse_trailers(body: str) -> dict[str, str]:
@@ -514,32 +522,70 @@ def _parse_trailers(body: str) -> dict[str, str]:
   are entirely trailer-shaped (a one-line subject like `add: doc`) are rejected to avoid
   misreading the subject as a trailer.
 
+  Args:
+    body: Full commit message body.
+
   Returns:
     Dict of trailer key-value pairs, or an empty dict when no valid trailer block is found.
   """
+  return dict(_trailer_block(body, _TRAILER_RE))
+
+
+def _trailer_block(body: str, pattern: re.Pattern[str]) -> list[tuple[str, str]]:
+  """
+  Extract the trailer block of a commit body as ordered key-value pairs.
+
+  A valid trailer block is a contiguous run of lines matching the pattern at the end of the body, preceded by a
+  blank line that follows at least one content line.
+
+  Args:
+    body: Full commit message body.
+    pattern: Compiled expression whose first two groups capture the trailer key and value of one line.
+
+  Returns:
+    Pairs of key and value in the order they appear in the body, or an empty list when the body has no valid
+    trailer block.
+  """
+  # the trailer block is the contiguous run of lines matching `pattern` at the end of the body
   lines = body.splitlines()
   collected: list[tuple[str, str]] = []
-  i = len(lines) - 1
-  while i >= 0 and lines[i].strip() == "":
-    i -= 1
-  while i >= 0:
-    match = _TRAILER_RE.match(lines[i])
+  idx = len(lines) - 1
+  while idx >= 0 and lines[idx].strip() == "":
+    idx -= 1
+  while idx >= 0:
+    match = pattern.match(lines[idx])
     if not match:
       break
     collected.append((match.group(1), match.group(2)))
-    i -= 1
+    idx -= 1
+
+  # guard: a body that ends in no trailer-shaped line has no trailer block
   if not collected:
-    return {}
+    return []
 
-  # Must be preceded by a blank-line separator AND by at least one
-  # non-empty content line before that blank (otherwise the
-  # "trailers" are really the whole body).
-  if i < 0 or lines[i].strip() != "":
-    return {}
-  return dict(reversed(collected))
+  # guard: the block needs a blank separator before it, else the whole body is trailer-shaped prose
+  if idx < 0 or lines[idx].strip() != "":
+    return []
+
+  # the block in body order
+  return list(reversed(collected))
 
 
-_GIT_LOG_FORMAT = "%H%x00%an%x00%ae%x00%s%x00%B%x1e"
+def parse_trailer_values(body: str, key: str) -> list[str]:
+  """
+  Parse every value recorded for a trailer key in a commit body.
+
+  Read trailers the way git does: the key is matched case-insensitively and a space after the colon is not required.
+
+  Args:
+    body: Full commit message body.
+    key: Trailer key to look up.
+
+  Returns:
+    The trimmed values of the key, or an empty list when the body has no such trailer.
+  """
+  # every value of `key` in the trailer block, the key compared case-insensitively, duplicates kept
+  return [ val.strip() for name, val in _trailer_block(body, _GIT_TRAILER_RE) if name.lower() == key.lower() ]
 
 
 def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
@@ -550,6 +596,10 @@ def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
 
   Guarantees:
     - Commits are ordered most-recent-first.
+
+  Args:
+    repo: Absolute path to the repository root.
+    path: Absolute path of the file, or a path relative to `repo`.
 
   Returns:
     List of `CommitRecord` entries in reverse-chronological order, or an empty list when no
@@ -568,12 +618,13 @@ def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
       "--",
       rel,
   )
+
+  # guard: no commit touches the path
   if not out:
     return []
-  records: list[CommitRecord] = []
 
-  # Records are separated by the record-separator byte (0x1e); inside
-  # one record, fields are separated by NUL (0x00).
+  # records are separated by the record-separator byte (0x1e); inside one record, fields are separated by NUL (0x00)
+  records: list[CommitRecord] = []
   for chunk in out.split("\x1e"):
     # waiver: the loop variable is deliberately rebound — each chunk is normalised in place before use
     chunk = chunk.strip("\n")  # noqa: PLW2901
@@ -588,15 +639,15 @@ def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
     # waiver: inline numeric literal, not a domain constant
     if len(parts) < 5:
       continue
-    sha, an, ae, subject, body = parts
+    sha, author_name, author_email, subject, body = parts
     records.append(
         CommitRecord(
-            sha=sha,
-            author_name=an,
-            author_email=ae,
-            subject=subject,
-            body=body,
-            trailers=_parse_trailers(body),
+            sha = sha,
+            author_name = author_name,
+            author_email = author_email,
+            subject = subject,
+            body = body,
+            trailers = _parse_trailers(body),
         )
     )
   return records

@@ -99,6 +99,9 @@ _KEY_ERROR = "error"
 # Directory whose presence marks a git working copy.
 _GIT_DIR = ".git"
 
+# Separator of a `git ls-files -z` listing, which prints every path as written, never quoted.
+_NUL = "\0"
+
 
 def _run_remote_mirror(payload: dict) -> dict:
   """
@@ -461,7 +464,7 @@ class MirrorSync:
     if not (self.clone_dir / _GIT_DIR).is_dir():
       return []
     proc = subprocess.run(
-      [ "git", "ls-files" ],
+      [ "git", "ls-files", "-z" ],
       cwd = str(self.clone_dir), capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
@@ -482,16 +485,16 @@ class MirrorSync:
     include = list(self._mirror_cfg.get(CFG_SOURCE_PATHS) or [])
     exclude = list(self._mirror_cfg.get(CFG_EXCLUDE) or [])
     result: list[str] = []
-    for rel in proc.stdout.splitlines():
-      # guard: only markdown is mirrored
+    for rel in proc.stdout.split(_NUL):
+      # only markdown is mirrored
       if not rel.endswith(_MD_SUFFIX):
         continue
 
-      # guard: outside every source_paths glob
+      # a document outside every source_paths glob is not mirrored
       if include and not any(self._matcher.match(rel, pat) for pat in include):
         continue
 
-      # guard: named by an exclude glob
+      # a document named by an exclude glob is not mirrored
       if any(self._matcher.match(rel, pat) for pat in exclude):
         continue
       result.append(rel)
@@ -560,8 +563,7 @@ class MirrorSync:
     result: list[str] = []
     for base, _dirs, files in os.walk(str(mirror_abs)):
       for fname in files:
-        # guard: only markdown belongs to the mirror
-        if not fname.endswith(_MD_SUFFIX):
-          continue
-        result.append((Path(base) / fname).relative_to(self._repo).as_posix())
+        # only markdown belongs to the mirror
+        if fname.endswith(_MD_SUFFIX):
+          result.append((Path(base) / fname).relative_to(self._repo).as_posix())
     return result

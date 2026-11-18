@@ -24,13 +24,19 @@ import os
 import re
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import axes as _axes  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from markers import Markers  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from term_link_syntax import TermLink  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from textfile import TextFile  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from pathlib import Path
+
+  from collections.abc import Sequence
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -62,6 +68,9 @@ _ENCODING = "utf-8"
 
 # Length (hex chars) of the stored source hash — first N of a sha256 hexdigest.
 _SRC_HASH_LEN = 16
+
+# Opening of every wikilink; a text without it carries no term link.
+_WIKILINK_OPEN = "[["
 
 # Minimum length of any single-layer quoted scalar — the outer opening and
 # closing quote characters. A string shorter than this cannot carry a real
@@ -129,7 +138,7 @@ def _repo_root_for(node_path: Path) -> Path | None:
     The repository root, or `None` when no ancestor carries `.git`.
   """
   for parent in node_path.resolve().parents:
-    # guard: this ancestor is a repository root
+    # this ancestor is the repository root sought
     if (parent / _GIT_DIR).exists():
       return parent
   return None
@@ -190,7 +199,7 @@ def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
   node_dir = node_path.resolve().parent
   candidate = (node_dir / target).resolve()
 
-  # guard: already written against the canonical base, and lands inside the repository
+  # already written against the canonical base, and lands inside the repository
   if candidate.is_file() and repo in candidate.parents:
     return candidate
 
@@ -436,7 +445,7 @@ def _parse_tags_block(block: str) -> list[str]:
     inner = flow[1:close] if close > 0 else flow[1:]
     return [ _yaml_unquote(item) for item in _split_flow_items(inner) if item ]
 
-  # guard: a scalar on the header line is a single tag
+  # a scalar on the header line is a single tag
   if after_colon:
     return [ _yaml_unquote(after_colon) ]
 
@@ -599,11 +608,11 @@ def _yaml_scalar(value: str) -> str:
   Returns:
     YAML-safe scalar fragment — either the raw value or a `'...'`-wrapped form.
   """
-  # guard: value is safe as plain scalar — keep it unquoted to avoid churn
+  # a value safe as a plain scalar stays unquoted, to avoid churn
   if not _yaml_needs_quote(value):
     return value
 
-  # guard: a line break only survives on one line as a double-quoted escape
+  # a line break only survives on one line as a double-quoted escape
   if any(char in value for char in _LINE_BREAK_ESCAPES):
     rendered = json.dumps(value, ensure_ascii = False)
     for char, escape in _LINE_BREAK_ESCAPES.items():
@@ -626,11 +635,11 @@ def _yaml_unquote(value: str) -> str:
   Returns:
     The inner string with the outer quote layer (if any) removed.
   """
-  # guard: single-quoted form — unescape the doubled-quote pair
+  # single-quoted form: unescape the doubled-quote pair
   if len(value) >= _MIN_QUOTED_LEN and value[0] == "'" and value[-1] == "'":
     return value[1:-1].replace("''", "'")
 
-  # guard: double-quoted form — strip the outer quotes and resolve the escapes
+  # double-quoted form: strip the outer quotes and resolve the escapes
   if len(value) >= _MIN_QUOTED_LEN and value[0] == '"' and value[-1] == '"':
     return _DQ_ESCAPE_RE.sub(_dq_unescape, value[1:-1])
   return value
@@ -648,7 +657,7 @@ def _dq_unescape(match: re.Match) -> str:
   """
   code = match.group(1)
 
-  # guard: a hex escape carries its code point after the escape letter
+  # a hex escape carries its code point after the escape letter
   if len(code) > 1:
     return chr(int(code[1:], _HEX_BASE))
   return _DQ_ESCAPES.get(code, match.group(0))
@@ -1013,7 +1022,7 @@ def _normalise_for_hash(text: str) -> str:
   return "\n".join(lines)
 
 
-def _markdown_source_for_hash(text: str) -> str:
+def _markdown_source_for_hash(text: str, dictionary_dirs: Sequence[str] = ()) -> str:
   """
   Reduce a markdown document to its operator-authored source for hashing.
 
@@ -1022,10 +1031,12 @@ def _markdown_source_for_hash(text: str) -> str:
   frontmatter keys are dropped, the `wiki/*`-prefixed tags are dropped
   (non-`wiki/` tags survive in their original order), and the
   `# See also` managed section is removed between its markers
-  (heading included).  The remainder is whitespace-normalised line by line.
+  (heading included).  A link into a terms dictionary directory is read as the
+  words it shows.  The remainder is whitespace-normalised line by line.
 
   Args:
     text: Full markdown document text.
+    dictionary_dirs: Repo-relative terms dictionary directories whose links are read as their words.
 
   Returns:
     Normalised operator-source string suitable for a stable hash.
@@ -1040,8 +1051,19 @@ def _markdown_source_for_hash(text: str) -> str:
   # A short fingerprint of that remainder is kept with the node. It records which curated state belongs to
   # which authored text, so a pass that has lost its bearing in the repository history can still tell the
   # nodes whose text has moved on from those whose text still stands as it was curated.
+  # A link into a terms dictionary directory is curation too: the terms curator places one on each use of a
+  # dictionary term, so such a link counts as the words it shows (its display text, or the term name when it
+  # has none). Adding, retargeting or removing a term link is therefore not a change of the document, while
+  # changing the prose around it still is. A link to anything other than a terms dictionary stays authored
+  # content. A document with no term link keeps exactly the fingerprint it had before, so fingerprints already
+  # stored with curated nodes do not go stale.
 
-  stripped = _strip_managed_md(text)
+  # Decision: a term link counts as the words it shows, not as authored content — counted as content, every
+  # terms curator commit would make the wiki curator classify the document again and each wiki curation commit
+  # would wake the terms curator in turn, a loop of model runs over every document
+
+  # a link to a term file reads as the words it shows, so placing or removing one never counts as an edit
+  stripped = TermLink.unlink_all(_strip_managed_md(text), dictionary_dirs)
   return _normalise_for_hash(stripped)
 
 
@@ -1346,20 +1368,41 @@ class MarkdownNode:
 
     The hash is computed over the document with every wiki-managed region
     removed (`wiki_summary` / `wiki_src_hash` keys, `wiki/*` tags, and the
-    `# See also` section), so re-curation never changes it.
+    `# See also` section) and every link into a terms dictionary directory
+    read as the words it shows, so re-curation never changes it.
 
     Guarantees:
       - The value changes only when operator-authored content changes; a wiki write never moves it.
+      - Adding, retargeting or removing a link into a terms dictionary directory never changes the value
+        while the words the link shows stay the same: its display text, or the last segment of its target
+        when it has no text (for a bare link to a heading, the last segment that names something followed by
+        its heading anchor with `#`), in the table-row form as well.
+      - Any other edit of the prose changes the value, and so does any wikilink pointing outside the terms
+        dictionary directories.
+      - A document with no link into a terms dictionary directory hashes to the same value as before term
+        links were read as plain words, so stored `wiki_src_hash` values stay valid.
     """
 
     # Contract:
     # The value covers operator-authored content only. A write to any wiki-managed region NEVER
     # changes it, so a re-curated node still reads as unchanged.
 
-    # a short digest is enough to tell one authored revision from another
-    source = _markdown_source_for_hash(self._text)
-    digest = hashlib.sha256(source.encode(self._ENCODING)).hexdigest()
-    return digest[:_SRC_HASH_LEN]
+    # Contract:
+    # Adding, retargeting or removing a link into a terms dictionary directory NEVER changes the value
+    # while the words the link shows stay the same: its display text, or the last segment of its target
+    # when it has no text; for a bare link to a heading, the last segment that names something followed by its
+    # heading anchor with `#`. This holds for the table-row form of the link as well.
+
+    # Contract:
+    # Any other edit of the prose changes the value, and so does any wikilink that points outside the
+    # terms dictionary directories.
+
+    # Contract:
+    # A document that carries no link into a terms dictionary directory hashes to the same value it
+    # always has, so every `wiki_src_hash` already stored with a curated node stays valid.
+
+    # hashed from the text held in memory, wiki writes made through this node included
+    return self._source_digest(self._text)
 
   @property
   def stored_src_hash(self) -> str | None:
@@ -1439,6 +1482,8 @@ class MarkdownNode:
         `wiki_connectors` is excluded from `source_hash`.
       - A `None` `wiki_summary` or `topics` argument leaves the currently stored value unchanged.
       - `stamp_src_hash=False` leaves the stored `wiki_src_hash` value untouched.
+      - A stamped `wiki_src_hash` equals the `source_hash` the node reports for the same text, so a node
+        just classified reads as unchanged.
 
     Args:
       wiki_summary: One-line summary string (no newlines); `None` leaves the currently stored
@@ -1468,6 +1513,10 @@ class MarkdownNode:
     # `stamp_src_hash=False` leaves the stored `wiki_src_hash` value untouched, whatever the freshly
     # computed hash would be.
 
+    # Contract:
+    # A stamped `wiki_src_hash` equals the value the node's source hash reports for the same text,
+    # so a node just classified compares as unchanged against its stored hash.
+
     # Domain(wiki.graph):
     # # Curated facets of a node
     # Curation touches four facets of a node and nothing else: the one-line gloss that describes it, the
@@ -1483,9 +1532,7 @@ class MarkdownNode:
 
     # Compute the source hash from the CURRENT content with managed regions
     # excluded — invariant across the writes below, so order does not matter.
-    src_hash = hashlib.sha256(
-      _markdown_source_for_hash(text).encode(_ENCODING)
-    ).hexdigest()[:_SRC_HASH_LEN]
+    src_hash = self._source_digest(text)
 
     # Step 1 — wiki_summary; a None leaves the current one as it is
     if wiki_summary is not None:
@@ -1580,6 +1627,37 @@ class MarkdownNode:
       return self._text
     _, _, close_end = span
     return self._text[close_end:]
+
+  def _source_digest(self, text: str) -> str:
+    """
+    Return the short source hash of a text of this document.
+
+    Args:
+      text: Full document text.
+
+    Returns:
+      The short hex hash of the text's operator-authored source, with term links read as their words.
+    """
+    # opt: the directories are looked up only for a text holding a wikilink — a text without one reduces to the
+    # same source under any directories, so the lookup could not change its hash
+    dirs = self._term_dirs() if _WIKILINK_OPEN in text else ()
+
+    # a short digest is enough to tell one authored revision from another
+    source = _markdown_source_for_hash(text, dirs)
+    return hashlib.sha256(source.encode(self._ENCODING)).hexdigest()[:_SRC_HASH_LEN]
+
+  def _term_dirs(self) -> tuple[str, ...]:
+    """
+    Return the terms dictionary directories whose links the source hash reads as their words.
+
+    Returns:
+      The directories of the repository the file lives in; empty when the file lies in no repository.
+    """
+    # the repository the file lives in, if any
+    root = _repo_root_for(self._path)
+
+    # the repository's directories come from the settings read every caller of the process shares
+    return () if root is None else tuple(_axes.DictionaryDirs.read(root))
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1821,7 +1899,7 @@ def _find_wiki_block_line_comment(
 
     # a non-comment line other than the shebang or a blank one is code — the header region ends there
     if inner is None:
-      # guard: the shebang and blank lines still belong to the header region
+      # the shebang and blank lines still belong to the header region
       if (i == 0 and _SHEBANG_RE.match(line)) or not line.strip():
         continue
       break

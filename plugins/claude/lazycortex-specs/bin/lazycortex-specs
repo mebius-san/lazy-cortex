@@ -73,6 +73,7 @@ _SUB_MIGRATE_READINESS = "migrate-readiness"
 _SUB_MIGRATE_NOTES = "migrate-notes"
 _SUB_MIGRATE_REVIEW_CLASS = "migrate-review-class"
 _SUB_MIGRATE_REQUESTS = "migrate-requests"
+_SUB_MIGRATE_PLAN_VALIDATORS = "migrate-plan-validators"
 _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
 _SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
@@ -198,6 +199,10 @@ _USAGE = (
     "                                  rename the retired architecture review class to system-architecture, or\n"
     "                                  drop it when that class exists (no commit); --check exits 0 when it would\n"
     "                                  change, 1 when not\n"
+    "  migrate-plan-validators [--dry-run | --check] [--cwd DIR]\n"
+    "                                  drop the validators of the code-plan, test-plan and system-test-plan\n"
+    "                                  review classes (no commit); --check exits 0 when a class would change, 1\n"
+    "                                  when none would\n"
     "  migrate-requests [--dry-run | --check] [--cwd DIR]\n"
     "                                  drop the retired experts= field from spawn-product lines of open requests\n"
     "                                  (no commit); --check exits 0 when a request would change, 1 when none\n"
@@ -278,6 +283,7 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_NOTES: ( "note_migrate", _MAIN ),
     _SUB_MIGRATE_REVIEW_CLASS: ( "review_class_migrate", _MAIN ),
     _SUB_MIGRATE_REQUESTS: ( "request_migrate", _MAIN ),
+    _SUB_MIGRATE_PLAN_VALIDATORS: ( "plan_validators_migrate", _MAIN ),
     _SUB_MIGRATE_SOURCE_LINKS: ( "source_link_migrate", _MAIN ),
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
     _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-15
+last_regen: 2026-11-18
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -42,8 +42,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 6b70bf1e2c99c61b6804a85c6a37d4ecf0432cca
-surface_sha: 709e7e5df1747f31727223f2f5950c7fb9b2d5a9834cef1aa27834dc4d482dbc
+source_sha: 49d309d84336429def584f483a8a73623a1948c2
+surface_sha: 9f4390c6fb130a83e92980c920d7bc168e44b1867b47165571e95dfe6b2a5468
 ---
 # Troubleshooting
 
@@ -1470,7 +1470,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-core.setup` or `/lazy-core.migrate` reports a step `failed` or `blocked`
 
-**Symptom**: The migration part of a `/lazy-core.setup` run (or a direct `/lazy-core.migrate`) lists a step as `failed: dirty: <paths>`, `failed: commit-refused: <message>`, `failed: snapshot-missing: <file>`, `failed: outside-writes: <paths>`, or a failed step followed by the same plugin's later steps as `blocked`.
+**Symptom**: The migration part of a `/lazy-core.setup` run (or a direct `/lazy-core.migrate`) lists a step as `failed: dirty: <paths>`, `failed: commit-refused: <message>`, `failed: snapshot-missing: <file>`, `failed: outside-writes: <paths>`, `failed: plugin-root: <stderr>`, `failed: step <k>: <stderr>`, `failed: not-done: <condition>`, a stamp line `failed: dirty: .state/lazy-core.migrated.<plugin>.json` or `failed: commit-refused: <message>`, or a failed step followed by the same plugin's later steps as `blocked`.
 
 **Likely cause (`dirty`)**: Uncommitted work sits on paths the step rewrites, so it did not start. Under `/lazy-core.setup` these are paths that were already uncommitted before the setup run, since the install chain's own writes are committed first.
 
@@ -1478,11 +1478,15 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause (`commit-refused` on a step)**: The git guard or a hook refused the step's commit, typically because the index holds staged content. The skill rolled the step's changes back and blocked the plugin's later steps.
 
-**Likely cause (`failed` / `blocked`)**: A command in the step failed or its completion check did not hold. The step's own changes were rolled back.
+**Likely cause (`failed` / `blocked`)**: A command in the step failed (`step <k>`, numbered within the step) or its completion check did not hold (`not-done`). The step's own changes were rolled back.
+
+**Likely cause (`plugin-root`)**: The step belongs to a plugin whose install location could not be resolved, so nothing was written. The plugin is missing or only partly installed on this machine.
+
+**Likely cause (stamp `dirty` or `commit-refused`)**: Once every step of a plugin has been applied, the run records the migrated version in `.state/lazy-core.migrated.<plugin>.json` and commits it. Uncommitted edits on that file, or a refused commit, leave the plugin unstamped.
 
 **Likely cause (`outside-writes`)**: The step changed files it did not declare. The skill rolled back every path the step changed and left your earlier uncommitted work alone.
 
-**Fix**: Commit or discard the changes on the paths the message names (or clear what the refusal names), then re-run `/lazy-core.setup`, which offers the step again. The plugin stays unstamped until every step ends `applied` or `not-applicable`. For `outside-writes`, report the step to the plugin's maintainer; the plugin stays unstamped until a fixed step applies.
+**Fix**: Commit or discard the changes on the paths the message names (or clear what the refusal names), then re-run `/lazy-core.setup`, which offers the step again. The plugin stays unstamped until every step ends `applied` or `not-applicable`. For `outside-writes`, report the step to the plugin's maintainer; the plugin stays unstamped until a fixed step applies. For `plugin-root`, run `/plugin update <plugin>@lazycortex` to restore the plugin, then re-run `/lazy-core.setup`. For a stamp `dirty` or `commit-refused`, commit or discard the changes the message names and re-run `/lazy-core.setup`; the plugin is stamped on that run. When the migration part ends `failed: repo-root: <stderr>`, the run is not inside a git repository: start it from the project checkout.
 
 ---
 
@@ -1496,7 +1500,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause (planning failed)**: The planning step refused, usually because `.claude/lazy.settings.json` is not valid JSON.
 
-**Fix (`not-applicable`)**: Nothing to fix. The step does not keep the plugin from being stamped, and once the plugin is stamped the step is not offered again, even if the missing piece is configured later.
+**Fix (`not-applicable`)**: Nothing to fix. A step whose territory is absent from the project, such as a spec catalog or a terms dictionary that is not configured, is left out of the plan and does not appear in the report at all. The step does not keep the plugin from being stamped, and once the plugin is stamped the step is not offered again, even if the missing piece is configured later.
 
 **Fix (`invalid`)**: Update the plugin. A broken stamp file under `.state/` can be deleted, and the next run re-judges every step.
 

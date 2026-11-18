@@ -4,6 +4,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 12.0.0 — 2026-11-18 UTC
+
+- **Breaking:** Terms settings move to the dictionary-directory shape. The new `terms` settings-ladder rung (version 1) converts existing terms settings automatically when settings load.
+- Migration steps can now write inside a repository's terms scopes. A `.git` path segment never grants that access.
+- The markdown-style protocol now says how a term is written. Every use of a dictionary term is a link to its term file. A new term is defined once, at first use. Headings, callout titles, code, comments, checkboxes, folder notes and verbatim documents take no term links. A link on part of a compound is not allowed. A link-only change earns no edit marker.
+- The `daemon-run-here` check now prints JSON. It never reports a non-string path, and an unusable `run_here` entry no longer counts as this checkout.
+- `lazy-core.migrate` unregisters in one call and skips an empty rollback call.
+- A settings section that exists only as an overlay now walks its migration ladder.
+- `settings migrate` given a directory now exits with code 2 and one stderr line instead of a traceback.
+- Routine items keep non-ASCII paths as they are and no longer shift fields when a commit subject contains a tab. Git older than 2.22 still sees `Lazy-Watch` skip trailers.
+
 ### 11.1.3 — 2026-11-15 UTC
 
 - `/lazy-core.doctor` now repairs the spec catalog on its own through the specs plugin's `doctor` verb, instead of only listing the audit's findings for you to fix by hand. A gate orphaned by gate precedence is still asked about per finding.
@@ -826,6 +837,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-log.audit` verifies the logging rule is installed and coherent.
 
 ## lazycortex-specs
+
+### 13.0.0 — 2026-11-18 UTC
+
+- **Breaking:** the review classes of the plan documents (`code-plan`, `test-plan`, `system-test-plan`) no longer carry validators. Updating removes the `tester_review`, `architect_review` and `developer_review` validator blocks that an earlier release seeded into `.claude/lazy.settings.json`, so they stop being dispatched. Product-scoped classes you wired yourself are left alone. `/lazy-core.setup` applies this.
+- A release's test plan now covers the deployed product, and the plan validators it relied on are gone.
+- Spec templates no longer carry a `## Terms` section. Term links now follow the markdown-style protocol, and the create-from-code, create-asset and sync-with-code skills point their writers at it. The audit no longer flags a link into a terms dictionary as a broken target.
+- Install seeds the request exclusion for terms once, and the install report states the scope and request-exclusion outcomes. The audit reads term settings with the tracked and local layers merged key by key, so a local scope entry without `dir` keeps the tracked one.
+- Fixed: commits marked `Lazy-Watch: skip` are no longer mistaken for operator edits when the coordinator looks up who last changed a document. This also holds on git older than 2.22. When there is no cursor, that lookback reads only the ten most recent unskipped commits, up to a fixed ceiling.
+- Fixed: decision de-duplication now reads a bare link the way the wiki terms curator leaves it. It uses the link's last segment and keeps any heading anchor, so a re-recorded decision is no longer treated as new.
 
 ### 12.1.0 — 2026-11-15 UTC
 
@@ -1684,6 +1704,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.15.1 — 2026-11-18 UTC
+
+- Fixed: a `Lazy-Watch: skip` commit is no longer counted as an operator edit, so it no longer buries the operator's real edit in the review's scan window. The `Lazy-Watch` trailer is now read the way git reads it.
+
 ### 6.15.0 — 2026-11-15 UTC
 
 - `/lazy-review.stop` now cancels the coordinator and expert jobs still running on the document before it parks the review, so no stray job writes to a document you have stopped. If a job can't be confirmed cancelled, the review is left as it was. New options let a caller skip the commit, take down the review banner and its approval checkboxes, or get a JSON report of which jobs were cancelled and which had already finished.
@@ -2135,6 +2159,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.10.5 — 2026-11-18 UTC
+
+- The tester's test plan now covers the deployed product only. Cases come from the designs and their test cases. Unit tests, tests that run entirely on stubs, and checks that only read the sources are left out.
+- Experts no longer validate plans. The tester stopped judging code plans, the implementer stopped judging test plans, and the architect stopped judging code plans. The implementer still validates bug reports.
+- The architect, designer, tech-writing aspect and terms aspect dropped their rules about the `## Terms` section. `architecture.md` now has six sections instead of seven, and the dictionary curator renames bare-word headings itself.
 
 ### 1.10.4 — 2026-11-15 UTC
 
@@ -2665,6 +2695,21 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 4.0.0 — 2026-11-18 UTC
+
+- **Breaking:** The terms dictionary changes shape on disk. Each scope's one-file dictionary is cut into one file per term under the scope's dictionary directory, the `legacy_file` setting is dropped, and the old `## Terms` sections that copied definitions into documents are removed, with links to the old file's headings moved onto the term files. Documents the migration cannot safely edit (heading lines, checkbox lines, comments, code) are named in its report so you can move them by hand. `/lazy-core.setup` applies it. Repositories whose terms scopes name unsafe paths (wildcards, absolute paths, `..` or `.git` segments) are skipped, and the report then gives the two commands to run by hand.
+- **Breaking:** After the dictionary migration, `/lazy-core.setup` queues one terms-curator job per document directory of every migrated scope, including documents under review. It writes a tracked marker `.state/lazy-wiki.terms-sweep.<scope>.json` for each scope it queues, so a scope is never swept twice. This links terms in existing documents, because only the curator places term links. If the daemon works in another checkout, nothing is queued; push the migration commits and run the sweep there.
+- New terms dictionary of one file per term: documents link the term file at each use of a term instead of repeating its definition, and the terms protocol moves to version 2 with an updated curator and updated terms skills.
+- New `terms-migrate`, `terms-sweep` and `terms-scope-config` commands. Migration resumes after an interruption, retargets links to old dictionary anchors, and joins terms whose names normalise to the same file.
+- The terms dictionary directory is never treated as a wiki node. Adding or changing a term link no longer counts as a change to the document for the wiki scan.
+- Term writes are now atomic. A batch applies its valid operations, lists each refused one, and hands the curator's errors back for one retry before they reach the error ledger. A document that changed since it was read is skipped, an interrupt (`SIGTERM` or `SIGINT`) rolls the batch back, and an uncommitted term file is never overwritten.
+- A terms relink can now skip the places where a word means something else. Two relinks of one word on one document are refused, and a document that kept a relink off is named in the result.
+- Term linking is more careful. It adds no link inside a hyphenated compound, a table cell boundary, a URL, a word broken across lines, or a code fence. It keeps blank lines and table cells intact, and a rewritten link keeps the words it showed.
+- Link targets resolve more reliably. A target ending in `.md` names the exact file first, anchors on unwrapped links are kept, and case-only and chained renames leave no stale term file.
+- The terms curator edits documents under review only when the sweep says so. A scope still on its old dictionary file owns no document that a migrated scope covers.
+- Failed terms writes and open incidents now show up in the error ledger. This covers a retry that was abandoned, a refusal after a commit, and a ledger that cannot be read or written, which never fails the write. The core dispatch seam opens and closes remembered incidents for any caller.
+- Terms commands now handle awkward paths. Paths containing `*`, `?` or `[` match literally, term files with non-ASCII names commit correctly, `./` source spellings are accepted, and a malformed file is refused as malformed. A repository with no commit yet, or no dictionary directory yet, no longer causes errors or git warnings.
 
 ### 3.7.4 — 2026-11-14 UTC
 

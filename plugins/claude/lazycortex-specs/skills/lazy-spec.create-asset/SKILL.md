@@ -191,6 +191,8 @@ One prose pass per document the scaffold actually seeded, driven by that documen
 
 In every authored doc, record a real decision fork the clarification settled (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/lazy-spec.decisions.md`) as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style` — on the document's approve these transfer automatically into the sibling `decisions.md`. Never force a fork that is not there.
 
+Every term of the repository's terms dictionary in an authored doc's prose is written as a link to its term file, and a term the doc introduces is defined once at its first use — the mechanics are § Terms of `lazycortex-core`'s `references/lazy-core.markdown-style.md`, read before the first prose pass.
+
 This skill never authors plan or report documents — they are not part of the scaffold (Step 4/5) and stay out of scope here too.
 
 ## Report

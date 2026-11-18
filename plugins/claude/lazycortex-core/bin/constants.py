@@ -1069,14 +1069,18 @@ class MigrationFile:
 # ----------------------------------------------------------------------------------------
 class MigrationTerritory:
   """
-  The consumer paths a migration step may write; the spec catalog root joins them at runtime.
+  The consumer paths a migration step may write; the spec catalog root joins them at runtime, and the terms
+  dictionaries join through the `{terms}` token.
 
   Attributes:
     PREFIXES: Repo-relative directory prefixes (ending in `/`) and exact file paths of the territory.
+    TERMS_TOKEN: The `writes` entry that stands for every terms dictionary and the documents it serves.
   """
 
   # Repo-relative directory prefixes (ending in `/`) and exact file paths of the territory.
   PREFIXES = ( ".claude/", "docs/domains/", ".state/", "upstream/", "pyproject.toml" )
+  # The `writes` entry that stands for every terms dictionary and the documents it serves.
+  TERMS_TOKEN = "{terms}"
 
 
 # ----------------------------------------------------------------------------------------

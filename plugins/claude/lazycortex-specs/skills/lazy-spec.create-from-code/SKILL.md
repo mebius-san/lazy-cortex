@@ -174,6 +174,8 @@ The primitive fills every template token, injects the type's `iconize_icon` / `i
 
 The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source links, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` this doc MUST NOT contain source links.
 
+Every document this step and Step P4 write follows § Terms of `lazycortex-core`'s `references/lazy-core.markdown-style.md`: a term of the repository's terms dictionary is a link to its term file on every use, and a term the document introduces is defined once at its first use. Read that section before the first prose pass.
+
 Emit the mandatory header section per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`, with the migrated `spec_role` key. The frontmatter carries `spec_source_docs`, and the body's closing `# Sources` section is written by `refresh-sources` below (`design.md` is not scaffolded from an asset template):
 
 ```markdown
@@ -279,9 +281,6 @@ spec_source_docs:
 
 # <product> — tech
 
-## Terms
-Optional. One line per technical term the document uses that the repository's dictionary does not already define.
-
 ## Stack
 One line per technology: name, version, what it is used for, and a manifest link via `lazy-spec.source-url`. Group by layer only when the product has more than one (server, client, tooling).
 
@@ -346,7 +345,7 @@ This step emits `no-candidates` if Agent D returned an empty `findings` list.
 - Product design doc contains zero source links (no markdown link into the product's code).
 - Every `refresh-sources` call of Steps P3 and P4 exited 0, and its JSON line names the doc with a `docs` value that is either the count of the table's entries for that doc or `unchanged`.
 - Product tech doc source links are all produced by `lazy-spec.source-url` — root links to files, never to a folder — and carry no line-number fragments.
-- Product tech doc carries no section beyond `## Terms`, `## Stack`, `## Platforms` and the managed `# Sources` block — no source map, no architecture narrative, no component or route tables.
+- Product tech doc carries no section beyond `## Stack`, `## Platforms` and the managed `# Sources` block — no source map, no architecture narrative, no component or route tables.
 - Both product docs carry the migrated `spec_role` + `spec_stage` frontmatter and the mandatory header (frontmatter + H1) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md`.
 - Both product docs carry `wiki_pinned_topics` — `wiki/doc-kind/design` + `wiki/product/<product>` on `design.md`, `wiki/doc-kind/tech` + `wiki/product/<product>` on `tech.md` — no `wiki/category/...` line on either (product-level docs have no category).
 - No operator-zone folder-note, no `human-tasks.md`, no `spec_role: layout` doc, no `layout.excalidraw` file, and no `backlog/` were created (those are removed roles / product-config's territory).
@@ -396,7 +395,7 @@ Then fill every document Step F2 left on disk, in the product's `language` (Step
 - **`vision`** — `## Overview`, `## Goals`, `## Requirements` and `## Value Proposition` from what the code evidently does: the outcome the feature produces for whoever triggers it, the obligations it already meets stated as requirement sentences, the value that outcome carries.
 - **`design`** — `## Design`, `## Behavior`, `## Constraints`, `## Risks`, `## Known Limitations` and `## Boundaries` from the scan, with `## Overview` opening on a reference to the sibling vision (goals and value live there, never here). Behavior terms only: no source URLs, no repo file paths, no class or function names — the scan's evidence is read, never quoted.
 
-Follow each section's own template comment — that comment is the section's contract. Drop a section whose comment marks it `Optional.` when the code gives it nothing to say, never add a section the template does not carry, and never write behavior the scan did not evidence. Where the code shows a real fork was taken (the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/lazy-spec.decisions.md`), record it as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style`; never force a fork that is not there.
+Follow each section's own template comment — that comment is the section's contract. Drop a section whose comment marks it `Optional.` when the code gives it nothing to say, never add a section the template does not carry, and never write behavior the scan did not evidence. Where the code shows a real fork was taken (the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/lazy-spec.decisions.md`), record it as a `[!decision] <thesis> #spec/decision` callout whose body is the justification in plain prose per `lazy-core.markdown-style`; never force a fork that is not there. Terms of the repository's terms dictionary are written as links to their term files, per § Terms of the same protocol (`lazycortex-core`'s `references/lazy-core.markdown-style.md`).
 
 **Source attribution.** Leave both documents' `spec_source_docs` as the scaffold wrote them — empty — and leave the body's `# Sources` sub-sections exactly as it rendered them. A freshly scaffolded asset-level document cites nothing: the documents of an asset's own level are read by rule rather than by link, so naming the sibling vision here would only duplicate what the folder layout already shows and invite drift. The key records what the layout cannot — the requests a document came from, and links across separate assets — and earns entries only when something actually adds them. A feature's documents carry no source links. Emit outcome `unchanged`.
 
@@ -439,6 +438,7 @@ One line per task in the active mode's canonical list, with its outcome word. A 
 - **Nested products are a per-area operator choice** — Step P2b asks per semantic area whether it becomes a nested product, a group folder, or flat placement.
 - **Delegate heavy reads** — parallel Explore agents scan source; the main session synthesizes and decides.
 - **An asset derived from code is scaffolded empty and written from the scan** — in both modes create-asset is invoked with `--empty`, so it owns the folder, the seeded documents and their start stages while this skill owns every word inside them. Its clarifying and opt-in-document questions never fire: the answers are in the code. Feature mode may raise one question, and only for a real fork the code left open; product mode's candidate pass raises none beyond its own scaffold / skip question. No per-asset `tech.md` and no seeded workflow originate from this skill.
+- **Terms are links** — in every document this skill writes, a term of the repository's terms dictionary links to its term file and no document carries a section of term definitions (`lazy-core.markdown-style` § Terms).
 - **This skill draws no diagrams.** A product picture is drawn on the operator's own `/lazy-diagram.draw` call against an existing heading, and the writing experts carry their own figures discipline (`lazy-core.markdown-style` § Figures). The removed `spec_role: layout` doc / `layout.excalidraw` file stay removed.
 - **Source attribution** — both product docs carry default `spec_source_docs` frontmatter and a body `# Sources` section (`## Docs` projected from that list; `## Requests` empty), mirroring `lazy-spec.create-asset`, per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`.
 - **Migrated frontmatter keys** — authored docs use `spec_role` / `spec_stage`; per-file stages flow through `lazy-spec.set-stage`.

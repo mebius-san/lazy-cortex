@@ -26,6 +26,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -446,15 +448,18 @@ class ScopeResolver:
     """
     Return the exclude globs that apply to every scope of this repository.
 
-    Two sources are unioned: the operator-authored `wiki.exclude` list, and the generated
-    domain-spec tree derived from `wiki.domains.output` when domains are configured.
+    The result unions the operator-authored `wiki.exclude` list with the subtrees the settings own
+    themselves: the generated domain-spec tree and the terms dictionary directories.
 
     Guarantees:
       - The generated domain-spec tree is excluded whenever `wiki.domains.output` is set, so a
         scope can never claim a file the domain build owns.
+      - A file under a terms dictionary directory is never a member of any scope while that terms
+        scope is configured, whatever the `paths` globs of a scope name.
+      - An unreadable settings source never raises; it contributes no dictionary directory.
 
     Returns:
-      List of repo-relative glob strings; empty when neither source contributes one.
+      List of repo-relative glob strings; empty when no source contributes one.
     """
 
     # Domain(wiki.scope):
@@ -465,11 +470,32 @@ class ScopeResolver:
     # them — the area author would have to remember a rule they never saw.
     # The generated rule-group tree is exclusion of this kind and is not even declared: it follows from the fact
     # that the tree is configured at all, so it can never fall out of step with where that tree currently lives.
+    # The terms dictionary directories are derived the same way, so the operator's list is never the only source.
+
+    # Domain(wiki.surfaces):
+    # # The terms dictionary is never wiki material
+    # A terms dictionary directory holds one file per term: the agreed word and its definition. No such file is ever
+    # a node of any scope, whatever the coverage patterns of a scope claim. Like the generated rule-group tree, the
+    # exclusion is not declared by the operator: it follows from the terms dictionary being configured at all, so a
+    # dictionary moved to another directory carries its exclusion with it, and it holds whether the dictionary
+    # configuration comes from the shared settings or from the personal overlay.
+    # The dictionary belongs to the terms curator and its own write path. Curating its files as documents would make
+    # every dictionary write wake the wiki curation, and term files would appear in the topic catalogue beside the
+    # documents that link to them.
 
     # Contract:
     # A generated domain-spec document is NEVER a member of any scope while
     # `wiki.domains.output` is configured, regardless of what a scope's
     # `paths` globs name.
+
+    # Contract:
+    # A file under a terms dictionary directory is NEVER a member of any scope
+    # while that terms scope is configured, regardless of what a scope's
+    # `paths` globs name.
+
+    # Contract:
+    # An unreadable settings source NEVER raises here; it contributes no
+    # dictionary directory.
 
     # the operator's own list contributes first
     wiki = self.load_wiki()
@@ -481,6 +507,12 @@ class ScopeResolver:
       output = domains.get(self._OUTPUT_KEY)
       if isinstance(output, str) and output:
         globs.append(output.rstrip("/") + self._SUBTREE_GLOB)
+
+    # every terms dictionary directory is derived too — a term file belongs to the dictionary, never to a scope
+    for directory in _axes.DictionaryDirs.read(self._repo):
+      glob = directory + self._SUBTREE_GLOB
+      if glob not in globs:
+        globs.append(glob)
     return globs
 
   # ------------------------------------------------------------------

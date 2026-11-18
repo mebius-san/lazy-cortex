@@ -87,10 +87,11 @@ class RelinkPlanner:
   # git porcelain status codes from `git diff --name-status`.
   _STATUS_DELETE = "D"
   _STATUS_ADD    = "A"
-  # Rename / copy status entries start with this letter and carry old+new paths.
+  # Rename and copy status entries start with these letters and carry old+new paths.
   _STATUS_RENAME_PREFIX = "R"
-  # A rename row has at least status + old-path + new-path columns.
-  _RENAME_COLS = 3
+  _STATUS_COPY_PREFIX   = "C"
+  # Separator of a `-z` listing, which prints every path as written, never quoted.
+  _NUL = "\0"
 
   def __init__(self, *, repo: Path, scope_id: str, cfg: dict) -> None:
     """
@@ -106,8 +107,6 @@ class RelinkPlanner:
     self._cfg = cfg
     self._resolver = _scope.ScopeResolver(repo = self._repo)
 
-  # ── public ────────────────────────────────────────────────────────────────
-
   def plan(self) -> dict:
     """
     Compute the relink plan for the scope.
@@ -120,6 +119,8 @@ class RelinkPlanner:
         last one yields nothing to classify and nothing to link.
       - An `anchor-lost` plan never drops a node; its empty drop list is not proof that
         no node left the scope.
+      - In `incremental` mode a rename counts as the old path leaving the scope and the new path arriving, and a
+        copy counts only as the new path arriving; the source of a copy is left untouched.
 
     Returns:
       Dict shaped `{"mode": ..., "synced_sha": <sha-or-None>,
@@ -140,6 +141,11 @@ class RelinkPlanner:
     # Contract:
     # An `anchor-lost` plan NEVER drops a node. Callers must not read its empty
     # drop list as proof that no node left the scope.
+
+    # Contract:
+    # In `incremental` mode a rename counts as the old path leaving the scope and the
+    # new path arriving, and a copy counts only as the new path arriving; the source
+    # of a copy is left untouched.
 
     # Domain(wiki.graph):
     # # Where a relink pass picks up from
@@ -165,8 +171,6 @@ class RelinkPlanner:
 
     # anchor is usable — plan from the git delta since it
     return self._plan_incremental(synced_sha)
-
-  # ── mode builders ───────────────────────────────────────────────────────────
 
   def _plan_initial(self, synced_sha: str | None) -> dict:
     """
@@ -220,11 +224,12 @@ class RelinkPlanner:
       # guard: unrecognised file type — skip
       if node is None:
         continue
-      stored = node.stored_src_hash
 
       # never curated (no stored hash) or content drifted — recurate
-      if stored is None or stored != node.source_hash:
+      if node.stored_src_hash != node.source_hash:
         changed.append(str(node_path))
+
+    # the recurate list in a stable order, as the incremental plan returns it
     changed.sort()
     return {
       self._K_MODE:       self.MODE_ANCHOR_LOST,
@@ -256,19 +261,18 @@ class RelinkPlanner:
     for status, rel in self._diff_name_status(synced_sha):
       abs_path = (self._repo / rel).resolve()
       if status == self._STATUS_DELETE:
-        # A deleted file: include only if it resolved into this scope by path.
+        # a deleted file: include only if it resolved into this scope by path
         if self._is_in_scope(rel, apply_filter = False):
           drop.append(str(abs_path))
         continue
 
-      # Added / modified: must resolve into this scope AND still exist on disk.
+      # added / modified: must resolve into this scope AND still exist on disk
       if self._is_in_scope(rel) and abs_path.is_file():
         node = _nodes.node_for(abs_path)
 
         # guard: unrecognised file type — skip
         if node is None:
           continue
-        stored = node.stored_src_hash
 
         # Domain(wiki.graph):
         # # Why an incremental delta still needs a content check
@@ -284,7 +288,7 @@ class RelinkPlanner:
         # regions moved (e.g. this relink's own commit). Skip so a re-run with no
         # real edits converges to an empty plan (idempotent); same content-hash
         # backstop the anchor-lost mode uses.
-        if stored is not None and stored == node.source_hash:
+        if node.stored_src_hash == node.source_hash:
           continue
         classify.append(str(abs_path))
 
@@ -298,8 +302,6 @@ class RelinkPlanner:
       self._K_LINK:       list(classify),
       self._K_DROP:       drop,
     }
-
-  # ── git + scope helpers ───────────────────────────────────────────────────
 
   def _read_synced_sha(self) -> str | None:
     """
@@ -324,9 +326,7 @@ class RelinkPlanner:
     """
     Return True when `sha` exists as a commit AND is an ancestor of HEAD.
 
-    Uses `git cat-file -e <sha>^{commit}` (existence) and
-    `git merge-base --is-ancestor <sha> HEAD` (reachability).  Either check
-    failing — or git being absent — marks the anchor lost.
+    A missing commit, a commit outside the history of HEAD, or git being absent marks the anchor lost.
 
     Args:
       sha: The candidate anchor commit SHA.
@@ -341,23 +341,22 @@ class RelinkPlanner:
 
   def _diff_name_status(self, sha: str) -> list[tuple[str, str]]:
     """
-    Return `(status, rel_path)` pairs from `git diff --name-status <sha>..HEAD`.
+    Return the `(status, path)` pairs of the repository delta between an anchor commit and HEAD.
 
-    The full repo delta is returned unfiltered; scope membership is decided
-    afterwards by `_is_in_scope`, which applies the project's own
-    glob semantics rather than git's pathspec matcher (git treats a `**`
-    pathspec literally unless `:(glob)` magic is used, so passing the scope
-    globs to git would silently drop changes).  Rename entries (`R…`) are
-    split into their old (deleted) and new (added) paths so both sides are seen.
+    The delta covers the whole repository and is not narrowed to any scope; scope membership is decided
+    afterwards by the caller's own glob semantics. Paths are exactly as they are on disk, non-ASCII and
+    spaced paths included.
+
+    A rename yields its old path as deleted and its new path as added; a copy yields only its new path as added.
 
     Args:
       sha: The anchor commit to diff against HEAD.
 
     Returns:
-      List of `(status_letter, repo-relative-posix-path)` tuples.
+      List of `(status_letter, repo-relative-posix-path)` tuples, empty when the delta cannot be read.
     """
     proc = subprocess.run(
-      [ "git", "-C", str(self._repo), "diff", "--name-status", f"{sha}..HEAD" ],
+      [ "git", "-C", str(self._repo), "diff", "--name-status", "-z", f"{sha}..HEAD" ],
       capture_output = True, text = True, check = False, encoding = "utf-8",
     )
 
@@ -365,25 +364,29 @@ class RelinkPlanner:
     if proc.returncode != 0:
       return []
 
-    # unpack the porcelain into (status, path) pairs the planner can consume
+    # unpack the NUL-separated fields — a status, then its path, or old and new path for a rename or copy —
+    # into (status, path) pairs the planner can consume
     out: list[tuple[str, str]] = []
-    for line in proc.stdout.splitlines():
-      # guard: skip blank lines
-      if not line.strip():
-        continue
-      parts = line.split("\t")
-      status = parts[0]
+    fields = [ field for field in proc.stdout.split(self._NUL) if field ]
+    index = 0
+    while index < len(fields):
+      status = fields[index]
+      index += 1
 
-      # Rename / copy: `R100\told\tnew` — old path deleted, new path added.
-      if status.startswith(self._STATUS_RENAME_PREFIX) and len(parts) >= self._RENAME_COLS:
-        out.append((self._STATUS_DELETE, parts[1]))
-        out.append((self._STATUS_ADD, parts[2]))
+      # rename / copy: `R100` or `C100`, old, new — a rename deletes the old path and adds the new one, a copy
+      # only adds the new one, its source staying where it was.
+      if status.startswith(( self._STATUS_RENAME_PREFIX, self._STATUS_COPY_PREFIX )) and index + 1 < len(fields):
+        if status.startswith(self._STATUS_RENAME_PREFIX):
+          out.append((self._STATUS_DELETE, fields[index]))
+        out.append((self._STATUS_ADD, fields[index + 1]))
+        index += 2
         continue
 
-      # guard: malformed line without a path column
-      if len(parts) < 2:
-        continue
-      out.append((status[0], parts[1]))
+      # guard: a status with no path after it ends the listing
+      if index >= len(fields):
+        break
+      out.append((status[0], fields[index]))
+      index += 1
     return out
 
   def _is_in_scope(self, rel_path: str, *, apply_filter: bool = True) -> bool:

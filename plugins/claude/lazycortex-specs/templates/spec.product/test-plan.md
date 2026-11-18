@@ -15,9 +15,6 @@ spec_source_docs: []
 # {{product}} — test-plan
 <!-- The standing instructions for testing the product: the mechanisms the repository ships, the environment a run needs, what counts as a smoke test and what the regression covers. It is read first by every release's tester and holds what does not change from release to release. The test cases of one asset live in that asset's test-plan, and the plan of one run lives in the release's test-plan. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Mechanisms
 <!-- The testing mechanisms this repository actually ships: runners, fixtures, harnesses, CI targets. One bullet per mechanism, verified present before it is named. A mechanism the repository does not ship does not belong here. -->
 

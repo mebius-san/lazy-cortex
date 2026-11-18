@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-11-15
+last_regen: 2026-11-18
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 6b70bf1e2c99c61b6804a85c6a37d4ecf0432cca
-surface_sha: fac74c53f1f1ec5073bdee740800cba6e26e5370f7c4d2633649a3e2c761c525
+source_sha: 7810fe7edbba70c46d14f7200ca57044e3ce640a
+surface_sha: 26c5ad06aac8cd8b29fbb1d4b2c748a1ddb63c4e784aa71944213b1479693a14
 ---
 # Frequently asked questions
 
@@ -40,7 +40,7 @@ surface_sha: fac74c53f1f1ec5073bdee740800cba6e26e5370f7c4d2633649a3e2c761c525
 
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy that `~/.claude/plugins/installed_plugins.json` records as installed for `lazycortex-specs@lazycortex`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Never locate it by searching the plugin cache: the cache keeps every version ever installed, so a search can land on a stale copy. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
-Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `vision.md` at the spec content-root, seeded through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc` from the `system-vision` type's template — whenever neither it nor a pre-existing `design.md` without a vision (the legal pre-vision state, migrated by the operator by hand) is already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while both are absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. Install never asks about products — it only reports whether one is already registered. Registering your first product is a separate, explicit `/lazy-spec.product-config` run, whenever you're ready.
+Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `vision.md` at the spec content-root, seeded through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc` from the `system-vision` type's template — whenever neither it nor a pre-existing `design.md` without a vision (the legal pre-vision state, migrated by the operator by hand) is already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while both are absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. When `lazycortex-wiki` is installed, install also keeps your requests out of the terms dictionary's link pass: a request under the vault's `requests/` folder is your own text and stays verbatim, so install asks the wiki to mark that folder as excluded from term links on the terms scope that covers the catalog. The seed only fills the setting when it is absent — a scope that already carries its own exclusion list is left as it stands — and install reports `seeded`, `kept` or `no-scope` for it. Install never asks about products — it only reports whether one is already registered. Registering your first product is a separate, explicit `/lazy-spec.product-config` run, whenever you're ready.
 
 ---
 
@@ -68,7 +68,7 @@ The parent stays aware of a nested product too: once a nested product's own docu
 
 ## Can I generate a product's spec from an existing codebase instead of writing it by hand?
 
-Yes, for a product that is already registered with a source binding. Run `/lazy-spec.create-from-code <product>` — it scans the source in parallel, then authors the product's `vision.md` (goals and value, from the code's evidenced outcomes) when one doesn't already exist, followed by a behaviour-only product design doc and a narrow product tech doc naming the stack and platforms read off the manifests. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (`/lazy-spec.create-asset` with `--empty` for the folder and the start doc, which is then written from the same scan — no further questions; the shipped `feature` declares its vision opt-in, so no `vision.md` is seeded, and only a type declared with a mandatory vision gets one seeded and written beside the start doc), or skip it.
+Yes, for a product that is already registered with a source binding. Run `/lazy-spec.create-from-code <product>` — it scans the source in parallel, then authors the product's `vision.md` (goals and value, from the code's evidenced outcomes) when one doesn't already exist, followed by a behaviour-only product design doc and a narrow product tech doc naming the stack and platforms read off the manifests (the tech doc carries only `Stack`, `Platforms` and the managed `# Sources` block — no terms list). Every document it writes links the repository's dictionary terms to their term files rather than defining them inline. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (`/lazy-spec.create-asset` with `--empty` for the folder and the start doc, which is then written from the same scan — no further questions; the shipped `feature` declares its vision opt-in, so no `vision.md` is seeded, and only a type declared with a mandatory vision gets one seeded and written beside the start doc), or skip it.
 
 The skill requires the product to already carry a `source` binding — register that first with `/lazy-spec.product-config`. On a design-only product (no source attached) it no-ops rather than guessing at code that isn't wired in.
 
@@ -93,6 +93,14 @@ The document layout differs too. Features and changes get `design.md` (no `bug.m
 A change asks one extra, optional question while it is scaffolded: which existing assets it modifies. Pick any number from the product's assets, or none for a cross-cutting or infrastructure-only change. The answers are recorded on the change's folder-note as its targets, and once the change's own design is approved, the coordinator folds that design into each named target's own `design.md` / `test-plan.md` through the same writers that normally author those documents — the target's own review loop then carries the folded document like any other.
 
 Where an asset lands defaults differently per type, too: a `feature`, `content`, or `research` asset defaults straight to the product root, while only `bug` and `change` default to a folder of their own (`bugs/`, `changes/`) that appears the first time an asset actually lands in it. Either way it is only a default — pass `--path <dir>` to place any asset anywhere under the product, including inside another asset's own folder.
+
+---
+
+## How do spec documents treat terms from the terms dictionary?
+
+When a repository keeps a terms dictionary (the wiki plugin's terms scope), every skill that writes spec prose — `/lazy-spec.create-asset` and its wrappers, `/lazy-spec.create-from-code`, and the writers `/lazy-spec.sync-with-code` dispatches — writes each dictionary term as a link to its term file, on every use, and defines a term the document introduces once at its first use. No spec document carries its own list of term definitions; the definition lives in the term's file. `/lazy-spec.sync-with-code` applies this to the whole document it edits, not only to the sections it rewrote. Folder-notes and documents the terms scope keeps verbatim, such as your requests, take no term links; and without the wiki plugin or a dictionary serving the document, terms stay plain text.
+
+A writer may link a new term before the dictionary's curator has created its file. `/lazy-spec.audit` knows this: a link whose target lies inside a configured terms dictionary directory is not reported as a broken target when the file is not there yet.
 
 ---
 

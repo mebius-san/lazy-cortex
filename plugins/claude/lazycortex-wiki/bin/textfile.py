@@ -46,10 +46,11 @@ class TextFile:
       it is in progress, and a process crash mid-write can still leave partial content. A file that
       does not yet exist still fails rather than falling back.
     - A symlinked path stays a symlink, and an existing file keeps its own permission bits.
-    - A file read as uniformly CRLF is written back as CRLF, one read as LF is written back as LF, and
-      one read with mixed line endings is written back with its per-line endings untouched.
+    - A file read or decoded as uniformly CRLF is written back as CRLF, one read or decoded as LF is
+      written back as LF, and one with mixed line endings is written back with its per-line endings
+      untouched.
     - The text handed to callers never carries a leading byte-order mark; a write restores the mark
-      only for a file that was last read with one.
+      only for a file whose last read or decode found one.
   """
 
   def __init__(self, *, path: Path) -> None:
@@ -62,16 +63,16 @@ class TextFile:
     # the file this helper reads and replaces
     self._path = Path(path)
 
-    # the line ending a write restores; LF until a read finds CRLF
+    # the line ending a write restores; LF until a read or a decode finds CRLF
     self._newline = _LF
 
-    # the byte-order mark a write restores; empty until a read finds one
+    # the byte-order mark a write restores; empty until a read or a decode finds one
     self._bom = ""
 
   @property
   def newline(self) -> str:
     """
-    Line ending the next write uses: the one the last read found, LF by default.
+    Line ending the next write uses: the one the last read or decode found, LF by default.
     """
     return self._newline
 
@@ -80,10 +81,8 @@ class TextFile:
     Read the file and return its text, normalised to LF when uniformly CRLF, with a leading byte-order mark removed.
 
     Guarantees:
-      - A file whose every line ends in CRLF comes back with every CRLF replaced by LF; an LF file
-        comes back unchanged; a file with mixed line endings comes back exactly as it is, so its
-        per-line endings survive untouched into a later write.
-      - The returned text never carries a leading byte-order mark, whether or not the file had one.
+      - The returned text is exactly what `decode` returns for the file's current bytes, and the byte-order
+        mark and line ending are recorded on the instance exactly as `decode` records them.
 
     Returns:
       The file text without a leading byte-order mark; a uniformly CRLF file comes back with every
@@ -91,10 +90,44 @@ class TextFile:
     """
 
     # Contract:
-    # The returned text NEVER carries a leading byte-order mark; a write restores the mark only for a
-    # file that was read with one.
+    # The returned text is exactly what `decode` returns for the file's current bytes, and the byte-order
+    # mark and line ending are recorded on the instance exactly as `decode` records them, so a caller's
+    # own snapshot of the bytes and a read of the file never disagree.
 
-    raw = self._path.read_bytes().decode(_ENCODING)
+    # the file's bytes as they stand, decoded by the same rules a caller's own snapshot is
+    return self.decode(self._path.read_bytes())
+
+  def decode(self, data: bytes) -> str:
+    """
+    Turn bytes read from the file earlier into the text `read` would return for them.
+
+    Lets a caller work from its own snapshot of the file's bytes under the same byte-order-mark and line-ending
+    handling as `read`; the mark and the line ending found are recorded so a later `write` restores them.
+
+    Guarantees:
+      - The returned text never carries a leading byte-order mark; a later write restores the mark only
+        when the decoded bytes carried one.
+      - Bytes whose every line ends in CRLF come back with every CRLF replaced by LF; LF bytes come back
+        unchanged; bytes with mixed line endings come back exactly as they are. A later write restores
+        the line ending found here: CRLF for the uniformly CRLF bytes, the text as it stands for the
+        other two, so per-line endings survive untouched.
+
+    Args:
+      data: UTF-8 bytes the caller read from the file earlier.
+
+    Returns:
+      The text without a leading byte-order mark; uniformly CRLF bytes come back with every CRLF replaced by LF,
+      and any other bytes come back with their line endings unchanged.
+
+    Raises:
+      UnicodeDecodeError: If the bytes are not valid UTF-8.
+    """
+
+    # Contract:
+    # The returned text NEVER carries a leading byte-order mark; a later write restores the mark only
+    # when the decoded bytes carried one.
+
+    raw = data.decode(_ENCODING)
 
     # remember a leading byte-order mark so a write can restore it
     self._bom = _BOM if raw.startswith(_BOM) else ""
@@ -103,7 +136,8 @@ class TextFile:
     # Contract:
     # A file whose every line ends in CRLF is returned with every CRLF replaced by LF; an LF file is
     # returned unchanged; a file with MIXED line endings is returned exactly as it is, never partially
-    # converted — its per-line endings survive untouched into a later write.
+    # converted — and a later write restores the line ending found here: CRLF for the uniformly CRLF
+    # file, its text as it stands for the other two, so per-line endings survive untouched.
 
     # a CRLF count equal to the LF count means every line ends in CRLF
     crlf = raw.count(_CRLF)
@@ -127,11 +161,11 @@ class TextFile:
         observe a partial write while it is in progress, and a process crash mid-write can still
         leave partial content. A file that does not yet exist still fails rather than falling back.
       - A symlinked path stays a symlink, and an existing file keeps its own permission bits.
-      - The write restores the line ending established by the last read: a file read as uniformly
-        CRLF is written back as CRLF; one read as LF, or with mixed endings, is written back exactly
-        as its text already stands, never converted wholesale.
-      - The write restores the leading byte-order mark the file was last read with; a file read
-        without one is written without one.
+      - The write restores the line ending established by the last read or decode: a file read or
+        decoded as uniformly CRLF is written back as CRLF; one read or decoded as LF, or with mixed
+        endings, is written back exactly as its text already stands, never converted wholesale.
+      - The write restores the leading byte-order mark the file was last read or decoded with; a file
+        read or decoded without one is written without one.
 
     Args:
       text: New content with LF line endings.
@@ -152,13 +186,13 @@ class TextFile:
     # file keeps its permission bits.
 
     # Contract:
-    # A write restores the line ending established by the last read: a file read as uniformly CRLF is
-    # written back with every line ending in CRLF; a file read as LF, or with MIXED endings, is written
-    # back exactly as its text already stands — never converted wholesale.
+    # A write restores the line ending established by the last read or decode: a file read or decoded as
+    # uniformly CRLF is written back with every line ending in CRLF; one read or decoded as LF, or with
+    # MIXED endings, is written back exactly as its text already stands — never converted wholesale.
 
     # Contract:
-    # A write restores the leading byte-order mark the file was last read with; a file read without one
-    # is written without one.
+    # A write restores the leading byte-order mark the file was last read or decoded with; a file read or
+    # decoded without one is written without one.
 
     target = Path(os.path.realpath(self._path))
     data = (self._bom + (text if self._newline == _LF else text.replace(_LF, self._newline))).encode(_ENCODING)

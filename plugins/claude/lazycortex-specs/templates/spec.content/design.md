@@ -18,9 +18,6 @@ spec_source_docs: []
 ## Overview
 <!-- What record this is and which schema of the project it is written against — the schema the job's context carries. A few sentences of prose that open with a link to the sibling vision when one exists. Where the data lives is the schema's business and is not stated here; why the record exists and its goals live in the vision and are not restated here. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Design
 <!-- What this record is for and why it is shaped this way. Prose: the grounds behind the decisions, decision by decision. The decisions themselves are stated in Definition. -->
 

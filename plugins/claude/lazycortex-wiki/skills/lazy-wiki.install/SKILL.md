@@ -165,12 +165,12 @@ Ensure the `terms` key exists. If absent, seed:
 
 ```json
 {
-  "_version": 1,
+  "_version": 2,
   "scopes": {}
 }
 ```
 
-`scopes` seeds empty: which documents a dictionary serves, where its file lives, and which of them are term sources are per-repo decisions made by `/lazy-wiki.configure terms`, which also registers the scope's scan routine.
+`_version: 2` is the shape in which each scope names its dictionary directory under `dir`; the core settings ladder brings an older section to it. `scopes` seeds empty: which documents a dictionary serves, where its directory lives, and which of them are term sources are per-repo decisions made by `/lazy-wiki.configure terms`, which also registers the scope's scan routine.
 
 Never overwrite an existing `wiki`, `structure`, or `terms` key or any nested key within any of them — a key already present gets no `settings-set` call. State **seeded** if added, **already-present** if the key was there — independently per section.
 
@@ -470,7 +470,7 @@ The consumer is deterministic (fetch → sync → commit; no expert dispatch), s
 
 ### Structure-scan routines (refresh only)
 
-The three structure-scan routines (`lazy-wiki.structure-scan`, `lazy-wiki.structure-scan-deletes`, `lazy-wiki.structure-scan-renames`) are registered by `/lazy-wiki.configure structure`, never here — which depth classes the map describes is a per-repo answer. Their `path_filter` is not: it is derived from the `structure` section Step 5 just completed, so a registration that predates the derivation, or one made before the section's `exclude` grew, is brought current on every install run without a question. Skipping this leaves a routine watching trees the map does not describe, and `lazy-wiki.audit` fails on it in every repo until someone re-runs the configure wizard by hand.
+The three structure-scan routines (`lazy-wiki.structure-scan`, `lazy-wiki.structure-scan-deletes`, `lazy-wiki.structure-scan-renames`) are registered by `/lazy-wiki.configure structure`, never here — which depth classes the map describes is a per-repo answer. Their `path_filter` is not: it is derived from the `structure` section Step 5 just completed and from the dictionary directories of the terms scopes, which the map never describes, so a registration that predates the derivation, one made before the section's `exclude` grew, or one made before a terms scope named its directory is brought current on every install run without a question. Skipping this leaves a routine watching trees the map does not describe, and `lazy-wiki.audit` fails on it in every repo until someone re-runs the configure wizard by hand.
 
 For each of the three names, read whether it is registered:
 

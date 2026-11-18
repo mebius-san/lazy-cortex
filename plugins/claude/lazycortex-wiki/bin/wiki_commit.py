@@ -42,6 +42,8 @@ class _Git:
   HEAD      = "HEAD"
   # Separator ending the options so every following argument is read as a path
   PATHS     = "--"
+  # Pathspec magic that makes git read a path as written, never as a glob pattern
+  LITERAL   = ":(literal)"
 
 
 # ----------------------------------------------------------------------------------------
@@ -111,13 +113,16 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> CommitResult:
   if not paths:
     return CommitResult(status = STATUS_UNCHANGED, sha = None)
 
+  # every path is read as written, a `*`, `?` or `[` in its name included
+  literal = [ f"{_Git.LITERAL}{rel}" for rel in paths ]
+
   # stage and commit exactly the named paths; any failing git step fails the commit
   try:
     # guard: no changes among the named paths — clean no-op
-    if not _git(repo, _Git.STATUS, _Git.PORCELAIN, _Git.PATHS, *paths).strip():
+    if not _git(repo, _Git.STATUS, _Git.PORCELAIN, _Git.PATHS, *literal).strip():
       return CommitResult(status = STATUS_UNCHANGED, sha = None)
-    _git(repo, _Git.ADD, _Git.PATHS, *paths)
-    _git(repo, _Git.COMMIT, _Git.MESSAGE, message, _Git.PATHS, *paths)
+    _git(repo, _Git.ADD, _Git.PATHS, *literal)
+    _git(repo, _Git.COMMIT, _Git.MESSAGE, message, _Git.PATHS, *literal)
     sha = _git(repo, _Git.REV_PARSE, _Git.HEAD).strip()
   except (subprocess.CalledProcessError, OSError) as error:
     raise WikiCommitError(f"git commit failed: {error}") from error

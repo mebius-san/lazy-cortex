@@ -27,7 +27,7 @@ Short test: will a later session ask "why not the other way?" and burn an hour r
 
 ## 3. A decision candidate deserves the same bar
 
-The same bar applies to a decision-candidate — a candidate that fails these tests is noise the coordinator would carry into design for nothing. Only an expert producing code, data, or a report raises one, because it cannot stop mid-job to ask. An expert writing a document under review never does: a product fork it may not settle under § 4 is a `[!question]` with options, and a call about the document itself — what its Terms list holds, section order, wording, formatting — it settles silently, with no signal at all. Decisions are about the product, never about the document that describes it.
+The same bar applies to a decision-candidate — a candidate that fails these tests is noise the coordinator would carry into design for nothing. Only an expert producing code, data, or a report raises one, because it cannot stop mid-job to ask. An expert writing a document under review never does: a product fork it may not settle under § 4 is a `[!question]` with options, and a call about the document itself — section order, wording, formatting — it settles silently, with no signal at all. Decisions are about the product, never about the document that describes it.
 
 ## 4. A question deserves a higher bar still
 

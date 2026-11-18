@@ -16,7 +16,7 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from typing import Literal
+  from typing import ClassVar, Final, Literal
 
 
 _BIN = Path(__file__).resolve().parent
@@ -118,6 +118,20 @@ class _K:
   REGISTRY_STAGE = "Claude Code's plugin registry"
   # Opening of the error raised when no lookup stage finds the core CLI.
   MSG_CORE_CLI_UNRESOLVABLE = "lazycortex-core CLI not resolvable"
+  # Settings section carrying the terms scopes.
+  TERMS_SECTION = "terms"
+  # Per-scope key naming a terms scope's dictionary directory.
+  TERMS_DIR = "dir"
+  # Key within the `wiki` section configuring the generated domain-spec tree.
+  DOMAINS = "domains"
+  # Key within the domains configuration naming the tree's directory.
+  DOMAINS_OUTPUT = "output"
+  # Directory of the domain-spec tree when its configuration names none; mirrors the default `domains.py` applies.
+  DEFAULT_DOMAINS_OUTPUT = "docs/domains"
+
+
+# Settings layer with the local overlay merged into the tracked file.
+_LAYER_MERGED: Final = "merged"
 
 
 def resolve_core_cli() -> Path:
@@ -176,14 +190,18 @@ def resolve_core_cli() -> Path:
   )
 
 
-def settings_get(repo: Path, section: str, *, layer: Literal["tracked", "merged"] = "tracked") -> dict:
+def read_settings(repo: Path,
+                  section: str,
+                  *,
+                  layer: Literal["tracked", "local", "merged"] = "tracked") -> dict:
   """
   Read one settings section via `lazycortex-core settings-get`.
 
   Args:
     repo: Absolute repository root the section is read from.
     section: Top-level settings-section name.
-    layer: Settings layer to read — `tracked` (no local overlay) or `merged` (the effective view).
+    layer: Settings layer to read — `tracked` (no local overlay), `local` (the overlay alone) or `merged` (the
+      effective view).
 
   Returns:
     The section dict of the requested layer, per `settings-get`'s contract.
@@ -208,7 +226,122 @@ def settings_get(repo: Path, section: str, *, layer: Literal["tracked", "merged"
   return json.loads(proc.stdout)
 
 
-def _settings_set(repo: Path, section: str, value: dict) -> None:
+def scope_dictionary_dirs(scopes: object) -> list[str]:
+  """
+  Return the dictionary directories a terms scope map configures.
+
+  Args:
+    scopes: The `terms.scopes` value.
+
+  Returns:
+    Repo-relative directories without a trailing slash, in configuration order.
+  """
+  # guard: a missing or malformed scope map configures no directory
+  if not isinstance(scopes, dict):
+    return []
+
+  # every scope naming a directory contributes it once
+  dirs = [
+    cfg[_K.TERMS_DIR].rstrip("/") for cfg in scopes.values()
+    if isinstance(cfg, dict) and isinstance(cfg.get(_K.TERMS_DIR), str) and cfg[_K.TERMS_DIR].strip("/")
+  ]
+  return list(dict.fromkeys(dirs))
+
+
+
+# ----------------------------------------------------------------------------------------
+class DictionaryDirs:
+  """
+  The dictionary directories of every terms scope a repository's merged settings configure.
+  """
+
+  # opt: the dictionary directories of each repository, read once per process and shared by every caller — valid
+  # while no process changes the terms settings and then reads the directories again; a caller that does passes
+  # the directories explicitly instead
+  _by_repo: ClassVar[dict[Path, list[str]]] = {}
+
+
+  @classmethod
+  def read(cls, repo: str | Path) -> list[str]:
+    """
+    Read the dictionary directory of every terms scope a repository's merged settings configure.
+
+    Guarantees:
+      - A failure reading the settings never raises; the result is then an empty list.
+      - The returned list is the caller's own copy; changing it never affects any later answer.
+
+    Args:
+      repo: Absolute repository root.
+
+    Returns:
+      A new list of repo-relative directories without a trailing slash; empty when the settings cannot be read.
+    """
+
+    # Contract:
+    # A failure reading the settings never raises; the result is then an empty list.
+
+    # Contract:
+    # The returned list is the caller's own copy; changing it never affects any later answer.
+
+    # a repository already read this process answers from the memo, as a copy the caller may change freely
+    key = Path(repo).resolve()
+    if key in cls._by_repo:
+      return list(cls._by_repo[key])
+
+    # a settings read that fails leaves no directory to protect rather than failing the caller, and is tried again
+    try:
+      terms = read_settings(Path(repo), _K.TERMS_SECTION, layer = _LAYER_MERGED)
+    except ( RuntimeError, ValueError, OSError ):
+      return []
+
+    # a successful read is remembered for every later caller of the process
+    cls._by_repo[key] = scope_dictionary_dirs(terms.get(_K.SCOPES) if isinstance(terms, dict) else None)
+    return list(cls._by_repo[key])
+
+
+
+# ----------------------------------------------------------------------------------------
+def read_managed_dirs(repo: Path, *, dictionaries: list[str] | None = None) -> list[str]:
+  """
+  Return the directories whose files the wiki generates or owns, so no pass over documents enters them.
+
+  Guarantees:
+    - A failure reading the settings never raises; the result holds the directories that could be read.
+
+  Args:
+    repo: Absolute repository root.
+    dictionaries: The dictionary directories to use instead of reading the terms settings, for a caller that holds
+      settings newer than the ones this process read before.
+
+  Returns:
+    The dictionary directories, then the generated domain-spec tree when it is configured.
+  """
+
+  # Contract:
+  # A failure reading the settings never raises; the result holds the directories that could be read.
+
+  # the directories of every terms scope come first, as the caller holds them or as the settings name them
+  dirs = DictionaryDirs.read(repo) if dictionaries is None else list(dictionaries)
+
+  # the domain-spec tree counts only when its configuration is present; a failed read adds nothing
+  try:
+    wiki = read_settings(repo, _K.WIKI_SECTION, layer = _LAYER_MERGED)
+  except ( RuntimeError, ValueError, OSError ):
+    return dirs
+
+  # the domain-spec tree's configuration, when the section carries one
+  domains = wiki.get(_K.DOMAINS) if isinstance(wiki, dict) else None
+
+  # guard: no domain-spec tree is configured
+  if not isinstance(domains, dict) or not domains:
+    return dirs
+
+  # the tree's directory, its default when unnamed, joins the dictionary directories once
+  output = str(domains.get(_K.DOMAINS_OUTPUT) or _K.DEFAULT_DOMAINS_OUTPUT).rstrip("/")
+  return list(dict.fromkeys([ *dirs, output ]))
+
+
+def _save_settings(repo: Path, section: str, value: dict) -> None:
   """
   Write one settings section via `lazycortex-core settings-set`.
 
@@ -264,7 +397,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
   # to the repository, and a scope only ever narrows what the repository already declares.
 
   # read the current axis vocabulary before unioning in the requested axes
-  wiki = settings_get(repo, _K.WIKI_SECTION)
+  wiki = read_settings(repo, _K.WIKI_SECTION)
   declared = wiki.get(_K.TAG_AXES)
 
   # guard: malformed `wiki.tag_axes` (e.g. an object) — report cleanly instead of unioning into it
@@ -304,7 +437,7 @@ def ensure_axes(repo: Path, axes: list[str]) -> dict:
 
   # append the missing axes and persist the section in one write
   wiki[_K.TAG_AXES] = [ *existing, *missing ]
-  _settings_set(repo, _K.WIKI_SECTION, wiki)
+  _save_settings(repo, _K.WIKI_SECTION, wiki)
   return { _K.STATUS: _K.STATUS_ADDED, _K.ADDED: missing }
 
 
@@ -357,7 +490,7 @@ def ensure_scope_config(repo: Path,
     `wiki.scopes` itself is not an object, the result is instead the single-key
     `{"error": "wiki.scopes must be an object"}`.
   """
-  wiki = settings_get(repo, _K.WIKI_SECTION)
+  wiki = read_settings(repo, _K.WIKI_SECTION)
   scopes = wiki.get(_K.SCOPES) or {}
 
   # guard: malformed `wiki.scopes` (e.g. a list) — report cleanly instead of crashing below
@@ -447,7 +580,7 @@ def ensure_scope_config(repo: Path,
     cfg[_K.FILTER] = new_filter
   scopes[scope_id] = cfg
   wiki[_K.SCOPES] = scopes
-  _settings_set(repo, _K.WIKI_SECTION, wiki)
+  _save_settings(repo, _K.WIKI_SECTION, wiki)
 
   # report what landed; the index badge entry appears only when the index badge list was seeded
   result: dict = {

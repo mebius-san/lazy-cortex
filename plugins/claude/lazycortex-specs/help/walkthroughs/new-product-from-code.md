@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
-last_regen: 2026-11-15
+last_regen: 2026-11-18
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce vision + design + tech docs (and scaffold any candidate features), then runs lazy-spec.coverage to gap-scan the code against the spec tree and materialize anything missed; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
   - lazy-spec.coverage
-source_sha: 0e097257aece4076b36a38f8b2a1ceccf5ae3782
-surface_sha: 6ab0c3b3f6453589309f0f884539d07db64abd155b3244399805bec83ceefb4b
+source_sha: 22b60f591c6dadaac3ba59e66718ced42828a208
+surface_sha: ecd8aef67ea5ab8b91497c800a71d2f8521e74ec65ce394205f529371db33d44
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -109,6 +109,8 @@ After the area decisions are recorded, the skill authors the product's docs in o
 Once `design.md` is written, the skill asks one question: also author the product-level `use-cases.md` — typed `system-use-cases`, distinct from an asset's own `use-cases.md` document type — (actors and cross-feature scenarios) from the same code survey? This is opt-in — decline and the doc is simply never created, with no gap to fix later.
 
 **`tech.md`** is narrow: the stack the product is built with and the platforms it runs on, each entry with its version and a root link to the manifest or configuration file that proves it. It never describes how the code is arranged — that is the product root's own `architecture.md` — and when your project has a content-root `tech.md`, the product's copy names only what differs from it.
+
+In every document it writes, a term from your repository's terms dictionary appears as a link to its term file, and a term the document introduces is defined once at its first use; no document carries a separate section of term definitions.
 
 `lazy-spec.create-from-code` does not author the product-root `ui-design.md`. That document has its own lifecycle: once `design.md` and `tech.md` are written here and `vision.md` approves, a `Write ui-design` checkbox appears on the product's folder-note (the level note `/lazy-spec.product-config` created in Step 2), and ticking it dispatches your registered ui-designer to write it. It is optional — a product with nothing to say about shared screen patterns can leave it unwritten.
 

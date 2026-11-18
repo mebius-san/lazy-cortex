@@ -54,7 +54,7 @@ _H1_RE = re.compile(r"^# ")
 # Frontmatter key that marks a document as belonging to an open review round, and the values
 # that read as set. An edit from outside the review job counts against that round.
 _REVIEW_ACTIVE_KEY = "review_active"
-_REVIEW_ACTIVE_RE = re.compile(
+REVIEW_ACTIVE_RE = re.compile(
   rf"^{_REVIEW_ACTIVE_KEY}\s*:\s*[\"']?(?:true|yes)[\"']?\s*$", re.IGNORECASE | re.MULTILINE,
 )
 
@@ -106,7 +106,7 @@ def _rel_label(repo: Path, path: Path) -> str:
     return path.as_posix()
 
 
-def _mirror_paths(repo: Path) -> list[str]:
+def read_all_mirror_paths(repo: Path) -> list[str]:
   """
   Collect the mirror directory of every configured scope that declares one.
 
@@ -121,29 +121,29 @@ def _mirror_paths(repo: Path) -> list[str]:
   for scope_id, cfg in resolver.load_scopes().items():
     sync = _mirror.MirrorSync(repo = repo, scope_id = scope_id, cfg = cfg)
 
-    # guard: the scope mirrors nothing — it has no regenerated tree to protect
+    # only a scope that mirrors something has a regenerated tree to protect
     if not sync.is_configured:
       continue
     out.append(sync.mirror_path)
   return out
 
 
-def _under_mirror(rel_posix: str, mirror_paths: list[str]) -> bool:
+def is_under_mirror(rel_posix: str, mirrors: list[str]) -> bool:
   """
   Test whether one repo-relative path lies inside a mirror tree.
 
   Args:
     rel_posix: The document's repo-relative POSIX path.
-    mirror_paths: Repo-relative mirror directories, from `_mirror_paths`.
+    mirrors: Repo-relative mirror directories, from `read_all_mirror_paths`.
 
   Returns:
     `True` when the path sits under one of the directories; a sibling merely sharing a name
     prefix (`wiki/mirrored-notes` against `wiki/mirror`) is never a match.
   """
-  return any(rel_posix.startswith(f"{base}/") for base in mirror_paths if base)
+  return any(rel_posix.startswith(f"{base}/") for base in mirrors if base)
 
 
-def _split_frontmatter(text: str) -> tuple[str, str]:
+def split_frontmatter(text: str) -> tuple[str, str]:
   """
   Split a document into its frontmatter block and the body that follows it.
 
@@ -321,24 +321,25 @@ def apply_term(repo: Path | str, path: Path | str, old_term: str, new_term: str)
   # refused as well.
 
   # guard: a mirrored document is regenerated from its source — the edit would not survive
-  if _under_mirror(label, _mirror_paths(repo)):
+  if is_under_mirror(label, read_all_mirror_paths(repo)):
     return _refusal(label, _REASON_MIRROR)
 
   # the frontmatter is split off before anything reads it — it is both the review flag's home
   # and a region no replacement may reach
   target_file = TextFile(path = target)
-  text = target_file.read()
-  head, body = _split_frontmatter(text)
+  head, body = split_frontmatter(target_file.read())
 
   # guard: the review loop owns the document until its round closes
-  if _REVIEW_ACTIVE_RE.search(head):
+  if REVIEW_ACTIVE_RE.search(head):
     return _refusal(label, _REASON_REVIEW)
 
   # the substitution itself, written back only when it actually found something
   rewritten, count = _rewrite_body(body, pattern, new_term)
 
-  # guard: nothing to replace outside the protected regions — leave the file untouched
+  # nothing replaced outside the protected regions leaves the file untouched
   if count == 0:
     return { _K_STATUS: STATUS_NOOP, _K_FILE: label, _K_REPLACEMENTS: 0 }
+
+  # the rewritten body goes back behind its frontmatter
   target_file.write(head + rewritten)
   return { _K_STATUS: STATUS_APPLIED, _K_FILE: label, _K_REPLACEMENTS: count }

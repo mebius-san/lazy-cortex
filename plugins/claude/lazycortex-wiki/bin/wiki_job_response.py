@@ -22,6 +22,8 @@ _KEY_PATH = "path"
 _KEY_ERROR = "error"
 _KEY_CATEGORY = "category"
 _KEY_MESSAGE = "message"
+# The envelope's own keys, which no field a protocol adds may write.
+_ENVELOPE_KEYS = frozenset({ _KEY_OUTCOME, _KEY_RESULT, _KEY_ERROR })
 
 # Outcome value that carries an error object instead of a result list.
 OUTCOME_ERROR = "error"
@@ -65,7 +67,8 @@ def write_response(job_dir: Path,
                    outcome: str,
                    result: list[str] | None = None,
                    category: str | None = None,
-                   message: str | None = None) -> Path:
+                   message: str | None = None,
+                   fields: dict[str, list[dict]] | None = None) -> Path:
   """
   Write a job's answer where the expert runtime collects it.
 
@@ -83,6 +86,8 @@ def write_response(job_dir: Path,
       entry; `None` omits the result key from the response.
     category: Failure category of an error outcome.
     message: Failure message of an error outcome.
+    fields: Extra keys a protocol adds beside the envelope of a non-error outcome; the envelope's own keys `outcome`,
+      `result` and `error` are never written from them, whatever the envelope holds.
 
   Returns:
     Path of the written response file.
@@ -108,6 +113,8 @@ def write_response(job_dir: Path,
     # an outcome with nothing to list (a noop) carries no result key at all
     if result is not None:
       envelope[_KEY_RESULT] = [ { _KEY_PATH: entry } for entry in result ]
+    # the fields a protocol adds ride beside the envelope's own, never in place of them
+    envelope.update({ key: value for key, value in ( fields or {} ).items() if key not in _ENVELOPE_KEYS })
 
   # the file lands where the runtime collects it
   path = Path(job_dir) / _RESPONSE_FILE

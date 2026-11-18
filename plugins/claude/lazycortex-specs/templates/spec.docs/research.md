@@ -15,9 +15,6 @@ spec_source_docs: []
 # {{slug}} — research
 <!-- The answer to the sibling research design: the routes walked, the findings with their sources, the options compared, and the conclusion per question. It is written by the researcher, and once approved it is immutable; a wrong conclusion is answered by a new research asset citing this one. A gap in the design is raised there as a `[!question]` callout, never filled in here. -->
 
-## Terms
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The terms this document uses, with their meaning. One line per term, alphabetical; a term the repository's dictionary already defines carries that definition verbatim, and a term this document introduces is defined here first. A term the document does not use does not belong here. -->
-
 ## Method
 <!-- The routes actually walked, in order: spec tree, code, structure map, wiki, external sources. One bullet per route, internal routes before the internet and never instead of it; a route the design named but the report skipped is listed with the reason. What each route yielded lives in Findings. -->
 

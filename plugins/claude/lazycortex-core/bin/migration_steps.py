@@ -50,8 +50,28 @@ _DEFAULT_SPEC_ROOT = "specs"
 _VAULT_ROOT_SETTING = "spec.vault_root"
 # Path segments that make a catalog root reach outside a plain repo-relative directory.
 _UNSAFE_SEGMENTS = ( "", ".", ".." )
+# The repository's own metadata directory, compared without letter case: a segment naming it reaches into git.
+_GIT_DIR_SEGMENT = ".git"
 # The placeholder a step glob carries for the spec catalog root.
 _SPEC_ROOT_TOKEN = "{spec_root}"
+# The settings section owned by lazycortex-wiki that configures the terms dictionaries.
+_TERMS_SECTION = "terms"
+# The key of the terms section that maps scope ids to scope settings.
+_TERMS_SCOPES = "scopes"
+# The scope key naming the dictionary directory.
+_TERMS_DIR = "dir"
+# The scope key naming the dictionary file a migrated scope still has to retire.
+_TERMS_LEGACY_FILE = "legacy_file"
+# The scope key naming the dictionary file of a scope the settings ladder has not migrated yet.
+_TERMS_FILE = "file"
+# The scope key listing the globs of the documents a dictionary serves.
+_TERMS_PATHS = "paths"
+# The suffix a dictionary file drops to name its directory; ref: lazy_settings_migrations/terms.py.
+_TERMS_FILE_SUFFIX = ".md"
+# The suffix a dictionary file without the markdown suffix gains to name its directory.
+_TERMS_DIR_SUFFIX = ".terms"
+# The glob of the term files inside a dictionary directory.
+_TERMS_ENTRY_GLOB = "{dir}/*.md"
 # The CLI-name prefix every lazycortex plugin's bin script carries.
 _PLUGIN_PREFIX = "lazycortex-"
 # The directory no repo walk enters.
@@ -124,6 +144,8 @@ class _ReasonKind(StrEnum):
   NOT_APPLICABLE = "not-applicable"
   # The step works on the spec catalog, and the repository grants the catalog no territory.
   NO_SPEC_TERRITORY = "no-spec-territory"
+  # The step works on the terms dictionaries, and the repository's terms settings grant no territory.
+  NO_TERMS_TERRITORY = "no-terms-territory"
 
 
 # ----------------------------------------------------------------------------------------
@@ -154,7 +176,7 @@ class _ReportProp(StrEnum):
   SLUG = "slug"
   # A step's release version.
   SINCE = "since"
-  # A step's write globs, spec root expanded.
+  # A step's write globs, spec root and terms token expanded.
   WRITES = "writes"
   # The stamped version in a stamp payload.
   VERSION = "version"
@@ -289,14 +311,23 @@ def parse_step(path: Path, plugin: str) -> Step:
   if not predicates:
     raise ValueError(f"{MigrationKey.APPLIES_WHEN} must name at least one condition")
 
+  # the write globs, with every entry that carries the terms token inside a longer glob set aside
+  writes = tuple(_require_text(item, MigrationKey.WRITES)
+                 for item in _parse_sequence(meta[MigrationKey.WRITES], MigrationKey.WRITES))
+  embedded = [ glob for glob in writes if MigrationTerritory.TERMS_TOKEN in glob
+               and glob != MigrationTerritory.TERMS_TOKEN ]
+
+  # guard: the terms token stands for a list of globs, so it cannot be part of one
+  if embedded:
+    raise ValueError(f"{MigrationTerritory.TERMS_TOKEN} must be a whole {MigrationKey.WRITES} entry: "
+                     f"{', '.join(embedded)}")
+
   # every field normalised to its declared shape
   return Step(
     plugin = plugin, number = int(name.group(1)), slug = name.group(2), path = path,
     since = _normalize_since(meta.get(MigrationKey.SINCE)),
     supersedes = _normalize_supersedes(meta.get(MigrationKey.SUPERSEDES)),
-    applies_when = predicates,
-    writes = tuple(_require_text(item, MigrationKey.WRITES)
-                   for item in _parse_sequence(meta[MigrationKey.WRITES], MigrationKey.WRITES)),
+    applies_when = predicates, writes = writes,
   )
 
 
@@ -311,12 +342,12 @@ def check_writes(step: Step, repo: Path) -> list[str]:
 
   Returns:
     The offending globs as the step file writes them; empty when every glob stays inside. A glob naming
-    `{spec_root}` is offending while the catalog root grants no territory.
+    `{spec_root}` is offending while the catalog root grants no territory, and so is a `{terms}` entry while the
+    terms settings grant none.
   """
   spec_root = _read_spec_root(repo)
-  return [ glob for glob in step.writes
-           if (spec_root is None and _SPEC_ROOT_TOKEN in glob)
-           or not _is_in_territory(_expand(glob, spec_root), spec_root) ]
+  terms = _read_terms_territory(repo)
+  return [ glob for glob in step.writes if not _is_in_territory(glob, spec_root, terms) ]
 
 
 def evaluate(predicate: dict, repo: Path, home: Path) -> tuple[bool, str]:
@@ -358,6 +389,8 @@ def plan(repo: Path, home: Path, plugins: dict[str, Path], *, only: set[str] | N
       be parsed.
     - A step that names `{spec_root}` while the catalog root grants no territory is skipped as
       `not-applicable` with detail `no-spec-territory`, never `invalid`.
+    - A step whose `writes` carry `{terms}` while the terms settings grant no territory is skipped as
+      `not-applicable` with detail `no-terms-territory`, never `invalid`.
     - `applicable` is ordered by step number.
 
   Args:
@@ -368,9 +401,10 @@ def plan(repo: Path, home: Path, plugins: dict[str, Path], *, only: set[str] | N
 
   Returns:
     `{"plugins": {name: {"applicable", "skipped", "invalid", "stamp"}}}` — applicable step mappings
-    (`path`, `number`, `slug`, `since`, `writes` with the spec root expanded), skipped `{path, reason}`
-    entries (a `not-applicable` one also carries `detail`), invalid `{path, reason}` entries, and the plugin's
-    stamped version or None.
+    (`path`, `number`, `slug`, `since`, and `writes`, one flat list with the `{spec_root}` and `{terms}`
+    placeholders expanded), skipped `{path, reason}` entries (a `not-applicable` one also carries `detail`,
+    which may be `no-spec-territory` or `no-terms-territory`), invalid `{path, reason}` entries, and the
+    plugin's stamped version or None.
 
   Raises:
     ValueError: When the consumer's settings file is not valid JSON.
@@ -381,9 +415,10 @@ def plan(repo: Path, home: Path, plugins: dict[str, Path], *, only: set[str] | N
   # reported under `invalid` and planning continues, so one bad file never hides another plugin's steps.
 
   # Contract:
-  # A superseded step file, parseable or not, and a `{spec_root}` step in a repository whose catalog grants no
-  # territory MUST land under `skipped`, never `invalid`; the migrate skill never stamps a plugin with an
-  # `invalid` entry, so either would keep the plugin unstamped forever.
+  # A superseded step file, parseable or not, a `{spec_root}` step in a repository whose catalog grants no
+  # territory, and a `{terms}` step in a repository whose terms settings grant no territory MUST land under
+  # `skipped`, never `invalid`; the migrate skill never stamps a plugin with an `invalid` entry, so any of
+  # them would keep the plugin unstamped forever.
 
   # Contract:
   # `applicable` MUST be ordered by step number; the migrate skill applies the steps in exactly that order.
@@ -481,6 +516,7 @@ def _plan_plugin(repo: Path, home: Path, plugin: str, *, root: Path) -> dict:
   skipped: list[dict] = []
   invalid: list[dict] = []
   spec_root = _read_spec_root(repo)
+  terms = _read_terms_territory(repo)
 
   # a broken stamp is reported and treated as no stamp, so every released step is judged again
   try:
@@ -491,7 +527,7 @@ def _plan_plugin(repo: Path, home: Path, plugin: str, *, root: Path) -> dict:
                      _ReportProp.REASON: str(exc) })
 
   # the valid steps, and every number any of them supersedes
-  steps, rejected = _load_steps(root / MigrationFile.DIR, plugin, repo = repo, spec_root = spec_root)
+  steps, rejected = _load_steps(root / MigrationFile.DIR, plugin, repo = repo, spec_root = spec_root, terms = terms)
   superseded = { number for step in steps for number in step.supersedes }
 
   # a step file that cannot be planned is moot once a valid step supersedes its number
@@ -507,7 +543,8 @@ def _plan_plugin(repo: Path, home: Path, plugin: str, *, root: Path) -> dict:
   # an unreleased step is always considered. A step a sibling step names as superseded is dropped, since
   # the superseding step covers the state both before and after it, and so is a superseded step file that
   # cannot even be read. A step that works on the spec catalog has nothing to do in a repository whose
-  # catalog grants no territory. Of the rest, a step applies only when every one of its conditions holds
+  # catalog grants no territory, and neither has a step that works on the terms dictionaries in a repository
+  # whose terms settings grant no territory. Of the rest, a step applies only when every one of its conditions holds
   # against the consumer's repository; steps are taken in their number order.
 
   # each step lands in exactly one bucket
@@ -528,6 +565,12 @@ def _plan_plugin(repo: Path, home: Path, plugin: str, *, root: Path) -> dict:
                        _ReportProp.DETAIL: _ReasonKind.NO_SPEC_TERRITORY })
       continue
 
+    # guard: a step on the terms dictionaries has nothing to do while the terms settings grant no territory
+    if terms is None and MigrationTerritory.TERMS_TOKEN in step.writes:
+      skipped.append({ _ReportProp.PATH: entry, _ReportProp.REASON: _ReasonKind.NOT_APPLICABLE,
+                       _ReportProp.DETAIL: _ReasonKind.NO_TERMS_TERRITORY })
+      continue
+
     # a predicate that cannot be judged makes the step invalid rather than silently inapplicable
     try:
       verdict = _evaluate_all(step, repo, home)
@@ -542,7 +585,8 @@ def _plan_plugin(repo: Path, home: Path, plugin: str, *, root: Path) -> dict:
     # an applicable step carries what the migrate skill needs to run and commit it
     applicable.append({
       _ReportProp.PATH: entry, _ReportProp.NUMBER: step.number, _ReportProp.SLUG: step.slug,
-      _ReportProp.SINCE: step.since, _ReportProp.WRITES: [ _expand(glob, spec_root) for glob in step.writes ],
+      _ReportProp.SINCE: step.since,
+      _ReportProp.WRITES: [ expanded for glob in step.writes for expanded in _expand(glob, spec_root, terms) ],
     })
 
   # the plugin's report, applicable steps already in number order
@@ -556,7 +600,8 @@ def _load_steps(directory: Path,
                 plugin: str,
                 *,
                 repo: Path,
-                spec_root: str | None) -> tuple[list[Step], list[tuple[int | None, dict]]]:
+                spec_root: str | None,
+                terms: tuple[str, ...] | None) -> tuple[list[Step], list[tuple[int | None, dict]]]:
   """
   Parse every step file of a plugin, setting aside each that cannot be planned.
 
@@ -565,13 +610,13 @@ def _load_steps(directory: Path,
     plugin: The plugin name.
     repo: The consumer repository root, for the territory check.
     spec_root: The repo-relative spec catalog root, or None when it grants no territory.
+    terms: The globs the `{terms}` token expands to, or None when the terms settings grant no territory.
 
   Returns:
-    The valid steps in number order, and the rejected step files: each with the step number its file name
+    The valid steps in number order, and the rejected step files, each with the step number its file name
     carries (None when the name is not `<NNN>-<slug>.md`) and its `{path, reason}` entry. A file that does not
     parse, a step whose number another file shares, and a step whose writes leave the territory are rejected;
-    a `{spec_root}` glob counts against no step while the catalog grants no territory, since such a step is
-    skipped rather than rejected.
+    a step whose `{spec_root}` or `{terms}` territory is not granted is skipped later, not rejected here.
   """
 
   # guard: the plugin ships no migrations
@@ -593,7 +638,9 @@ def _load_steps(directory: Path,
       rejected.append(( int(number.group(1)) if number else None,
                         { _ReportProp.PATH: str(directory / name), _ReportProp.REASON: str(exc) } ))
       continue
-    outside = [ glob for glob in check_writes(step, repo) if spec_root is not None or _SPEC_ROOT_TOKEN not in glob ]
+    outside = [ glob for glob in check_writes(step, repo)
+                if (spec_root is not None or _SPEC_ROOT_TOKEN not in glob)
+                and (terms is not None or glob != MigrationTerritory.TERMS_TOKEN) ]
 
     # guard: a step may never write the consumer's own code
     if outside:
@@ -655,11 +702,12 @@ def _is_held(predicate: dict, repo: Path, spec_root: str | None) -> bool:
   """
   # path predicates match files and directories
   if _PredicateKind.PATH_EXISTS in predicate:
-    excluded = [ compile_scope_glob(_expand(glob, spec_root)) for glob in predicate.get(_PredicateKind.EXCEPT, []) ]
-    hits = _find_all_matches(repo, _expand(predicate[_PredicateKind.PATH_EXISTS], spec_root))
+    excluded = [ compile_scope_glob(_substitute_spec_root(glob, spec_root))
+                 for glob in predicate.get(_PredicateKind.EXCEPT, []) ]
+    hits = _find_all_matches(repo, _substitute_spec_root(predicate[_PredicateKind.PATH_EXISTS], spec_root))
     return any(not any(rx.match(hit) for rx in excluded) for hit in hits)
   if _PredicateKind.PATH_MISSING in predicate:
-    return not _find_all_matches(repo, _expand(predicate[_PredicateKind.PATH_MISSING], spec_root))
+    return not _find_all_matches(repo, _substitute_spec_root(predicate[_PredicateKind.PATH_MISSING], spec_root))
 
   # settings predicates read the merged settings
   if _PredicateKind.SETTINGS_KEY_PRESENT in predicate:
@@ -669,7 +717,8 @@ def _is_held(predicate: dict, repo: Path, spec_root: str | None) -> bool:
 
   # content predicates read every file under a glob
   spec = next(iter(predicate.values()))
-  texts = [ _read_text(repo / rel) for rel in _find_all_matches(repo, _expand(spec[_PredicateKind.GLOB], spec_root))
+  texts = [ _read_text(repo / rel)
+            for rel in _find_all_matches(repo, _substitute_spec_root(spec[_PredicateKind.GLOB], spec_root))
             if (repo / rel).is_file() ]
   if _PredicateKind.FRONTMATTER_KEY in predicate:
     return any(spec[_PredicateKind.KEY] in parse_frontmatter(text) for text in texts)
@@ -809,8 +858,8 @@ def _read_spec_root(repo: Path) -> str | None:
 
   Returns:
     The `spec.vault_root` setting without its trailing slash, `specs` when unset or empty, or None when the
-    setting is not a plain repo-relative directory — the repo root, absolute, climbing through `..`, or
-    carrying a glob metacharacter or whitespace.
+    setting is not a plain repo-relative directory — the repo root, absolute, climbing through `..`, holding a
+    segment named `.git` in any letter case, or carrying a glob metacharacter or whitespace.
   """
   section = load_section(repo / SettingsFile.REL, _SPEC_SECTION)
 
@@ -825,31 +874,178 @@ def _read_spec_root(repo: Path) -> str | None:
   # inside the repository; an unset or empty root means the default catalog directory. A root that is the
   # repository itself, absolute, that climbs out through a parent reference, or whose name carries a wildcard,
   # a character class, or whitespace would hand the consumer's own code to migration steps, so it contributes
-  # no territory at all, and a step that works on the catalog has nothing to do there. A trailing slash is
-  # ignored.
+  # no territory at all, and a step that works on the catalog has nothing to do there. A root with a segment
+  # naming the repository's own git directory, in any letter case and at any depth, would hand git's own
+  # metadata to migration steps and contributes no territory either. A trailing slash is ignored.
 
   # guard: anything but a plain relative directory fails closed
-  if not isinstance(value, str) or value.startswith("/") or any(
-      _is_unsafe_segment(segment) for segment in value.rstrip("/").split("/")):
+  if not _is_plain_relative(value):
     return None
   return value.rstrip("/")
 
 
-def _is_unsafe_segment(segment: str) -> bool:
+def _read_terms_territory(repo: Path) -> tuple[str, ...] | None:
   """
-  Tell whether one path segment of a catalog root keeps it from being a plain directory name.
+  Read the globs the `{terms}` token expands to from the consumer's merged terms settings.
 
   Args:
-    segment: One `/`-separated segment of the configured root.
+    repo: The consumer repository root.
 
   Returns:
-    Whether the segment is empty, `.` or `..`, or carries a glob metacharacter or whitespace.
+    The globs of every scope in scope order, duplicates dropped, or None when the settings grant no terms
+    territory.
   """
-  return (segment in _UNSAFE_SEGMENTS or any(char in _WILDCARDS for char in segment)
-          or any(char.isspace() for char in segment))
+  scopes = load_section(repo / SettingsFile.REL, _TERMS_SECTION).get(_TERMS_SCOPES)
+
+  # Domain(install.reconciliation):
+  # # Terms dictionaries are a territory only while every scope keeps them inside the repository
+  # The terms dictionaries belong to the plugins' territory only when every scope is safe: its dictionary
+  # directory and its legacy dictionary file are plain repo-relative paths with no wildcard, whitespace,
+  # absolute start, parent reference or segment naming the repository's own git directory (in any letter case,
+  # at any depth), and every document glob of the scope is not absolute, never climbs out through a parent
+  # reference, never has a segment naming the git directory in any position, and opens on a plain directory
+  # name rather than a wildcard. One unsafe scope
+  # withdraws the whole terms territory, since a wildcard or an escaping path would hand the consumer's own
+  # code to migration steps. A repository with no terms section, or whose scopes name no dictionary, grants
+  # nothing. A scope the settings ladder has not migrated yet grants its dictionary file, the directory the
+  # ladder will derive from that file, and its documents, so a step may run before or after the ladder. The
+  # territory is a list of globs, so the token standing for it is legal only as a whole write entry, never
+  # as part of a longer path.
+
+  # guard: no terms section, or no scope map in it
+  if not isinstance(scopes, dict):
+    return None
+
+  # every scope adds its globs; a single unsafe scope withdraws the whole territory
+  globs: list[str] = []
+  for key, cfg in scopes.items():
+
+    # guard: the version sentinel or a malformed entry is not a scope
+    if key == SettingsKey.VERSION or not isinstance(cfg, dict):
+      continue
+
+    # the globs this scope grants, None when one of its paths is unsafe
+    scope_globs = _expand_terms_scope(cfg)
+
+    # guard: an unsafe scope would hand the consumer's own code to a step
+    if scope_globs is None:
+      return None
+
+    # a glob joins the territory once, at its first occurrence
+    globs += [ glob for index, glob in enumerate(scope_globs)
+               if glob not in globs and glob not in scope_globs[:index] ]
+
+  # a section whose scopes name no dictionary grants nothing
+  return tuple(globs) or None
 
 
-def _expand(glob: str, spec_root: str | None) -> str:
+def _expand_terms_scope(cfg: dict) -> list[str] | None:
+  """
+  List the globs one terms scope grants, migrated by the settings ladder or not.
+
+  Args:
+    cfg: One scope config from `terms.scopes`.
+
+  Returns:
+    The dictionary file still to retire, the term files of the dictionary directory, and the document
+    globs; empty for a scope that names no dictionary; None when a path is not a plain repo-relative one.
+  """
+  migrated = _TERMS_DIR in cfg
+  legacy = cfg.get(_TERMS_LEGACY_FILE) if migrated else cfg.get(_TERMS_FILE)
+  directory = cfg.get(_TERMS_DIR)
+  paths = cfg.get(_TERMS_PATHS, [])
+
+  # guard: a scope naming no dictionary is not served, so it grants nothing
+  if not migrated and legacy is None:
+    return []
+
+  # a scope the ladder has not passed yet names the directory the ladder will derive from its file
+  if not migrated and isinstance(legacy, str):
+    directory = (legacy.removesuffix(_TERMS_FILE_SUFFIX) if legacy.endswith(_TERMS_FILE_SUFFIX)
+                 else legacy + _TERMS_DIR_SUFFIX)
+
+  # guard: every path must stay a plain repo-relative one, and a document glob may not open on a wildcard
+  if not _is_plain_relative(directory) or (legacy is not None and not _is_plain_relative(legacy)) \
+      or not isinstance(paths, list) or not all(_is_plain_glob(glob) for glob in paths):
+    return None
+
+  # the dictionary file still to retire, the term files, then the documents
+  return [ *([ legacy ] if legacy is not None else []),
+           _TERMS_ENTRY_GLOB.format(dir = str(directory).rstrip("/")), *paths ]
+
+
+def _is_plain_relative(value: object) -> bool:
+  """
+  Tell whether a configured path is a plain repo-relative one.
+
+  Args:
+    value: The configured value.
+
+  Returns:
+    Whether it is a string that is not absolute and whose every segment is a plain name, so none is a wildcard,
+    whitespace, a parent reference or `.git` in any letter case; a trailing slash is ignored.
+  """
+  return isinstance(value, str) and not value.startswith("/") and not any(
+    _is_unsafe_segment(segment) for segment in value.rstrip("/").split("/"))
+
+
+def _is_plain_glob(glob: object) -> bool:
+  """
+  Tell whether a configured document glob stays under a plain repo-relative directory.
+
+  Args:
+    glob: The configured glob.
+
+  Returns:
+    Whether it is a string that is not absolute, never climbs through `..`, opens on a plain segment, and holds
+    no segment named `.git` in any letter case, in any position.
+  """
+  return isinstance(glob, str) and not glob.startswith("/") and ".." not in glob.split("/") \
+      and not _is_unsafe_segment(glob.split("/")[0]) \
+      and not any(segment.casefold() == _GIT_DIR_SEGMENT for segment in glob.split("/"))
+
+
+def _is_unsafe_segment(segment: str) -> bool:
+  """
+  Tell whether one path segment of a configured path keeps it from being a plain directory name.
+
+  Args:
+    segment: One `/`-separated segment of the configured path.
+
+  Returns:
+    Whether the segment is empty, `.` or `..`, is `.git` in any letter case, or carries a glob metacharacter
+    or whitespace.
+  """
+  return (segment in _UNSAFE_SEGMENTS or segment.casefold() == _GIT_DIR_SEGMENT
+          or any(char in _WILDCARDS for char in segment) or any(char.isspace() for char in segment))
+
+
+def _expand(glob: str, spec_root: str | None, terms: tuple[str, ...] | None) -> list[str]:
+  """
+  Expand one write glob of a step into the globs it stands for.
+
+  Args:
+    glob: A write glob as the step file writes it.
+    spec_root: The repo-relative catalog root, or None when it grants no territory.
+    terms: The globs the `{terms}` token expands to, or None when the terms settings grant no territory.
+
+  Returns:
+    The terms globs for the `{terms}` token, else the one glob with the spec root substituted.
+
+  Raises:
+    ValueError: When the glob names a placeholder whose territory is not granted.
+  """
+  # any glob but the terms token stands for itself, with the catalog root substituted
+  if glob != MigrationTerritory.TERMS_TOKEN:
+    return [ _substitute_spec_root(glob, spec_root) ]
+
+  # guard: refused terms settings never stand in for the token
+  if terms is None:
+    raise ValueError(f"{glob!r} names the terms dictionaries while the {_TERMS_SECTION} settings grant no territory")
+  return list(terms)
+
+
+def _substitute_spec_root(glob: str, spec_root: str | None) -> str:
   """
   Substitute the spec catalog root into a step glob.
 
@@ -863,7 +1059,7 @@ def _expand(glob: str, spec_root: str | None) -> str:
   Raises:
     ValueError: When the glob names the placeholder and the catalog root grants no territory.
   """
-  # guard: nothing to substitute
+  # a glob without the placeholder stands as written
   if _SPEC_ROOT_TOKEN not in glob:
     return glob
 
@@ -894,33 +1090,47 @@ def _names_spec_root(step: Step) -> bool:
   return any(_SPEC_ROOT_TOKEN in glob for glob in globs)
 
 
-def _is_in_territory(glob: str, spec_root: str | None) -> bool:
+def _is_in_territory(glob: str, spec_root: str | None, terms: tuple[str, ...] | None) -> bool:
   """
-  Tell whether an expanded write glob stays inside the plugins' territory.
+  Tell whether a write glob of a step stays inside the plugins' territory.
 
   Args:
-    glob: An expanded repo-relative glob.
+    glob: A write glob as the step file writes it.
     spec_root: The repo-relative catalog root, a territory directory of its own, or None when it grants
       no territory.
+    terms: The globs the `{terms}` token expands to, or None when the terms settings grant no territory.
 
   Returns:
-    Whether the glob stays inside.
+    Whether the glob stays inside; the `{terms}` token stays inside only while the terms settings grant
+    territory.
   """
 
   # Domain(install.reconciliation):
   # # A migration step writes only what the plugins own in a consumer repository
   # A step may touch the Claude configuration tree, the generated domain-document tree, the tracked state
-  # corner, the project's Python tool configuration file, and the spec catalog. Anything else, the
-  # consumer's own code above all, is outside; so is any path that is absolute or climbs out through a
-  # parent reference.
+  # corner, the project's Python tool configuration file, and the spec catalog. Through the terms token only,
+  # it may also touch each terms scope's dictionary: its legacy dictionary file, the term files in its
+  # dictionary directory, and the documents the scope serves. A path written literally that names a
+  # dictionary is still outside. Anything else, the consumer's own code above all, is outside; so is any
+  # path that is absolute or climbs out through a parent reference.
+
+  # the terms token is inside exactly while the terms settings grant territory, its globs being checked for
+  # safety when they were read
+  if glob == MigrationTerritory.TERMS_TOKEN:
+    return terms is not None
+
+  # guard: the catalog placeholder is outside while the catalog grants no territory
+  if spec_root is None and _SPEC_ROOT_TOKEN in glob:
+    return False
+  expanded = _substitute_spec_root(glob, spec_root)
 
   # guard: an absolute path or a parent reference escapes every prefix
-  if glob.startswith("/") or ".." in glob.split("/"):
+  if expanded.startswith("/") or ".." in expanded.split("/"):
     return False
 
   # an entry ending in `/` is a directory prefix, any other entry an exact file
   catalog = () if spec_root is None else ( f"{spec_root}/", )
-  return any(glob.startswith(entry) if entry.endswith("/") else glob == entry
+  return any(expanded.startswith(entry) if entry.endswith("/") else expanded == entry
              for entry in ( *MigrationTerritory.PREFIXES, *catalog ))
 
 

@@ -16,6 +16,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -42,20 +44,25 @@ class StructureResolveError(Exception):
 # ----------------------------------------------------------------------------------------
 class StructureWatch:
   """
-  Derives the path filter the structure-scan routines must carry.
+  Deriver of the path filter the structure-scan routines must carry.
 
   The three structure-scan routines dispatch one expert job per tick carrying every changed
   path, and the job is paid for before the expert can judge a path irrelevant. What the
-  routines watch is therefore a cost decision, not a preference, and it is derived from the
-  structure section rather than authored: the map's exclusions become a pathspec the watch
-  never enumerates. The unit of work is not derived at all — the routines run in the
+  routines watch is therefore a cost decision, not a preference, and it is derived rather
+  than authored: the structure section's exclusions and the terms dictionary directories
+  become a pathspec the watch never enumerates. The unit of work is not derived at all — the routines run in the
   runtime's default whole-list mode, so a registration that still carries a grouping key is
   reported as drift.
 
   Guarantees:
     - The map's own path is excluded whatever the settings say.
-    - The derivation is a pure function of the structure section — two calls over the same
-      settings return equal results, and nothing is read from the environment.
+    - The derivation depends only on the settings — the structure section plus the directories of
+      the terms scopes.
+    - A term file is never watched: every configured terms dictionary directory's subtree is
+      excluded, after the map's own path and the operator's exclusions, with no duplicates.
+
+  Attributes:
+    repo: Repository root every relative path resolves against.
   """
 
   # Contract:
@@ -63,14 +70,27 @@ class StructureWatch:
   # settings list it. A caller may add exclusions through the settings; no caller can
   # remove this one.
 
+  # Contract:
+  # The derivation depends only on the settings: the structure section and the
+  # directories of the terms scopes.
+
+  # Contract:
+  # A term file is NEVER watched: `read_excluded_globs()` and `build_path_filter()` ALWAYS carry
+  # the subtree of every configured terms dictionary directory, after the map's own
+  # path and the operator's exclusions, with no duplicates.
+
   # Domain(wiki.structure):
   # # What the structure map's watch is allowed to see
   # The map is kept current by watching the repository for files appearing, disappearing and
-  # moving. Two kinds of path must never reach that watch. The first is the map itself: the
+  # moving. Three kinds of path must never reach that watch. The first is the map itself: the
   # curator commits the map, so a watch that sees it is woken by its own output and never
   # settles. The second is any tree the operator has declared the map does not describe —
   # watching it buys nothing, because the only possible answer is that there is nothing to do.
-  # The first kind is a property of the system and is subtracted unconditionally; the second is
+  # The third is the terms dictionary directories: a term file is dictionary material the map
+  # does not describe, and a watch that saw them would hand the structure curator a job for
+  # every new term the terms curator writes. The first and third kinds are properties of the
+  # system and are subtracted unconditionally — the third is derived from the terms
+  # configuration, so a dictionary moved elsewhere carries its exclusion along; the second is
   # the operator's declaration and is read from it. Beyond what is watched, there is the
   # question of how much work one observation is. Everything one tick observed is answered
   # together as a single unit of work: a directory moved whole is one change to the map, not
@@ -88,6 +108,8 @@ class StructureWatch:
   _PATH_FILTER_KEY = "path_filter"
   # git pathspec magic that turns a glob into an exclusion
   _EXCLUDE_MAGIC = ":(exclude)"
+  # suffix turning a directory into the glob of its whole subtree
+  _SUBTREE_GLOB = "/**"
   # keys a registration must not carry: the retired one and the one whose default is wanted
   _STALE_KEYS = ( "group_globs", "group" )
 
@@ -101,7 +123,7 @@ class StructureWatch:
     # the root every relative path below resolves against
     self.repo: Path = Path(repo)
 
-  def section(self) -> dict:
+  def read_section(self) -> dict:
     """
     Return the repository's structure section.
 
@@ -122,34 +144,40 @@ class StructureWatch:
         data = json.load(fh)
     except (OSError, json.JSONDecodeError):
       return {}
-    section = data.get(self._STRUCTURE_KEY, {})
-
     # guard: section absent or malformed — treat as unconfigured
-    if not isinstance(section, dict):
+    if not isinstance(section := data.get(self._STRUCTURE_KEY, {}), dict):
       return {}
     return section
 
-  def excluded_globs(self) -> list[str]:
+  def read_excluded_globs(self) -> list[str]:
     """
     Return the globs of the paths the structure map does not describe.
 
     Guarantees:
       - The map's own path is always first, whatever the settings say.
+      - The subtree of every configured terms dictionary directory follows the operator's exclusions.
       - The list has no duplicates and holds only non-blank strings.
 
     Returns:
-      The map's own path followed by the operator's configured exclusions.
+      The map's own path, then the operator's configured exclusions, then the subtree of every terms
+      dictionary directory.
     """
     # the map leads the list whether or not the settings mention it — a caller may add
     # exclusions, never drop this one
     globs = [ MAP_PATH ]
-    configured = self.section().get(self._EXCLUDE_KEY)
+    configured = self.read_section().get(self._EXCLUDE_KEY)
 
     # collect the operator's own exclusions behind it, skipping anything malformed
     if isinstance(configured, list):
       for entry in configured:
         if isinstance(entry, str) and entry.strip() and entry not in globs:
           globs.append(entry)
+
+    # a term file is dictionary material the map never describes, so no new term wakes the structure curator
+    for directory in _axes.DictionaryDirs.read(self.repo):
+      glob = directory + self._SUBTREE_GLOB
+      if glob not in globs:
+        globs.append(glob)
     return globs
 
   def is_excluded(self, rel: str) -> bool:
@@ -163,9 +191,9 @@ class StructureWatch:
       True when the path matches any excluded glob, the map's own path included.
     """
     matcher = _scope.GlobMatcher()
-    return any(matcher.match(rel, glob) for glob in self.excluded_globs())
+    return any(matcher.match(rel, glob) for glob in self.read_excluded_globs())
 
-  def path_filter(self) -> list[str]:
+  def build_path_filter(self) -> list[str]:
     """
     Return the git pathspec the structure-scan routines must watch through.
 
@@ -173,9 +201,9 @@ class StructureWatch:
       One `:(exclude)<glob>` entry per excluded path, the map's own path first, in a stable
       order with no duplicates.
     """
-    return [ f"{self._EXCLUDE_MAGIC}{glob}" for glob in self.excluded_globs() ]
+    return [ f"{self._EXCLUDE_MAGIC}{glob}" for glob in self.read_excluded_globs() ]
 
-  def expected(self) -> dict:
+  def build_expected(self) -> dict:
     """
     Return the derived routine keys as one mapping.
 
@@ -184,9 +212,9 @@ class StructureWatch:
       default and is never registered.
     """
     # the shape a caller splices straight into a routine registration
-    return { self._PATH_FILTER_KEY: self.path_filter() }
+    return { self._PATH_FILTER_KEY: self.build_path_filter() }
 
-  def drift(self, registered: dict) -> dict:
+  def compute_drift(self, registered: dict) -> dict:
     """
     Compare one registered routine config against the derivation and report the difference.
 
@@ -198,14 +226,11 @@ class StructureWatch:
       the registration still carries, each carrying the expected and the actual value; empty
       when the routine carries exactly what is derived.
     """
-    expected = self.expected()
-
     # a registered value counts as matching only when it equals the derivation exactly —
     # a superset is drift too, because it watches trees the operator has excluded
     findings = {}
-    for key, want in expected.items():
-      got = registered.get(key)
-      if got != want:
+    for key, want in self.build_expected().items():
+      if (got := registered.get(key)) != want:
         findings[key] = { "expected": want, "actual": got }
 
     # a routine carrying a grouping key is drift in the other direction: the routines want
@@ -255,7 +280,7 @@ class StructureProfiles:
     self._watch = watch
 
     # each well-formed profile as its depth and globs, in the settings' key order
-    configured = watch.section().get(self._PROFILES_KEY)
+    configured = watch.read_section().get(self._PROFILES_KEY)
     self._profiles: list[tuple[str, list[str]]] = [
       (
         str(profile[self._PROFILE_DEPTH_KEY]),

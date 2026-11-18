@@ -6,11 +6,17 @@ lazycortex-wiki CLI dispatcher.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import argparse
 import contextlib
+import functools
 import json
 import math
 import os
+import posixpath
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -18,7 +24,13 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from collections.abc import Callable
+  from types import FrameType
+
+  from collections.abc import Callable, Iterable
+
+
+# A signal's handler as the interpreter keeps it: a function, or one of the default and ignore settings.
+type _SignalHandler = Callable[[int, FrameType | None], object] | int | None
 
 
 # Add the bin directory to sys.path so sibling modules (scope, etc.) can be imported.
@@ -62,6 +74,10 @@ import tags as _tags  # noqa: E402  # pylint: disable=import-error,wrong-import-
 import terms as _terms  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import term_dictionary as _term_dictionary  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import term_links as _term_links  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import terms_migrate as _terms_migrate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import textfile as _textfile  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -114,11 +130,18 @@ _SUBCOMMANDS = {
                     "no commit).",
   "domain-collect": "Land every finished domain-writer job: write its files, refresh the index, commit them, "
                     "consume the job.",
-  "terms-resolve":  "Resolve a terms-curator job's documents to their terms scope (dictionary and term sources) "
-                    "as JSON; writes nothing.",
-  "terms-write":    "Apply a terms-curator job's dictionary operations, commit the dictionary, and write the job "
-                    "response.",
+  "terms-resolve":  "Resolve a terms-curator job's documents to their terms scope (dictionary, term sources, "
+                    "dangling term links, link-excluded documents) as JSON; writes nothing.",
+  "terms-write":    "Apply a terms-curator job's operations to the dictionary's term files and the documents' term "
+                    "links, commit both together, and write the job response.",
   "terms-apply":    "Apply a decided term replacement to one document's prose (the operator picks the direction).",
+  "terms-migrate":  "Cut each terms scope's old dictionary file into term files and bring the scope's documents' term "
+                    "links and old terms sections in line (--check: exit 0 while work is left).",
+  "terms-sweep":    "List the terms scopes' documents, queue one terms-curator job per directory with --dispatch "
+                    "(--mark writes the sweep marker, --include-review opens documents under review; a scope not "
+                    "migrated yet is left out), or with --check exit 0 "
+                    "while a scope is unswept (--migrated: not counting unmigrated scopes).",
+  "terms-scope-config": "Seed a link exclusion on the terms scope covering a document when it has none.",
   "mirror-plan":    "Fetch a mirror scope's source and print the sync plan as JSON (dry-run, mirror untouched).",
   "mirror-sync":    "Fetch a mirror scope's source, sync the mirror tree, and commit the touched files.",
   "structure-watch-config": "Derive the path filter the structure-scan routines must carry.",
@@ -256,6 +279,131 @@ class _ProcessFileRun:
 
 
 # ----------------------------------------------------------------------------------------
+# waiver: a named tuple, not a dataclass — test loaders exec this extension-less file without registering it in
+# sys.modules, which a dataclass needs at class creation
+class _TermsWrite(NamedTuple):
+  """
+  What one `terms-write` run changed and committed.
+
+  Attributes:
+    commit: Outcome of the commit carrying the term files and the documents.
+    documents: Repo-relative documents whose text changed.
+    unmatched: Accepted link and retarget operations that found no occurrence in any document, and link operations
+      that a `skip` kept off a document they name, the latter carrying `skip_unmatched`, those documents sorted.
+    merged: Stems of the terms the batch joined with another term.
+    applied: Number of operations the batch applied.
+    refused: Refused operations, each with its zero-based batch position, the operation as sent and the reason.
+    skip_fragments: The `skip` fragments that matched no place, in the order sent, by document and by the word of
+      the link they keep off it.
+  """
+
+  # The outcome of the commit carrying the term files and the documents
+  commit: _wiki_commit.CommitResult
+  # The repo-relative documents whose text changed
+  documents: list[str]
+  # The link and retarget operations that found no occurrence in any document
+  unmatched: list[dict]
+  # The stems of the terms the batch joined with another term
+  merged: list[str]
+  # The number of operations the batch applied
+  applied: int
+  # The operations the batch refused, each with its position in the batch and the reason
+  refused: list[dict]
+  # The `skip` fragments that matched no place, by document and by the word of the link they keep off it
+  skip_fragments: dict[tuple[str, str], list[str]]
+
+
+# ----------------------------------------------------------------------------------------
+class _SignalStop:
+  """
+  Termination-signal handling of one `terms-write` commit phase.
+
+  A signal received while `holding` is set is only recorded; otherwise it stops the run at once.
+
+  Attributes:
+    holding: Whether a signal is only recorded instead of stopping the run.
+    received: The first signal recorded while `holding` was set, or `None`.
+  """
+
+  def __init__(self, *, signals: tuple[int, ...]) -> None:
+    """
+    Prepare the handling of the given signals; no handler is installed yet.
+
+    Args:
+      signals: The signals that end a run.
+    """
+    # the signals handled, and whether their handlers could be set from this thread
+    self._signals = signals
+    self._installed = False
+
+    # whether a signal is only recorded, and the first one recorded
+    self.holding = False
+    self.received: int | None = None
+
+  def install(self) -> dict[int, _SignalHandler]:
+    """
+    Make each termination signal reach this handling.
+
+    Returns:
+      The handler each signal had before, by signal; empty when handlers cannot be set from this thread.
+    """
+    # the handlers in place now, then this one; only the main thread may set them
+    try:
+      previous: dict[int, _SignalHandler] = { signum: signal.getsignal(signum) for signum in self._signals }
+      for signum in self._signals:
+        signal.signal(signum, self.on_signal)
+    except ValueError:
+      return {}
+    self._installed = True
+    return previous
+
+  def ignore(self) -> None:
+    """
+    Make every termination signal ignored, when this handling was installed.
+    """
+    # guard: handlers that could not be set are left alone
+    if not self._installed:
+      return
+
+    # every signal is ignored from here on
+    for signum in self._signals:
+      signal.signal(signum, signal.SIG_IGN)
+
+  @staticmethod
+  def restore(previous: dict[int, _SignalHandler]) -> None:
+    """
+    Put back the handlers the termination signals had before.
+
+    Args:
+      previous: The handler each signal had before, by signal.
+    """
+    # each signal gets its earlier handler back
+    for signum, handler in previous.items():
+      signal.signal(signum, handler)
+
+  def on_signal(self, signum: int, _frame: FrameType | None) -> None:
+    """
+    Record a termination signal, or stop the run on it.
+
+    Args:
+      signum: The signal received.
+      _frame: The interrupted frame, unused.
+
+    Raises:
+      KeyboardInterrupt: Carrying the signal, when the signal is not only recorded.
+    """
+    # while a signal is only recorded, git finishes its commit and releases its lock, and the run decides afterwards
+    if self.holding:
+      if self.received is None:
+        self.received = signum
+      return
+
+    # otherwise the write in progress stops, and every further signal is ignored so the rollback can finish
+    self.ignore()
+    raise KeyboardInterrupt(signum)
+
+
+# ----------------------------------------------------------------------------------------
 class Cli:
   """
   Command-line entry point for the lazycortex-wiki dispatcher.
@@ -310,6 +458,9 @@ class Cli:
   _CMD_TERMS_APPLY    = "terms-apply"
   _CMD_TERMS_RESOLVE  = "terms-resolve"
   _CMD_TERMS_WRITE    = "terms-write"
+  _CMD_TERMS_MIGRATE  = "terms-migrate"
+  _CMD_TERMS_SWEEP    = "terms-sweep"
+  _CMD_TERMS_SCOPE_CONFIG = "terms-scope-config"
   _CMD_MIRROR_PLAN    = "mirror-plan"
   _CMD_MIRROR_SYNC    = "mirror-sync"
   _CMD_CORE_CLI       = "core-cli"
@@ -336,6 +487,9 @@ class Cli:
     " and write response.json at the job dir root."
   )
   _ARG_RESOLVE_JOB_DIR_HELP = "Structure-curator job dir whose request names the paths to resolve."
+  _ARG_TERMS_RESOLVE_JOB_DIR_HELP = (
+    "Terms-curator job dir whose request names the documents to resolve; read only, nothing is written."
+  )
   _ARG_ALL               = "--all"
   _ARG_ALL_DEST          = "all_dirs"
   _ARG_RESOLVE_ALL_HELP  = "Resolve every directory the map describes instead of one job's paths."
@@ -400,6 +554,47 @@ class Cli:
   _ARG_TERM_TO             = "--to"
   _ARG_TERM_TO_DEST        = "new_term"
   _ARG_TERM_TO_HELP        = "The term replacing it, as the dictionary writes it."
+
+  # argparse strings for the terms-migrate, terms-sweep and terms-scope-config subcommands.
+  _ARG_MIGRATE_CHECK_HELP  = "Write nothing; exit 0 while a scope or a document still needs the migration, else 1."
+  _ARG_SWEEP_PATHS         = "paths"
+  _ARG_SWEEP_PATHS_HELP    = "Repo-relative documents or directories the sweep is limited to (default: every scope)."
+  _ARG_DISPATCH            = "--dispatch"
+  _ARG_DISPATCH_DEST       = "dispatch"
+  _ARG_DISPATCH_HELP       = "Queue one terms-curator job per directory, in the daemon's checkout only."
+  _ARG_MARK                = "--mark"
+  _ARG_MARK_DEST           = "mark"
+  _ARG_MARK_HELP           = "With --dispatch: write each scope's sweep marker once its jobs are queued or deferred."
+  _ARG_SWEEP_CHECK_HELP    = "Write nothing; exit 0 while a scope with documents has no sweep marker, else 1."
+  _ARG_MIGRATED            = "--migrated"
+  _ARG_MIGRATED_DEST       = "migrated"
+  _ARG_MIGRATED_HELP       = "With --check: leave out the scopes that still carry their old dictionary file."
+  _ARG_INCLUDE_REVIEW      = "--include-review"
+  _ARG_INCLUDE_REVIEW_DEST = "include_review"
+  _ARG_INCLUDE_REVIEW_HELP = "With --dispatch: let the curator edit documents under an open review round."
+  _ARG_SWEEP_SCOPE         = "--scope"
+  _ARG_SWEEP_SCOPE_DEST    = "scope"
+  _ARG_SWEEP_SCOPE_HELP    = ("Limit the listing or the queueing to this one terms scope; without it, --mark "
+                              "takes only the scopes that have no sweep marker yet.")
+  _ARG_SCOPE_DOC_HELP      = "Path of a document the terms scope to seed covers."
+  _ARG_LINK_EXCLUDE        = "--link-exclude"
+  _ARG_LINK_EXCLUDE_DEST   = "link_exclude"
+  _ARG_LINK_EXCLUDE_HELP   = "Glob seeded as the scope's link exclusion when the scope has none."
+  _MSG_MARK_NEEDS_DISPATCH = "--mark requires --dispatch and takes no paths"
+  _MSG_CHECK_TAKES_NO_PATHS = "--check answers for the whole sweep and takes no paths or scope"
+  _MSG_MIGRATED_NEEDS_CHECK = "--migrated requires --check"
+  _MSG_INCLUDE_REVIEW_NEEDS_DISPATCH = "--include-review requires --dispatch"
+
+  # Exit codes of the terms migration verbs, as the migration runner reads them.
+  _EXIT_DONE           = 0
+  _EXIT_NOTHING        = 1
+  _EXIT_BROKEN         = 2
+  _EXIT_NOT_APPLICABLE = 3
+  # Exit code of terms-scope-config when the seed could not be written.
+  _EXIT_FAILED         = 1
+
+  # Keys of the terms-migrate and terms-sweep outcome lines.
+  _OUT_SCOPES = "scopes"
 
   # argparse strings for the text subcommand.
   _ARG_TEXT_KEY            = "key"
@@ -626,6 +821,17 @@ class Cli:
   # subprocess, an undecodable file or core reply — reported as a transient refusal so the job still answers.
   _UNEXPECTED_FAILURES = ( OSError, RuntimeError, subprocess.SubprocessError, ValueError )
 
+  # The signals that end a run, and the base of the exit status a run ended by one reports: the shell's 128 plus the
+  # signal's number.
+  _TERMINATION_SIGNALS = ( signal.SIGTERM, signal.SIGINT )
+  _SIGNAL_EXIT_BASE    = 128
+  # The stderr line of a run a signal stopped, naming the paths a rollback could not put back (`-` for none).
+  # The stderr lines of `terms-migrate` naming a document it left alone because it changed on disk meanwhile, and a
+  # link to a heading of the old dictionary file standing where no link edit reaches.
+  _MSG_CHANGED_ON_DISK = "{cmd}: {file} changed on disk during the migration and was left as it is; run it again"
+  _MSG_UNMOVED         = "{cmd}: {file}: {link} stands where the migration never edits a link; move it by hand"
+  _MSG_STOPPED         ="{cmd}: stopped by signal {signum}; paths the rollback could not put back: {failed}"
+
   # Curation phases a curator job runs; the commit subject and the outcome line name them.
   _PHASE_CLASSIFY      = "classify"
   _PHASE_LINK          = "link"
@@ -655,6 +861,33 @@ class Cli:
   _RESULT_OPS     = "operations"
   _TERMS_OP_TERM  = "term"
   _OUTCOME_NOOP   = "noop"
+  # Request key letting a terms job edit documents under an open review round
+  _REQ_INCLUDE_REVIEW = "include_review"
+  # The marker a terms job keeps at its root; its key recording whether any call of the job committed; its key
+  # recording whether a call opened the job's retry, which makes every later call final; and the copy of the batch
+  # that call judged, kept beside the corrected batch that replaces it.
+  _TERMS_RETRY_MARKER = "terms-retry.json"
+  _RETRY_COMMITTED    = "committed"
+  _RETRY_OPENED       = "retry"
+  _RESULT_TERMS_FIRST = "result/terms.1.json"
+  # Where the job's one retry stands, as the terms-write outcome line names it
+  _RETRY_OPEN  = "open"
+  _RETRY_FINAL = "final"
+  # Operation keys and kinds of a terms batch the verb itself reads
+  _TERMS_OP          = "op"
+  _TERMS_OP_FROM     = "from"
+  _TERMS_OP_TARGET   = "target"
+  _TERMS_OP_FILES    = "files"
+  _TERMS_OP_RELINK   = "relink"
+  _TERMS_OP_RETARGET = "retarget"
+  # Operation kinds that change the dictionary itself rather than only the documents
+  _TERMS_DICTIONARY_OPS = frozenset({ "add", "extend", "rename", "split" })
+  # The most characters of one unmatched `skip` fragment an error-ledger detail shows, and the mark of a cut one
+  _SKIP_FRAGMENT_MAX_CHARS = 60
+  _ELLIPSIS                = "…"
+  # The noun counting the linked documents in a links-only commit subject, for one document and for several.
+  _SUBJECT_DOCUMENT  = "document"
+  _SUBJECT_DOCUMENTS = "documents"
 
   # The structure-curator job's result file, and the request keys and kinds naming its paths.
   _RESULT_STRUCTURE = "result/structure.json"
@@ -688,10 +921,21 @@ class Cli:
   _NAV_NO_DOMAINS      = "no-domains"
   _NAV_UNTRACKED       = "untracked"
 
-  # Layout of one `git status --porcelain -z` entry: separator, path offset, statuses carrying a source path.
-  _PORCELAIN_SEP         = "\0"
+  # Separator of every NUL-separated git listing (`-z`), which prints each path as written, never quoted.
+  _NUL                   = "\0"
+  # The pathspec magic that makes git read a path as written, never as a glob pattern.
+  _LITERAL               = ":(literal)"
+  # A commit record of a `git show` listing: its fields are split by a NUL, records end with a record separator,
+  # each written in the format as git's escape, and the line break git prints between records.
+  _RS                    = "\x1e"
+  _GIT_NUL               = "%x00"
+  _GIT_RS                = "%x1e"
+  _NL                    = "\n"
+  # Layout of one `git status --porcelain -z` entry: path offset, statuses carrying a source path.
   _PORCELAIN_PATH_AT     = 3
   _PORCELAIN_WITH_SOURCE = "RC"
+  # The `git status` switch that skips the scan for untracked files.
+  _GIT_NO_UNTRACKED      = "--untracked-files=no"
 
   # Keys of the relink-commit outcome line.
   _OUT_ANCHOR     = "anchor"
@@ -704,6 +948,13 @@ class Cli:
   _OUT_SOURCES    = "sources"
   _OUT_OPERATIONS = "operations"
   _OUT_CATEGORY   = "category"
+  _OUT_DANGLING      = "dangling"
+  _OUT_LINK_EXCLUDED = "link_excluded"
+  _OUT_DOCUMENTS     = "documents"
+  _OUT_UNMATCHED     = "unmatched"
+  _OUT_MERGED        = "merged"
+  _OUT_REFUSED       = "refused"
+  _OUT_RETRY         = "retry"
 
   # Key of the tag-apply outcome line counting the rewritten nodes.
   _OUT_NODES_CHANGED = "nodes_changed"
@@ -724,9 +975,15 @@ class Cli:
     Parse arguments and dispatch to the selected subcommand.
 
     Guarantees:
-      - Exit code 0 means the subcommand ran to completion, including its documented
-        skips; 1 means the subcommand itself failed; 2 never reports failed work and is
-        reserved for an invocation that could not be run at all.
+      - Exit code 0 means the subcommand ran to completion, including its documented skips, and 1 means the
+        subcommand itself failed.
+      - For every subcommand except `terms-migrate` and `terms-sweep`, 2 never reports failed work and is
+        reserved for an invocation that could not be run at all, such as a rejected argument vector, an unknown
+        subcommand, or a path that names no file.
+      - The `terms-migrate` and `terms-sweep` subcommands follow the migration runner's exit table instead: 0
+        means the verb did its work or the predicate's condition holds, 1 means there was nothing to do or the
+        condition does not hold, 2 means the verb broke or was refused, and 3 means the verb does not apply to
+        this repository.
 
     Args:
       argv: Argument vector to parse; defaults to the process arguments when not supplied.
@@ -736,9 +993,15 @@ class Cli:
     """
 
     # Contract:
-    # Exit code 0 means the subcommand ran to completion, including its documented skips,
-    # and 1 means the subcommand itself failed; 2 NEVER reports failed work — it is
-    # reserved for an invocation that could not be run at all.
+    # Exit code 0 means the subcommand ran to completion, including its documented skips, and 1 means the
+    # subcommand itself failed. For every subcommand except `terms-migrate` and `terms-sweep`, 2 NEVER reports
+    # failed work: it is reserved for an invocation that could not be run at all, such as a rejected argument
+    # vector, an unknown subcommand, or a path that names no file.
+
+    # Contract:
+    # The `terms-migrate` and `terms-sweep` subcommands follow the migration runner's exit table instead: 0 means
+    # the verb did its work or the predicate's condition holds, 1 means there was nothing to do or the condition
+    # does not hold, 2 means the verb broke or was refused, and 3 means the verb does not apply to this repository.
 
     # parse the command line and pick out the invoked subcommand
     parser = self._build_parser()
@@ -799,6 +1062,9 @@ class Cli:
       self._CMD_TERMS_APPLY: self._cmd_terms_apply,
       self._CMD_TERMS_RESOLVE: self._cmd_terms_resolve,
       self._CMD_TERMS_WRITE: self._cmd_terms_write,
+      self._CMD_TERMS_MIGRATE: self._cmd_terms_migrate,
+      self._CMD_TERMS_SWEEP: self._cmd_terms_sweep,
+      self._CMD_TERMS_SCOPE_CONFIG: self._cmd_terms_scope_config,
       self._CMD_MIRROR_PLAN: self._cmd_mirror_plan,
       self._CMD_MIRROR_SYNC: self._cmd_mirror_sync,
       self._CMD_STRUCTURE_WATCH_CONFIG: self._cmd_structure_watch_config,
@@ -1116,9 +1382,39 @@ class Cli:
         )
         sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name in ( self._CMD_TERMS_RESOLVE, self._CMD_TERMS_WRITE, self._CMD_STRUCTURE_APPLY ):
-        # the terms- and structure-curator job verbs read the job dir and the repo
-        sub_parser.add_argument(self._ARG_JOB_DIR, dest = self._ARG_JOB_DIR_DEST, required = True,
-                                help = self._ARG_JOB_DIR_HELP)
+        # the terms- and structure-curator job verbs read the job dir and the repo; only the lookup writes nothing
+        sub_parser.add_argument(
+          self._ARG_JOB_DIR, dest = self._ARG_JOB_DIR_DEST, required = True,
+          help = self._ARG_TERMS_RESOLVE_JOB_DIR_HELP if name == self._CMD_TERMS_RESOLVE else self._ARG_JOB_DIR_HELP,
+        )
+        sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_TERMS_MIGRATE:
+        # terms-migrate takes the predicate switch and the repo
+        sub_parser.add_argument(self._ARG_CHECK, dest = self._ARG_CHECK_DEST, action = self._ACTION_STORE_TRUE,
+                                help = self._ARG_MIGRATE_CHECK_HELP)
+        sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_TERMS_SWEEP:
+        # terms-sweep takes optional paths, then either the dispatch switch with its marker switch or the predicate
+        sub_parser.add_argument(self._ARG_SWEEP_PATHS, nargs = "*", default = [], help = self._ARG_SWEEP_PATHS_HELP)
+        mode = sub_parser.add_mutually_exclusive_group()
+        mode.add_argument(self._ARG_DISPATCH, dest = self._ARG_DISPATCH_DEST, action = self._ACTION_STORE_TRUE,
+                          help = self._ARG_DISPATCH_HELP)
+        mode.add_argument(self._ARG_CHECK, dest = self._ARG_CHECK_DEST, action = self._ACTION_STORE_TRUE,
+                          help = self._ARG_SWEEP_CHECK_HELP)
+        sub_parser.add_argument(self._ARG_MARK, dest = self._ARG_MARK_DEST, action = self._ACTION_STORE_TRUE,
+                                help = self._ARG_MARK_HELP)
+        sub_parser.add_argument(self._ARG_MIGRATED, dest = self._ARG_MIGRATED_DEST, action = self._ACTION_STORE_TRUE,
+                                help = self._ARG_MIGRATED_HELP)
+        sub_parser.add_argument(self._ARG_INCLUDE_REVIEW, dest = self._ARG_INCLUDE_REVIEW_DEST,
+                                action = self._ACTION_STORE_TRUE, help = self._ARG_INCLUDE_REVIEW_HELP)
+        sub_parser.add_argument(self._ARG_SWEEP_SCOPE, dest = self._ARG_SWEEP_SCOPE_DEST, default = None,
+                                help = self._ARG_SWEEP_SCOPE_HELP)
+        sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_TERMS_SCOPE_CONFIG:
+        # terms-scope-config takes the document path, the required glob and the repo
+        sub_parser.add_argument(self._ARG_PATH, help = self._ARG_SCOPE_DOC_HELP)
+        sub_parser.add_argument(self._ARG_LINK_EXCLUDE, dest = self._ARG_LINK_EXCLUDE_DEST, required = True,
+                                help = self._ARG_LINK_EXCLUDE_HELP)
         sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_STRUCTURE_RESOLVE:
         # structure-resolve reads one job dir or the whole tree, never both, and the repo
@@ -1725,15 +2021,15 @@ class Cli:
 
     # without --check the derivation itself is the whole output
     if not args.check:
-      print(json.dumps(watch.expected(), indent = 2, sort_keys = True))
+      print(json.dumps(watch.build_expected(), indent = 2, sort_keys = True))
       return 0
 
     # compare each registered structure routine against what the section derives
     registered = self._load_structure_routines(repo)
-    drifted = { name: watch.drift(cfg) for name, cfg in registered.items() }
+    drifted = { name: watch.compute_drift(cfg) for name, cfg in registered.items() }
     drifted = { name: found for name, found in drifted.items() if found }
     print(json.dumps({
-      "expected": watch.expected(),
+      "expected": watch.build_expected(),
       "routines": sorted(registered),
       "drift": drifted,
     }, indent = 2, sort_keys = True))
@@ -1902,7 +2198,7 @@ class Cli:
 
     # ask git whether it tracks the rule
     tracked = subprocess.run(
-      [ "git", "ls-files", "--error-unmatch", "--", rel ],
+      [ "git", "ls-files", "--error-unmatch", "--", *self._as_literal([ rel ]) ],
       cwd = str(repo), capture_output = True, text = True, check = False, encoding = self._ENCODING,
     )
 
@@ -2840,7 +3136,7 @@ class Cli:
 
     # each entry is the two status letters, a space, the path; a rename or copy carries its source next
     changed: list[str] = []
-    fields = raw.split(self._PORCELAIN_SEP)
+    fields = raw.split(self._NUL)
     index = 0
     while index < len(fields):
       entry = fields[index]
@@ -4137,7 +4433,10 @@ class Cli:
       return True
 
     # undo the landing: unstage what the commit attempt staged, then restore the bytes
-    subprocess.run([ "git", "reset", "-q", "--", *paths ], cwd = str(repo), check = False, capture_output = True)
+    subprocess.run(
+      [ "git", "reset", "-q", "--", *self._as_literal(paths) ],
+      cwd = str(repo), check = False, capture_output = True,
+    )
     for rel, data in before.items():
       if data is None:
         (repo / rel).unlink(missing_ok = True)
@@ -4249,8 +4548,10 @@ class Cli:
     """
     Print the terms dictionary scope that a job's documents belong to.
 
-    Prints one JSON object `{scope, dictionary, sources}` on stdout, or `{"status": "noop"}` when the
-    documents belong to no dictionary. An unreadable request is reported on stderr.
+    Prints one JSON object `{scope, dictionary, sources, dangling, link_excluded}` on stdout, or
+    `{"status": "noop"}` when the documents belong to no dictionary. `dangling` lists the sources' links
+    to term files the dictionary does not hold, only those standing where `terms-write` edits links, and
+    `link_excluded` the sources whose text the verbs never edit. An unreadable request is reported on stderr.
 
     Notes:
       - Nothing is written; neither the dictionary nor the job directory changes.
@@ -4275,98 +4576,1456 @@ class Cli:
     if scope is None:
       print(json.dumps({ self._OUT_STATUS: self._OUTCOME_NOOP }))
       return 0
+
+    # the job's links to missing term files, and the job's documents whose text the verbs never edit
+    matcher = _scope.GlobMatcher()
     print(json.dumps({
-      self._OUT_SCOPE:      scope.scope_id,
-      self._OUT_DICTIONARY: scope.dictionary,
-      self._OUT_SOURCES:    scope.sources,
+      self._OUT_SCOPE:         scope.scope_id,
+      self._OUT_DICTIONARY:    scope.dictionary,
+      self._OUT_SOURCES:       scope.sources,
+      self._OUT_DANGLING:      _term_links.find_all_dangling(repo, scope.dictionary, scope.sources),
+      self._OUT_LINK_EXCLUDED: [
+        rel for rel in scope.sources if any(matcher.match(rel, glob) for glob in scope.link_exclude)
+      ],
     }))
     return 0
 
 
   def _cmd_terms_write(self, args: argparse.Namespace) -> int:
     """
-    Apply a curated batch of term operations to the scope's dictionary and commit it.
+    Apply a curated batch of term operations to the scope's dictionary and commit the valid ones.
 
     Reads the job's documents from `request.json` (`files`, or the legacy single `file` as a batch of
-    one) and the operations from `result/terms.json`. Only the dictionary is written and committed,
-    with the subject `wiki(terms): <term>` for one operation or `wiki(terms): <dir> (<n> terms)` for
-    several. Prints one JSON line `{status, dictionary, operations, commit, category, reason}` on
-    stdout, and the refusal reason on stderr.
+    one) and the operations from `result/terms.json`; a missing result file is an empty batch. The valid
+    operations are applied and committed, and the refused ones are listed in the answer. Writes the term files
+    and the document links the accepted operations change in one commit. The subject names the term's title
+    after the batch for one operation (`wiki(terms): <title>`), the shared directory with a term count for
+    several (`wiki(terms): <dir> (<n> terms)`), and the linked documents, singular for one, when only links
+    change (`wiki(terms): link <dir> (<n> documents)`). Prints one JSON line on stdout, and the refusal reason
+    on stderr.
+
+    Guarantees:
+      - An error of a single operation never refuses the batch: the accepted operations are applied and
+        committed in one commit, and each refused operation is listed with its zero-based index, the operation
+        as sent and the reason.
+      - A refused operation leaves the dictionary exactly as it was before it; the link edits, the operation
+        count, the commit subject, `merged` and the retargets come from the accepted operations only.
+      - Exit status is 0 when the batch was judged, even if every operation was refused, and 1 only on a
+        whole-batch refusal.
+      - The marker `terms-retry.json` records two facts of the job apart from each other: whether the job's
+        retry is open and whether any call of the job committed. Every call that commits records the commit.
+        A call is final only when the marker records the retry as open: it hands nothing back, never rewrites
+        the kept copy, and is never refused merely for being a further call, whichever run of the job makes it.
+        The first call that hands something back, a refused operation, an `unmatched` entry carrying
+        `skip_unmatched` or an unusable result file, while the retry is not open copies the submitted batch to
+        `result/terms.1.json` and records the retry as open, keeping an earlier commit recorded. Once a call of
+        the job committed, a later call that changes nothing answers `curated`, and a later call refused as a
+        whole for a non-transient reason, whose documents resolved to a scope, answers `curated` too, although
+        its outcome line still says refused and it exits 1; that refusal is recorded in the error ledger under
+        the cause `terms-batch-refused`, one incident `wiki-terms-batch:<scope id>:<document path>` per source
+        of the job. A call that fails before its documents resolve to a scope answers error with its own
+        category even after a commit, and a transient refusal answers error. A whole-batch transient refusal, a
+        repository without a commit and a failed rollback write no marker.
+      - Each refused operation and each `skip_unmatched` entry, in the first call as well as in a final one, is
+        recorded in the error ledger under the cause `terms-operation-refused` and the incident
+        `wiki-terms:<scope id>:<document path>`. A refused `relink` or `retarget` is recorded under each source
+        of the job it names, compared in its plain repo-relative form (`./specs/a.md` is `specs/a.md`) and
+        keyed by the source's own spelling; a named document outside the job gets no incident. An operation
+        that names none of the job's sources is recorded under every source, and a `skip_unmatched` entry under
+        each document it lists. Every call that judged the batch closes both incidents, `wiki-terms:` and
+        `wiki-terms-batch:`, of each of its sources under which it recorded nothing, and never closes the
+        incident of a document that is not its own; a whole-batch refusal closes nothing. The marker, the kept
+        copy, `response.json` and the outcome line, printed with a flush, come before any ledger call. A report
+        the ledger does not take, or does not take in time, never changes the call's answer or exit code, and
+        once one ledger call of a verb call runs out of time, that call sends no further report or close. An
+        unusable result file with no earlier commit makes no ledger call.
+      - A failure past the first write, with no commit landed, rolls the batch back path by path and always
+        attempts to unstage: changed files hold their previous content, created files are gone, removed files
+        are back and nothing the batch staged stays staged. A rollback that fully succeeds answers transient;
+        one that could not restore or unstage some path answers technical, never retried, and the reason
+        names each such path.
+      - A commit reported as failed counts as the run's own only when it is the commit this run created,
+        recognised by the first line of its message being the first line of the message the run passed to the
+        commit call, so a trailer a commit hook appends does not make it foreign; it is then
+        never reverted and the run succeeds. Any other commit made since the run started, one that does not
+        touch the committed paths or a foreign one that touches them, even leaving them clean, is not the run's
+        commit: the normal rollback runs and the job answers transient. The job answers technical when HEAD
+        cannot be read, when the run's commit landed but the paths still carry changes (the files are left as
+        written), or when the rollback itself fails.
+      - A term file the batch would write or remove that carries uncommitted changes, or is untracked, refuses the
+        whole batch as transient, with nothing written.
 
     Notes:
-      - A refusal of the batch, whatever check raises it, comes before the dictionary is written and leaves it
-        untouched.
-      - `response.json` is left at the root of the job directory on every outcome: `curated`, listing
-        `result/terms.json`; a bare `noop`; or an error carrying the category logical, technical or
-        transient.
-      - A failed commit, a failed file write or an unreachable core CLI is reported as a transient refusal.
+      - A whole-batch refusal, whatever check raises it, comes before any term file or document is written
+        and leaves them untouched.
+      - A repository with no commit yet is refused as technical, never transient, before any file is written.
+      - A batch that changes no term file and no document is a `noop` and makes no commit.
+      - The outcome line is `{status, dictionary, operations, commit, category, reason, documents, unmatched,
+        merged, refused, retry}`: `operations` is the accepted count, `refused` lists `{index, operation, reason}`
+        per refused operation, and `retry` is `open` when this call opened the job's retry, `final` when the
+        marker `terms-retry.json` recorded the retry as open when the call began, otherwise null.
+      - `response.json` is left at the root of the job directory on every outcome: `curated`, carrying `refused`
+        and listing `result/terms.json` (and `result/terms.1.json` when that copy exists), when this call or any
+        earlier call of the job committed; a `noop` carrying `refused`; or an error carrying the category
+        logical, technical or transient.
+      - A result file the verb cannot use (unreadable, not a JSON object, `operations` not a list of objects) is a
+        technical refusal with nothing written.
+      - A SIGTERM or SIGINT during the writes stops the run at once: the batch is rolled back, then the process
+        ends with exit status 128 plus the signal number. A signal arriving while the commit call runs is only
+        recorded and git is never killed; when the call returns, a landed commit finishes the run normally,
+        and otherwise the ordinary rollback runs, then the process ends with 128 plus the signal number.
+      - Both signals are ignored while any rollback runs, and the handlers in place before the run are restored
+        on every path.
 
     Args:
       args: Parsed argument namespace; must carry `.job_dir` and `.repo`.
 
     Returns:
-      Integer exit code (0 when the batch is applied or there was nothing to apply, 1 on a refusal).
+      Integer exit code (0 when the batch was judged, even if every operation was refused, or there was nothing to
+      apply; 1 on a whole-batch refusal).
+
+    Raises:
+      SystemExit: Carrying 128 plus the signal number, when a termination signal stopped the run and its commit
+        did not land.
     """
+
+    # Contract:
+    # A failure after the first file is written, with no commit landed, rolls the batch back path by path
+    # and always attempts to unstage: files the batch changed hold their previous content, files it created
+    # are gone, files it removed are back, and nothing it staged stays staged. A rollback that fully
+    # succeeds answers transient. A rollback that could not restore or unstage some path answers technical,
+    # which is never retried, and the reason names each such path.
+
+    # Contract:
+    # A commit reported as failed counts as the run's own only when it is the commit this run created,
+    # recognised by the first line of its message being the first line of the message the run passed to the
+    # commit call, so a trailer a commit hook appends does not make it foreign; such a
+    # commit is never reverted and the run succeeds. Any other commit made since the run started, whether it
+    # leaves the committed paths untouched or is a foreign one that touches them, even leaving them clean,
+    # is not the run's commit: the normal rollback runs and the job answers transient. The job answers
+    # technical when HEAD cannot be read, when the run's commit landed but the committed paths still carry
+    # changes, in which case the files are left as written, or when the rollback itself fails.
+
+    # Contract:
+    # A term file the batch would write or remove that carries uncommitted changes, or is untracked,
+    # refuses the whole batch as transient, and nothing is written.
+
+    # Contract:
+    # An error of a single operation never refuses the batch: the accepted operations are applied and
+    # committed in one commit, and each refused operation is listed with its zero-based index, the
+    # operation as sent and the reason. Nothing downstream of the dictionary, neither the link edits, the
+    # operation count, the commit subject, the merged terms nor the retargets, sees a refused operation.
+
+    # Contract:
+    # The marker `terms-retry.json` records two facts of the job apart from each other: whether the job's
+    # retry is open, and whether any call of the job committed. Every call that commits records the commit.
+    # A call is final only when the marker records the retry as open: it hands nothing back, never rewrites
+    # the kept copy, and is never refused merely for being a further call, whichever run of the job makes
+    # it. The first call that hands something back, a refused operation, an `unmatched` entry carrying
+    # `skip_unmatched` or an unusable result file, while the retry is not open copies the submitted batch to
+    # `result/terms.1.json` and records the retry as open, keeping an earlier commit recorded. Once a call
+    # of the job committed, a later call that changes nothing answers `curated`, and a later call refused
+    # as a whole for a non-transient reason, whose documents resolved to a scope, answers `curated` too,
+    # although its outcome line still says refused and it exits 1; that refusal is recorded in the error
+    # ledger under the cause `terms-batch-refused`, one incident `wiki-terms-batch:<scope id>:<document
+    # path>` per source of the job. A call that fails before its documents resolve to a scope answers error
+    # with its own category even after a commit, and a transient refusal answers error. A whole-batch
+    # transient refusal, a repository without a commit and a failed rollback write no marker.
+
+    # Contract:
+    # Each refused operation and each `skip_unmatched` entry, in the first call as well as in a final one,
+    # is recorded in the error ledger under the cause `terms-operation-refused` and the incident
+    # `wiki-terms:<scope id>:<document path>`. A refused `relink` or `retarget` is recorded under each
+    # source of the job it names, compared in its plain repo-relative form (`./specs/a.md` is `specs/a.md`)
+    # and keyed by the source's own spelling; a named document outside the job gets no incident. An
+    # operation that names none of the job's sources is recorded under every source, and a `skip_unmatched`
+    # entry under each document it lists. Every call that judged the batch closes both incidents,
+    # `wiki-terms:` and `wiki-terms-batch:`, of each of its sources under which it recorded nothing, and
+    # never closes the incident of a document that is not its own; a whole-batch refusal closes nothing.
+    # The marker, the kept copy, `response.json` and the outcome line, printed with a flush, come before
+    # any ledger call. A report the ledger does not take, or does not take in time, never changes the
+    # call's answer or exit code, and once one ledger call of a verb call runs out of time, that call
+    # sends no further report or close. An unusable result file with no earlier commit makes no ledger
+    # call.
+
     repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
     job_dir = Path(args.job_dir)
     dictionary: str | None = None
+    scope: _term_dictionary.TermsScope | None = None
 
-    # a refusal from a check, raised before the dictionary is written, leaves it byte-identical
+    # a job whose retry an earlier call already opened makes every further call final, whichever run of the job it is
+    final = self._is_retry_open(job_dir)
+
+    # a refusal from a check, raised before any file is written, leaves the dictionary and the documents as they were
     try:
+      request = self._read_json_object(job_dir / self._JOB_REQUEST, what = self._JOB_REQUEST)
       files = self._request_files(job_dir)
       scope = _term_dictionary.resolve_terms_scope(repo, files)
 
       # guard: the documents belong to no dictionary, or none of them is a term source
       if scope is None:
-        _job_response.write_response(job_dir, outcome = self._OUTCOME_NOOP)
+        # an earlier commit of the job keeps its answer curated; otherwise nothing changed in any call
+        if self._is_retry_committed(job_dir):
+          self._write_curated_response(job_dir, [])
+        else:
+          _job_response.write_response(job_dir, outcome = self._OUTCOME_NOOP)
         print(json.dumps(self._terms_outcome(self._OUTCOME_NOOP, None, 0, commit = None)))
         return 0
 
-      # the curator's operations for the scope's dictionary
+      # a result file the verb cannot use has nothing to apply, and goes back to the curator while its retry is open
       dictionary = scope.dictionary
-      operations = self._read_json_object(job_dir / self._RESULT_TERMS, what = self._RESULT_TERMS).get(
-        self._RESULT_OPS,
-      )
-      # guard: the operations must be a list of objects
-      if not isinstance(operations, list) or not all(isinstance(op, dict) for op in operations):
-        raise _job_response.JobRefusedError(
-          category = _job_response.CATEGORY_TECHNICAL, reason = f"{self._RESULT_TERMS}: operations must be a list",
+      try:
+        operations = self._terms_operations(job_dir)
+      except _job_response.JobRefusedError as unusable:
+        # the first call opens the job's one retry and keeps the file for the record; a final call opens nothing
+        if not final:
+          self._open_terms_retry(job_dir, committed = self._is_retry_committed(job_dir))
+        return self._refuse_terms(
+          repo, job_dir, scope, unusable, retry = self._RETRY_FINAL if final else self._RETRY_OPEN,
         )
 
-      # guard: nothing to apply is a noop for the whole batch
-      if not operations:
-        _job_response.write_response(job_dir, outcome = self._OUTCOME_NOOP)
-        print(json.dumps(self._terms_outcome(self._OUTCOME_NOOP, dictionary, 0, commit = None)))
-        return 0
-
-      # write the dictionary the accepted batch yields, then commit exactly that file
-      path = repo / dictionary
-      text = _term_dictionary.TermDictionary(path = path).apply(operations)
-      _textfile.TextFile(path = path).write(text)
-      try:
-        commit = _wiki_commit.commit_paths(repo, [ dictionary ], self._terms_subject(files, operations))
-      except _wiki_commit.WikiCommitError as error:
-        raise _job_response.JobRefusedError(
-          category = _job_response.CATEGORY_TRANSIENT, reason = str(error),
-        ) from error
+      # the dictionary and the documents the accepted operations change, in one commit
+      written = self._write_terms(
+        repo, scope, files, operations, allow_review = request.get(self._REQ_INCLUDE_REVIEW) is True,
+      )
     except ( _job_response.JobRefusedError, *self._UNEXPECTED_FAILURES ) as caught:
-      refusal = self._as_refusal(caught)
-      print(f"{self._CMD_TERMS_WRITE}: {refusal.reason}", file = sys.stderr)
+      return self._refuse_terms(
+        repo, job_dir, scope, self._as_refusal(caught), retry = self._RETRY_FINAL if final else None,
+      )
+
+    # the marker before anything reaches the ledger: the curator's errors go back to it once, when no call of the job
+    # has opened its retry yet
+    landed = written.commit.status == _wiki_commit.STATUS_COMMITTED
+    committed = landed or self._is_retry_committed(job_dir)
+    errors = self._find_all_terms_errors(scope, written)
+    if final:
+      retry: str | None = self._RETRY_FINAL
+    elif errors:
+      self._open_terms_retry(job_dir, committed = committed)
+      retry = self._RETRY_OPEN
+    else:
+      retry = None
+
+    # every call that commits records the commit, beside where the retry stands; a call opening the retry did so
+    if landed and retry != self._RETRY_OPEN:
+      self._write_retry_marker(job_dir, committed = True, retry = final)
+
+    # this call is a noop when it changed nothing; the job is curated when this call or an earlier one committed
+    status = self._OUTCOME_CURATED if landed else self._OUTCOME_NOOP
+    if committed:
+      self._write_curated_response(job_dir, written.refused)
+    else:
+      _job_response.write_response(job_dir, outcome = status, fields = { self._OUT_REFUSED: written.refused })
+
+    # the outcome line names what the call changed, what it could not place, what it refused and where the retry stands
+    outcome = self._terms_outcome(status, dictionary, written.applied, commit = written.commit.status)
+    outcome[self._OUT_DOCUMENTS] = len(written.documents)
+    outcome[self._OUT_UNMATCHED] = written.unmatched
+    outcome[self._OUT_MERGED] = written.merged
+    outcome[self._OUT_REFUSED] = written.refused
+    outcome[self._OUT_RETRY] = retry
+    print(json.dumps(outcome), flush = True)
+
+    # the ledger comes last, so a report it does not take never changes the answer
+    self._update_terms_ledger(
+      repo, scope, errors,
+      cause = _dispatch.CoreDispatch.CAUSE_TERMS_REFUSED, prefix = _dispatch.CoreDispatch.INCIDENT_TERMS_PREFIX,
+    )
+    return 0
+
+
+  def _refuse_terms(self,
+                    repo: Path,
+                    job_dir: Path,
+                    scope: _term_dictionary.TermsScope | None,
+                    refusal: _job_response.JobRefusedError,
+                    *,
+                    retry: str | None) -> int:
+    """
+    Answer a whole-batch refusal of `terms-write` and report it.
+
+    Notes:
+      - Prints the reason on stderr and one outcome line with status `refused` on stdout.
+      - Writes an error response with the refusal's category, except when a call of the job already committed, the
+        refusal is not transient and the call's documents resolved to a scope: the job then stays `curated` and
+        the refusal is recorded in the core error ledger under the cause `terms-batch-refused`, one incident
+        `wiki-terms-batch:<scope id>:<document path>` per source of the job.
+      - Writes the response and prints the outcome line, with a flush, before any ledger call, so a report the
+        ledger does not take never changes the answer.
+
+    Args:
+      repo: Repository root.
+      job_dir: The job's bundle directory.
+      scope: The terms scope serving the job's documents, or `None` when none was resolved.
+      refusal: The refusal to answer, carrying its category and reason.
+      retry: Where the job's retry stands, as the outcome line reports it.
+
+    Returns:
+      Exit code 1, whichever response the job receives.
+    """
+    # the reason on stderr; after an earlier commit of the job a refusal of a call whose documents resolved to a scope
+    # that a retry of the runtime cannot cure keeps the job curated and goes to the ledger, any other refusal is the
+    # job's error
+    print(f"{self._CMD_TERMS_WRITE}: {refusal.reason}", file = sys.stderr)
+    kept = (
+      scope is not None and refusal.category != _job_response.CATEGORY_TRANSIENT
+      and self._is_retry_committed(job_dir)
+    )
+    if kept:
+      self._write_curated_response(job_dir, [])
+    else:
       _job_response.write_response(
         job_dir, outcome = _job_response.OUTCOME_ERROR, category = refusal.category, message = refusal.reason,
       )
-      outcome = self._terms_outcome(self._STATUS_REFUSED, dictionary, 0, commit = None)
-      outcome[self._OUT_CATEGORY] = refusal.category
-      outcome[self._OUT_REASON] = refusal.reason
-      print(json.dumps(outcome))
-      return 1
 
-    # the dictionary is written and committed; the job's answer names its result file
-    _job_response.write_response(job_dir, outcome = self._OUTCOME_CURATED, result = [ self._RESULT_TERMS ])
-    print(json.dumps(
-      self._terms_outcome(self._OUTCOME_CURATED, dictionary, len(operations), commit = commit.status),
-    ))
-    return 0
+    # the outcome line carries the refusal and where the retry stands
+    outcome = self._terms_outcome(self._STATUS_REFUSED, scope.dictionary if scope else None, 0, commit = None)
+    outcome[self._OUT_CATEGORY] = refusal.category
+    outcome[self._OUT_REASON] = refusal.reason
+    outcome[self._OUT_RETRY] = retry
+    print(json.dumps(outcome), flush = True)
+
+    # a refusal the job's earlier commit outlives is recorded under its own incident of every document of the job
+    if kept and scope is not None:
+      self._update_terms_ledger(
+        repo, scope, [ ( rel, f"terms-write refused: {refusal.reason}" ) for rel in scope.sources ],
+        cause = _dispatch.CoreDispatch.CAUSE_TERMS_BATCH_REFUSED,
+        prefix = _dispatch.CoreDispatch.INCIDENT_TERMS_BATCH_PREFIX,
+      )
+    return 1
+
+
+  def _write_curated_response(self, job_dir: Path, refused: list[dict]) -> None:
+    """
+    Write the `curated` answer of a job that committed.
+
+    Notes:
+      - The response lists `result/terms.json`, and `result/terms.1.json` too when the job kept its first batch
+        there.
+      - Replaces an existing response of the job.
+
+    Args:
+      job_dir: The job's bundle directory.
+      refused: The refused operations this call hands back, carried beside the envelope.
+    """
+    # the corrected batch, and the first one when the job kept it
+    kept = [ self._RESULT_TERMS_FIRST ] if (job_dir / self._RESULT_TERMS_FIRST).is_file() else []
+    _job_response.write_response(
+      job_dir, outcome = self._OUTCOME_CURATED, result = [ self._RESULT_TERMS, *kept ],
+      fields = { self._OUT_REFUSED: refused },
+    )
+
+
+  def _find_all_terms_errors(self,
+                             scope: _term_dictionary.TermsScope,
+                             written: _TermsWrite) -> list[tuple[str, str]]:
+    """
+    Collect the errors of a call that the curator is to correct, each with the document it concerns.
+
+    Notes:
+      - A refused `relink` or `retarget` concerns each source of the job it names, compared in its plain
+        repo-relative form (`./specs/a.md` is `specs/a.md`) and returned in the source's own spelling; a named
+        document outside the job is dropped.
+      - An operation naming none of the job's sources concerns every source of the job.
+      - A `skip_unmatched` entry concerns each document it lists, and its description for a document names the
+        fragments that matched nothing there.
+
+    Args:
+      scope: The terms scope serving the job's documents.
+      written: The outcome of the call's write.
+
+    Returns:
+      One pair of document path and one-line description per error and document; empty when the call has none.
+    """
+    # the job's documents by their plain repo-relative form, so `./specs/a.md` names `specs/a.md`
+    sources = { posixpath.normpath(rel): rel for rel in scope.sources }
+
+    # a refused operation concerns the job's documents it names, or every document of the job when it names none
+    errors: list[tuple[str, str]] = []
+    for entry in written.refused:
+      operation = entry[_term_dictionary.REFUSED_OPERATION]
+      named = operation.get(self._TERMS_OP_FILES)
+      own = (
+        [ sources[plain] for plain in dict.fromkeys(posixpath.normpath(rel) for rel in named) if plain in sources ]
+        if operation.get(self._TERMS_OP) in ( self._TERMS_OP_RELINK, self._TERMS_OP_RETARGET )
+        and isinstance(named, list) and all(isinstance(rel, str) for rel in named)
+        else []
+      )
+      errors += [ ( rel, self._format_refused(entry) ) for rel in own or scope.sources ]
+
+    # a link a `skip` kept off a document concerns that document, and names the fragments that matched nothing there
+    for entry in written.unmatched:
+      errors += [
+        ( rel, self._format_skip_unmatched(
+          entry, rel, written.skip_fragments.get(( rel, str(entry.get(self._TERMS_OP_FROM)) ), []),
+        ) )
+        for rel in entry.get(_term_links.KEY_SKIP_UNMATCHED, [])
+      ]
+    return errors
+
+
+  def _update_terms_ledger(self,
+                           repo: Path,
+                           scope: _term_dictionary.TermsScope,
+                           errors: list[tuple[str, str]],
+                           *,
+                           cause: str,
+                           prefix: str) -> None:
+    """
+    Record a call's errors in the core error ledger and close the incidents of its documents that hold none.
+
+    Notes:
+      - Each error is recorded under the cause given and the incident `<prefix><scope id>:<document path>` of its
+        document.
+      - Every source of the job under which nothing was recorded has both its incidents closed, the one of refused
+        operations and the one of whole-batch refusals; the incidents of a document outside the job stay untouched.
+      - A report or a close the ledger does not take, or does not take in time, is dropped and never raised; once one
+        runs out of time, the call sends no further one.
+
+    Args:
+      repo: Repository root.
+      scope: The terms scope serving the job's documents.
+      errors: Pairs of document path and one-line description of the error recorded under that document.
+      cause: Stable cause token the errors are recorded under.
+      prefix: Incident-key prefix the errors fold under, before the scope id.
+    """
+    # one dispatcher for the whole call, so a ledger call that ran out of time holds back the rest
+    try:
+      core = _dispatch.CoreDispatch()
+    # waiver: best-effort boundary — an unreachable core leaves the call's reports undelivered
+    except ( RuntimeError, OSError ):
+      return
+
+    # each error is recorded under its document's incident, one per scope and document, so a later pass finds it
+    for rel, detail in errors:
+      self._send_terms_report(core, functools.partial(
+        core.report_open, repo, cause = cause, incident = f"{prefix}{scope.scope_id}:{rel}", detail = detail,
+      ))
+
+    # each document of the job that holds no error closes both its incidents; a document of another job is never
+    # touched
+    recorded = { rel for rel, _ in errors }
+    prefixes = ( _dispatch.CoreDispatch.INCIDENT_TERMS_PREFIX, _dispatch.CoreDispatch.INCIDENT_TERMS_BATCH_PREFIX )
+    for rel in scope.sources:
+      if rel not in recorded:
+        for incident_prefix in prefixes:
+          self._send_terms_report(
+            core, functools.partial(core.close_open_incident, repo, f"{incident_prefix}{scope.scope_id}:{rel}"),
+          )
+
+
+  def _open_terms_retry(self, job_dir: Path, *, committed: bool) -> None:
+    """
+    Open the job's one retry.
+
+    Notes:
+      - Copies the submitted result file to `result/terms.1.json` when it exists.
+      - Writes the marker `terms-retry.json` at the job directory root, recording the retry as open and whether any
+        call of the job committed.
+
+    Args:
+      job_dir: The job's bundle directory.
+      committed: Whether this call or an earlier call of the job committed.
+    """
+    # the submitted batch stays for the record beside the corrected one that replaces it
+    if (job_dir / self._RESULT_TERMS).is_file():
+      shutil.copyfile(job_dir / self._RESULT_TERMS, job_dir / self._RESULT_TERMS_FIRST)
+
+    # the marker makes every later call of the job final and remembers whether a call of the job committed
+    self._write_retry_marker(job_dir, committed = committed, retry = True)
+
+
+  def _write_retry_marker(self, job_dir: Path, *, committed: bool, retry: bool) -> None:
+    """
+    Write the marker `terms-retry.json` with the two facts of the job it records.
+
+    Notes:
+      - Replaces an existing marker.
+
+    Args:
+      job_dir: The job's bundle directory.
+      committed: Whether a call of the job has committed.
+      retry: Whether a call of the job has opened its retry, which makes every later call final.
+    """
+    # the marker's two facts: whether a call of the job committed, and whether its retry is open
+    (job_dir / self._TERMS_RETRY_MARKER).write_text(
+      json.dumps({ self._RETRY_COMMITTED: committed, self._RETRY_OPENED: retry }), encoding = self._ENCODING,
+    )
+
+
+  def _is_retry_committed(self, job_dir: Path) -> bool:
+    """
+    Tell whether any call of the job has committed.
+
+    Args:
+      job_dir: The job's bundle directory.
+
+    Returns:
+      `True` when the retry marker records a commit by any call of the job; `False` when it records none, is
+      missing or is unreadable.
+    """
+    # the marker's commit fact
+    return self._read_retry_marker(job_dir).get(self._RETRY_COMMITTED) is True
+
+
+  def _is_retry_open(self, job_dir: Path) -> bool:
+    """
+    Tell whether a call of the job has opened its retry, so every further call is final.
+
+    Args:
+      job_dir: The job's bundle directory.
+
+    Returns:
+      `True` when the retry marker records the retry as open; `False` when it does not, is missing or is unreadable.
+    """
+    # the marker's retry fact
+    return self._read_retry_marker(job_dir).get(self._RETRY_OPENED) is True
+
+
+  def _read_retry_marker(self, job_dir: Path) -> dict:
+    """
+    Read the job's marker `terms-retry.json`.
+
+    Args:
+      job_dir: The job's bundle directory.
+
+    Returns:
+      The marker's object; empty when the marker is missing, unreadable or not a JSON object.
+    """
+    # a marker that is missing or unreadable records nothing
+    try:
+      marker = json.loads((job_dir / self._TERMS_RETRY_MARKER).read_text(encoding = self._ENCODING))
+    except ( OSError, ValueError ):
+      return {}
+    return marker if isinstance(marker, dict) else {}
+
+
+  def _format_refused(self, entry: dict) -> str:
+    """
+    Describe a refused operation in one line.
+
+    Args:
+      entry: Refused-operation record with the operation as sent and the reason.
+
+    Returns:
+      The operation's kind and word, followed by the reason it was refused.
+    """
+    # the operation's kind and word, then why it was refused
+    operation = entry[_term_dictionary.REFUSED_OPERATION]
+    kind = operation.get(self._TERMS_OP)
+    word = operation.get(self._TERMS_OP_FROM if kind == self._TERMS_OP_RELINK else self._TERMS_OP_TERM)
+    return f"{kind} {word!r}: {entry[_term_dictionary.REFUSED_REASON]}"
+
+
+  def _format_skip_unmatched(self, entry: dict, rel: str, fragments: list[str]) -> str:
+    """
+    Describe a link operation whose `skip` matched no place in a document, in one line.
+
+    Args:
+      entry: Unmatched record carrying `skip_unmatched`.
+      rel: The document the `skip` matched no place in.
+      fragments: The fragments of the `skip` that matched no place there, in the order sent.
+
+    Returns:
+      The link's word, the document, and the fragments that matched no place, each long one cut short.
+    """
+    # each fragment shown whole or cut to its first characters, so the detail stays short and on one line
+    shown = [
+      fragment if len(fragment) <= self._SKIP_FRAGMENT_MAX_CHARS
+      else f"{fragment[:self._SKIP_FRAGMENT_MAX_CHARS]}{self._ELLIPSIS}"
+      for fragment in fragments
+    ]
+
+    # the link's word, the document, then the fragments its text no longer matches
+    return (
+      f"{self._TERMS_OP_RELINK} {entry.get(self._TERMS_OP_FROM)!r}: "
+      f"skip matches no place in {rel}: {', '.join(repr(fragment) for fragment in shown)}"
+    )
+
+
+  @staticmethod
+  def _send_terms_report(core: _dispatch.CoreDispatch, call: Callable[[], None]) -> None:
+    """
+    Deliver one report to the core error ledger, unless a ledger call of the same verb call ran out of time.
+
+    Notes:
+      - A report the ledger does not take, does not take in time, or that its open-incident record cannot be read or
+        written for, is left undelivered; nothing is raised.
+
+    Args:
+      core: The dispatcher every report of the verb call goes through.
+      call: Report to make through that dispatcher.
+    """
+    # limit: one ledger call that ran out of time stops the rest of the verb call, so a hung core costs one time
+    # limit per call; a total budget per call would also bound a core that is slow but answers
+    # guard: a ledger call of this verb call already ran out of time
+    if core.has_timed_out:
+      return
+
+    # a report that cannot be delivered never breaks the work it reports on
+    try:
+      call()
+    # waiver: best-effort boundary — an unwritable or unreadable open-incident record leaves the report undelivered
+    except OSError:
+      pass
+
+
+  def _terms_operations(self, job_dir: Path) -> list[dict]:
+    """
+    Read the curator's term operations from the job's result file.
+
+    Notes:
+      - An absent result file is created with no operations, so a curated answer can name it.
+
+    Args:
+      job_dir: The job's bundle directory.
+
+    Returns:
+      The operations in order; empty when the result file is absent.
+
+    Raises:
+      JobRefusedError: Technical category when the file is unreadable or its operations are not a list of objects.
+    """
+    path = job_dir / self._RESULT_TERMS
+
+    # guard: an absent result is an empty batch, written down so a curated answer can name it
+    if not path.is_file():
+      path.parent.mkdir(parents = True, exist_ok = True)
+      path.write_text(json.dumps({ self._RESULT_OPS: [] }), encoding = self._ENCODING)
+      return []
+    operations = self._read_json_object(path, what = self._RESULT_TERMS).get(self._RESULT_OPS)
+
+    # guard: the operations must be a list of objects
+    if not isinstance(operations, list) or not all(isinstance(op, dict) for op in operations):
+      raise _job_response.JobRefusedError(
+        category = _job_response.CATEGORY_TECHNICAL, reason = f"{self._RESULT_TERMS}: operations must be a list",
+      )
+    return operations
+
+
+  def _write_terms(self,
+                   repo: Path,
+                   scope: _term_dictionary.TermsScope,
+                   files: list[str],
+                   operations: list[dict],
+                   *,
+                   allow_review: bool) -> _TermsWrite:
+    """
+    Apply the valid operations of a batch to the dictionary and the documents they reach, and commit both together.
+
+    Notes:
+      - A refused operation is applied nowhere and listed in the result; the link plans, the subject and the
+        `unmatched` entries come from the accepted operations only.
+      - Every term file and every document text is computed before anything is written; the files then land in
+        one commit, and a failed write or commit puts the worktree and the index back as they were.
+      - Writes and removes term files, and edits the job's documents; the rest of the scope's documents are
+        edited only when a term moved to another file.
+      - A document with uncommitted changes is never edited. Neither is a document whose bytes on disk, just
+        before the write, differ from the reading the run judged clean and rendered: it is not written, not
+        committed and not counted among the changed documents.
+      - A term file the batch writes or removes that carries uncommitted changes, or is untracked, refuses the
+        whole batch as transient before anything is written.
+
+    Args:
+      repo: Repository root.
+      scope: The terms scope serving the job's documents.
+      files: The documents the job's request names.
+      operations: The curator's term operations.
+      allow_review: Whether documents under an open review round may be edited.
+
+    Returns:
+      The commit, the changed documents, the accepted document operations that found no occurrence or whose `skip`
+      a document could not honour, the joined terms, the number of applied operations and the refused operations.
+
+    Raises:
+      JobRefusedError: When the batch is refused as a whole, or transient when the commit fails.
+    """
+    term_dictionary = _term_dictionary.TermDictionary(path = repo / scope.dictionary)
+    change = term_dictionary.compute_change(operations, sources = scope.sources)
+    context = _term_links.build_sync_context(repo, scope)
+    term_writes = {
+      f"{scope.dictionary}/{stem}{_term_dictionary.TERM_FILE_SUFFIX}": text for stem, text in change.writes.items()
+    }
+    term_removals = [ f"{scope.dictionary}/{stem}{_term_dictionary.TERM_FILE_SUFFIX}" for stem in change.removals ]
+
+    # guard: a term file with uncommitted content is someone's work; the batch cannot be applied in part
+    busy = self._dirty_paths(repo, [ *term_writes, *term_removals ])
+    if busy:
+      raise _job_response.JobRefusedError(
+        category = _job_response.CATEGORY_TRANSIENT,
+        reason = f"term files carry uncommitted changes: {', '.join(sorted(busy))}",
+      )
+
+    # the job's documents always; the rest of the scope only when a term moved to another file
+    others = (
+      [ rel for rel in self._scope_documents(repo, scope, context) if rel not in scope.sources ]
+      if change.retargets else []
+    )
+
+    # each document is read once, before it is judged clean, so the bytes judged are the bytes rendered and
+    # compared; a document someone is editing is left alone, since the commit takes whole files
+    read = { rel: self._read_bytes(repo, rel) for rels in ( scope.sources, others ) for rel in rels }
+    dirty = self._dirty_paths(repo, [ *scope.sources, *others ])
+
+    # every document's new text is computed before anything is written, from the bytes read above and the accepted
+    # operations only
+    own, rest = _term_links.build_link_plans(
+      term_dictionary, change, change.accepted, scope.sources, dictionary_dir = scope.dictionary,
+    )
+    results = [
+      _term_links.render_document(repo, rel, plan, context, allow_review = allow_review, data = read[rel])
+      for rels, plan in ( ( scope.sources, own ), ( others, rest ) )
+      for rel in rels if rel not in dirty
+    ]
+    edits = {
+      result[_term_links.KEY_FILE]: result[_term_links.KEY_TEXT] for result in results
+      if result[_term_links.KEY_STATUS] == _term_links.STATUS_APPLIED
+    }
+
+    # a document changed on disk since it was read is someone's edit, left alone exactly like a dirty one
+    # limit: an edit landing between this check and the commit is lost or bot-committed, recheck in the write loop
+    edits = { rel: text for rel, text in edits.items() if self._read_bytes(repo, rel) == read[rel] }
+
+    # the term files and the documents land in one commit, or the worktree goes back to how it was
+    documents = list(edits)
+    commit = self._commit_terms(
+      repo, { **term_writes, **edits }, term_removals,
+      self._terms_subject(files, change.accepted, documents, term_dictionary.compute_terms_after(change)),
+    )
+    return _TermsWrite(
+      commit = commit, documents = documents, unmatched = self._unmatched(change.accepted, results),
+      merged = change.merged, applied = len(change.accepted), refused = change.refused,
+      skip_fragments = {
+        ( result[_term_links.KEY_FILE], word ): fragments for result in results
+        for word, fragments in result.get(_term_links.KEY_SKIP_UNMATCHED_FRAGMENTS, {}).items()
+      },
+    )
+
+
+  @staticmethod
+  def _read_bytes(repo: Path, rel: str) -> bytes | None:
+    """
+    Read a file's bytes as they stand on disk.
+
+    Args:
+      repo: Repository root.
+      rel: Repo-relative path of the file.
+
+    Returns:
+      The file's bytes, or `None` when it cannot be read.
+    """
+    # a file that is gone or unreadable has no bytes to compare
+    try:
+      return (repo / rel).read_bytes()
+    except OSError:
+      return None
+
+
+  def _commit_terms(self,
+                    repo: Path,
+                    writes: dict[str, str],
+                    removals: list[str],
+                    subject: str) -> _wiki_commit.CommitResult:
+    """
+    Write and remove files and commit them together, restoring the worktree when any step fails.
+
+    Notes:
+      - A written file's parent directory is created when it is missing.
+      - A removed path git does not track is deleted but not committed.
+      - On a failure with no commit landed, the written files hold their previous content, created files are
+        gone, removed files are back and nothing the commit staged stays staged.
+      - A commit that landed although it reported a failure, meaning a commit made since the run started touches
+        the committed paths, its message starts with the first line of the run's commit message and the paths are
+        clean, is returned as committed, with its own identifier, and never reverted. Any other commit made
+        meanwhile, whether it touches the committed paths or not, is not the run's commit and the normal rollback
+        runs.
+      - A SIGTERM or SIGINT during the writes stops the run at once: the rollback runs, then the process ends with
+        `SystemExit` carrying 128 plus the signal number. A signal arriving while the commit call runs is only
+        recorded and git is never killed; when the call returns, a landed commit is returned as the normal
+        result, and otherwise the ordinary rollback runs, then the process ends the same way.
+      - Both signals are ignored while any rollback runs. The signal handlers in place before the call are
+        restored on every path.
+
+    Args:
+      repo: Repository root.
+      writes: New text by repo-relative path.
+      removals: Repo-relative paths to delete.
+      subject: Commit subject.
+
+    Returns:
+      The commit outcome.
+
+    Raises:
+      JobRefusedError: Transient category when a write or the commit fails and the rollback fully restores the
+        worktree and the index. Technical category when the rollback could not restore or unstage some path
+        (the reason names each), when HEAD cannot be read afterwards, or when a commit touching the paths exists
+        while they still carry changes. Technical category, before anything is written, when the repository has
+        no commit yet.
+      CalledProcessError: When git cannot resolve HEAD before the writes for any other reason.
+      SystemExit: Carrying 128 plus the signal number, after a SIGTERM or SIGINT stopped the run and its commit
+        did not land, once the rollback has run.
+    """
+    paths = [ *writes, *removals ]
+    before = { rel: (repo / rel).read_bytes() if (repo / rel).is_file() else None for rel in paths }
+
+    # a removed path git does not track has nothing to commit; HEAD is read so a commit that landed is recognised
+    tracked_removals = set(self._query_tracked_paths(repo, removals))
+    committed = [ *writes, *( rel for rel in removals if rel in tracked_removals ) ]
+    head = self._git_head(repo)
+
+    # a termination signal during the writes stops the run where it stands, so it takes the rollback a failure takes;
+    # one during the commit call is only recorded, so git is never killed and releases its own lock; the handlers in
+    # place before go back once the phase is over
+    stop = _SignalStop(signals = self._TERMINATION_SIGNALS)
+    previous = stop.install()
+
+    # every write and removal, then the commit; any failure undoes them all unless the commit landed
+    try:
+      for rel, text in writes.items():
+        # a dictionary directory git kept no copy of appears with its first term file
+        (repo / rel).parent.mkdir(parents = True, exist_ok = True)
+        _term_links.write_document(repo, rel, text)
+      for rel in removals:
+        (repo / rel).unlink(missing_ok = True)
+      # limit: a signal recorded now waits on git unbounded, a hung hook holds the run; add a commit timeout if needed
+      stop.holding = True
+      return _wiki_commit.commit_paths(repo, committed, subject)
+    except ( _wiki_commit.WikiCommitError, KeyboardInterrupt, *self._UNEXPECTED_FAILURES ) as error:
+      # both signals are ignored until the rollback is over, so nothing cuts it short
+      stop.ignore()
+      landed = self._landed_commit(repo, head, committed, subject, error)
+
+      # guard: a commit that landed is never reverted, and the run finishes normally whatever signal arrived meanwhile
+      if landed is not None:
+        return landed
+
+      # the worktree and the index go back; a signal that stopped the writes, or arrived during the commit call, ends
+      # the run once they are back, and an interrupt the run's own handling did not raise is the interpreter's answer
+      # to the interrupt signal
+      failed = self._restore_paths(repo, before)
+      signum = (
+        ( error.args[0] if error.args and isinstance(error.args[0], int) else int(signal.SIGINT) )
+        if isinstance(error, KeyboardInterrupt) else stop.received
+      )
+
+      # guard: a stopped run ends here with the signal's status once its files are back
+      if signum is not None:
+        print(
+          self._MSG_STOPPED.format(cmd = self._CMD_TERMS_WRITE, signum = signum, failed = ", ".join(failed) or "-"),
+          file = sys.stderr,
+        )
+        raise SystemExit(self._SIGNAL_EXIT_BASE + signum) from error
+
+      # a rollback that could not finish needs a person, not a retry
+      if failed:
+        raise _job_response.JobRefusedError(
+          category = _job_response.CATEGORY_TECHNICAL,
+          reason = f"{error}; rollback left these paths in a wrong state, repair them by hand: {', '.join(failed)}",
+        ) from error
+      raise _job_response.JobRefusedError(
+        category = _job_response.CATEGORY_TRANSIENT, reason = str(error),
+      ) from error
+    finally:
+      # outside the writes and the commit the signals act as they did before
+      stop.restore(previous)
+
+
+  def _git_head(self, repo: Path) -> str:
+    """
+    Return the commit HEAD points at.
+
+    Args:
+      repo: Repository root.
+
+    Returns:
+      The commit identifier.
+
+    Raises:
+      JobRefusedError: Technical category when the repository has no commit yet (HEAD is unborn).
+      CalledProcessError: When git fails to resolve HEAD for any other reason.
+    """
+    # HEAD as git resolves it; on a branch with no commit yet git answers nothing and says nothing
+    resolved = subprocess.run(
+      [ "git", "rev-parse", "--verify", "--quiet", "HEAD" ],
+      cwd = str(repo), capture_output = True, text = True, encoding = self._ENCODING, check = False,
+    )
+
+    # guard: a repository with no commit yet has no base for the run's commit, and a retry never changes that
+    if resolved.returncode != 0 and not resolved.stderr.strip():
+      raise _job_response.JobRefusedError(
+        category = _job_response.CATEGORY_TECHNICAL,
+        reason = "the repository has no commit yet; make a first commit, then run the job again",
+      )
+
+    # guard: any other failure is git's own
+    if resolved.returncode != 0:
+      raise subprocess.CalledProcessError(resolved.returncode, resolved.args, resolved.stdout, resolved.stderr)
+    return resolved.stdout.strip()
+
+
+  def _landed_commit(self,
+                     repo: Path,
+                     head: str,
+                     committed: list[str],
+                     subject: str,
+                     error: BaseException) -> _wiki_commit.CommitResult | None:
+    """
+    Tell whether a commit reported as failed landed after all.
+
+    Args:
+      repo: Repository root.
+      head: The commit HEAD pointed at before the writes.
+      committed: Repo-relative paths the commit was to carry.
+      subject: The commit message the run passed; only a commit whose first message line equals its first line is
+        the run's.
+      error: The failure the commit reported, or the `KeyboardInterrupt` a termination signal raised.
+
+    Returns:
+      The run's own commit, with its own identifier rather than HEAD's, when it was made since `head`, touches the
+      paths and they carry no change; `None` when no such commit exists, whether HEAD stayed or moved only by other
+      commits, including foreign ones that touch the same paths.
+
+    Raises:
+      JobRefusedError: Technical category when HEAD cannot be read, or when the run's commit landed while the
+        paths still carry changes: the files are left as written, since reverting them could undo committed work.
+    """
+    # where HEAD stands now, which commits since the writes carry the paths, which of them is the one this run
+    # created, recognised by the exact message the run passed, and whether the paths still differ
+    try:
+      now = self._git_head(repo)
+      carrying = (
+        subprocess.check_output(
+          [ "git", "rev-list", f"{head}..{now}", "--", *self._as_literal(committed) ],
+          cwd = str(repo), text = True, encoding = self._ENCODING,
+        ).split()
+        if now != head and committed else []
+      )
+      ours = next((
+        sha for sha, _, message in (
+          record.strip(self._NL).partition(self._NUL) for record in subprocess.check_output(
+            [ "git", "show", "-s", f"--format=%H{self._GIT_NUL}%B{self._GIT_RS}", *carrying ],
+            cwd = str(repo), text = True, encoding = self._ENCODING,
+          ).split(self._RS)
+        )
+        if sha and message.strip().partition(self._NL)[0] == subject.strip().partition(self._NL)[0]
+      ), "") if carrying else ""
+      pending = (
+        subprocess.check_output(
+          [ "git", "status", "--porcelain", "--", *self._as_literal(committed) ],
+          cwd = str(repo), text = True, encoding = self._ENCODING,
+        ).strip()
+        if ours else ""
+      )
+    except ( OSError, subprocess.SubprocessError, _job_response.JobRefusedError ) as probe:
+      raise _job_response.JobRefusedError(
+        category = _job_response.CATEGORY_TECHNICAL,
+        reason = (
+          f"{error}; whether the commit landed is unknown ({probe}); files left as written: {', '.join(committed)}"
+        ),
+      ) from error
+
+    # guard: no commit since the writes is the one this run created — HEAD stayed, or someone else committed, on these
+    # paths or others; ours did not land and the rollback, which touches only these paths, may run
+    if not ours:
+      return None
+
+    # guard: the run's commit is there but the paths still differ from HEAD — a mixed state a person must look at
+    if pending:
+      raise _job_response.JobRefusedError(
+        category = _job_response.CATEGORY_TECHNICAL,
+        reason = (
+          f"{error}; the run's commit {ours} landed but these paths still carry changes, "
+          f"left as written: {', '.join(committed)}"
+        ),
+      ) from error
+
+    # the commit is there: the run succeeded
+    return _wiki_commit.CommitResult(status = _wiki_commit.STATUS_COMMITTED, sha = ours)
+
+
+  def _restore_paths(self, repo: Path, before: dict[str, bytes | None]) -> list[str]:
+    """
+    Put files and their index entries back as they were before a failed write.
+
+    Notes:
+      - Every path is attempted even when another fails, and unstaging is attempted whatever happened to the files.
+
+    Args:
+      repo: Repository root.
+      before: Each path's bytes before the write, or `None` when it did not exist.
+
+    Returns:
+      The paths left in a wrong state, each with what failed; empty when everything was restored.
+    """
+    failed: list[str] = []
+
+    # each file on its own: old bytes back, a file that did not exist removed
+    for rel, data in before.items():
+      try:
+        if data is None:
+          (repo / rel).unlink(missing_ok = True)
+        else:
+          (repo / rel).write_bytes(data)
+      except OSError as error:
+        failed.append(f"{rel} (content: {error})")
+
+    # a path the failed commit already staged is unstaged again, whatever happened to the files
+    try:
+      staged = [
+        rel for rel in subprocess.check_output(
+          [ "git", "diff", "--cached", "--name-only", "-z", "--", *self._as_literal(before) ],
+          cwd = str(repo), text = True, encoding = self._ENCODING,
+        ).split(self._NUL) if rel
+      ]
+    except ( OSError, subprocess.SubprocessError ) as error:
+      return [ *failed, *( f"{rel} (index: {error})" for rel in before ) ]
+    try:
+      if staged:
+        subprocess.check_output(
+          [ "git", "reset", "-q", "--", *self._as_literal(staged) ], cwd = str(repo), text = True,
+          encoding = self._ENCODING,
+        )
+    except ( OSError, subprocess.SubprocessError ) as error:
+      failed.extend(f"{rel} (staged: {error})" for rel in staged)
+
+    # the paths that could not be put back, empty when the worktree and the index are as they were
+    return failed
+
+
+  def _scope_documents(self,
+                       repo: Path,
+                       scope: _term_dictionary.TermsScope,
+                       context: _term_links.SyncContext) -> list[str]:
+    """
+    List the tracked documents a terms scope serves that exist in the working tree, outside the managed directories.
+
+    Args:
+      repo: Repository root.
+      scope: The terms scope.
+      context: Settings-derived facts of the run, naming the managed directories.
+
+    Returns:
+      Repo-relative documents in git's order, each once.
+
+    Raises:
+      CalledProcessError: When git cannot list the files.
+    """
+    # a document inside a managed directory is never edited by a pass over the scope
+    return [
+      rel for rel in _terms_migrate.list_documents(repo, scope.paths)
+      if not any(rel.startswith(f"{base}/") for base in context.managed_dirs if base)
+    ]
+
+
+  def _dirty_paths(self, repo: Path, paths: list[str]) -> set[str]:
+    """
+    Return the paths that carry uncommitted changes.
+
+    Args:
+      repo: Repository root.
+      paths: Repo-relative paths to check.
+
+    Returns:
+      The paths among them with a pending change.
+
+    Raises:
+      CalledProcessError: When git cannot report the status.
+    """
+    # guard: nothing to check
+    if not paths:
+      return set()
+
+    # a path whose directory is missing can hold no untracked file, and scanning for one makes git warn, so
+    # those paths are asked about tracked changes only; each directory is looked at once, so one appearing meanwhile
+    # cannot leave a path out of both questions
+    present: list[str] = []
+    absent: list[str] = []
+    for rel in paths:
+      ( present if (repo / rel).parent.is_dir() else absent ).append(rel)
+
+    # git is asked about every path, the ones whose directory is missing without scanning for untracked files
+    raw = "".join(
+      subprocess.check_output(
+        [ "git", "status", "--porcelain", "-z", *flags, "--", *self._as_literal(rels) ],
+        cwd = str(repo), text = True, encoding = self._ENCODING,
+      )
+      for rels, flags in ( ( present, () ), ( absent, ( self._GIT_NO_UNTRACKED, ) ) ) if rels
+    )
+
+    # each entry is the two status letters, a space, the path; a rename or copy carries its source next
+    dirty: set[str] = set()
+    fields = raw.split(self._NUL)
+    index = 0
+    while index < len(fields):
+      entry = fields[index]
+      index += 1
+      # guard: the trailing separator leaves an empty field
+      if len(entry) <= self._PORCELAIN_PATH_AT:
+        continue
+      dirty.add(entry[self._PORCELAIN_PATH_AT:])
+      if entry[0] in self._PORCELAIN_WITH_SOURCE:
+        index += 1
+    return dirty
+
+
+  def _unmatched(self, operations: list[dict], results: list[dict]) -> list[dict]:
+    """
+    List the document operations that found no occurrence in any document, or could not be honoured in one.
+
+    A document an operation names is matched to a pass outcome by its plain repo-relative form.
+
+    Args:
+      operations: The curator's term operations.
+      results: The outcome of every document pass.
+
+    Returns:
+      The link and retarget operations without a single linked word or moved link, and the link operations that a
+      `skip` kept off a document they name. The latter carry the extra key `skip_unmatched`, listing those
+      documents sorted, each in the job source's own spelling; every other entry is the operation as sent.
+    """
+    # what the passes reached, across every document, and the words a document kept off because their exclusions
+    # matched no place there, by the document's plain repo-relative form and in the document's own spelling
+    linked = { word for result in results for word in result.get(_term_links.KEY_LINKED, []) }
+    moved = { target for result in results for target in result.get(_term_links.KEY_RETARGETED, []) }
+    kept_off = {
+      ( posixpath.normpath(result[_term_links.KEY_FILE]), word ): result[_term_links.KEY_FILE]
+      for result in results for word in result.get(_term_links.KEY_SKIP_UNMATCHED, [])
+    }
+
+    # an operation is matched when its word or its target was reached anywhere, and a link operation also only when
+    # no document it names was kept off; a link operation kept off somewhere names those documents as the job does
+    unmatched: list[dict] = []
+    for op in operations:
+      kind = op.get(self._TERMS_OP)
+      refusing = sorted({
+        kept_off[key] for rel in op.get(self._TERMS_OP_FILES) or []
+        if ( key := ( posixpath.normpath(rel), op.get(self._TERMS_OP_FROM) ) ) in kept_off
+      }) if kind == self._TERMS_OP_RELINK else []
+      if kind == self._TERMS_OP_RELINK and ( op.get(self._TERMS_OP_FROM) not in linked or refusing ):
+        unmatched.append({ **op, _term_links.KEY_SKIP_UNMATCHED: refusing } if refusing else op)
+      elif kind == self._TERMS_OP_RETARGET and op.get(self._TERMS_OP_TARGET) not in moved:
+        unmatched.append(op)
+    return unmatched
+
+
+  def _cmd_terms_migrate(self, args: argparse.Namespace) -> int:
+    """
+    Migrate every terms scope to a dictionary directory, or check whether work is left.
+
+    Syntax: `terms-migrate --repo <root> [--check]`. Prints one JSON line
+    `{"scopes": [{"scope", "terms", "merged": [{"file", "terms"}], "skipped", "dropped": [{"where", "line"}],
+    "documents", "undecodable", "changed_on_disk", "unmoved": [{"file", "links"}]}]}` on stdout, where `dropped`
+    lists the non-title chunks of the old file that belong to no term, `undecodable` lists the documents that are not
+    valid UTF-8, `changed_on_disk` lists the documents changed on disk during the run and left as they were, and
+    `unmoved` lists, per document, the links to headings of the old dictionary file that stand on prose the link
+    edit leaves alone (heading, callout title, checkbox line, comment, protected section); text inside inline code
+    or a fenced block is a literal sample and is never listed. Each skipped heading, each dropped chunk, each such
+    document and each unmoved link is named on stderr; `--check` never counts unmoved links as work. An H1 heading
+    line (`# `) of the old file is neither content nor a dropped chunk, so `dropped` never names one; `## ` and `# `
+    lines
+    inside a fenced code block are not headings. An old file is refused, before anything is written and with the
+    old file kept, when it holds a non-blank line other than an H1 heading and yields no term, or when its `## `
+    headings all name no file; in the second case the refusal names those headings. A file of only H1 title lines
+    and blanks migrates to an empty dictionary. With `--check` nothing is printed.
+
+    Guarantees:
+      - The migration run exits 0 when it migrated or had nothing to do, 2 when it stopped on a broken scope, and
+        3 when the repository has no terms scopes.
+      - With `--check` the verb never writes and exits 0 when work is left and 1 when none is, also when the
+        repository has no terms scopes.
+
+    Args:
+      args: Parsed argument namespace; carries `.repo` and `.check`.
+
+    Returns:
+      Integer exit code.
+    """
+
+    # Contract:
+    # The migration run exits 0 when it migrated or had nothing to do, 2 when it stopped on a broken scope, and 3
+    # when the repository has no terms scopes.
+
+    # Contract:
+    # With `--check` the verb NEVER writes and exits 0 when work is left and 1 when none is, also when the
+    # repository has no terms scopes.
+
+    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+
+    # the settings are read once; the predicate answers from them, the run cuts and passes every scope
+    try:
+      settings = _terms_migrate.TermsSettings.read(repo)
+
+      # guard: without terms scopes there is nothing to migrate, which the predicate answers as no work
+      if settings is None:
+        if args.check:
+          return self._EXIT_NOTHING
+        print(f"{self._CMD_TERMS_MIGRATE}: no terms scopes configured", file = sys.stderr)
+        return self._EXIT_NOT_APPLICABLE
+
+      # guard: the predicate writes nothing and answers whether any work is left
+      if args.check:
+        migration = _terms_migrate.TermsMigration(repo = repo, settings = settings)
+        return self._EXIT_DONE if migration.check() else self._EXIT_NOTHING
+      reports = _terms_migrate.TermsMigration(
+        repo = repo, settings = settings, core = _dispatch.CoreDispatch(),
+      ).run()
+    except ( _terms_migrate.TermsVerbError, *self._UNEXPECTED_FAILURES ) as error:
+      print(f"{self._CMD_TERMS_MIGRATE}: {error}", file = sys.stderr)
+      return self._EXIT_BROKEN
+
+    # a heading that names no file and a document that is not valid UTF-8 are reported, never a failure; the
+    # outcome line names what each scope got
+    for report in reports:
+      for heading in report[_terms_migrate.KEY_SKIPPED]:
+        print(f"{self._CMD_TERMS_MIGRATE}: heading {heading!r} names no term file, skipped", file = sys.stderr)
+      for chunk in report[_terms_migrate.KEY_DROPPED]:
+        print(
+          f"{self._CMD_TERMS_MIGRATE}: scope {report[_terms_migrate.KEY_SCOPE]}: "
+          f"dropped {chunk[_terms_migrate.KEY_WHERE]} text starting {chunk[_terms_migrate.KEY_LINE]!r}",
+          file = sys.stderr,
+        )
+      self._name_undecodable(self._CMD_TERMS_MIGRATE, report[_terms_migrate.KEY_UNDECODABLE])
+      for rel in report[_terms_migrate.KEY_CHANGED_ON_DISK]:
+        print(self._MSG_CHANGED_ON_DISK.format(cmd = self._CMD_TERMS_MIGRATE, file = rel), file = sys.stderr)
+      for record in report[_terms_migrate.KEY_UNMOVED]:
+        for link in record[_terms_migrate.KEY_LINKS]:
+          print(
+            self._MSG_UNMOVED.format(
+              cmd = self._CMD_TERMS_MIGRATE, file = record[_terms_migrate.KEY_FILE], link = link,
+            ),
+            file = sys.stderr,
+          )
+    print(json.dumps({ self._OUT_SCOPES: reports }))
+    return self._EXIT_DONE
+
+
+  def _cmd_terms_sweep(self, args: argparse.Namespace) -> int:
+    """
+    List or queue the terms-curator sweep over the documents of the terms scopes.
+
+    Syntax: `terms-sweep --repo <root> [<path>...] [--scope <id>]
+    [--dispatch [--mark] [--include-review] | --check [--migrated]]`.
+    Without `--dispatch` prints one JSON line `{"scopes": [{"scope", "documents"}]}`. With `--dispatch` prints one
+    JSON line `{"directories", "queued", "already_queued", "deferred_to", "unmigrated"}`, plus `error` on failure.
+
+    Guarantees:
+      - With `--dispatch` the verb exits 0 when jobs were queued, when there was nothing to queue, and when the
+        queueing was deferred to the daemon's checkout; 2 when it failed; 3 when the repository has no terms
+        scopes.
+      - A failed `--dispatch` still prints its outcome line, carrying the counts of what was queued before the
+        failure and an `error` key with the reason.
+      - Only `--dispatch` prints an outcome line on failure; a failed listing or a failed `--check` prints its
+        reason on stderr and nothing on stdout.
+      - With `--check` the verb never writes and exits 0 when sweep work is left and 1 when none is.
+      - `--include-review` is accepted only together with `--dispatch`; any other use exits 2 before anything is
+        queued.
+      - Only with `--include-review` do the queued jobs open documents under review to the curator; without it no
+        queued job edits a document under review.
+      - `--migrated` is accepted only together with `--check`; any other use exits 2 before anything is queued.
+      - `--check --migrated` leaves the scopes that still carry their old dictionary file out of the answer.
+      - `--check` answers for the whole sweep and is refused with exit 2, before anything else, when explicit paths
+        or a `--scope` are given.
+      - Every `--dispatch` outcome line, whether it reports success, a deferral or a failure, carries an
+        `unmigrated` key listing the scopes that still carry their old dictionary file.
+      - `--dispatch --scope <id>` naming a scope that still carries its old dictionary file exits 2 before anything
+        is queued, naming the scope and the `terms-migrate` verb.
+      - A `--scope` id that names no terms scope with a dictionary directory exits 2 and names the id on stderr.
+      - `--mark` is accepted only together with `--dispatch` over the whole sweep, never with explicit paths; any
+        other use exits 2 before anything is queued.
+      - A document that is not valid UTF-8 is named on stderr and is never listed or queued.
+
+    Args:
+      args: Parsed argument namespace; carries `.repo`, `.paths`, `.scope`, `.dispatch`, `.mark`, `.include_review`,
+        `.check` and `.migrated`.
+
+    Returns:
+      Integer exit code.
+    """
+
+    # Contract:
+    # With `--dispatch` the verb exits 0 when jobs were queued, when there was nothing to queue, and when the
+    # queueing was deferred to the daemon's checkout; 2 when it failed; 3 when the repository has no terms scopes.
+
+    # Contract:
+    # A failed `--dispatch` still prints its outcome line, carrying the counts of what was queued before the
+    # failure and an `error` key with the reason. Only `--dispatch` prints an outcome line on failure; a failed
+    # listing or a failed `--check` prints its reason on stderr and nothing on stdout.
+
+    # Contract:
+    # With `--check` the verb NEVER writes and exits 0 when sweep work is left and 1 when none is.
+
+    # Contract:
+    # `--mark` is accepted only together with `--dispatch` over the whole sweep, never with explicit paths; any
+    # other use exits 2 before anything is queued.
+
+    # Contract:
+    # `--include-review` is accepted only together with `--dispatch`; any other use exits 2 before anything is
+    # queued.
+
+    # Contract:
+    # Only with `--include-review` do the queued jobs open documents under review to the curator; without it no
+    # queued job edits a document under review.
+
+    # Contract:
+    # `--migrated` is accepted only together with `--check`; any other use exits 2 before anything is queued.
+
+    # Contract:
+    # `--check --migrated` leaves the scopes that still carry their old dictionary file out of the answer.
+
+    # Contract:
+    # `--check` answers for the whole sweep and is refused with exit 2, before anything else, when explicit paths or
+    # a `--scope` are given.
+
+    # Contract:
+    # Every `--dispatch` outcome line, whether it reports success, a deferral or a failure, carries an `unmigrated`
+    # key listing the scopes that still carry their old dictionary file.
+
+    # Contract:
+    # `--dispatch --scope <id>` naming a scope that still carries its old dictionary file exits 2 before anything is
+    # queued, naming the scope and the `terms-migrate` verb.
+
+    # Contract:
+    # A `--scope` id that names no terms scope with a dictionary directory exits 2 and names the id on stderr.
+
+    # Contract:
+    # A document that is not valid UTF-8 is named on stderr and is never listed or queued.
+
+    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+
+    # guard: the marker belongs to a whole queued sweep only
+    if args.mark and ( not args.dispatch or args.paths ):
+      print(f"{self._CMD_TERMS_SWEEP}: {self._MSG_MARK_NEEDS_DISPATCH}", file = sys.stderr)
+      return self._EXIT_BROKEN
+
+    # guard: opening documents under review is a property of queued jobs only
+    if args.include_review and not args.dispatch:
+      print(f"{self._CMD_TERMS_SWEEP}: {self._MSG_INCLUDE_REVIEW_NEEDS_DISPATCH}", file = sys.stderr)
+      return self._EXIT_BROKEN
+
+    # guard: leaving out the unmigrated scopes is a reading of the predicate only
+    if args.migrated and not args.check:
+      print(f"{self._CMD_TERMS_SWEEP}: {self._MSG_MIGRATED_NEEDS_CHECK}", file = sys.stderr)
+      return self._EXIT_BROKEN
+
+    # guard: the predicate answers for the whole sweep, so it takes no paths and no scope
+    if args.check and ( args.paths or args.scope is not None ):
+      print(f"{self._CMD_TERMS_SWEEP}: {self._MSG_CHECK_TAKES_NO_PATHS}", file = sys.stderr)
+      return self._EXIT_BROKEN
+
+    # the list, the predicate, or the queueing — each over settings read once
+    sweep: _terms_migrate.TermsSweep | None = None
+    try:
+      settings = _terms_migrate.TermsSettings.read(repo)
+
+      # guard: queueing without terms scopes is not applicable here
+      if args.dispatch and settings is None:
+        print(f"{self._CMD_TERMS_SWEEP}: no terms scopes configured", file = sys.stderr)
+        return self._EXIT_NOT_APPLICABLE
+      sweep = _terms_migrate.TermsSweep(
+        repo = repo, settings = settings, core = _dispatch.CoreDispatch() if args.dispatch else None,
+      )
+
+      # the predicate answers and writes nothing
+      if args.check:
+        pending = sweep.check(migrated = args.migrated)
+        self._name_undecodable(self._CMD_TERMS_SWEEP, sweep.undecodable)
+        return self._EXIT_DONE if pending else self._EXIT_NOTHING
+
+      # without the dispatch switch the documents are only listed
+      if not args.dispatch:
+        listed = sweep.read_documents(args.paths, scope = args.scope)
+        self._name_undecodable(self._CMD_TERMS_SWEEP, sweep.undecodable)
+        print(json.dumps({ self._OUT_SCOPES: [
+          { _terms_migrate.KEY_SCOPE: scope_id, _terms_migrate.KEY_DOCUMENTS: files }
+          for scope_id, files in listed.items()
+        ] }))
+        return self._EXIT_DONE
+
+      # the queueing, over every scope or the one named
+      report = sweep.dispatch(
+        args.paths, mark = args.mark, scope = args.scope, include_review = args.include_review,
+      )
+    except ( _terms_migrate.TermsVerbError, *self._UNEXPECTED_FAILURES ) as error:
+      print(f"{self._CMD_TERMS_SWEEP}: {error}", file = sys.stderr)
+
+      # only the queueing has an outcome line
+      if not args.dispatch:
+        return self._EXIT_BROKEN
+
+      # the outcome line still says what was counted and queued before the failure
+      partial = error.report if isinstance(error, _terms_migrate.TermsVerbError) else None
+      if sweep is not None:
+        self._name_undecodable(self._CMD_TERMS_SWEEP, sweep.undecodable)
+      print(json.dumps({ **( partial or self._empty_sweep_report() ), _terms_migrate.KEY_ERROR: str(error) }))
+      return self._EXIT_BROKEN
+
+    # the documents set aside, then the queued, already active and deferred jobs
+    self._name_undecodable(self._CMD_TERMS_SWEEP, sweep.undecodable)
+    print(json.dumps(report))
+    return self._EXIT_DONE
+
+
+  @staticmethod
+  def _name_undecodable(verb: str, documents: list[str]) -> None:
+    """
+    Name on stderr every document that was set aside for not being valid UTF-8.
+
+    Args:
+      verb: Name of the subcommand that prefixes each line.
+      documents: Repo-relative documents that were set aside.
+    """
+    # each document set aside for not being valid UTF-8 is named, so the operator can repair it
+    for rel in documents:
+      print(f"{verb}: {rel} is not valid UTF-8, skipped", file = sys.stderr)
+
+
+  @staticmethod
+  def _empty_sweep_report() -> dict:
+    """
+    Build the outcome line of a sweep that queued nothing.
+
+    Returns:
+      The dispatch report with zero counts and no deferral.
+    """
+    # the outcome line of a sweep that queued nothing
+    return {
+      _terms_migrate.KEY_DIRECTORIES: 0, _terms_migrate.KEY_QUEUED: 0, _terms_migrate.KEY_ALREADY_QUEUED: 0,
+      _terms_migrate.KEY_DEFERRED_TO: None, _terms_migrate.KEY_UNMIGRATED: [],
+    }
+
+
+  def _cmd_terms_scope_config(self, args: argparse.Namespace) -> int:
+    """
+    Seed an exclusion from link editing on the terms scope that covers a document.
+
+    Syntax: `terms-scope-config --repo <root> <path> --link-exclude <glob>`. Prints one word on stdout: `seeded`,
+    `kept` or `no-scope`.
+
+    Guarantees:
+      - The verb prints exactly one of `seeded`, `kept` or `no-scope` and exits 0; it exits 1 only when the seed
+        cannot be written.
+
+    Args:
+      args: Parsed argument namespace; carries `.repo`, `.path` and `.link_exclude`.
+
+    Returns:
+      Integer exit code.
+    """
+
+    # Contract:
+    # The verb prints exactly one of `seeded`, `kept` or `no-scope` and exits 0; it exits 1 only when the seed
+    # cannot be written.
+
+    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+
+    # the scope covering the document gets the exclusion when it has none
+    try:
+      outcome = _terms_migrate.seed_link_exclude(repo, args.path, args.link_exclude, _dispatch.CoreDispatch())
+    except self._UNEXPECTED_FAILURES as error:
+      print(f"{self._CMD_TERMS_SCOPE_CONFIG}: {error}", file = sys.stderr)
+      return self._EXIT_FAILED
+    print(outcome)
+    return self._EXIT_DONE
 
 
   def _cmd_structure_apply(self, args: argparse.Namespace) -> int:
@@ -4650,12 +6309,14 @@ class Cli:
 
     Args:
       status: Outcome word of the run.
-      dictionary: Repo-relative path of the scope's dictionary, or None when no dictionary applies.
+      dictionary: Repo-relative path of the scope's dictionary, or `None` when no dictionary applies.
       operations: Number of term operations applied.
-      commit: Commit status of the dictionary write, or None when nothing was committed.
+      commit: Commit status of the run, or `None` when nothing was committed.
 
     Returns:
-      Mapping with `status`, `dictionary`, `operations`, `commit`, `category` and `reason`, the last two unset.
+      Mapping with `status`, `dictionary`, `operations`, `commit`, `category`, `reason`, `documents`, `unmatched`,
+      `merged`, `refused` and `retry`, the category, reason and retry unset and the documents, unmatched, merged
+      and refused empty.
     """
     return {
       self._OUT_STATUS:     status,
@@ -4664,6 +6325,11 @@ class Cli:
       self._OUT_COMMIT:     commit,
       self._OUT_CATEGORY:   None,
       self._OUT_REASON:     None,
+      self._OUT_DOCUMENTS:  0,
+      self._OUT_UNMATCHED:  [],
+      self._OUT_MERGED:     [],
+      self._OUT_REFUSED:    [],
+      self._OUT_RETRY:      None,
     }
 
 
@@ -4697,28 +6363,57 @@ class Cli:
     return [ single ]
 
 
-  def _terms_subject(self, files: list[str], operations: list[dict]) -> str:
+  def _terms_subject(self,
+                     files: list[str],
+                     operations: list[dict],
+                     documents: list[str],
+                     titles: dict[str, str]) -> str:
     """
     Compose the commit subject for a batch of term operations.
-
-    A single operation is named by its term; several are named by the directory the documents share,
-    followed by the number of terms.
 
     Args:
       files: Repo-relative paths of the documents the batch came from.
       operations: Term operations being committed.
+      documents: Repo-relative documents whose links changed.
+      titles: Each term's title once the batch is written, by file name stem.
 
     Returns:
-      Subject line of the form `wiki(terms): <term>` or `wiki(terms): <dir> (<n> terms)`.
+      For a links-only batch, `wiki(terms): link <dir> (<n> documents)`, with `document` in the singular for one.
+      For one operation, `wiki(terms): <title>`, naming the title the term carries after the batch (the kept
+      title when an `add` or `rename` joins an existing term, the requested spelling when `titles` holds none).
+      For several operations, `wiki(terms): <dir> (<n> terms)`.
     """
-    # one operation is named by its term
-    if len(operations) == 1:
-      return f"wiki(terms): {operations[0].get(self._TERMS_OP_TERM, '')}"
+    changes = [ op for op in operations if op.get(self._TERMS_OP) in self._TERMS_DICTIONARY_OPS ]
+
+    # guard: a batch that changes no term is named by the documents it linked, the count in its grammatical number
+    if not changes:
+      noun = self._SUBJECT_DOCUMENT if len(documents) == 1 else self._SUBJECT_DOCUMENTS
+      return f"wiki(terms): link {self._common_dir(documents)} ({len(documents)} {noun})"
+
+    # one dictionary operation is named by the title its term carries after the batch, a joined term keeping its own
+    if len(changes) == 1:
+      requested = str(changes[0].get(self._TERMS_OP_TERM, ""))
+      stem = _term_dictionary.term_file_stem(requested).casefold()
+      return f"wiki(terms): {next(( title for key, title in titles.items() if key.casefold() == stem ), requested)}"
 
     # several are named by the directory the documents share, with the count
-    parents = [ Path(rel).parent.as_posix() for rel in files ] or [ "." ]
+    return f"wiki(terms): {self._common_dir(files)} ({len(changes)} terms)"
+
+
+  @staticmethod
+  def _common_dir(paths: list[str]) -> str:
+    """
+    Return the directory a set of repo-relative paths shares.
+
+    Args:
+      paths: Repo-relative file paths.
+
+    Returns:
+      Their common parent directory, or `.` when there are none.
+    """
+    parents = [ Path(rel).parent.as_posix() for rel in paths ] or [ "." ]
     common = os.path.commonpath(parents) if len(parents) > 1 else parents[0]
-    return f"wiki(terms): {Path(common).as_posix()} ({len(operations)} terms)"
+    return Path(common).as_posix()
 
 
   def _cmd_terms_apply(self, args: argparse.Namespace) -> int:
@@ -4893,6 +6588,26 @@ class Cli:
     return engine
 
 
+  @classmethod
+  def _as_literal(cls, paths: Iterable[str]) -> list[str]:
+    """
+    Mark repo-relative paths as literal git pathspecs.
+
+    Guarantees:
+      - Git matches each returned pathspec against the path exactly as written; a `*`, `?` or `[` in a name is
+        never read as a glob.
+      - The result keeps the order of the input and holds one pathspec per path.
+
+    Args:
+      paths: Repo-relative paths to hand to a git command.
+
+    Returns:
+      The pathspecs for `paths`, each prefixed with git's `:(literal)` magic.
+    """
+    # each path is marked so git matches it as written, a `*`, `?` or `[` in its name included
+    return [ f"{cls._LITERAL}{rel}" for rel in paths ]
+
+
   def _query_tracked_paths(self, repo: Path, paths: list[str]) -> list[str]:
     """
     Filter a path list down to those git currently tracks.
@@ -4909,9 +6624,9 @@ class Cli:
     if not paths:
       return []
 
-    # ask git which of the paths it tracks
+    # ask git which of the paths it tracks, NUL-separated so a non-ASCII or spaced path comes back as written
     proc = subprocess.run(
-      [ "git", "ls-files", "--", *paths ],
+      [ "git", "ls-files", "-z", "--", *self._as_literal(paths) ],
       cwd = str(repo),
       capture_output = True,
       text = True,
@@ -4921,7 +6636,7 @@ class Cli:
     # guard: lookup failed — treat every path as untracked
     if proc.returncode != 0:
       return []
-    return [ line for line in proc.stdout.splitlines() if line ]
+    return [ rel for rel in proc.stdout.split(self._NUL) if rel ]
 
 
   def _is_domain_trigger(self, cfg: _domains.DomainConfig, rel: str) -> bool:

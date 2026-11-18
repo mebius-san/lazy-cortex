@@ -225,5 +225,7 @@ Examples, with the content-root at `specs/`:
 - `[[Server/Tester/chapter/changes/rename-chapter-log/design|rename-chapter-log design]]`
 - `[[specs/vision|vision]]` — the content-root's own vision
 
+A **term link** points outside the catalog: at a term's file in a terms dictionary directory, in the vault form from the vault root (`[[<dir>/<stem>|<display text>]]`, the display text being the term as the sentence uses it). The file may not exist yet — a link to a new term stays unresolved until the dictionary's curator enters it, and `lazy-spec.audit` does not report it as a broken target. How and where a term is linked is `lazycortex-core`'s `references/lazy-core.markdown-style.md` § Terms.
+
 Asset folder names are NOT required to be globally unique across products — the wikilink path disambiguates them. Request slugs, by contrast, are globally unique across the single content-root `requests/` inbox.
 

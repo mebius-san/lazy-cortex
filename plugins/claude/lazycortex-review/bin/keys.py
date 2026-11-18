@@ -752,10 +752,18 @@ class Trailer:
 
   Attributes:
     PHASE: The `Doc-Review-Phase` trailer key carried by every review-loop commit.
+    WATCH: The `Lazy-Watch` trailer key; the value `skip` marks a commit no watch routine reacts to.
+    WATCH_SKIP: The `Lazy-Watch` trailer value, compared case-insensitively, that exempts a commit.
   """
 
   # The `Doc-Review-Phase` trailer key carried by every review-loop commit.
   PHASE = "Doc-Review-Phase"
+
+  # The `Lazy-Watch` trailer key; the value `skip` marks a commit no watch routine reacts to.
+  WATCH = "Lazy-Watch"
+
+  # The `Lazy-Watch` trailer value (compared case-insensitively) that exempts a commit.
+  WATCH_SKIP = "skip"
 
 
 # ----------------------------------------------------------------------------------------

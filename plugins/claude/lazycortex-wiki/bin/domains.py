@@ -85,6 +85,9 @@ KIND_BLOCK_DOC   = "block-doc"
 # File encoding used throughout.
 _ENCODING = "utf-8"
 
+# Separator of a `git ls-files -z` listing, which prints every path as written, never quoted.
+_NUL = "\0"
+
 # Frontmatter key carrying the generation-time content hash of a group doc.
 FM_DOMAIN_HASH = "domain_hash"
 
@@ -458,7 +461,7 @@ class DomainScanner:
       git checkout or no file matches.
     """
     proc = subprocess.run(
-      [ "git", "ls-files" ],
+      [ "git", "ls-files", "-z" ],
       cwd = str(self._repo),
       capture_output = True,
       text = True,
@@ -470,10 +473,9 @@ class DomainScanner:
       return []
 
     # keep only the files a configured code glob claims
-    tracked = [ line for line in proc.stdout.splitlines() if line ]
     return sorted(
-      rel for rel in tracked
-      if any(self._matcher.match(rel, pat) for pat in self._globs)
+      rel for rel in proc.stdout.split(_NUL)
+      if rel and any(self._matcher.match(rel, pat) for pat in self._globs)
     )
 
   def _extract_blocks(self, abs_path: Path, rel: str) -> list[dict]:
@@ -1104,7 +1106,7 @@ class DomainIndex:
         doc_abs = Path(base) / fname
         rel = doc_abs.relative_to(self._cfg.repo).as_posix()
 
-        # guard: not a generated doc (index, non-markdown)
+        # only a generated doc is walked; the index and non-markdown files are not
         if self._layout.classify(rel) is None:
           continue
 
@@ -1401,8 +1403,10 @@ class DomainLanding:
     if not body.strip():
       raise DomainLandingError(f"returned document for {doc_rel!r} is empty")
 
-    # guard: a return without the key in a leading frontmatter block has no place for the digest
+    # the returned document line by line, endings kept
     lines = body.splitlines(keepends = True)
+
+    # guard: a return without the key in a leading frontmatter block has no place for the digest
     if DomainPlanner.locate_hash_line(lines) is None:
       raise DomainLandingError(f"returned document for {doc_rel!r} carries no {FM_DOMAIN_HASH} frontmatter key")
 

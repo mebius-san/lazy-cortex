@@ -238,9 +238,32 @@ _FAILED_PATHS = "failed_paths"
 # note instead, and a loose document to a folder-note carrying neither role, which is skipped.
 _SPEC_ROLE_STATUS = "status"
 
-# Bounded lookback window for `_has_operator_authored_recently`'s bot-buried-operator-commit
-# rescue (N3) — see that function's docstring for why this is a fixed window, not a range scan.
+# The most recent commits of a path, skip-marked ones left out, the author lookback judges for an operator commit
+# buried under a bot one, whether it scans the span after the cursor or the history without one.
 _AUTHOR_LOOKBACK_COMMITS = 10
+
+# The most commits of a path's history the author lookback reads when no cursor bounds it, skip-marked ones
+# included; a longer run of skip-marked commits hides an older operator commit.
+_AUTHOR_HISTORY_CEILING = 1000
+
+# The `Lazy-Watch` git trailer key and its exempting value (compared case-insensitively): a commit
+# carrying `Lazy-Watch: skip` is automated bookkeeping and never counts as an operator edit.
+_WATCH_TRAILER_KEY = "Lazy-Watch"
+_WATCH_TRAILER_SKIP = "skip"
+
+# `git log --format` for the author lookback: a record separator, the author email, a NUL, then the
+# values of the commit's `Lazy-Watch` trailer.
+_AUTHOR_LOG_FORMAT = f"--format=%x1e%ae%x00%(trailers:key={_WATCH_TRAILER_KEY},valueonly)"
+
+# The opening of git's trailer placeholder, which a git older than 2.22 prints as written instead of expanding it,
+# and the format read instead: a record separator, the author email, a NUL, then the whole message.
+_TRAILER_PLACEHOLDER = "%(trailers"
+_AUTHOR_MESSAGE_FORMAT = "--format=%x1e%ae%x00%B"
+# A paragraph break of a commit message, one trailer line of its closing paragraph (a key, a colon, the value),
+# and the openings of a trailer's continuation line.
+_PARAGRAPH_BREAK_RE = re.compile(r"\n[ \t]*\n")
+_TRAILER_LINE_RE = re.compile(r"^([A-Za-z0-9-]+)[ \t]*:[ \t]*(.*)$")
+_CONTINUATION = ( " ", "\t" )
 
 # The two frontmatter keys the busy-guard used to stamp before the sidecar-declined migration —
 # their bare string values, kept local because the shared key vocabulary dropped both once every
@@ -414,6 +437,119 @@ def _compute_answer_fingerprint(block: str) -> str:
   return hashlib.sha256(block.encode()).hexdigest()
 
 
+def _parse_unskipped_authors(log_output: str) -> list[str]:
+  """
+  Return the author emails of the logged commits that are not marked `Lazy-Watch: skip`.
+
+  Args:
+    log_output: Output of `git log` whose format prints each commit's author email and `Lazy-Watch` trailer
+      values.
+
+  Returns:
+    The author emails, in log order, of every commit whose `Lazy-Watch` trailer is absent or has no
+    value equal to `skip` (compared case-insensitively); empty when no commit qualifies.
+  """
+  emails: list[str] = []
+
+  # one record per commit: the email, a NUL, then the commit's `Lazy-Watch` trailer values
+  for record in log_output.split("\x1e"):
+    email, _, trailer_values = record.partition("\x00")
+
+    # guard: the leading split piece before the first separator is empty
+    if not email.strip():
+      continue
+
+    # a commit marked `Lazy-Watch: skip` is automated bookkeeping, so it is left out
+    if any(value.strip().lower() == _WATCH_TRAILER_SKIP for value in trailer_values.splitlines()):
+      continue
+    emails.append(email.strip())
+  return emails
+
+
+def _query_unskipped_authors(repo_root: Path,
+                             span: str,
+                             path: str,
+                             *,
+                             max_count: int | None = None) -> list[str] | None:
+  """
+  Return the author emails of the path's commits in a span that are not marked `Lazy-Watch: skip`.
+
+  Notes:
+    - Spawns one `git log` subprocess over the span.
+    - When the git in use prints the trailer placeholder unexpanded (older than 2.22), the commits' whole messages
+      are read with one more `git log` and their trailer blocks are parsed instead.
+
+  Args:
+    repo_root: The repository root to run `git` in.
+    span: The revision or `<from>..<to>` range to scan.
+    path: The repo-relative path whose commits are scanned.
+    max_count: The most commits of the span to read, skip-marked ones included; `None` reads the whole span.
+
+  Returns:
+    The author emails in log order of every commit whose `Lazy-Watch` trailer is absent or has no value equal to
+    `skip` (compared case-insensitively); `None` when git cannot read the span.
+  """
+  # the path's commits in the span, at most the asked count of them, with the trailer values git resolves itself
+  bound = [ f"--max-count={max_count}" ] if max_count is not None else []
+  logged = subprocess.run(
+      [ "git", "log", *bound, _AUTHOR_LOG_FORMAT, span, "--", path ],
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
+  )
+
+  # guard: a span git cannot read names no author
+  if logged.returncode != 0:
+    return None
+
+  # a git that knows the trailer placeholder has resolved it already, and its answer is read as it stands
+  if _TRAILER_PLACEHOLDER not in logged.stdout:
+    return _parse_unskipped_authors(logged.stdout)
+
+  # an older git printed the placeholder as written, so each whole message is read and its trailer block parsed
+  messages = subprocess.run(
+      [ "git", "log", *bound, _AUTHOR_MESSAGE_FORMAT, span, "--", path ],
+      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
+  )
+  return [
+    email.strip() for email, _, message in ( record.partition("\x00") for record in messages.stdout.split("\x1e") )
+    if email.strip() and not any(
+      value.lower() == _WATCH_TRAILER_SKIP for value in _parse_trailer_values(message, _WATCH_TRAILER_KEY)
+    )
+  ] if messages.returncode == 0 else None
+
+
+def _parse_trailer_values(message: str, key: str) -> list[str]:
+  """
+  Return the values a commit message's trailer block gives to one trailer key.
+
+  Args:
+    message: The whole commit message.
+    key: The trailer key to read, compared without letter case.
+
+  Returns:
+    The stripped values in the order written; empty when the message has no trailer block, when its closing
+    paragraph is prose, or when the key does not occur.
+  """
+  # guard: the closing paragraph is the trailer block, never the subject paragraph alone, so a message of one
+  # paragraph carries no trailer block
+  if len(paragraphs := [ part for part in _PARAGRAPH_BREAK_RE.split(message.strip()) if part.strip() ]) < 2:
+    return []
+
+  # each line of the closing paragraph, read as a trailer where it is one
+  lines = paragraphs[-1].splitlines()
+  matches = [ _TRAILER_LINE_RE.match(line) for line in lines ]
+
+  # guard: a closing paragraph with a line that is neither a trailer nor its continuation is prose
+  if not all(
+    match is not None or line.startswith(_CONTINUATION) for match, line in zip(matches, lines, strict = True)
+  ):
+    return []
+
+  # every value of the key, compared without letter case as git compares trailer keys
+  return [
+    match.group(2).strip() for match in matches if match is not None and match.group(1).lower() == key.lower()
+  ]
+
+
 def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | None) -> bool:
   """
   Check whether the item's author, or a recent commit touching the same path, is non-`@bot.`.
@@ -425,9 +561,14 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
       store; None when nothing is recorded yet.
 
   Returns:
-    True when the item's own author is non-bot, or when the path's commits after `cursor`
-    (falling back to a bounded window of the most recent ones when no cursor is usable) include
-    a non-bot author; False otherwise, including when the item carries no usable `path` / `sha`.
+    True when the item's own author is non-bot, or when a non-bot author appears among the most
+    recent commits of the path, a fixed number of them. Commits marked `Lazy-Watch: skip` are
+    left out before that number is taken. Those commits are the ones after `cursor` when it is
+    usable, otherwise the path's latest history up to the item's commit. A non-bot commit older
+    than that window does not count. When no cursor is usable, the scan reads at most a fixed
+    ceiling of the path's commits, skip-marked ones included, and ends with False as soon as it
+    reaches the worker's own historic wake commit. False otherwise, including when the item
+    carries no usable `path` / `sha`.
   """
 
   # Domain(spec.lifecycle):
@@ -435,21 +576,32 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
   # A change watch hands the coordinator only the single most recent commit on a document's own
   # path, so an operator's edit is invisible to that commit alone whenever an automated commit
   # lands on the same path afterward, inside the same watch window — the operator's edit is
-  # buried under the newer one. The rescue scans the document's own commit history since the
-  # last commit the coordinator actually reacted to, and treats any commit in that span authored
-  # by someone other than the automation's own identity as proof an operator touched the
-  # document during the window, even though the watch item itself points at the later, automated
-  # commit. Without a known starting point for the scan, the rescue instead looks back a fixed
-  # number of commits and stops early the moment it reaches one of the coordinator's own
-  # historic commits, since everything before that point has already been accounted for.
+  # buried under the newer one. The rescue reads the document's own commit history since the
+  # last commit the coordinator actually reacted to, up to the watch item's commit, and judges
+  # only the most recent of those commits, a fixed number of them (ten). A commit in that
+  # selection authored by someone other than the automation's own identity is proof an operator
+  # touched the document during the window, even though the watch item itself points at the
+  # later, automated commit. An operator commit buried under more than that fixed number of
+  # newer automated commits is therefore missed. Without a known starting point for the scan,
+  # the rescue instead reads the document's most recent commits, up to a fixed ceiling on how
+  # many it reads, and judges the same fixed number of most recent ones among them; it stops
+  # early the moment it reaches one of the coordinator's own historic commits, since everything
+  # before that point has already been accounted for.
+  # A commit in the scanned span that carries the git trailer `Lazy-Watch` with the value
+  # `skip` (compared case-insensitively) is left out of the scan: whatever its author, it is never
+  # counted as an operator commit, and it is never the commit that bounds the scan. Such commits
+  # are dropped before the fixed number of most recent commits is taken, so they never use up
+  # that number. With a last reacted-to commit, a long run of them therefore hides nothing the
+  # fixed number would have shown. Without one, they still count toward the ceiling of commits
+  # read, so a long enough run of them can push an operator commit past that ceiling. A commit
+  # without the trailer, or with any other value of it, is judged as before.
 
   # an item whose own author is non-bot answers the check at once
   if _BOT_MARK not in item.get(_ITEM_AUTHOR_EMAIL, ""):
     return True
 
-  # a bot-authored tip can bury an operator commit on the same path within one pull batch (N3;
-  # the same failure mode fixed for the note's own commit history in cfed7046, before this
-  # worker's git-watch resew)
+  # a bot-authored tip can bury an operator commit on the same path within one pull batch, so the path's history
+  # ending at the item's commit is read for one
   sha = item.get(_ITEM_SHA)
   path = item.get(_ITEM_PATH)
 
@@ -457,27 +609,20 @@ def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | N
   if not sha or not path:
     return False
 
-  # the cursor bounds the scan to commits this worker has not dispatched on yet (N6 — without a
-  # lower bound, the same operator commit re-fires on every later bot tick until it ages out of
-  # the window); a cursor git no longer knows (rewritten history, a sha recorded on another
+  # the cursor bounds the scan to commits this worker has not dispatched on yet, so one operator commit never
+  # re-fires on every later bot tick; a cursor git no longer knows (rewritten history, a sha recorded on another
   # checkout) falls through to the fixed window below
-  if cursor:
-    ranged = subprocess.run(
-        ["git", "log", "--format=%ae", "-n", str(_AUTHOR_LOOKBACK_COMMITS),
-         f"{cursor}..{sha}", "--", path],
-        cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
-    )
-    if ranged.returncode == 0:
-      return any(_BOT_MARK not in email for email in ranged.stdout.splitlines())
+  # git is asked for the path's whole history in the span, so the window counts only the commits left after the
+  # skip-marked ones are dropped
+  # limit: either scan is blind past `_AUTHOR_LOOKBACK_COMMITS` unskipped bot commits; judge all of the span to lift it
+  if cursor and (ranged := _query_unskipped_authors(repo_root, f"{cursor}..{sha}", path)) is not None:
+    return any(_BOT_MARK not in email for email in ranged[:_AUTHOR_LOOKBACK_COMMITS])
 
   # no usable cursor: a fixed-size window of the path's own recent authors, ending at the
-  # item's reported tip.
-  # limit: blind past `_AUTHOR_LOOKBACK_COMMITS` bot commits per pull, the cursor scan above is the upgrade
-  out = subprocess.run(
-      ["git", "log", "--format=%ae", "-n", str(_AUTHOR_LOOKBACK_COMMITS), sha, "--", path],
-      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
-  ).stdout
-  for email in out.splitlines():
+  # item's reported tip, read from at most `_AUTHOR_HISTORY_CEILING` commits of its history.
+  # limit: blind past `_AUTHOR_HISTORY_CEILING` commits of the path, skip-marked ones included; a cursor lifts it
+  recent = _query_unskipped_authors(repo_root, sha, path, max_count = _AUTHOR_HISTORY_CEILING)
+  for email in (recent or [])[:_AUTHOR_LOOKBACK_COMMITS]:
     if _BOT_MARK not in email:
       return True
 

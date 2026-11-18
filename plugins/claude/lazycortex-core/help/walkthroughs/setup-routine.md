@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-11-12
+last_regen: 2026-11-18
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -111,6 +111,8 @@ Run `/lazy-routine.unregister <name>` (e.g. `/lazy-routine.unregister lazy-revie
 The skill checks the settings file, prints a confirmation, and removes the entry. Unregistering a routine that does not exist is a no-op — it prints an INFO message and exits cleanly without an error.
 
 Two built-in routines are protected from accidental removal: `lazy-expert.pump`, which processes expert jobs, and `lazy-runtime.doctor`, which repairs stuck jobs and daemon halts. Attempting to unregister either one without `--force` aborts with an explanation. Only pass `--force` if you intentionally want that work to stop; with `--force` the skill prints a warning and proceeds. Re-register the routine or re-run `/lazy-core.install` to restore it.
+
+A routine name is required; the skill aborts without one. If the removal fails because `.claude/lazy.settings.json` is unwritable, check that the file exists and is not read-only, and run `/lazy-core.install` if it is absent.
 
 The daemon picks up the removal on its next cycle — no restart needed.
 
