@@ -61,21 +61,29 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import BannerTag, Outcome, PlanReview, SpecKey, SpecValue, State  # noqa: E402
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_paths import (  # noqa: E402
     find_settings_root, read_text, require_plugin_cli, spec_content_root, write_text_atomic,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
+
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 _REQUIRED_REVIEW_KEYS = (
     SpecKey.REVIEW_ACTIVE, SpecKey.REVIEW_ROUND, SpecKey.REVIEW_APPROVED,
@@ -296,7 +304,7 @@ def _bootstrap_review(file_path: Path) -> None:
         [sys.executable, str(_resolve_review_cli(flip_gate.repo_root(file_path.parent))), PlanReview.START_VERB,
          _NO_COMMIT_FLAG, str(file_path)],
         cwd = str(file_path.parent), capture_output = True, text = True, check = False,
-        timeout = _BOOTSTRAP_TIMEOUT_S, encoding = "utf-8",
+        timeout = _BOOTSTRAP_TIMEOUT_S, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
   # guard: a hung review CLI would otherwise stall every routine on the daemon's serial tick
   except subprocess.TimeoutExpired:

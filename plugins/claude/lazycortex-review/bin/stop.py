@@ -3,9 +3,11 @@
 
 Cancels the coordinator job and the expert job in flight on the document, sets `review_active: false` and commits.
 Optionally the review banner is removed as well. Body and `approved` are otherwise left untouched so a subsequent
-`start` can resume from the operator's last state. A job that cannot be confirmed cancelled leaves the review as it
-was. With `--json` the stop prints one JSON report naming the jobs it cancelled and the jobs already over, so a
-caller can raise their wakes again or resume the review.
+`start` can resume from the operator's last state. A job that cannot be confirmed cancelled, or whose marker cannot
+be cleared after a confirmed cancel, leaves the review as it was; so does a job-marker sidecar that cannot be read or
+is no store. A stop commit that git refuses puts the document back as it was before the stop. With `--json` the stop
+prints one JSON report naming the jobs it cancelled and the jobs already over, so a caller can raise their wakes
+again or resume the review.
 """
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -56,29 +58,74 @@ _DECODE_ERRORS = "replace"
 # waiver: the core `cancel-job` report's own wire key saying whether the call cancelled the job
 _CANCELLED_KEY = "cancelled"
 
+# Git's per-path magic prefix that makes one path argument literal, never a pattern; unlike the global
+# `--literal-pathspecs` option it exports nothing into the environment of the hooks git runs.
+_LITERAL_PATHSPEC = ":(literal)"
+
 
 def _atomic_commit(file_path: Path) -> None:
   """
   Commit a stopped document on its own.
 
   Args:
-    file_path: The stopped document.
+    file_path: The stopped document; its file name is taken literally, never as a pattern.
 
   Raises:
     subprocess.CalledProcessError: If staging or committing the document fails.
   """
-  # the document is staged from its own folder
+  # the document is staged from its own folder, under its literal name, never as a pattern
   cwd = file_path.parent
+  literal_name = f"{_LITERAL_PATHSPEC}{file_path.name}"
   subprocess.run(
-      ["git", "add", "--", str(file_path.name)],
-      cwd=cwd, check=True, capture_output=True,
+      ["git", "add", "--", literal_name],
+      cwd = cwd, check = True, capture_output = True,
   )
 
   # the pathspec keeps a concurrently staged foreign file out of the stop commit
   subprocess.run(
-      ["git", "commit", "-q", "-m", f"review: stop {file_path.name}", "--", str(file_path.name)],
-      cwd=cwd, check=True, capture_output=True,
+      [
+          "git", "commit", "-q",
+          "-m", f"review: stop {file_path.name}", "--", literal_name,
+      ],
+      cwd = cwd, check = True, capture_output = True,
   )
+
+
+def _restore_document(file_path: Path, before: bytes) -> str | None:
+  """
+  Put a document whose stop commit failed back as it was before the stop.
+
+  Guarantees:
+    - Never raises: a failure to restore is returned as the reason.
+
+  Args:
+    file_path: The stopped document.
+    before: The document's bytes before the stop.
+
+  Returns:
+    `None` when the document is restored; otherwise a one-line reason, `document left staged` when its index entry
+    could not be put back to HEAD or `document left rewritten` when its bytes could not be written back.
+  """
+  # the stop commit staged the document before git refused it: the index entry goes back to HEAD first, under the
+  # document's literal name, so nothing of the stop is left staged
+  try:
+    unstaged = subprocess.run(
+        [ "git", "restore", "--staged", "--", f"{_LITERAL_PATHSPEC}{file_path.name}" ],
+        cwd = file_path.parent, check = False, capture_output = True,
+    )
+  except OSError as error:
+    return f"document left staged: {error}"
+
+  # guard: an index entry git would not put back leaves the stop staged; the working copy is not touched then
+  if unstaged.returncode != 0:
+    return f"document left staged: {os.fsdecode(unstaged.stderr).strip()}"
+
+  # the working copy takes back the bytes it had before the stop
+  try:
+    _atomic_io.write_bytes_atomic(file_path, before)
+  except OSError as error:
+    return f"document left rewritten: {error}"
+  return None
 
 
 def stop_review(file_path: Path, *, strip_banner: bool = False) -> bool:
@@ -190,10 +237,16 @@ def cancel_review_jobs(file_path: Path) -> JobsCancelResult:
   Cancel the coordinator job and the expert job a document's review has in flight and clear their markers.
 
   Guarantees:
-    - A document with no job in flight is left alone and the core CLI is never called.
+    - A document whose job markers were read and show no job in flight is left alone and the core CLI is never
+      called.
+    - A job-marker sidecar that exists but cannot be read, or reads but is no store, is never read as "no job in
+      flight": a failure naming the sidecar and the error is returned before any cancel call is made and before any
+      marker is changed.
     - The coordinator job is cancelled before the expert job.
     - A job the core CLI does not confirm cancelled keeps its marker, and no job after it is tried; a call that times
       out, cannot be launched, exits non-zero or prints an unreadable report confirms nothing.
+    - A marker that cannot be cleared after a confirmed cancel refuses the stop: the failure names the sidecar, the
+      job confirmed cancelled is still listed as cancelled, and no job after it is tried.
     - A job the core CLI reports already over keeps its marker for the collect tick and is reported as terminal,
       never as cancelled.
     - A job with no bundle on disk has its marker cleared and is reported as neither cancelled nor terminal.
@@ -202,12 +255,18 @@ def cancel_review_jobs(file_path: Path) -> JobsCancelResult:
     file_path: Absolute path to the reviewed document.
 
   Returns:
-    The ids of the jobs cancelled, the ids of the jobs already over, and the reason a job could not be cancelled
-    when one could not.
+    The ids of the jobs cancelled, the ids of the jobs already over, and the failure reason when a job could not be
+    cancelled, a marker could not be cleared after a confirmed cancel, or the job markers could not be read; in the
+    last case nothing is changed.
   """
 
   # Contract:
-  # A document with no job in flight is left alone and the core CLI is never called.
+  # A document whose job markers were read and show no job in flight is left alone and the core CLI is never called.
+
+  # Contract:
+  # A job-marker sidecar that exists but cannot be read, or reads but is no store, is NEVER read as "no job in
+  # flight": the call returns a failure naming the sidecar and the error, before any cancel call is made and before
+  # any marker is changed.
 
   # Contract:
   # The coordinator job is cancelled before the expert job.
@@ -215,6 +274,10 @@ def cancel_review_jobs(file_path: Path) -> JobsCancelResult:
   # Contract:
   # A job the core CLI does not confirm cancelled keeps its marker, and no job after it is tried; a call that times
   # out, cannot be launched, exits non-zero or prints an unreadable report confirms nothing.
+
+  # Contract:
+  # A marker that cannot be cleared after a confirmed cancel refuses the stop: the returned failure names the
+  # sidecar, the job confirmed cancelled is still listed as cancelled, and no job after it is tried.
 
   # Contract:
   # Only a job the core CLI reports `cancelled: true` is listed as cancelled; a job it reports already over keeps
@@ -231,10 +294,24 @@ def cancel_review_jobs(file_path: Path) -> JobsCancelResult:
   # expert's. The stop goes ahead only when every cancellation is confirmed; if one is not, the review is refused
   # its stop and stays exactly as it was, since the job may still be running. A cancellation that does not answer
   # in time counts as unconfirmed. A job that had already finished is not cancelled at all: it stays tracked so
-  # that its result is still collected.
+  # that its result is still collected. Before anything is cancelled the stop looks up which jobs are in flight on
+  # the document; when that record exists but cannot be read, or can be read but is not a valid record at all, the
+  # stop is refused and nothing is changed. A failed lookup is never taken to mean that no job is running, because
+  # stopping a review whose jobs may still be running leaves work in flight that nobody will collect. The same
+  # holds once a job has been cancelled: if the record of that job cannot then be cleared, the stop is refused as
+  # well, since the record would go on naming a job that no longer runs.
 
   repo = _find_repo_root(file_path)
-  markers = _job_markers.read(repo, file_path)
+
+  # guard: markers that cannot be read do not say "no job in flight"; the stop is refused before anything changes
+  try:
+    markers = _job_markers.read_checked(repo, file_path)
+  except OSError as error:
+    return JobsCancelResult(
+        failure = (
+            f"job markers cannot be read: {_job_markers.sidecar_path(repo)}: {type(error).__name__}: {error}"
+        ),
+    )
   cancelled: list[str] = []
   terminal: list[str] = []
 
@@ -257,9 +334,19 @@ def cancel_review_jobs(file_path: Path) -> JobsCancelResult:
       continue
 
     # a job gone or cancelled no longer needs its marker; only a cancelled one is reported as such
-    _job_markers.update(repo, file_path, { marker: None })
     if answer.cancelled:
       cancelled.append(job_id)
+
+    # guard: a marker that cannot be cleared keeps naming the job, so the stop is refused before the next job
+    try:
+      _job_markers.update(repo, file_path, { marker: None })
+    except OSError as error:
+      return JobsCancelResult(
+          cancelled = cancelled, terminal = terminal,
+          failure = (
+              f"job marker cannot be cleared: {_job_markers.sidecar_path(repo)}: {type(error).__name__}: {error}"
+          ),
+      )
 
   # every job in flight is gone
   return JobsCancelResult(cancelled = cancelled, terminal = terminal)
@@ -275,14 +362,20 @@ def _cancel_job(repo: Path, job_id: str) -> _JobAnswer:
 
   Returns:
     No flag set when no bundle carries the id; `cancelled` when the call cancelled a bundle; `terminal` when every
-    bundle was already over; `failure` when a cancel is unconfirmed — a non-zero exit, a report that cannot be read,
-    a call that cannot be launched or runs out of time.
+    bundle was already over; `failure` when a cancel is unconfirmed — the job queue cannot be listed, the core CLI
+    cannot be resolved, a non-zero exit, a report that cannot be read, a call that cannot be launched or runs out of
+    time.
   """
   # the bundle's parent folder names the expert the core CLI addresses the job by
   jobs_root = repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR
-  experts = sorted(
-      folder.name for folder in (jobs_root.iterdir() if jobs_root.is_dir() else ()) if (folder / job_id).is_dir()
-  )
+
+  # guard: a job queue that cannot be listed cannot show whether the job is still there, so nothing is confirmed
+  try:
+    experts = sorted(
+        folder.name for folder in (jobs_root.iterdir() if jobs_root.is_dir() else ()) if (folder / job_id).is_dir()
+    )
+  except OSError as error:
+    return _JobAnswer(failure = f"{_CANCEL_JOB} {job_id}: job queue cannot be listed: {error}")
 
   # guard: no bundle on disk, nothing left to stop
   if not experts:
@@ -350,29 +443,57 @@ def main(argv: list[str]) -> int:
 
   Guarantees:
     - A review whose in-flight coordinator job or expert job cannot be confirmed cancelled, a cancel call that
-      times out or cannot be launched included, is not stopped: the command exits 1 and the document is left
-      unchanged.
+      times out or cannot be launched included, or whose job marker cannot be cleared after a confirmed cancel, is
+      not stopped: the command exits 1 and the document is left unchanged.
+    - A job-marker sidecar that exists but cannot be read, or reads but is no store, is never read as "no job in
+      flight": the command exits 1 with one stderr line naming the sidecar path and the error, and changes nothing:
+      no cancel call is made, the document is not written and nothing is committed.
+    - When git refuses the stop commit, the command exits 1 with one stderr line naming the commit failure and never
+      ends in a traceback; the document is restored to its pre-stop bytes and its index entry is put back to HEAD, so
+      the tree is left clean. The jobs the call cancelled stay cancelled and are reported.
     - With `--json` the command prints exactly one JSON object,
-      `{"file", "changed", "cancelled_jobs", "terminal_jobs", "error"}`, on exit 0 and on exit 1 alike, every key
-      always present: `cancelled_jobs` names every job the call cancelled, in cancel order, `terminal_jobs` names
-      every job already over whose marker was kept, and `error` is null unless a job could not be cancelled.
+      `{"file", "changed", "cancelled_jobs", "terminal_jobs", "error"}`, on exit 0 and on exit 1 alike, a failed
+      stop commit and a marker that cannot be cleared included, every key always present: `changed` reports whether
+      the document was left rewritten, so it is false after a failed commit whose restore succeeded and true when the
+      restore failed, `cancelled_jobs` names every job the call cancelled, in cancel order, `terminal_jobs` names
+      every job already over whose marker was kept, and `error` is null unless the stop was refused or its commit
+      failed: a job could not be cancelled, a job marker could not be read or cleared, or git refused the commit,
+      which `error` then names, together with the failure of the restore when the restore itself failed.
 
   Args:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: 0 on success, 1 when the job in flight cannot be cancelled, 2 when the file is not found.
+    Exit code: 0 on success; 1 when the job in flight cannot be cancelled, a job marker cannot be cleared after a
+    confirmed cancel, or the job markers cannot be read (the stop is refused and the document is left unchanged), or
+    when the stop commit fails (the document is restored and the cancelled jobs stay cancelled); 2 when the file is
+    not found.
   """
 
   # Contract:
   # When the coordinator job or the expert job in flight on the document cannot be confirmed cancelled, a cancel call
-  # that times out or cannot be launched included, the command exits 1 and the document is left unchanged.
+  # that times out or cannot be launched included, or its job marker cannot be cleared after a confirmed cancel, the
+  # command exits 1 and the document is left unchanged.
+
+  # Contract:
+  # When the job-marker sidecar exists but cannot be read, or reads but is no store, the command NEVER treats it as
+  # "no job in flight": it exits 1 with one stderr line naming the sidecar path and the error, and changes nothing.
+  # No cancel call is made, the document is NOT written and nothing is committed.
+
+  # Contract:
+  # When git refuses the stop commit, the command exits 1 with one stderr line naming the commit failure and NEVER
+  # ends in a traceback. The document is restored to its pre-stop bytes and its index entry is put back to HEAD, so
+  # the tree is left clean. The jobs the call cancelled stay cancelled and are reported.
 
   # Contract:
   # With `--json` the command prints exactly one JSON object,
-  # `{"file", "changed", "cancelled_jobs", "terminal_jobs", "error"}`, on exit 0 and on exit 1 alike, every key
-  # always present: `cancelled_jobs` names every job the call cancelled, in cancel order, `terminal_jobs` names every
-  # job already over whose marker was kept, and `error` is null unless a job could not be cancelled.
+  # `{"file", "changed", "cancelled_jobs", "terminal_jobs", "error"}`, on exit 0 and on exit 1 alike, a failed stop
+  # commit and a marker that cannot be cleared included, every key always present: `changed` reports whether the
+  # document was left rewritten, so it is false after a failed commit whose restore succeeded and true when the
+  # restore failed, `cancelled_jobs` names every job the call cancelled, in cancel order, `terminal_jobs` names every
+  # job already over whose marker was kept, and `error` is null unless the stop was refused or its commit failed: a
+  # job could not be cancelled, a job marker could not be read or cleared, or git refused the commit, which `error`
+  # then names, together with the failure of the restore when the restore itself failed.
 
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazy-review.stop")
@@ -403,9 +524,33 @@ def main(argv: list[str]) -> int:
     return 1
 
   # with every job gone the review is stopped, and committed unless the caller keeps the commit
+  before = file_path.read_bytes()
   changed = stop_review(file_path, strip_banner = args.strip_banner)
-  if changed and not args.no_commit:
-    _atomic_commit(file_path)
+
+  # guard: a commit git refused puts the document back as it was before the stop, so the tree stays clean and the
+  # stop can be retried; the failure is told in one line and, with `--json`, in the one report the caller reads
+  try:
+    if changed and not args.no_commit:
+      _atomic_commit(file_path)
+  except subprocess.CalledProcessError as error:
+
+    # Domain(review.lifecycle):
+    # # A refused stop leaves no half-done stop behind
+    # A stop is recorded by one commit of the document. When that commit is refused, the document is put back
+    # exactly as it was before the stop, so nothing of the stop lingers in it, neither in the file nor among the
+    # changes waiting to be committed, and the stop can simply be tried again. The work that was already cancelled
+    # before the commit is not revived: it stays cancelled, and the refusal is reported together with the jobs
+    # that were cancelled, so the caller can resume the review or raise its wakes again.
+
+    # the refusal is told first, then the document is put back, and a failed put-back is appended to the same line
+    reason = f"stop commit failed: {os.fsdecode(error.stderr or error.stdout or b'').strip() or error}"
+    unrestored = _restore_document(file_path, before)
+    if unrestored is not None:
+      reason = f"{reason}; {unrestored}"
+    sys.stderr.write(f"{reason}\n")
+    if args.json:
+      print(_format_report(file_path, replace(jobs, failure = reason), changed = unrestored is not None))
+    return 1
 
   # a caller that acts on what the stop cancelled reads the JSON form
   report = f"stopped: {file_path} (changed={changed})"

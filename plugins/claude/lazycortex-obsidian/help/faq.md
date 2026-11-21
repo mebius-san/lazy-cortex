@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,8 +14,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: ff30e9e27bc19afc6edd3e246ca4d4f3f890f4996d7a4665db966c70f6e961d3
+source_sha: 5048c26182621a44f9d4ab628e900ce399ae12f0
+surface_sha: e097d5b54cf4e0f827a0427e8e138c2e22bea7ea6c7f3c0851748b1d0bb9153d
 ---
 # Frequently asked questions
 
@@ -151,7 +151,19 @@ Yes. The plugin update refreshes the plugin cache but does not automatically re-
 
 ## How do I share my vault's Obsidian configuration across machines or with teammates?
 
-Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the whole `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, the theme, and top-level config files. The theme is fetched from its own repository the way Obsidian would, replacing any copy already sitting in the vault. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
+Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the shareable `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. Per-device personal state — bookmarks and Iconize's recently used icons — is deliberately not part of the snapshot (see the question on bookmarks below). On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, the theme, and top-level config files. The theme is fetched from its own repository the way Obsidian would, replacing any copy already sitting in the vault. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
+
+---
+
+## Why are my bookmarks and Iconize's recently used icons not shared through the manifest?
+
+They are personal to each device, so the manifest no longer carries them. `/lazy-obsidian.capture` stops recording Obsidian's bookmarks and Iconize's recently used icons, `/lazy-obsidian.deploy` never lays them down — even from a manifest that still contains them — and `/lazy-obsidian.audit` never reports them as drift. Each device keeps its own `.obsidian/bookmarks.json`, and nothing in this plugin touches that file, so bookmarking something on one machine no longer leaves the manifest stale or pushes your bookmarks onto every clone. Iconize's other settings and rules are still captured and deployed as before.
+
+---
+
+## My manifest was captured by an older version and still holds bookmarks. How do I clean it up?
+
+Run `/lazy-core.setup` after updating the plugin. It runs the plugin's migration step, which uses the manifest worker's `strip-personal` verb to remove exactly those two entries — the bookmarks and Iconize's recently used icons — from `.obsidian.manifest.json`, leaving every other key, its value, and its order as they were. The step never reads or writes `.obsidian/` itself, so your live bookmarks are untouched. Commit the resulting manifest change so other clones stop receiving the old bookmarks. Until the manifest is cleaned, `/lazy-obsidian.deploy` still ignores the stale entries, so a deploy on a new machine is safe either way.
 
 ---
 
@@ -181,7 +193,7 @@ The tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md` 
 
 ## The audit reports "vault manifest drift". What does that mean?
 
-`/lazy-obsidian.audit` compares your live `.obsidian/` config against `.obsidian.manifest.json`, but only when that manifest exists — a vault that has never run `/lazy-obsidian.capture` is skipped with outcome `no-manifest`, which is not a failure. When drift is found, it means the live vault and the recorded manifest disagree, and the audit never guesses which side is right — it presents each entry and lets you choose: run `/lazy-obsidian.capture` if the live vault is correct and should be recorded, or `/lazy-obsidian.deploy` if the manifest is correct and the live vault should be restored from it. A separate `warnings` list (not drift) covers things like a plugin whose installed version moved past what its settings were captured under, or credentials the manifest can never carry.
+`/lazy-obsidian.audit` compares your live `.obsidian/` config against `.obsidian.manifest.json`, but only when that manifest exists — a vault that has never run `/lazy-obsidian.capture` is skipped with outcome `no-manifest`, which is not a failure. When drift is found, it means the live vault and the recorded manifest disagree, and the audit never guesses which side is right — it presents each entry and lets you choose: run `/lazy-obsidian.capture` if the live vault is correct and should be recorded, or `/lazy-obsidian.deploy` if the manifest is correct and the live vault should be restored from it. Bookmarks and Iconize's recently used icons never count as drift, since they are per-device state. A separate `warnings` list (not drift) covers things like a plugin whose installed version moved past what its settings were captured under, or credentials the manifest can never carry.
 
 ---
 

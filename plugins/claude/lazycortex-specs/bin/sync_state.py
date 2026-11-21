@@ -16,11 +16,14 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -214,7 +217,11 @@ def write_checkpoint(repo: Path, product: str, *, head: str | None = None, today
 
   Raises:
     SyncStateRefusedError: If the product has no record, its record has no code binding, or no commit is given and
-      HEAD cannot be read.
+      the repository has no commit or the folder lies in no repository (reason no-head); nothing is written.
+    subprocess.CalledProcessError: If git fails while reading HEAD, in which case nothing is written; or while
+      checking whether git still tracks the retired file, in which case the checkpoint is not written by this call,
+      though a pre-convention leftover may already have been renamed onto the current name by the read.
+    OSError: If git cannot be run for either of those steps, with the same state on disk.
   """
 
   # Contract:
@@ -227,7 +234,7 @@ def write_checkpoint(repo: Path, product: str, *, head: str | None = None, today
 
   # the record's code binding is checked before anything is written
   source_paths = _require_source_paths(repo, product)
-  commit = head or flip_gate.git_field(repo, [ "rev-parse", "HEAD" ], "")
+  commit = head or flip_gate.read_head(repo)
 
   # guard: a checkpoint without a commit would make the next run's window meaningless
   if not commit:
@@ -236,6 +243,11 @@ def write_checkpoint(repo: Path, product: str, *, head: str | None = None, today
   # the read renames a pre-convention leftover onto the current name first
   read = load_migrated_checkpoint(repo, product)
 
+  # whether git still tracks the renamed-away file is asked before the checkpoint is written, so a git failure
+  # raises with no checkpoint written by this call
+  legacy = _state_path(repo, _LEGACY_TEMPLATE, product)
+  legacy_tracked = not legacy.exists() and flip_gate.is_tracked(repo, legacy.relative_to(repo))
+
   # the whole file is rewritten from the record and HEAD, keys in a fixed order
   data = { LAST_COMMIT: commit, LAST_SYNC: flip_gate.effective_today(today), SOURCE_PATHS: source_paths }
   path = Path(read.path)
@@ -243,12 +255,7 @@ def write_checkpoint(repo: Path, product: str, *, head: str | None = None, today
   spec_paths.write_text_atomic(path, json.dumps(data, indent = _INDENT, ensure_ascii = False) + "\n")
 
   # the renamed-away file rides the commit while git still tracks it, so its deletion lands too
-  legacy = _state_path(repo, _LEGACY_TEMPLATE, product)
-  touched = [ read.path ]
-  if not legacy.exists() and flip_gate.git_field(
-      repo, [ "ls-files", "--error-unmatch", "--", str(legacy.relative_to(repo)) ], ""):
-    touched.append(str(legacy))
-  return touched
+  return [ read.path, *( [ str(legacy) ] if legacy_tracked else [] ) ]
 
 
 def _refusal(product: str, reason: str) -> dict:

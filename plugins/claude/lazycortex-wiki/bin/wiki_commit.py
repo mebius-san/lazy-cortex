@@ -13,6 +13,9 @@ if TYPE_CHECKING:
 # Encoding git's text output is decoded with.
 _ENCODING = "utf-8"
 
+# Codec error handler that turns a byte that is not valid text into a replacement mark instead of failing.
+_DECODE_LOSSY = "replace"
+
 # The two outcomes a commit attempt reports.
 STATUS_COMMITTED: Final = "committed"
 STATUS_UNCHANGED: Final = "unchanged"
@@ -52,7 +55,24 @@ class WikiCommitError(Exception):
   Failure of a path-scoped wiki commit.
 
   Raised when a git step of the commit cannot run or exits non-zero; the message carries git's own report.
+
+  Attributes:
+    landed: Whether the commit itself was made before the failure, so only a step after it failed.
   """
+
+  def __init__(self, message: str, *, landed: bool = False) -> None:
+    """
+    Record the failure and whether the commit landed before it.
+
+    Args:
+      message: Git's own report of the failed step.
+      landed: Whether the commit itself was made before the failure.
+    """
+    # the base exception carries git's report
+    super().__init__(message)
+
+    # a caller that undoes its writes on a failed commit must leave a landed one alone
+    self.landed = landed
 
 
 # ----------------------------------------------------------------------------------------
@@ -81,6 +101,8 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> CommitResult:
     - Content staged in the repository's index by anyone else is never included in the commit and stays staged.
     - A call with no paths, or with paths that carry no changes, commits nothing, does not fail, and reports
       `unchanged` with no commit identifier.
+    - A raised `WikiCommitError` has `landed` true exactly when `git commit` succeeded and only a later step
+      failed; a caller that undoes its writes on a failed commit must leave a landed commit alone.
 
   Args:
     repo: Repository root the commit is made in.
@@ -91,7 +113,10 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> CommitResult:
     The commit outcome, carrying the new HEAD identifier when a commit landed.
 
   Raises:
-    WikiCommitError: If a git step fails or git cannot be run.
+    WikiCommitError: If a git step fails or git cannot be run; its `landed` attribute tells whether the commit was
+      made before the failure, and its message carries what git or a hook printed for the failed step, such as a
+      hook's refusal text. When the commit step is refused the named paths are left staged in the index, so a
+      caller that must leave the index as it found it records the entries beforehand and puts them back.
   """
 
   # Contract:
@@ -101,6 +126,10 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> CommitResult:
   # Contract:
   # A call with no paths, or whose paths carry no changes, commits nothing, does not fail,
   # and reports `unchanged` with no commit identifier.
+
+  # Contract:
+  # A `WikiCommitError` carries `landed`, true exactly when `git commit` succeeded and only a later
+  # step failed. A caller that undoes its writes on a failed commit MUST leave a landed commit alone.
 
   # Domain(runtime.git-safety):
   # # A wiki commit never snapshots the shared index
@@ -123,12 +152,38 @@ def commit_paths(repo: Path, paths: list[str], message: str) -> CommitResult:
       return CommitResult(status = STATUS_UNCHANGED, sha = None)
     _git(repo, _Git.ADD, _Git.PATHS, *literal)
     _git(repo, _Git.COMMIT, _Git.MESSAGE, message, _Git.PATHS, *literal)
+  except (subprocess.CalledProcessError, OSError) as error:
+    raise WikiCommitError(f"git commit failed: {error}{_read_report(error)}") from error
+
+  # the commit is made; a failure to read its identifier is reported as one that left the commit in place
+  try:
     sha = _git(repo, _Git.REV_PARSE, _Git.HEAD).strip()
   except (subprocess.CalledProcessError, OSError) as error:
-    raise WikiCommitError(f"git commit failed: {error}") from error
+    raise WikiCommitError(
+      f"git commit landed but its identifier could not be read: {error}{_read_report(error)}", landed = True,
+    ) from error
 
   # the commit landed; report the new HEAD
   return CommitResult(status = STATUS_COMMITTED, sha = sha)
+
+
+def _read_report(error: BaseException) -> str:
+  """
+  Return what git and its hooks printed on stderr for a failed step, ready to follow the failure in a message.
+
+  Args:
+    error: The failure of a git step.
+
+  Returns:
+    The printed text led by a separator, or an empty string when the failure carries none.
+  """
+  # only a step git ran and failed carries what was printed
+  printed = getattr(error, "stderr", None)
+
+  # guard: git could not be started, or printed nothing
+  if not isinstance(printed, bytes) or not printed.strip():
+    return ""
+  return f": {printed.decode(_ENCODING, errors = _DECODE_LOSSY).strip()}"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -146,6 +201,8 @@ def _git(repo: Path, *args: str) -> str:
     subprocess.CalledProcessError: If git exits non-zero.
     OSError: If git cannot be started.
   """
+  # git's output is taken as bytes, so its exit status alone tells success from failure; whatever a hook or git
+  # printed is decoded afterwards, a byte that is not valid text becoming a replacement mark
   return subprocess.check_output(
-    [ _Git.EXE, *args ], cwd = str(repo), text = True, encoding = _ENCODING, stderr = subprocess.PIPE,
-  )
+    [ _Git.EXE, *args ], cwd = str(repo), stderr = subprocess.PIPE,
+  ).decode(_ENCODING, errors = _DECODE_LOSSY)

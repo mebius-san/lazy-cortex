@@ -1,5 +1,5 @@
 ---
-name: lazy-spec.research-playbook
+name: lazy-spec.research-type
 description: Type playbook for research assets — a research design (the question) written by the designer and validated by the researcher, then the researcher's report (the answer) written through the `Start research` row and accepted by review; the approved report is the deliverable, a citable, immutable document, and its approval closes `spec_released` itself — no release, no version tag.
 ---
 # Research type playbook — an asset whose deliverable is the answer itself
@@ -15,8 +15,7 @@ This file is the law of the wake on which `spec.coordinator` works an asset whos
 - **No `vision.md`.** The type declares `vision: none`, like `bug`: the questions and the decision that depends on the answers live in the research design itself, and a vision would restate them.
 - **`cancelled` is refused on `design.md` on its own** — research that stopped being needed is abandoned as a whole through `spec_cancelled`, which moves `design.md` to `cancelled` together with its asset.
 - **Location is not a fact of the type.** The declaration's `default_path` places new research at the product root by default, but the asset is legal anywhere, nesting inside the folder of the feature whose question it settles included. Type resolution reads `spec_asset_type`, never a path; the asset boundary stays the folder whose folder-note carries `spec_role: status`.
-- **Tools are known from creation.** The type declaration names `default_tools: ["research"]`, and the scaffold writes that list into `spec_tools` when the asset is created. The `research` tool is the researcher who writes the report through the `Start research` writer-launch row below — not an implementation job, and never a release: a research asset is excluded from every release delta. Buying a second tool — say `docs`, to publish the conclusions outward — goes through a `[!question]` listing the candidates, never silently; `spec_tools` is extended through `note-set-key` once the operator answers.
-- **Legacy layout.** An asset whose folder carries `design.md` typed `design` and no `spec_tools` predates this form. It is migrated by hand — retype the document to `research-design` and set `spec_tools: ["research"]` on the status note; no shipped vault carries such an asset.
+- **The report has a playbook of its own.** How `research.md` is written, what reaches the researcher, what "done" means and how its acceptance cycle runs is `lazy-spec.research-job.md`, the playbook of the research report; it is read on every wake of this type together with this file. The researcher — the main writer of the `research-report` review class — writes the report through the `Start research` writer-launch row below — not an implementation job, and never a release: a research asset is excluded from every release delta.
 
 ## Gates
 
@@ -55,6 +54,6 @@ No architecture checkbox and no plan checkbox ever hang on this type: research i
 
 Research almost always spawns work — but never inside itself. New work is opened as a **new asset**: an expert or the coordinator raises an `[!asset-proposal]` citing the approved report, the coordinator materialises an asset of the appropriate type, and the new asset's documents cite the report by a wikilink.
 
-Mutating the research asset instead is forbidden: appending tools beyond the one bought through a `[!question]`, hanging an implementation checkbox of another tool on it, rewriting the approved report into a specification of a future feature — each destroys the thing the asset existed for. An approved research report is immutable as a citation: the very assets that grew out of it will point at it, and it must read the way it read at the moment of approval.
+Mutating the research asset instead is forbidden: hanging an implementation checkbox on it, rewriting the approved report into a specification of a future feature — each destroys the thing the asset existed for. An approved research report is immutable as a citation: the very assets that grew out of it will point at it, and it must read the way it read at the moment of approval.
 
 Research whose conclusion turns out to be wrong is not rewritten after the fact — a new one is opened, citing the previous report by a wikilink.

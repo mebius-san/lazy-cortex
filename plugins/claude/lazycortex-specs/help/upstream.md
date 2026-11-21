@@ -1,15 +1,15 @@
 ---
 chapter_type: block
 summary: Mirror external design repos into your vault and keep a spec doc's visible source list matching its frontmatter.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How an upstream unit becomes part of a spec"
   request: "flow diagram: upstream-run mirrors and diffs a unit from a foreign repo, an operator ticks its Take into work / Process update checkbox, a body-only request opens and freezes the unit to in-review, the request lands against an asset (recorded in spec_source_requests), and refresh-sources re-projects that attachment into the asset doc's visible Sources list"
 source_skills:
   - lazy-spec.upstream-run
   - lazy-spec.refresh-sources
-source_sha: 366f9a33136b31f461b921c6831415c2a11407ca
-surface_sha: c3018e4e2a4e0244c24da18448bb9ff2684a4636575c5d6e78782f7c889e4a36
+source_sha: cd5be25450dbd5c7ade3e7cc1ecf31d707a2f132
+surface_sha: f3a9c657b7290b93dd20390ad8e00650d1b6a99f5661c5a6cb4754f9ab1c0b77
 ---
 
 Some design material for your product doesn't start life in your spec vault — it lives in someone else's repository, updated on its own schedule. This block covers two jobs that keep your specs honest about material like that: pulling in what changed in a mirrored external source, and making sure a doc's visible list of sources actually matches what its frontmatter says it's built from.
@@ -28,7 +28,7 @@ A unit landing as `new` or `drifted` doesn't do anything on its own; it waits on
 
 Once a request from an upstream unit lands against one of your assets, that asset's `spec_source_requests` frontmatter gains the request's wikilink — but the doc body doesn't update itself. Run `/lazy-spec.refresh-sources <doc-path>` on that asset's authored doc and the `## Requests` list under its `# Sources` section catches up: the newly attached request appears as a bullet, any bullet whose wikilink is no longer in frontmatter drops out, and everything else you or another skill wrote there stays untouched. Nothing outside that section moves: the one-line descriptions on the asset's own note and on the product root are the coordinators' to keep current, and the counts on container notes are refreshed by their own event-driven writes.
 
-`/lazy-spec.upstream-run` never asks you a question and always finishes cleanly: a source that can't be reached is reported in the result and the other sources still run. It is also idempotent — re-running it with nothing changed upstream reports every previously processed unit as `processed` again.
+`/lazy-spec.upstream-run` never asks you a question. A source that can't be fetched is reported under errors and the other sources still run, so one unreachable repo never aborts the pass. The summary it renders shows how many units were considered, how many this pass visited, how many carry new work, and one line per status. If something inside the pass itself failed — a unit that raised while being advanced, a source whose planning or note update raised, or one of the pass's own bookkeeping writes — the run reports that the pass failed and names each one; every unit and source not named was still handled normally, and the next pass retries the failed ones. It is also idempotent — re-running it with nothing changed upstream reports every previously processed unit as `processed` again.
 
 In practice: reach for `/lazy-spec.upstream-run` when you want to know right now what changed in a mirrored source instead of waiting on the schedule. Reach for `/lazy-spec.refresh-sources` any time you've hand-edited a doc's `spec_source_docs` / `spec_source_requests`, or after a request — upstream-derived or otherwise — has landed and you want the doc's visible Sources section to actually say so.
 
@@ -40,6 +40,8 @@ In practice: reach for `/lazy-spec.upstream-run` when you want to know right now
 
 - **Every count is `0`.** No source is configured under `spec.upstream` yet, or a mount's `units` glob matches nothing in the source's current tree. Add a source entry or widen the glob.
 - **A message appears under errors.** That source's URL or branch was unreachable, or an existing clone's origin no longer matches the configured URL (the clone is never re-pointed automatically). The other sources still ran normally, and the failing source's units stay as the last successful fetch left them.
+- **The summary says the pass failed and names `writes_failed`.** The `upstream/` folder's own note or the position the next pass resumes from could not be written, usually because the disk is read-only or full; the message is listed under errors. Free the path and run the pass again: the note is seeded on the next run, and until the resume position is written every pass starts from the same unit.
+- **The summary says the pass failed and names `units_failed` or `sources_failed`.** One unit or one source raised; its message under errors names it. Everything else was still handled, and the next pass retries the failed one.
 - **A unit stays `new` with no checkbox.** Open its folder-note's `# Actions` section. A unit whose mirrored root note carries `spec_role: status` without `spec_released: true` is deliberately gated and gets no checkbox until the upstream asset is published.
 - **`/lazy-spec.refresh-sources` refuses a doc.** It only accepts a stage-bearing authored doc (design, code plan, test plan, bug, or tech). A status folder-note or a code/test report carries no `spec_source_docs` and is rejected, with the reason `folder-note` for a status or level note and `no-source-docs` for a doc whose type is undeclared or has no stages. Run it on one of that folder's authored docs instead.
 

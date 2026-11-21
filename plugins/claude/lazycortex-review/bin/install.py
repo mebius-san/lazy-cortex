@@ -264,6 +264,8 @@ def _resolve_branch(repo: Path, existing: dict) -> str:
   proc = subprocess.run(
       ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
       capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
   )
   return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else _FALLBACK_BRANCH
 
@@ -407,6 +409,8 @@ def _run_core_settings(cli: Path, repo: Path, verb: str, *, section: str, payloa
       [ sys.executable, str(cli), verb, section, _CoreCommand.VERBATIM_FLAG, _CoreCommand.CWD_FLAG, str(repo) ],
       input = None if payload is None else json.dumps(payload),
       capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
   )
 
   # guard: the verb refused — its error text, else its stderr, is the reason
@@ -507,6 +511,8 @@ def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
             _CoreCommand.CWD_FLAG, str(repo),
         ],
         capture_output = True, text = True, check = False, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
     )
 
     # guard: the verb refused — a rejected config must not pass for a reconciled routine

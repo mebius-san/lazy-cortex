@@ -233,7 +233,8 @@ def load_settings_section(section: str, *,
 
   Raises:
     KeyError: If `scope` is not one of `tracked`, `local`, `merged`.
-    json.JSONDecodeError: If the settings file read is not valid JSON.
+    ValueError: If the settings file read is not valid JSON (a `json.JSONDecodeError`) or its top level is not a JSON
+      object.
   """
 
   # Contract:
@@ -272,7 +273,8 @@ def load_verbatim_section(section: str, *, cwd: Path | str | None = None, home: 
     The section dict as stored, or `None` when the file is missing or does not carry the section.
 
   Raises:
-    json.JSONDecodeError: If the settings file is not valid JSON.
+    ValueError: If the settings file is not valid JSON (a `json.JSONDecodeError`) or its top level is not a JSON
+      object.
   """
   # the tracked file answers as stored: no stub, no overlay
   return load_verbatim_tracked_section(resolve_settings_path(cwd, home = home), section)
@@ -415,12 +417,13 @@ def cmd_settings_get(argv: list[str]) -> int:
 
   Returns:
     Process exit code: 0 on success, 1 when a `--verbatim` read meets a settings file that is not
-    valid JSON (an `error` JSON is printed).
+    valid JSON or whose top level is not a JSON object (an `error` JSON naming the file is printed).
 
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser; this
       includes `--verbatim` combined with `--key` or a scope other than `tracked`.
-    json.JSONDecodeError: If the settings file read is not valid JSON on a non-verbatim read.
+    ValueError: If the settings file read is not valid JSON (a `json.JSONDecodeError`) or its top level is not a
+      JSON object, on a non-verbatim read.
   """
   # the verb's command line: the shared section / key / scope / root arguments with every read scope
   # waiver: argparse CLI signature and help strings, not domain keys
@@ -438,7 +441,7 @@ def cmd_settings_get(argv: list[str]) -> int:
       parser.error("--verbatim reads a whole tracked section; it takes neither --key nor another --scope")
     try:
       print(json.dumps(load_verbatim_section(args.section, cwd = args.cwd, home = args.home)))
-    except json.JSONDecodeError as error:
+    except ValueError as error:
       print(json.dumps({ ConfirmKey.ERROR: f"{resolve_settings_path(args.cwd, home = args.home)}: {error}" }))
       return 1
     return 0

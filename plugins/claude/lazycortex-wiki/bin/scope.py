@@ -688,6 +688,8 @@ class ScopeResolver:
     Guarantees:
       - The enumeration is sorted and duplicate-free, so the same repository and scope config
         always yield the same list in the same order.
+      - A file whose bytes are not UTF-8 text is left out and named on stderr; a file that merely cannot be read
+        stays a node.
 
     Notes:
       - Only the directories the scope's `paths` globs name are walked, so the cost follows the size of the
@@ -699,12 +701,18 @@ class ScopeResolver:
     Returns:
       Sorted list of absolute `Path` objects for the scope's curated nodes — files matching a
       `paths` glob, minus those an `exclude_paths` glob names, minus the topics index, minus
-      whatever the scope's optional `filter` rejects.
+      whatever the scope's optional `filter` rejects, minus files whose bytes are not UTF-8 text.
     """
 
     # Contract:
     # The enumeration MUST be sorted and duplicate-free, so the same repository
     # and scope config always yield the same list in the same order.
+
+    # Contract:
+    # A file whose bytes are not UTF-8 text is NOT a node of any scope and is named on stderr:
+    # every consumer of the enumeration reads its nodes as text, and one undecodable file must not
+    # fail them all. A file that merely cannot be read right now stays a node — a read error is
+    # not evidence it is gone.
 
     paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
     exclude_globs = self._effective_excludes(cfg)
@@ -734,16 +742,52 @@ class ScopeResolver:
           break
         seen_abs.add(ap)
 
-        # collect only real files that clear the scope's optional frontmatter filter — a
-        # filtered node (e.g. review_active: true) drops out of the index entirely, so other
-        # nodes do not link to it while the flag is set.
-        if ap.is_file() and self._passes_filter(cfg, full):
+        # guard: a glob can match a directory or a dangling link — only a real file is a node
+        if not ap.is_file():
+          break
+
+        # guard: an undecodable file is left out, and said so — a node that silently vanished
+        # would read as deleted to whoever compares two enumerations
+        if self._is_undecodable(full):
+          print(f"wiki scope: {rel} is not UTF-8 text — left out of the scope", file = sys.stderr)
+          break
+
+        # collect only files that clear the scope's optional frontmatter filter — a filtered
+        # node (e.g. review_active: true) drops out of the index entirely, so other nodes do
+        # not link to it while the flag is set.
+        if self._passes_filter(cfg, full):
           candidates.append(ap)
         break
 
     # walk order is filesystem-dependent — sort so callers get a stable enumeration
     candidates.sort()
     return candidates
+
+  # ------------------------------------------------------------------
+  def find_all_linked_nodes(self, cfg: dict) -> list[str]:
+    """
+    List the scope's files that are themselves symbolic links, under the names they have in the tree.
+
+    The node enumeration names a linked file by the file it leads to, so a node that is itself a link is
+    invisible there; this listing is where such a node is found.
+
+    Args:
+      cfg: A single scope-config dict (the value side of a `wiki.scopes` entry).
+
+    Returns:
+      Sorted repo-relative POSIX paths of the files matching a `paths` glob, and no `exclude_paths` glob, that
+      are symbolic links leading to a file; empty when the scope holds none.
+    """
+    paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
+    exclude_globs = self._effective_excludes(cfg)
+
+    # the same walk the node enumeration makes, keeping the link's own spelling instead of what it leads to
+    return sorted({
+      rel for full, rel in self._list_glob_files(paths_globs)
+      if full.is_symlink() and full.is_file()
+      and any(self._matcher.match(rel, pat) for pat in paths_globs)
+      and not any(self._matcher.match(rel, ep) for ep in exclude_globs)
+    })
 
   # ------------------------------------------------------------------
   def _list_glob_files(self, paths_globs: list[str]) -> list[tuple[Path, str]]:
@@ -869,9 +913,34 @@ class ScopeResolver:
     # limit: one frontmatter read per markdown candidate, cache by mtime if a walk ever drags
     try:
       text = abs_path.read_text(encoding = self._ENCODING)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+      # bytes that are not UTF-8 text are as unreadable as a missing file
       return False
     return _parse_frontmatter(text).get(self._WIKI_ROLE_KEY) == self._TOPICS_INDEX_ROLE
+
+  # ------------------------------------------------------------------
+  def _is_undecodable(self, abs_path: Path) -> bool:
+    """
+    Return whether the bytes of the file at `abs_path` are not UTF-8 text.
+
+    Args:
+      abs_path: Absolute path to the candidate node file.
+
+    Returns:
+      True only when the file was read and its bytes are not UTF-8; False when it reads as UTF-8 text or cannot be
+      read at the moment.
+    """
+
+    # every consumer of the enumeration reads its nodes as text, so the file is decoded once here
+    # limit: one whole-file read per candidate, cache by mtime if a walk ever drags
+    try:
+      abs_path.read_text(encoding = self._ENCODING)
+    except OSError:
+      # a file that cannot be read right now is not shown to be undecodable
+      return False
+    except UnicodeDecodeError:
+      return True
+    return False
 
   # ------------------------------------------------------------------
   def _passes_filter(self, cfg: dict, abs_path: Path) -> bool:
@@ -897,7 +966,8 @@ class ScopeResolver:
       return True
     try:
       text = abs_path.read_text(encoding = self._ENCODING)
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+      # bytes that are not UTF-8 text are as unreadable as a missing file
       text = ""
     return _match_filter(flt, _parse_frontmatter(text), abs_path)
 

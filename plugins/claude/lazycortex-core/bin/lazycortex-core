@@ -830,7 +830,9 @@ def _query_git_toplevel() -> str:
     The checkout's top-level directory, or an empty string outside a checkout.
   """
   return subprocess.run([ _Probe.GIT, _Probe.GIT_REV_PARSE, _Probe.GIT_SHOW_TOPLEVEL ],
-                        capture_output = True, text = True, check = False, encoding = _ENCODING).stdout.strip()
+                        capture_output = True, text = True, check = False, encoding = _ENCODING,
+                        # waiver: stdlib decode-error mode, not a domain constant
+                        errors = "surrogateescape").stdout.strip()
 
 
 def _print_error(message: str) -> int:
@@ -1095,9 +1097,10 @@ def _cmd_dispatch_job() -> int:
   Queue an expert job for a sibling plugin from a JSON job bundle.
 
   Reads the bundle from stdin as
-  `{ "expert": "<name>", "payload": {...}, "protocols": [...], "source": [repo-relative path, ...],
-  "context": [repo-relative path, ...], "source_inline": {filename: text}, "context_inline": {filename: text},
-  "result": [filename, ...], "job_id": "...", "dedup_key": "..." }`.
+  `{ "expert": "<name>", "payload": {...}, "protocols": [...],
+  "source": [{"path": "<repo-relative path>"}, ...], "context": [{"path": "<repo-relative path>"}, ...],
+  "source_inline": {filename: text}, "context_inline": {filename: text},
+  "result": [{"path": "result/<filename>"}, ...], "job_id": "...", "dedup_key": "..." }`.
   `source` and `context` name working-tree paths that the pump copies into the job's buckets when it claims the job;
   `source_inline` and `context_inline` carry text that no file holds and are written at dispatch.
 
@@ -1427,7 +1430,9 @@ def _is_daemon_alive(repo: Path) -> bool:
     if shutil.which(_Probe.LAUNCHCTL) is None:
       return False
     probe = subprocess.run([ _Probe.LAUNCHCTL, _Probe.LAUNCHCTL_LIST, _Probe.LAUNCHD_LABEL.format(repo.name) ],
-                           capture_output = True, text = True, check = False, encoding = _ENCODING)
+                           capture_output = True, text = True, check = False, encoding = _ENCODING,
+                           # waiver: stdlib decode-error mode, not a domain constant
+                           errors = "replace")
     return probe.returncode == 0 and _Probe.LAUNCHD_PID in probe.stdout
 
   # guard: same reasoning for a non-systemd host
@@ -1438,6 +1443,8 @@ def _is_daemon_alive(repo: Path) -> bool:
   probe = subprocess.run(
     [ _Probe.SYSTEMCTL, _Probe.SYSTEMCTL_USER, _Probe.SYSTEMCTL_IS_ACTIVE, _Probe.SYSTEMD_UNIT.format(repo.name) ],
     capture_output = True, text = True, check = False, encoding = _ENCODING,
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace",
   )
   return probe.returncode == 0 and probe.stdout.strip() == _Probe.SYSTEMD_ACTIVE
 
@@ -1512,7 +1519,13 @@ def _cmd_runtime_tick(repo: Path, argv: list[str]) -> int:
       # guard: skip stray files beside the per-expert directories
       if not edir.is_dir():
         continue
-      for jdir in edir.iterdir():
+
+      # an expert folder that cannot be listed counts nothing; the pump names it in its own tick
+      try:
+        bundles = list(edir.iterdir())
+      except OSError:
+        continue
+      for jdir in bundles:
         # guard: skip stray files beside the job bundles
         if not jdir.is_dir():
           continue

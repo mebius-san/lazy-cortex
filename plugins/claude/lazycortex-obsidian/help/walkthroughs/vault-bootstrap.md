@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
@@ -81,7 +81,10 @@ snippets, then chains into `/lazy-obsidian.diagram-install` — no per-chain
 opt-in, no separate commands. Enabling the plugin means full functionality;
 the chains and the snippet step always run.
 
-The full set of chained work happens inside this one invocation.
+The full set of chained work happens inside this one invocation. Once both
+chains and the snippet step are done, the install also seeds the model tier for
+the tag-page agent (`lazy-obsidian.gen-tag-pages`) in `lazy.settings.json`, so a
+later dispatch of that agent resolves a model without any extra setup.
 
 ### Step 2 — Iconize chain: three hard-dependency plugins
 
@@ -150,7 +153,18 @@ register (an older version wrote it), the chain refreshes it in place — your
 tuned `interval_sec` is carried over, everything else resets to the shipped
 defaults. If an older install also left a duplicate of that identity in
 `lazy.settings.json`'s `experts` table, this run prunes it — the routine's own
-identity is now the single record.
+identity is now the single record. A git-watch routine only sees commits made
+after it starts, so right after registering it the chain also runs one
+`reconcile` sweep to paint notes committed before the routine existed, and
+reports how many paths it touched (or that the vault was already clean).
+
+**Callbacks directory and legacy cleanup** — the chain creates an empty
+`.claude/callbacks/` directory (with a `.gitkeep`) where you can drop
+executables for exotic `callback:` matchers. It also removes a leftover
+pre-commit shim at `.githooks/pre-commit` from plugin versions before 3.0.0 —
+but only when the file carries the plugin's own version marker; a pre-commit
+file that is not the plugin's is left untouched. Commit-time repaint now
+belongs to the repaint routine, so the old shim could only misfire.
 
 **Gitignore entry** — Iconize's `data.json` at
 `.obsidian/plugins/obsidian-icon-folder/data.json` is appended to `.gitignore`
@@ -232,6 +246,9 @@ single `/lazy-obsidian.install` invocation. Scan it for:
   install wrote an older shape of the routine (its command, watch trigger,
   `ignore_halt` flag, or bot identity) and this run brought it current; your
   `interval_sec` tuning was preserved.
+- A **kept-orphan** note for a legacy `mermaid-no-bg.css` snippet — the diagram
+  chain leaves it in place; it is now redundant because mermaid fences carry a
+  transparent-background directive, and you can delete it by hand.
 - Any **failed:** outcome for `mermaid-popup` — note the reason and re-run
   `/lazy-obsidian.update-plugin mermaid-popup` when the network is available.
 - A `paint-roots-seeded=<vault_root>` annotation on the icon-map line (Step 3)

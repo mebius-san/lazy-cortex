@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -42,8 +42,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 49d309d84336429def584f483a8a73623a1948c2
-surface_sha: 9f4390c6fb130a83e92980c920d7bc168e44b1867b47165571e95dfe6b2a5468
+source_sha: 89f50038ff1a4fc16921c20d9fabda3c6653800a
+surface_sha: dd37e6c97f7b84abab2456fa0653018464a1c69440df2a93862397aa72b424b6
 ---
 # Troubleshooting
 
@@ -1072,7 +1072,17 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix (protocols argument)**: Pass a JSON array literal — `'[]'` for no protocols, or `'["plugin:protocol-name"]'` to attach one — then re-dispatch with the corrected argument.
 
-**Fix (io argument)**: Pass a JSON object literal — `'{}'` for none, or `'{"source": ["docs/spec.md"]}'` to name source/context files — then re-dispatch with the corrected argument.
+**Fix (io argument)**: Pass a JSON object literal — `'{}'` for none, or `'{"source": [{"path": "docs/spec.md"}]}'` to name source/context files — then re-dispatch with the corrected argument. Each entry is a `{"path": "..."}` object, never a bare string.
+
+---
+
+## `/lazy-expert.dispatch-job` refuses a `source`, `context`, or `result` entry: "entries must be {"path": "<string>"} objects"
+
+**Symptom**: `/lazy-expert.dispatch-job` returns an error saying that `source` / `context` / `result` entries must be `{"path": "<string>"}` objects, and no job is queued.
+
+**Likely cause**: One of the entries was passed as a bare string (`"docs/spec.md"`) or as an object without a string `path`. Every entry of those lists must be a path object, the same shape path entries have in a job's request and response files.
+
+**Fix**: Write each `source` / `context` entry as `{"path": "<repo-relative path>"}` (an optional `description` may sit beside `path`), and each `result` entry as `{"path": "result/<filename>"}`. If you hold text that no file carries, pass it as `source_inline` / `context_inline` instead, then re-dispatch.
 
 ---
 

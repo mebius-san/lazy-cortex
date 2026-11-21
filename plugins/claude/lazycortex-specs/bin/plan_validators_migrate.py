@@ -24,9 +24,13 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
+
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 # Decision: only the bare class tokens match, never a product-scoped `<kind>@<key>` class — a scoped class exists to
 # hold the reviewer an operator wired for one product, and that choice is not a seeded default to retire.
@@ -83,8 +87,8 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
     the class tokens that lost their validators, in list order.
 
   Raises:
-    RuntimeError: When the core CLI cannot be resolved or started, a core call runs past its time limit, its output
-      cannot be decoded, a core call exits non-zero, or `settings-get` prints anything but JSON.
+    RuntimeError: When the core CLI cannot be resolved or started, a core call runs past its time limit or exits
+      non-zero, or `settings-get` prints anything but JSON.
   """
 
   # Contract:
@@ -173,15 +177,16 @@ def _call_core(repo: Path, *args: str) -> str:
     The verb's stdout.
 
   Raises:
-    RuntimeError: When the core CLI cannot be resolved or started, runs past its time limit, its output cannot be
-      decoded, or the verb exits non-zero.
+    RuntimeError: When the core CLI cannot be resolved or started, runs past its time limit, or the verb exits
+      non-zero.
   """
-  # a spawn the system refuses, a call that runs past its time limit, or output that is not UTF-8 is a failed core
-  # call like any other
+  # a spawn the system refuses, or a call that runs past its time limit, is a failed core call like any other;
+  # undecodable output bytes are replaced, never raised on
   try:
     res = subprocess.run(
         [ sys.executable, str(spec_paths.resolve_core_cli(repo)), *args, _CWD_FLAG, str(repo) ],
         cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+        errors = _DECODE_ERRORS,
         timeout = _CORE_TIMEOUT_S,
     )
   except subprocess.TimeoutExpired as error:

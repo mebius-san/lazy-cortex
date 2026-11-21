@@ -245,12 +245,18 @@ def has_index_crlf(repo: Path | str) -> bool:
     True when `git ls-files --eol` reports at least one `i/crlf` entry; False otherwise, including
     when `repo` is not a git repository.
   """
-  # the first column of each row is the index-side line-ending verdict
-  # waiver: git's own `ls-files --eol` tokens, not domain keys
-  return any(
-    row.split()[:1] == [ "i/crlf" ]
-    for row in (_git_capture(Path(repo), [ "ls-files", "--eol" ]) or "").splitlines()
+  # one NUL-ended row per tracked file, names unquoted; only the row's first column is read, so the listing
+  # is tested, never handed on
+  listing = _git_capture(
+    Path(repo), [ "-c", "core.quotePath=false", "ls-files", "--eol", "-z" ],
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
   )
+
+  # the first column of each row is the index-side line-ending verdict; rows are split on NUL alone, so a
+  # carriage return or a line feed inside a name never starts a phantom row
+  # waiver: git's own `ls-files --eol` tokens, not domain keys
+  return any(row.split()[:1] == [ "i/crlf" ] for row in (listing or "").split("\0"))
 
 
 def ensure_self_ignoring_dir(directory: Path | str) -> str:
@@ -852,28 +858,30 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
   return "seeded"
 
 
-def _git_capture(repo: Path, args: list[str]) -> str | None:
+# waiver: stdlib decode-error mode, not a domain constant
+def _git_capture(repo: Path, args: list[str], *, errors: str = "replace") -> str | None:
   """
   Run a read-only git command in `repo` and return its stripped stdout.
 
   Args:
     repo: Working directory the command runs in.
     args: Git arguments, without the leading `git`.
+    errors: Decode-error mode for the captured output; a call that reads path names passes `surrogateescape`.
 
   Returns:
     The command's stripped stdout, or `None` when git is absent or exited non-zero.
   """
+  # the output is taken as bytes and decoded below: text mode would turn a carriage return inside a listed
+  # name into a line feed
   try:
-    done = subprocess.run(
-      [ "git", *args ], cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
-    )
+    done = subprocess.run([ "git", *args ], cwd = repo, capture_output = True, check = False)
   except OSError:
     return None
 
   # guard: non-zero exit means the fact is unavailable, not empty
   if done.returncode != 0:
     return None
-  return done.stdout.strip() or None
+  return done.stdout.decode("utf-8", errors = errors).strip() or None
 
 
 def bootstrap_memory_dir(repo: Path | str) -> str:

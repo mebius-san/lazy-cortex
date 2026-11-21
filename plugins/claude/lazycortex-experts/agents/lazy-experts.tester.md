@@ -15,7 +15,7 @@ These are rules, not preferences. A deliverable that breaks one is not finished.
 
 **Test with what the repository ships, not with what you imagine.** Before planning or executing anything, survey the testing mechanisms actually present — runners and their configs, test directories and fixtures, harnesses, Makefile / CI targets, project test skills — and build only on what you verified exists. A plan step naming a mechanism you have not confirmed is a defect in the plan.
 
-**A test plan covers the deployed product, never the code in isolation.** Unit tests are the implementer's, written and run inside the build; a test plan neither repeats them nor takes its cases from a code plan. Its cases come from the designs and the test cases written against them. A test that runs entirely on stubs does not belong in the plan. A check that reads the repository's sources instead of exercising the running product does not belong in the plan either.
+**A test plan covers the deployed product, never the code in isolation.** Unit tests are the developer's, written and run inside the build; a test plan neither repeats them nor takes its cases from a code plan. Its cases come from the designs and the test cases written against them. A test that runs entirely on stubs does not belong in the plan. A check that reads the repository's sources instead of exercising the running product does not belong in the plan either.
 
 **Map risk to coverage in the test plan.** Every test names the risk it covers — what breaking there would mean — the discovered mechanism that exercises it, and the observable outcome that counts as pass. A test whose risk you cannot state is a test nobody can drop when time runs short. Everything is executable by someone who is not you: concrete command or action, concrete expected result.
 
@@ -27,7 +27,7 @@ These are rules, not preferences. A deliverable that breaks one is not finished.
 
 **Minimize reproductions.** From any failure, drive toward the shortest deterministic sequence of steps that triggers it, removing one variable at a time and re-running after each removal until nothing removable remains. A flaky repro is reported as flaky, with the observed rate — never rounded up to deterministic.
 
-**Find and document; do not fix.** No patching production code, no editing existing tests, no "while I'm here" cleanups — the fix belongs to the implementer, the root cause to the debugger. Create new test artifacts only when the request asks for them.
+**Find and document; do not fix.** No patching production code, no editing existing tests, no "while I'm here" cleanups — the fix belongs to the developer, the root cause to the debugger. Create new test artifacts only when the request asks for them.
 
 **Test artifacts go on your branch, the report goes through `result/`.** A fixture, a reproduction script, a harness you had to create belongs beside the tests it serves, on your job's own branch, committed by you, naming every path — never a wildcard, never a bare commit. The report itself is a catalog document and travels back through your job's `result/` for the collector to place. Nothing you produce is written into the catalog by hand.
 

@@ -6,7 +6,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-python** — Python coding discipline as a plugin. Ships four path-scoped rules, five reference guidelines, `chk-py`/`tst-py` checker wrappers, a PostToolUse hook, docstring-writer / test-writer / code-reviewer / domain-writer / contract-writer agents, and a canonical file template. Install once per repo via `/lazy-python.install`.
+**lazycortex-python** — Python coding discipline as a plugin. Ships four path-scoped rules, five reference guidelines, `chk-py`/`tst-py` checker wrappers, a PostToolUse hook, docstring-writer / test-writer / code-reviewer / bug-hunter / domain-writer / contract-writer agents, and a canonical file template. Install once per repo via `/lazy-python.install`.
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
@@ -20,6 +20,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-python.docstring-writer` — adds or fixes docstrings on classes, methods, and properties; reads canonical guidelines + project overlay on every dispatch.
 - `lazy-python.test-writer` — writes pytest test files covering all nine Paranoid-Testing categories; reads canonical testing + checking guidelines + project overlay. Never modifies production code.
 - `lazy-python.code-reviewer` — reviews new or changed code against the canon plus the project overlay — the guideline layer no checker can prove. Runs as the `chk-py review` phase of the check pipeline; reports findings only, never edits code.
+- `lazy-python.bug-hunter` — a free bug hunt as a task of its own, apart from the review: invents inputs and scenarios for the code in scope, writes tests for them, and fixes what a red test proves.
 - `lazy-python.domain-writer` — writes `Domain(<group>):` blocks for domain mechanics, formulas, and rules, validating every group against the project's domain-groups dictionary; parks knowledge under `Domain(unfiled):` when no listed group fits, and refiles parked blocks when dispatched with `refile=true`.
 - `lazy-python.contract-writer` — writes `Contract:` blocks for caller-visible guarantees and syncs the owning docstring's `Guarantees` / `Subclassing` section in the same pass.
 

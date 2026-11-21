@@ -446,54 +446,112 @@ def find_repo_root(cwd: str | None = None) -> str | None:
     The repository root path, or None when `cwd` is not inside a git repository or the
     `git` binary is unavailable.
   """
+  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
   try:
-    root = subprocess.check_output(
+    root = os.fsdecode(subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
       stderr = subprocess.DEVNULL,
-      text = True,
-      cwd = cwd, encoding = "utf-8",
-    ).strip()
+      cwd = cwd,
+    )).strip()
   except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError, OSError):
     return None
   return root or None
 
 
+def _parse_raw_names(raw: str) -> list[str]:
+  """
+  Read the file names out of a NUL-separated `git diff --raw` listing.
+
+  Args:
+    raw: The raw listing, its fields separated by NUL.
+
+  Returns:
+    One name per listed file, in listing order; a renamed or copied file is named by its new path.
+  """
+  # each entry is a `:`-led field of modes, hashes and a status, followed by one path, or two for a rename or copy
+  fields = raw.split("\0")
+  names: list[str] = []
+  index = 0
+  while index < len(fields):
+    entry = fields[index]
+    index += 1
+
+    # guard: only a `:`-led field opens an entry
+    # waiver: git raw-diff entry marker, not a domain constant
+    if not entry.startswith(":"):
+      continue
+
+    # the status letter is the entry's last word; a rename or a copy carries the old path before the new one
+    # waiver: git raw-diff status letters and field layout, not domain constants
+    width = 2 if entry.rsplit(" ", 1)[-1][:1] in "RC" else 1
+    paths = fields[index:index + width]
+    index += width
+
+    # the file's staged name is the last path of its entry
+    if paths:
+      names.append(paths[-1])
+  return names
+
+
 def collect_staged_added_lines(root: str) -> list[tuple[str, str]]:
   """
-  Collect the added lines of the repository's staged diff as `(file, line)` pairs.
+  Collect the added lines of the repository's staged diff as `(file, line)` pairs, each filed under the name git
+  lists for its file.
 
   Age-encrypted files (`.age`) are dropped — they are unreadable by design and can only
   produce false positives.
+
+  Guarantees:
+    - Every staged added line is attributed to the file it belongs to, whatever characters the file's name
+      holds; the name is the exact path as git records it, never a quoted or escaped spelling.
 
   Args:
     root: Absolute path to the repository root whose index is read.
 
   Returns:
-    The `(repo-relative path, added line content)` pairs of the staged diff, empty when
-    nothing is staged or git is unavailable.
+    The `(repo-relative path, added line content)` pairs of the staged diff, where each path is the name git
+    lists for the file whatever characters it holds; empty when nothing is staged or git is unavailable.
   """
+
+  # Contract:
+  # Every staged added line is attributed to the file it belongs to, whatever characters the file's name
+  # holds. The attributed name is the exact path as git records it, never a quoted or escaped spelling, so
+  # a check that scans or waives by file never misses or misplaces a line because of an unusual name.
+
+  # one call returns the staged files as a NUL-separated raw listing followed by the patch, so the names and
+  # the patch come from the same reading of the index; the output is taken as bytes and decoded below
   try:
-    diff = subprocess.check_output(
-      [ "git", "diff", "--cached", "--diff-filter=ACMR", "-U0" ],
+    output = subprocess.check_output(
+      [ "git", "-c", "core.quotePath=false", "diff", "--cached", "--diff-filter=ACMR", "--raw", "-z", "-U0" ],
       stderr = subprocess.DEVNULL,
-      text = True,
-      cwd = root, encoding = "utf-8",
+      cwd = root,
     )
   except (subprocess.CalledProcessError, FileNotFoundError):
     return []
 
-  # parse diff into (file, line_content) pairs — only added lines
+  # an empty field closes the raw listing; the names keep undecodable bytes as surrogate escapes, the patch
+  # text is only scanned, so its undecodable bytes are replaced
+  # waiver: git diff-output separator and stdlib codec names, not domain constants
+  raw, _, patch = output.partition(b"\0\0")
+  # waiver: stdlib codec and decode-error mode names, not domain constants
+  names = _parse_raw_names(raw.decode("utf-8", errors = "surrogateescape"))
+
+  # parse diff into (file, line_content) pairs — only added lines; the patch lists its files in the order of
+  # the raw listing, so each file header takes the next exact name instead of its own quoted spelling
+  header_count = 0
   current_file = None
   added_lines = []
-  for line in diff.splitlines():
+  # waiver: stdlib codec and decode-error mode names and line terminators, not domain constants
+  for line in patch.decode("utf-8", errors = "replace").split("\n"):
     # waiver: git diff-output token, not a domain constant
     if line.startswith("diff --git"):
-      match = re.search(r" b/(.+)$", line)
-      if match:
-        current_file = match.group(1)
+      # a header past the end of the listing keeps its own text as the name, so its lines are never dropped
+      current_file = names[header_count] if header_count < len(names) else line
+      header_count += 1
     elif line.startswith("+") and not line.startswith("+++"):
       if current_file:
-        added_lines.append((current_file, line[1:]))
+        # waiver: line terminator of a CRLF file, not a domain constant
+        added_lines.append((current_file, line[1:].removesuffix("\r")))
 
   # Domain(guard.public-scan):
   # # Encrypted content is out of scope for plaintext scanning

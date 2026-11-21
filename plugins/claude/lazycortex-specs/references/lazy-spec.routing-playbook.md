@@ -9,7 +9,7 @@ Request routing is a coordinator MODE, dispatched at the terminal group of the r
 
 **Tools, unchanged.** `lazy-spec.request-classify` and `lazy-spec.request-find-candidates` remain the coordinator's instruments in this mode — the same classification (a closed meta-class set plus the target product's open asset-type set) and the same candidate search over every declared asset type.
 
-**No target descriptions.** A routing line carries only its verb and structural fields — kind, slug, `product=`, `path=`, `tools=`, `targets=`, `drop=`. The coordinator writes no per-target prose for the apply step to seed: apply seeds nothing onto any target, and every downstream writer reads the request file itself from its own job context (`spec_source_requests` resolved via `context_from_frontmatter`), never a re-telling. A legacy `:: <description>` tail or `docs=` field on an old request is tolerated at parse time and ignored.
+**No target descriptions.** A routing line carries only its verb and structural fields — kind, slug, `product=`, `path=`, `targets=`, `drop=`. The coordinator writes no per-target prose for the apply step to seed: apply seeds nothing onto any target, and every downstream writer reads the request file itself from its own job context (`spec_source_requests` resolved via `context_from_frontmatter`), never a re-telling. A legacy `:: <description>` tail, `docs=` field or `tools=` field on an old request is tolerated at parse time and ignored.
 
 **Duplicate-behavior check.** Before proposing a spawn, the coordinator checks whether the request already describes something the code does today, through the same research routes any expert's research-aspect uses against the target product — `lazy-wiki.structure` query mode, `/lazy-wiki.domains`, `lazy-spec.lookup`. A capability the check finds already implemented is never spawned silently — it routes as a `reference` line (below) with its rationale stated in the routing section's prose; when the overlap is ambiguous — code that partially matches, or a candidate that may or may not be the same thing — the coordinator raises it through the same operator `[!question]` confirmation this chapter already gates routing behind, rather than guessing.
 
@@ -20,8 +20,6 @@ Request routing is a coordinator MODE, dispatched at the terminal group of the r
 **A spawn line names no documents.** A spawn creates the asset folder and its status folder-note alone — no authored docs, no review opened. Every document, `design.md` included, is created later, one launch-checkbox tick at a time, via the `seed-doc` primitive; which docs a type starts with is the launch ladder's business, not routing's. A legacy `docs=` field on an old request is tolerated at apply time and ignored.
 
 **`path=` is optional and names a PLACE.** Absent, the target type's `default_path` decides where the asset lands. This is a hint on write only: nothing ever resolves an asset's type back out of the folder it ended up in (Chapter 2).
-
-**`tools=` is optional.** The coordinator writes it when routing ALREADY knows what the work is made of — the request itself is explicit, or the target type declares `default_tools`. Absent, `spec_tools` is simply not written, the asset starts "not determined", and the type playbook's own moment of determination decides it later (Chapter 2).
 
 **`drop=` rides on an attach line.** It names the documents to remove from the existing target when the request is folded into it — the attach drop list (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.attach-drop-playbook.md`), supplied by the TARGET type's playbook. An attach line with no `drop=` means exactly "drop nothing": absence is a decision, not an omission to be filled in by the apply worker. Dropping is the whole of what an attach removes — no gate is flipped, whatever the asset type.
 
@@ -36,7 +34,7 @@ Request routing is a coordinator MODE, dispatched at the terminal group of the r
 **Grammar note — one structured block, four verbs.** The routing-decision block's full grammar (parsed by `apply_request.py`, documented verbatim in `lazy-spec.request-protocol.md`'s "Routing-block grammar" section) is:
 
 ```
-spawn <asset-type> <slug> [product=<key>] [path=<dir>] [tools=<tool>[,...]] [targets=<folder>/<slug>[,...]]
+spawn <asset-type> <slug> [product=<key>] [path=<dir>] [targets=<folder>/<slug>[,...]]
 spawn-product key=<key> path=<spec_path> :: <description>
 attach <repo-relative-folder-note-path | level-doc-path> [drop=<file>[,...]]
 reference <repo-relative-folder-note-path>

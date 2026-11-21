@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: ff30e9e27bc19afc6edd3e246ca4d4f3f890f4996d7a4665db966c70f6e961d3
+source_sha: 5048c26182621a44f9d4ab628e900ce399ae12f0
+surface_sha: e097d5b54cf4e0f827a0427e8e138c2e22bea7ea6c7f3c0851748b1d0bb9153d
 ---
 # Troubleshooting
 
@@ -318,6 +318,26 @@ surface_sha: ff30e9e27bc19afc6edd3e246ca4d4f3f890f4996d7a4665db966c70f6e961d3
 **Likely cause**: Usually expected — deploy restores Iconize's settings, but the per-path icon entries are painted live by Iconize and the bundled `iconize-reloader` from note frontmatter. If icons stay missing after Obsidian opens, Iconize's frontmatter settings are wrong: the manifest was captured before Iconize settings were recorded, so it carries none for Iconize.
 
 **Fix**: Open Obsidian (it repaints on load), or run `/lazy-obsidian.iconize-sync reconcile` to force the frontmatter reconciliation immediately. If icons still do not appear, check that `.obsidian/plugins/obsidian-icon-folder/data.json` has `iconInFrontmatterEnabled: true` and the field names `iconize_icon` / `iconize_color` under `settings` — `iconize-reloader` corrects them on load and whenever Iconize rewrites the file — then re-run `/lazy-obsidian.capture` so the manifest records them.
+
+---
+
+## Bookmarks or recently used icons are missing after `/lazy-obsidian.deploy`
+
+**Symptom**: After deploying on a new machine, Obsidian's bookmarks pane is empty and Iconize's recently used icons list is blank, even though the vault had both on the machine where it was captured.
+
+**Likely cause**: Expected. Bookmarks (`bookmarks.json`) and Iconize's recently used icons are per-device personal state. `/lazy-obsidian.capture` no longer records them, `/lazy-obsidian.deploy` never lays them down (even from a manifest that still carries them), and `/lazy-obsidian.audit` does not report them as drift. Each device keeps its own `.obsidian/bookmarks.json`, and nothing touches that file.
+
+**Fix**: Nothing to fix. Create the bookmarks you want on this device in Obsidian; they stay local to it.
+
+---
+
+## The manifest still carries bookmarks or recently used icons, or changes on every bookmark edit
+
+**Symptom**: `.obsidian.manifest.json` still contains a `bookmarks.json` entry or Iconize's recently used icons, or shows up in `git status` after bookmarks changed on another device and you pulled it.
+
+**Likely cause**: The manifest was captured by an earlier release, before this state became per-device. Until those two entries are stripped, they keep shipping one device's personal state to every clone that pulls the manifest.
+
+**Fix**: Run `/lazy-core.setup`. It runs the plugin's migration step, which removes exactly those two entries from the manifest and leaves every other key, its value and its order unchanged; it never reads or writes `.obsidian/`. Review the manifest diff and commit it. Later captures do not bring the entries back.
 
 ---
 

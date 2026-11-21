@@ -70,7 +70,9 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     The completed process, output captured as text; the caller reads the return code.
   """
   return subprocess.run([ "git", "-C", str(repo), *args ],
-                        check = False, capture_output = True, text = True, encoding = "utf-8")
+                        check = False, capture_output = True, text = True, encoding = "utf-8",
+                        # waiver: stdlib decode-error mode, not a domain constant
+                        errors = "replace")
 
 
 def main(argv: list[str]) -> int:

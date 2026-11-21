@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce vision + design + tech docs (and scaffold any candidate features), then runs lazy-spec.coverage to gap-scan the code against the spec tree and materialize anything missed; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
   - lazy-spec.coverage
-source_sha: 22b60f591c6dadaac3ba59e66718ced42828a208
-surface_sha: ecd8aef67ea5ab8b91497c800a71d2f8521e74ec65ce394205f529371db33d44
+source_sha: 2f7cbc6131378ad2fb07b51fdc460840760d310a
+surface_sha: 06c26273b29d8cec6d49568846d0542968922bd40a1d54c6cccfb001e66feed2
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -73,9 +73,9 @@ The key decisions you will make:
 - **Guidelines** (optional) — per-role file paths whose contents are folded into an expert's job context whenever an operator later ticks a launch checkbox on this product's assets, and into the expert jobs of the review rounds that run on this product's documents.
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug/content/research/release set now, or later via `/lazy-spec.add-asset-type`. The wizard delegates this: declaring a type is a separate run of that skill once the product is fully written and audited.
 - **Workflow mode** — `full` (the default: approved assets are implemented, tested and shipped by the product's releases) or `spec-only` (no releases: an asset is released only by an explicit operator word once its start document is approved). Most code-bound products want `full`.
-- **Release** — asked only for a product that owns releases (it has source, no enclosing product already declares source, and mode is `full`): the expert that leads every release build (the inherited default, an explicit expert, or a chain of your own), the manifest file whose version a published release reads and writes, and up to two deploy targets (`staging`, `production`) with their commands and addresses. Answering `none` to the manifest and deploy questions is fine. A nested product ships in its owner's releases and is not asked.
+- **Release** — asked only for a product that owns releases (it has source, no enclosing product already declares source, and mode is `full`): the expert that leads every release build (the inherited default, an explicit expert, or a chain of your own), the specialists that expert orders material from (one per role, derived from your registered experts — keep the derived list or change a role), the manifest file whose version a published release reads and writes, and up to two deploy targets (`staging`, `production`) with their commands and addresses. Answering `none` to the manifest and deploy questions is fine. In a new product the specialists question comes after the record is written, once the implementer is known. A nested product ships in its owner's releases and is not asked.
 
-A product nested under another product inherits language, guidelines, asset types, and workflow mode from its ancestors instead of being asked again; you can still declare its own value.
+A product nested under another product inherits language, guidelines, asset types, and workflow mode from its ancestors instead of being asked again; you can still declare its own value. A nested product may declare a `source` of its own only when its paths lie inside its parent's source paths — such a source narrows the code area for `sync-with-code` and the audit, and a path outside the parent's is refused.
 
 When the wizard finishes, the skill writes the product record into settings, creates the product folder with its folder-note — now the level note the `spec.catalog-coordinator` owns, carrying `spec_role: product`, the level gates (all starting `false`), and the coordinator's own sections (`# Summary`, `# Gates`, `# Attachments`, `# Status brief`, `# Coordinator rules`, `# Coordinator commands`, `# History`) alongside its précis and stats markers — plus a starter `vision.md` beside the note (an empty seed, skipped when the product already has a `vision.md` or a pre-vision `design.md`) and the shared vault-root request inbox. It then runs `/lazy-spec.audit` on the product and reports any issues. No review classes are generated here; your documents ride the shared classes `/lazy-spec.install` seeded.
 
@@ -94,7 +94,7 @@ The skill resolves your product's source binding, then fans out four parallel Ex
 
 Before it writes a single document, the skill groups Agent D's candidates by area and asks you, one area at a time, how that area enters the spec tree:
 
-- **nested product** — the area becomes a product of its own, registered under yours (`<compound-key>-<area>`) with the area's folder as its source path; it inherits your language, experts, asset types, and guidelines unless you give it its own. The skill runs `/lazy-spec.product-config` on your behalf to register it — you don't fill out that wizard a second time by hand.
+- **nested product** — the area becomes a product of its own, registered under yours (`<compound-key>-<area>`) with the area's folder as its source path; it inherits your language, experts, asset types, and guidelines unless you give it its own. The skill runs `/lazy-spec.product-config` on your behalf to register it, handing over the key, the spec path, and the area's folder as its source — the wizard asks only for what those leave open, and you don't fill out the whole wizard a second time by hand.
 - **group folder** — the area's candidates land together under a folder inside your product; the first one scaffolded seeds the folder's own note.
 - **flat** — the area's candidates land at the product root, same as any candidate with no area of its own.
 

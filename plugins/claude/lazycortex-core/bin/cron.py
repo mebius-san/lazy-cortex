@@ -25,14 +25,31 @@ with bare `python3`.
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from datetime import datetime
+  pass
 
 
 CronSpec = tuple[set[int], set[int], set[int], set[int], set[int]]
+
+# the scheduler's own search window: how far past the reference moment the next fire is looked for
+# waiver: inline numeric literals (years and the longest year in days), not domain constants
+DEFAULT_HORIZON_DAYS = 4 * 366
+
+# one full calendar cycle: every pairing of a weekday with a date, 29 February included, comes round
+# once in any 28 years that hold no century year without a leap day
+# waiver: inline numeric literals (years and the longest year in days), not domain constants
+CYCLE_HORIZON_DAYS = 28 * 366
+
+# a fixed start for a search over one full calendar cycle; the cycle it opens ends before 2100, the
+# nearest century year without a leap day
+# waiver: inline numeric literals (a calendar date), not domain constants
+CYCLE_START = datetime(2000, 1, 1, tzinfo = UTC)
+
+# the longest year in days, used to word a search window in years
+_DAYS_PER_LONG_YEAR = 366
 
 
 class CronError(ValueError):
@@ -201,31 +218,39 @@ def matches(spec: CronSpec, dt: datetime) -> bool:
   )
 
 
-def next_fire(spec: CronSpec, after_dt: datetime) -> datetime:
+def next_fire(spec: CronSpec, after_dt: datetime, *, horizon_days: int = DEFAULT_HORIZON_DAYS) -> datetime:
   """
   Find the next moment strictly after a reference time at which the cron spec fires.
 
   Args:
     spec: Tuple of five value sets as returned by `parse`.
     after_dt: Reference moment; the result is strictly greater than this value.
+    horizon_days: Length of the search window in days, counted from the reference moment; the default window
+      is four years, and a spec that fires only in rarer years needs a wider one.
 
   Returns:
     The next datetime at which `spec` fires, with second and microsecond zeroed.
 
   Raises:
-    CronError: If no firing moment exists within four years of the reference time,
-      indicating the specification is unsatisfiable (e.g. February 30).
+    CronError: If no firing moment exists within the search horizon of the reference time,
+      indicating the specification is unsatisfiable (e.g. February 30) or fires only beyond the horizon.
   """
   # advance to the next whole minute (cron's resolution) before scanning
   cur = after_dt.replace(second = 0, microsecond = 0) + timedelta(minutes = 1)
-  end = after_dt + timedelta(days = 4 * 366)
+  end = after_dt + timedelta(days = horizon_days)
+  _minute, _hour, day, month, dow = spec
 
-  # bounded linear scan at minute granularity; four years covers every valid 5-field pattern
+  # bounded linear scan: a day whose date or weekday the spec excludes is stepped over whole, and
+  # only the minutes of a day that can fire are walked one by one
   while cur < end:
+    # the day cannot fire at any minute → the scan resumes at the next midnight
+    if cur.day not in day or cur.month not in month or _python_weekday_to_cron(cur.weekday()) not in dow:
+      cur = (cur + timedelta(days = 1)).replace(hour = 0, minute = 0)
+      continue
     if matches(spec, cur):
       return cur
     cur += timedelta(minutes = 1)
-  raise CronError("no fire within 4 years; cron spec is unsatisfiable")
+  raise CronError(f"no fire within {horizon_days // _DAYS_PER_LONG_YEAR} years; cron spec is unsatisfiable")
 
 
 def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
@@ -238,6 +263,8 @@ def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
   Guarantees:
     - Any number of missed firing boundaries inside the checked interval collapses into
       a single True verdict rather than one signal per missed boundary.
+    - For every expression that can fire within one full 28-year calendar cycle the call answers and never raises,
+      however far away the next firing lies; an expression that can never fire still raises `CronError`.
 
   Args:
     spec: Tuple of five value sets as returned by `parse`.
@@ -246,12 +273,19 @@ def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
 
   Returns:
     True if at least one cron firing falls in `(last_run, now]`, false otherwise.
+
+  Raises:
+    CronError: If the spec can never fire; its search covers a full 28-year calendar cycle.
   """
 
   # Contract:
   # Any number of missed firing boundaries inside the checked interval collapses into a
   # single True verdict; the interval is never reported as more than one due signal no
   # matter how many boundaries it actually contains.
+
+  # Contract:
+  # For every expression that can fire within one full 28-year calendar cycle the call answers and NEVER
+  # raises, however far away the next firing lies; an expression that can never fire still raises `CronError`.
 
   # Domain(runtime.daemon-loop):
   # # Skip-on-miss due policy
@@ -264,4 +298,7 @@ def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
   # guard: degenerate interval — nothing can be due when the window is empty or inverted
   if last_run >= now:
     return False
-  return next_fire(spec, last_run) <= now
+
+  # the search covers one full calendar cycle, so every expression that validation accepts gets an answer
+  # here: one that fires only in some years is found however far away its next firing lies
+  return next_fire(spec, last_run, horizon_days = CYCLE_HORIZON_DAYS) <= now

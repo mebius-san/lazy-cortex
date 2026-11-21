@@ -45,9 +45,8 @@ fields the router decides and this worker never guesses at:
 - `path=<dir>` on a spawn line — the folder under the product's
   `spec_path` the asset lands in; absent falls back to the asset
   type's own `default_path`.
-- `tools=<tool>[,...]` on a spawn line — the tools the asset is
-  realised and checked with; absent leaves them undetermined for the
-  coordinator to settle on its own wake.
+- `tools=<tool>[,...]` on a spawn line — tolerated and ignored, as a
+  `docs=` field is: a routing decision names no tools for an asset.
 - `product=<key>` on a spawn line — the spawning product, the sole way
   one decision fans a request out across several products in one apply
   run.
@@ -164,14 +163,18 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_paths import (  # noqa: E402
-    find_settings_root, read_text, require_plugin_cli, resolve_core_cli, spec_content_root, write_text_atomic,
+    find_settings_root, read_text, require_plugin_cli, require_valid_settings, resolve_core_cli, spec_content_root,
+    write_text_atomic,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_TRUE,
     LEVEL_ROLES,
@@ -184,25 +187,37 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     SpecHaltKey,
     SpecTargetsKey,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import catalog_note  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_markers import Markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
+
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 # The shipped types' folders, for a prose path-form spawn target parsed with no settings at hand.
 # `feature` (and every other type whose `default_path` is the product root itself) contributes no
@@ -265,11 +280,9 @@ class _K:
     DECISION_TARGETS_PREFIX: Prefix marking the optional design-cascade `targets=` field on a change-spawn line.
     DECISION_PRODUCT_PREFIX: Prefix marking the optional spawning-product `product=` field on a spawn line.
     DECISION_PATH_PREFIX: Prefix marking the optional `path=` field naming a spawn's folder.
-    DECISION_TOOLS_PREFIX: Prefix marking the optional `tools=` field naming a spawn's tools.
     DECISION_DROP_PREFIX: Prefix marking the optional `drop=` field naming an attach's dropped docs.
     SCAFFOLD_PATH_FLAG: The `scaffold-asset` flag naming the folder the asset lands in.
     SCAFFOLD_GROUP_NOTE_KEY: The scaffold result key naming the group folder-note it seeded.
-    SPEC_TOOLS_KEY: Frontmatter key listing the tools the asset is realised and checked with.
     ASSET_TYPES: Settings key holding a product's own asset-type declarations.
     SOURCE_REQUESTS_H2: Sub-heading marking a folder-note's source-requests list.
     HISTORY_H2: Sub-heading marking a doc's history log.
@@ -385,16 +398,12 @@ class _K:
   DECISION_PRODUCT_PREFIX = "product="
   # Prefix marking the optional `path=` field naming a spawn's folder.
   DECISION_PATH_PREFIX = "path="
-  # Prefix marking the optional `tools=` field naming a spawn's tools.
-  DECISION_TOOLS_PREFIX = "tools="
   # Prefix marking the optional `drop=` field naming an attach's dropped docs.
   DECISION_DROP_PREFIX = "drop="
   # The `scaffold-asset` flag naming the folder the asset lands in.
   SCAFFOLD_PATH_FLAG = "--path"
   # The scaffold result key naming the group folder-note it seeded.
   SCAFFOLD_GROUP_NOTE_KEY = "group_note"
-  # Frontmatter key listing the tools the asset is realised and checked with.
-  SPEC_TOOLS_KEY = "spec_tools"
   # Settings key holding a product's own asset-type declarations.
   ASSET_TYPES = "asset_types"
   # Settings section holding the vault-wide spec configuration.
@@ -885,21 +894,6 @@ def _parse_spawn_paths(block: str) -> dict[tuple[str, str], str]:
   return _parse_spawn_field(block, _K.DECISION_PATH_PREFIX)
 
 
-def _parse_spawn_tools(block: str) -> dict[tuple[str, str], list[str]]:
-  """
-  Scan a routing-decision block for each spawn line's own `tools=` field.
-
-  Args:
-    block: Inner text of the comment block (between the opening and closing markers).
-
-  Returns:
-    Dict `{(kind, slug): [tool, ...]}` — a spawn line without the field is absent, which leaves
-    the asset's tools undetermined for the coordinator to settle on its own wake.
-  """
-  return { key: [ tool.strip() for tool in raw.split(",") if tool.strip() ]
-           for key, raw in _parse_spawn_field(block, _K.DECISION_TOOLS_PREFIX).items() }
-
-
 def _parse_attach_drops(block: str) -> dict[str, list[str]]:
   """
   Scan a routing-decision block for each attach line's own `drop=` field.
@@ -1195,11 +1189,11 @@ def _strip_prior_status_callout(body: str) -> str:
   # guard: no H1 — leave body as-is
   if not m_h1:
     return body
-  head = body[:m_h1.start()]
-  tail = body[m_h1.start():]
+
+  # the lines above the H1 are walked once, the status callout's lines dropped and every other line kept
   out_lines: list[str] = []
   in_status_callout = False
-  for line in spec_frontmatter.split_lines(head, keepends = True):
+  for line in spec_frontmatter.split_lines(body[:m_h1.start()], keepends = True):
     if line.startswith("> "):
       if re.search(_K.STATUS_TAG_PATTERN, line):
         in_status_callout = True
@@ -1215,7 +1209,7 @@ def _strip_prior_status_callout(body: str) -> str:
       continue
     in_status_callout = False
     out_lines.append(line)
-  return "".join(out_lines) + tail
+  return "".join(out_lines) + body[m_h1.start():]
 
 
 def _format_status_callout(*, accepted: bool, wikilinks: list[str], reason: str | None) -> str:
@@ -1292,21 +1286,6 @@ def set_fm_list(fm_text: str, key: str, values: list[str]) -> str:
     place, a missing key is appended before the closing fence.
   """
   return spec_frontmatter.write_list(fm_text, key, values)
-
-
-def _del_fm_key(fm_text: str, key: str) -> str:
-  """
-  Remove a scalar `key: value` line from a `---`-delimited frontmatter block.
-
-  Args:
-    fm_text: Full frontmatter text including the opening / closing fences.
-    key: Scalar key name to remove.
-
-  Returns:
-    Frontmatter text with the key's line removed; unchanged when the key is absent.
-  """
-  pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$\n?")
-  return pat.sub("", fm_text, count = 1)
 
 
 def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
@@ -1446,17 +1425,15 @@ class _Attach:
     return name or _K.DESIGN_MD
 
   @staticmethod
-  def kind_from_folder_note(folder_note: Path) -> str:
+  def read_kind_from_folder_note(folder_note: Path) -> str:
     """
-    Infer the entity kind from a folder-note's path.
+    Read the entity kind a folder-note declares in its own frontmatter.
 
     Args:
       folder_note: Path to the entity's `<slug>/<slug>.md` folder-note.
 
     Returns:
-      The note's own `spec_asset_type`, falling back to `change` on a note that carries none —
-      the folder the note sits in is never consulted, since a type's folder is the caller's
-      choice rather than a property of the type.
+      The note's own `spec_asset_type`, or `change` when the note carries none or does not exist.
     """
     declared = asset_types.type_of(folder_note) if folder_note.is_file() else ""
     return declared or _K.CHANGE_KIND
@@ -1697,13 +1674,7 @@ class _Apply:
     This repo's tracked settings file — `.claude/lazy.settings.json` under the repo root.
     """
 
-    # Decision: raw read over `_read_settings_section` — `_read_settings_section` spawns the
-    # `lazycortex-core` CLI per call and aborts the whole run on any read error, while every
-    # reader of this property owes its own caller a different fallback or wording for an absent
-    # or malformed file (a silent fallback to the shipped asset types, a logical-refusal message,
-    # an empty record), which only a direct read lets each one supply for itself.
-
-    # build the path only — reading it is each caller's own business, per the Decision above
+    # build the path only — it is checked for existence and named in a commit, never read here
     return self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
 
   def _load_product_record(self, product: str) -> dict:
@@ -1718,23 +1689,26 @@ class _Apply:
       its ancestors' (`spec_path` and friends).
 
     Raises:
-      SystemExit: When the settings file is missing or malformed, the key names no registered
-        product, or that product's record carries no `spec_path`.
+      SystemExit: When the settings file is missing, cannot be read, is not valid JSON or is not a
+        JSON object, the key names no registered product, or that product's record carries no
+        `spec_path`.
     """
 
     # guard: no settings file to read the product registry from
     if not self._settings_path.exists():
       _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json absent at {self._settings_path}")
 
-    # the parsed settings, refused outright when they are not valid JSON
+    # opt: valid while `resolve_product.load_products` returns the tracked registry `settings-get products` prints
+
+    # guard: the product registry is refused outright when the settings cannot be read or do not parse;
+    # `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
-      data = json.loads(self._settings_path.read_text(encoding = "utf-8"))
-    except json.JSONDecodeError as error:
+      registry = resolve_product.load_products(self.repo)
+    except (OSError, ValueError) as error:
       _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
 
     # the product's own record, as registered
-    products_section = data.get(_K.PRODUCTS) or {}
-    record = products_section.get(product) if isinstance(products_section, dict) else None
+    record = registry.get(product)
 
     # guard: the key names no registered product
     if not isinstance(record, dict):
@@ -1746,7 +1720,7 @@ class _Apply:
       _fail(_K.CAT_LOGICAL, f"product '{product}' has no {_K.SPEC_PATH}")
 
     # the effective record, with every key the product leaves undeclared inherited from its ancestors
-    return resolve_product.effective_record(self.repo, product)
+    return resolve_product.effective_record(self.repo, product, products = registry)
 
   def _default_product(self) -> str:
     """
@@ -1772,10 +1746,11 @@ class _Apply:
 
     # opt: registry loaded once and handed down — a preloaded registry answers as a disk read would
 
-    # load the product registry, refusing logically when the settings file will not parse
+    # guard: the product registry is refused logically when the settings file will not parse;
+    # `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
       registry = resolve_product.load_products(self.repo)
-    except json.JSONDecodeError as error:
+    except ValueError as error:
       _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
     keys = sorted(key for key, record in registry.items() if isinstance(record, dict))
 
@@ -1799,19 +1774,24 @@ class _Apply:
 
     Returns:
       The owning product's effective record (`resolve_product.effective_record_by_path`), or `{}`
-      when the note sits outside the content root, the settings file is missing or malformed, or
-      no registered product's `spec_path` covers it.
+      when the settings file is missing, unreadable or malformed (including not a JSON object),
+      the note sits outside the content root, or no registered product's `spec_path` covers it.
     """
+    # the product registry is read first, so a settings failure is never mistaken for a note outside the content
+    # root; `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
+    try:
+      registry = resolve_product.load_products(self.repo)
+    except (OSError, ValueError):
+      # guard: a malformed or unreadable settings file resolves to no product record
+      return {}
     try:
       rel = note.relative_to(spec_content_root(self.repo))
     except ValueError:
       # guard: a note outside the content root is owned by no registered product
       return {}
-    try:
-      _key, record = resolve_product.effective_record_by_path(self.repo, rel.as_posix())
-    except (OSError, json.JSONDecodeError):
-      # guard: a malformed or unreadable settings file resolves to no product record, as before
-      return {}
+
+    # the record of the innermost registered product covering the note, empty when none does
+    _key, record = resolve_product.effective_record_by_path(self.repo, rel.as_posix(), products = registry)
     return record or {}
 
   def _read_known_kinds(self) -> frozenset[str]:
@@ -1823,28 +1803,26 @@ class _Apply:
     the product it lands in is settled separately by `product=`.
 
     Returns:
-      The admissible type names, the shipped set alone when no settings file is readable.
+      The admissible type names, the shipped set alone when the settings file is absent, unreadable
+      or unparseable (including one that is not a JSON object).
     """
     kinds = set(asset_types.builtin_defaults())
 
-    # guard: no readable settings — only the shipped declarations apply
-    if not self._settings_path.exists():
-      return frozenset(kinds)
-
-    # unparseable settings fall back to the shipped declarations as well
+    # guard: absent, unreadable or unparseable settings leave only the shipped declarations; `ValueError` covers a
+    # JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
-      data = json.loads(self._settings_path.read_text(encoding = "utf-8"))
-    except json.JSONDecodeError:
+      registry = resolve_product.load_products(self.repo)
+    except (OSError, ValueError):
       return frozenset(kinds)
 
     # every product's own asset types join the shipped ones
-    for record in (data.get(_K.PRODUCTS) or {}).values():
+    for record in registry.values():
       if isinstance(record, dict):
         kinds.update(record.get(_K.ASSET_TYPES) or {})
     return frozenset(kinds)
 
   def _spawn(self, kind: str, slug: str, *, product: str | None = None,
-             path: str = "", tools: list[str] | None = None) -> tuple[Path, str]:
+             path: str = "") -> tuple[Path, str]:
     """
     Run the scaffold-asset subprocess to create the new entity folder.
 
@@ -1857,7 +1835,6 @@ class _Apply:
         key) when omitted, matching every pre-multi-product routing decision on a single-product
         repo.
       path: The decision's own `path=` field, empty to fall back to the type's `default_path`.
-      tools: The decision's own `tools=` field, empty to leave the asset's tools undetermined.
 
     Returns:
       Two-tuple of the new folder-note's absolute path
@@ -1890,7 +1867,7 @@ class _Apply:
         cwd = str(self.repo),
         capture_output = True,
         text = True,
-        check = False, encoding = "utf-8",
+        check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
 
     # guard: the scaffolder refused — nothing was created to continue from
@@ -1908,13 +1885,6 @@ class _Apply:
       seeded_group = ""
     if seeded_group:
       self.spawn_group_notes.append(self.repo / seeded_group)
-
-    # the router's own tool judgement overrides whatever the type's declaration seeded
-    if tools:
-      note_text = read_text(folder_note)
-      _values, fm_end = parse_frontmatter(note_text)
-      write_text_atomic(folder_note,
-          set_fm_list(note_text[:fm_end], _K.SPEC_TOOLS_KEY, tools) + note_text[fm_end:])
     return folder_note, spec_path
 
   def _read_settings_section(self, section: str) -> dict:
@@ -1936,6 +1906,7 @@ class _Apply:
         [ sys.executable, str(_resolve_core(self.repo)), _K.CLI_SETTINGS_GET, section,
           _K.CLI_CWD_FLAG, str(self.repo) ],
         cwd = str(self.repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+        errors = _DECODE_ERRORS,
     )
 
     # guard: the section is unreadable — abort rather than enact against guessed content
@@ -1967,7 +1938,7 @@ class _Apply:
         [ sys.executable, str(_resolve_core(self.repo)), _K.CLI_SETTINGS_SET, section,
           _K.CLI_CWD_FLAG, str(self.repo) ],
         input = json.dumps(value), cwd = str(self.repo),
-        capture_output = True, text = True, check = False, encoding = "utf-8",
+        capture_output = True, text = True, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
 
     # guard: a failed write leaves the enactment half-done, so it aborts the whole run
@@ -2008,7 +1979,7 @@ class _Apply:
     A key already on record under the very same `spec_path` is re-applied as a no-op, leaving the
     recorded record as an operator may have edited it. Every refusal is raised before the first
     settings write. `language` is written only when no enclosing product already supplies one, and
-    the saved record carries no `source` block and no empty asset-type, tool-type, or guideline
+    the saved record carries no `source` block and no empty asset-type or guideline
     placeholder keys.
 
     Args:
@@ -2040,9 +2011,9 @@ class _Apply:
     # its effective record from; None at the top level
     ancestor_key, _ancestor = resolve_product.resolve_product_by_path(self.repo, spec_path)
 
-    # the record carries no `source` block and no empty asset-type, tool-type or guideline
-    # placeholders: a request registers the spec tree only, and `tool_types` is inherited whole
-    # from the nearest declaring ancestor, so an empty one here would shadow what they declare
+    # the record carries no `source` block and no empty asset-type or guideline
+    # placeholders: a request registers the spec tree only, and the settings are inherited from the
+    # nearest declaring ancestor, so an empty one here would shadow what they declare
     record: dict = { _K.SPEC_PATH: spec_path }
 
     # Domain(spec.config):
@@ -2149,6 +2120,7 @@ class _Apply:
           str(note.relative_to(self.repo)), _K.SEED_DOC_FLAG, _K.VISION_DOC_TOKEN,
           _K.CLI_CWD_FLAG, str(self.repo) ],
         cwd = str(self.repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+        errors = _DECODE_ERRORS,
     )
 
     # guard: an unseeded vision leaves the product without the first rung of its ladder
@@ -2383,7 +2355,7 @@ class _Apply:
       subprocess.run(
           [ sys.executable, str(self.review_cli), "stop", str(doc_path.resolve()) ],
           capture_output = True, text = True, cwd = str(self.repo),
-          timeout = _K.REVIEW_STOP_TIMEOUT_S, check = False, encoding = "utf-8",
+          timeout = _K.REVIEW_STOP_TIMEOUT_S, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
       )
     # waiver: fire-and-forget follow-up — the sibling doc is being dropped regardless of its
     # review state; ANY stop failure (CLI crash, timeout) must degrade to a silent skip, never raise
@@ -2547,7 +2519,7 @@ class _Apply:
     # the product's own declarations decide the primary doc — a type declared only by this product
     # would otherwise silently fall back to the shipped default
     primary_path = folder_note.parent / _Attach.primary_doc_for_kind(
-        _Attach.kind_from_folder_note(folder_note), self._record_for_note(folder_note))
+        _Attach.read_kind_from_folder_note(folder_note), self._record_for_note(folder_note))
     populated: list[Path] = []
     if primary_path.is_file():
       # attribution is the review trigger: a changed source list re-enters the doc into review
@@ -2572,7 +2544,7 @@ class _Apply:
         cwd = str(self.repo),
         capture_output = True,
         text = True,
-        check = False, encoding = "utf-8",
+        check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
 
     # guard: review-start is idempotent — non-zero exit on already-open is benign;
@@ -2687,8 +2659,12 @@ class _Apply:
 
     # a failed commit leaves the tree dirty and would halt the daemon silently, so the run aborts loudly
     except subprocess.CalledProcessError as error:
-      stderr = os.fsdecode(error.stderr or b"")
-      _fail(_K.CAT_LOGICAL, f"git commit failed: exit={error.returncode} stderr={stderr.strip()[:240]}")
+      _fail(_K.CAT_LOGICAL,
+            f"git commit failed: exit={error.returncode} stderr={os.fsdecode(error.stderr or b'').strip()[:240]}")
+
+    # git that cannot be run at all fails the commit the same way, so the run aborts as loudly
+    except OSError as error:
+      _fail(_K.CAT_LOGICAL, f"git commit failed: {type(error).__name__}: {error}")
 
   def run(self) -> int:
     """
@@ -2715,6 +2691,11 @@ class _Apply:
         halted once, by this handler, with its already-deleted paths; the drop halts the asset itself only when
         nothing of it was deleted yet.
       - An asset is never halted for the deletions of an outer or nested asset.
+      - Settings that exist but cannot be read as a JSON object (unreadable, not UTF-8 text, not valid JSON, or not
+        an object) refuse the pass before anything is written: the request file and every other file stay
+        byte-identical, no asset is created and no job is cancelled. The refusal leaves the call as
+        `spec_paths.SettingsError`, a `ValueError` naming the settings file, and is never turned into a rejection
+        of the request computed from default lookups.
 
     Returns:
       Exit code: `0` on success or idempotent terminal-state skip.
@@ -2729,6 +2710,8 @@ class _Apply:
         a named sibling that survives its deletion after the asset's first deletion (the run-level
         handler halts the asset with its deleted paths before the abort), or a failed review opening, request
         stamp or commit — carrying a JSON error object on stdout and exit `1`.
+      ValueError: When the settings file exists but cannot be read as a JSON object (a `spec_paths.SettingsError`
+        naming the file); raised before anything is written.
       Exception: Any non-`SystemExit` error raised after a document was dropped or an expert job was cancelled
         propagates unchanged, after the assets that lost documents or whose job was cancelled are halted.
     """
@@ -2759,6 +2742,13 @@ class _Apply:
     # The documents of every attach target MUST be dropped before any target is attributed to the request,
     # so a failed drop leaves no start document attributed, neither on disk nor in a halt commit.
 
+    # Contract:
+    # Settings that exist but cannot be read as a JSON object, because they are unreadable, not UTF-8 text, not
+    # valid JSON, or not an object, refuse the pass before anything is written: the request file and every other
+    # file stay byte-identical, no asset is created and no job is cancelled. The refusal leaves the call as
+    # `spec_paths.SettingsError`, a `ValueError` naming the settings file, and is never turned into a rejection of
+    # the request computed from default lookups.
+
     # Domain(spec.lifecycle):
     # # One attach pass, all or nothing
     # A request can attach to or reference several assets at once, so every one of them is checked before anything is
@@ -2784,6 +2774,10 @@ class _Apply:
     # another asset's drop failing, a failure inside the asset's own drop after its first deletion, the request's
     # attribution, the review not reopening, or the pass not being recorded. An asset around such an asset or nested
     # inside it lost nothing of its own and is never halted.
+
+    # settings that cannot be read as a JSON object refuse the pass before anything is written: every lookup below
+    # would otherwise answer from the shipped defaults, and the request would be rejected on that answer
+    require_valid_settings(self.repo)
 
     # the frontmatter status decides whether this pass has anything left to do
     text = read_text(self.file_path)
@@ -2815,7 +2809,6 @@ class _Apply:
     reference_targets: list[str] = []
     spawn_product: dict[tuple[str, str], str] = {}
     spawn_paths: dict[tuple[str, str], str] = {}
-    spawn_tools: dict[tuple[str, str], list[str]] = {}
     attach_drops: dict[str, list[str]] = {}
     product_targets: list[tuple[str, str, str]] = []
     if decision_block is not None:
@@ -2826,7 +2819,6 @@ class _Apply:
       reference_targets = [ path for path, _description in _parse_reference_targets(decision_block) ]
       spawn_product = _parse_spawn_products(decision_block)
       spawn_paths = _parse_spawn_paths(decision_block)
-      spawn_tools = _parse_spawn_tools(decision_block)
       attach_drops = _parse_attach_drops(decision_block)
       product_targets = _parse_spawn_product_targets(decision_block)
 
@@ -2883,8 +2875,7 @@ class _Apply:
     for kind, slug in spawn_targets:
       folder_note, spec_path = self._spawn(
           kind, slug, product = spawn_product.get(( kind, slug )),
-          path = spawn_paths.get(( kind, slug ), ""),
-          tools = spawn_tools.get(( kind, slug )))
+          path = spawn_paths.get(( kind, slug ), ""))
       resolved_wikilinks.append(str(folder_note.relative_to(self.repo).with_suffix("")))
       _FolderNote.append_source_request(folder_note, self.request_wikilink, request_display)
       self.spawn_folder_notes.append(folder_note)
@@ -2940,7 +2931,7 @@ class _Apply:
       # drive-relative either. The comparison ignores letter case, since on a case-insensitive
       # filesystem a differently cased name opens the same file
       start_doc = _Attach.primary_doc_for_kind(
-          _Attach.kind_from_folder_note(folder_note), self._record_for_note(folder_note))
+          _Attach.read_kind_from_folder_note(folder_note), self._record_for_note(folder_note))
       undroppable = { doc_name.casefold() for doc_name in ( folder_note.name, start_doc ) }
       for name in attach_drops.get(target, []):
         # guard: a path-shaped name could reach outside the asset folder or into a nested asset; a `:`

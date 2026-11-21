@@ -91,20 +91,6 @@
       "icon": "LiClipboardCheck",
       "color": "#94a3b8"
     },
-    "data-report": {
-      "stages": false,
-      "review": true,
-      "append_only": true,
-      "icon": "LiDatabase",
-      "color": "#94a3b8"
-    },
-    "docs-report": {
-      "stages": false,
-      "review": true,
-      "append_only": true,
-      "icon": "LiBookOpen",
-      "color": "#94a3b8"
-    },
     "decisions": {
       "stages": false,
       "review": false,

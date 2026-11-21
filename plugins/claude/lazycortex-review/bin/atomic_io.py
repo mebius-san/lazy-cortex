@@ -1,4 +1,4 @@
-"""Crash-safe replacement of a document's text on disk."""
+"""Crash-safe replacement of a document's text, or of a file's bytes, on disk."""
 from __future__ import annotations
 
 import os
@@ -33,8 +33,8 @@ _CRLF = "\r\n"
 _LF_RE = re.compile(_LF)
 _CRLF_RE = re.compile(_CRLF)
 
-# the temp file is opened for text writing
-_WRITE_MODE = "w"
+# the temp file is opened for writing bytes, so nothing translates what is stored
+_WRITE_MODE = "wb"
 
 
 def _current_umask() -> int:
@@ -168,6 +168,10 @@ def write_text_atomic(path: Path, text: str) -> None:
   Args:
     path: The file to write; it may not exist yet, and it may be a symlink.
     text: The complete new content of the file.
+
+  Raises:
+    UnicodeEncodeError: When `text` holds a character UTF-8 cannot encode (a lone surrogate); nothing is written.
+    OSError: When the write or the rename fails; the file is left as it was.
   """
 
   # Contract:
@@ -175,6 +179,49 @@ def write_text_atomic(path: Path, text: str) -> None:
   # an existing file MUST keep its permission bits; a symlink at `path` MUST survive, with the
   # file it points at replaced; `text` MUST land byte-for-byte as UTF-8, untranslated.
 
+  # the text is encoded before any file is touched, so text that cannot be stored raises with nothing written
+  _replace_atomic(path, text.encode(_ENCODING), is_durable = True)
+
+
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+  """
+  Replace the whole content of `path` with `data` so a reader never sees a partial write.
+
+  The file is created when it is absent. Unlike `write_text_atomic`, the bytes are not flushed to disk.
+
+  Guarantees:
+    - When the call raises, the file at `path` is left exactly as it was before the call: its earlier bytes when it
+      existed, absent when it did not.
+    - An existing file keeps its permission bits.
+
+  Args:
+    path: The file to write; it may not exist yet.
+    data: The complete new content of the file.
+
+  Raises:
+    OSError: When the write or the rename fails.
+  """
+
+  # Contract:
+  # When the call raises, the file at `path` MUST be left exactly as it was before the call: its earlier
+  # bytes when it existed, absent when it did not. An existing file MUST keep its permission bits.
+
+  # the bytes land beside the target and are swapped in whole; a reader never sees a part of them
+  _replace_atomic(path, data, is_durable = False)
+
+
+def _replace_atomic(path: Path, data: bytes, *, is_durable: bool) -> None:
+  """
+  Replace the content of `path` with `data` through a temporary sibling and one rename.
+
+  Args:
+    path: The file to write; a symlink is written through.
+    data: The complete new content of the file.
+    is_durable: Whether the bytes are flushed to disk before the rename.
+
+  Raises:
+    OSError: When the write or the rename fails; the target is left as it was.
+  """
   # a symlink is written through: the temp file sits beside the real target, never the link
   target = Path(os.path.realpath(path))
   try:
@@ -182,13 +229,14 @@ def write_text_atomic(path: Path, text: str) -> None:
   except FileNotFoundError:
     mode = _DEFAULT_FILE_MODE & ~_current_umask()
 
-  # write and flush to disk beside the target, then swap it in with one rename
+  # write beside the target, flushed to disk when asked, then swap it in with one rename
   fd, tmp_name = tempfile.mkstemp(dir = target.parent, prefix = f".{target.name}.", suffix = _TMP_SUFFIX)
   try:
-    with os.fdopen(fd, _WRITE_MODE, encoding = _ENCODING, newline = "") as handle:
-      handle.write(text)
-      handle.flush()
-      os.fsync(handle.fileno())
+    with os.fdopen(fd, _WRITE_MODE) as handle:
+      handle.write(data)
+      if is_durable:
+        handle.flush()
+        os.fsync(handle.fileno())
     os.chmod(tmp_name, mode)
     os.replace(tmp_name, target)
   except BaseException:

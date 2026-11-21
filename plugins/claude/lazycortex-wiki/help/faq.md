@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -20,8 +20,8 @@ source_skills:
   - lazy-wiki.structure-curator
   - lazy-wiki.tag-curator
   - lazy-wiki.terms-curator
-source_sha: a9427e0aa55df74742c5194896af0fb50f864358
-surface_sha: dbc1a9ac0d5eeb1172892d1304b3fefd8ecf747fb7382478bce3876b219f0f16
+source_sha: c8db3a16da37483d17108e3fb748f277fb0691b5
+surface_sha: 713652ab31db0956acad9e29a8c8a2150ec5072c26f41319d0a84d630743c622
 ---
 # Frequently asked questions
 
@@ -125,7 +125,7 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 `see-also-path-base` catches a See-also link written against the wrong path form for the target node (for example, a relative link that no longer matches how the node's canonical path is tracked in the index) — the fix rewrites the link's target to the canonical path without touching its gloss.
 
-Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `scope-self-nullified`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the audit surfaces them but modifies nothing. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead. `scope-self-nullified` catches a scope whose `exclude_paths` glob covers everything its `paths` glob admits — every path the scope claims to curate is also excluded, so it indexes nothing and the navigation rule sends every session to an index that stays empty; the finding names the file count that removing the offending exclude glob would wake into one curator job per file, so the fix is made on purpose rather than as a typo cleanup.
+Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `scope-self-nullified`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`, `mirror-unreadable`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the audit surfaces them but modifies nothing. `mirror-unreadable` means a mirror file could not be read (an encoding or permissions problem on the file the finding names) or the source listing failed: fix the file's encoding or permissions, or re-fetch the clone when the source listing is what failed. Until the file is readable again the sync skips it and deletes nothing. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead. `scope-self-nullified` catches a scope whose `exclude_paths` glob covers everything its `paths` glob admits — every path the scope claims to curate is also excluded, so it indexes nothing and the navigation rule sends every session to an index that stays empty; the finding names the file count that removing the offending exclude glob would wake into one curator job per file, so the fix is made on purpose rather than as a typo cleanup.
 
 The same run also audits the terms dictionary (when any terms scope is configured) and the project-structure map (when it is configured or already built), and — when `wiki.domains` is configured — a repo-level `domains` section covering the generated doc tree; see the dedicated questions below for what each of those sections reports.
 

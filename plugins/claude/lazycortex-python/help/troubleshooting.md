@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-11-13
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
-surface_sha: 761a7fc31242a12fece3f8587db0a889a96f113df61b860fa34ce2d683409615
+source_sha: 702f588ca1c39d4fcd68482e154c1dcc3eda50ee
+surface_sha: bedbe687d2d296b7ee45cb2b7563ace3c5ec8acf197b9751939f3843db17c19e
 ---
 # Troubleshooting
 
@@ -234,9 +234,29 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: After dispatching `lazy-python.code-reviewer` and running `chk-py review --render <findings.json>`, the command prints one or more `fail:`-severity lines followed by `Found blocking guideline issues: <N> finding(s)`, and exits `1`.
 
-**Likely cause**: The reviewer recorded at least one `FAIL`-severity finding — a violated guideline clause the deterministic checkers cannot see, such as an unapproved test-assertion change, a checker-relaxing suppression without a `# waiver:` reason, or a docstring that contradicts the code it documents. A `WARN`-only review (missing purpose comments, naming mismatches, useless locals) does not block; only a `FAIL` does.
+**Likely cause**: The reviewer recorded at least one `FAIL`-severity finding — a violated guideline clause the deterministic checkers cannot see, such as an unapproved test-assertion change, a checker-relaxing suppression without a `# waiver:` reason, a docstring that contradicts the code it documents, or a real bug in the changed code (rule `bug`). A `WARN`-only review (missing purpose comments, naming mismatches, useless locals) does not block; only a `FAIL` does.
 
 **Fix**: Apply the fix the finding names — in the code the finding cites, never by editing the findings document itself. Re-run `chk-py review`: because the file content changed, the scope key changes too, so the review phase re-manifests and needs a fresh `lazy-python.code-reviewer` dispatch against the new scope before it can pass.
+
+---
+
+## `lazy-python.code-reviewer` ignored the bug list, focus, or "already fixed" notes in my dispatch
+
+**Symptom**: You dispatched `lazy-python.code-reviewer` with a list of defect classes to probe, a narrower part of the scope, a priority, or a note that earlier findings are closed. The findings cover the whole scope and the checklist only; nothing you asked it to probe appears, and "closed" items are reported again if they still hold.
+
+**Likely cause**: The reviewer takes exactly two things from its dispatch prompt: the review scope (the manifest path, or a file list when there is no manifest) and your approvals of test changes, each naming the test it approves. Everything else is ignored by design: bug-hunt requests, inputs to try, focus or priority, a subset of the manifest's `files`, earlier rounds' findings, and instructions on what to read or skip. Each run judges the current state of every file in the manifest against the fixed checklist.
+
+**Fix**: This is expected behaviour. To get a free-form hunt for bugs with invented inputs, dispatch `lazy-python.bug-hunter` as a task of its own; it is never part of the guideline review. To have a test change accepted by the review, name the exact test in the dispatch. A finding that is no longer true goes away by fixing the code and re-running `chk-py review`, not by telling the reviewer it is closed.
+
+---
+
+## `lazy-python.code-reviewer` reports a `bug` finding at `FAIL`
+
+**Symptom**: A review finding with rule `bug` and severity `FAIL` names a concrete input or state and the wrong outcome it produces in code the diff touched.
+
+**Likely cause**: The reviewer's checklist reads the touched regions of changed files for defects: a wrong result, a crash, lost or corrupted data, a broken caller contract. It reports one only when it sits in lines the diff touched or is caused by them, a concrete trigger can be named, and that trigger actually reaches the code through a caller, a config value, or a file the program really reads. An input no caller produces, a state the program already refuses, a race in sequential code, or a platform the project does not run under is not reported.
+
+**Fix**: Fix the code the finding cites, in the changed lines or the cause the finding names. If you believe the named trigger cannot reach the code, check the caller path the finding relies on; the finding must hold up against the source, so a wrong trace is corrected by the next run, not by editing the findings document. Re-run `chk-py review`: the changed files give a new scope key and the review needs a fresh dispatch.
 
 ---
 

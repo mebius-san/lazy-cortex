@@ -4,14 +4,13 @@ lazy-memory.write worker — atomic note + tag-index regen + consolidate drops +
 Reads frontmatter from the body, validates, writes the note, regenerates
 every touched tag file (local + global), drops --consolidate paths, and
 finalizes the change with one atomic git commit under the memory-bot
-identity derived from the expert (`memory.<expert>` / `memory.<expert>@<bot-domain>`).
+identity of the expert the worker was invoked for (`memory.<expert>` / `memory.<expert>@<bot-domain>`).
 The expert that called this worker does NOT commit the memory paths
 itself — the subsystem owns its own git visibility.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -34,6 +33,8 @@ from memory_runtime import (  # noqa: E402
   FrontmatterError, slugify, resolve_slug, validate_frontmatter,
   topic_from_tag, _read_note_frontmatter, regen_touched_tags,
 )
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import settings_cli  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 class WriteError(Exception):
@@ -160,50 +161,124 @@ def _is_safe_consolidate_path(repo: Path, target: Path) -> bool:
 # waiver: deliberate copy of constants.BOT_EMAIL_DOMAIN (sans "@") — skill-shipped script, no bin/ import path
 _BOT_DOMAIN = "bot.invalid"
 _MEMORY_PREFIX = "memory."
+# The `git_author` field of an expert registration that holds its email address.
+_EMAIL_KEY = "email"
+# The per-path pathspec magic that makes git take one path as written. A git call that writes or can run
+# a hook marks each path with it, because the global `--literal-pathspecs` option reaches the hooks' environment.
+_LITERAL_MAGIC = ":(literal)"
 
 
-def _load_expert_git_author(repo: Path, expert: str) -> dict:
+def _mark_literal(paths: list[str]) -> list[str]:
   """
-  Read `lazy.settings.json[experts][<expert>].git_author` from the worktree.
+  Mark each path so git takes it as written and never as a pattern.
 
-  Used as the base identity from which the memory-bot identity is derived.
-  Returns an empty dict when the file or entry is missing — the caller
-  decides whether that is fatal.
+  The marking is per path, so hooks that a git call runs inherit no literal-pathspec setting.
+
+  Args:
+    paths: Paths relative to the directory git runs in.
+
+  Returns:
+    The paths in the order given, each marked as a literal path.
+  """
+  return [ f"{_LITERAL_MAGIC}{path}" for path in paths ]
+
+
+def _load_experts(repo: Path) -> dict:
+  """
+  Read the merged `lazy.settings.json[experts]` registry, the local overlay `lazy.settings.local.json` merged on.
 
   Args:
     repo: Absolute path to the repository worktree root.
+
+  Returns:
+    The registered experts by name, from both settings layers, or an empty dict when the settings are absent,
+    unreadable (a layer that is not valid JSON or not a JSON object included), or declare no experts.
+  """
+  # the registry as the runtime dispatches from it: an expert registered only in the overlay is a registered expert
+  try:
+    # waiver: external settings section name and core settings scope, not internal keys
+    experts = settings_cli.load_settings_section("experts", cwd = repo, scope = "merged")
+  except (OSError, ValueError):
+    # guard: an unreadable settings layer registers no expert
+    return {}
+  return experts if isinstance(experts, dict) else {}
+
+
+def _get_git_author(experts: dict, expert: str) -> dict:
+  """
+  Take one expert's `git_author` out of the registry.
+
+  Args:
+    experts: The registered experts by name.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
 
   Returns:
-    The `git_author` dict for the named expert, or an empty dict when the settings
-    file is absent, unreadable, or does not declare the expert.
+    The expert's `git_author` dict, or an empty dict when the expert or its `git_author` is not declared.
   """
-  # waiver: filesystem path/filename idiom, not a domain constant
-  settings_path = repo / ".claude" / "lazy.settings.json"
+  entry = experts.get(expert)
+  # waiver: external settings field name, not an internal key
+  author = entry.get("git_author") if isinstance(entry, dict) else None
+  return author if isinstance(author, dict) else {}
 
-  # guard: settings file missing — return empty dict, caller decides
-  if not settings_path.exists():
-    return {}
-  try:
-    data = json.loads(settings_path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
-    return {}
-  # waiver: external settings field name, not an internal key
-  experts = data.get("experts") or {}
-  entry = experts.get(expert) or {}
-  # waiver: external settings field name, not an internal key
-  return entry.get("git_author") or {}
+
+def _bare_email_local(email: str) -> str:
+  """
+  Strip the domain and every `memory.` layer from an email address.
+
+  Args:
+    email: An email address, possibly memory-prefixed.
+
+  Returns:
+    The local part with no `memory.` prefix left.
+  """
+  local = email.partition("@")[0]
+  while local.startswith(_MEMORY_PREFIX):
+    local = local[len(_MEMORY_PREFIX):]
+  return local
+
+
+def _is_other_expert_email(experts: dict, expert: str, email: str) -> bool:
+  """
+  Tell whether an email address belongs to a registered expert other than the given one.
+
+  Args:
+    experts: The registered experts by name.
+    expert: The expert the memory write is for.
+    email: The email address to attribute.
+
+  Returns:
+    True when the address, memory layers aside, is another registered expert's name or `git_author` email and not
+    the given expert's own.
+  """
+  # the address to attribute and the expert's own address, each with its domain and memory layers stripped
+  local = _bare_email_local(email)
+  own = _bare_email_local(_get_git_author(experts, expert).get(_EMAIL_KEY) or f"{expert}@{_BOT_DOMAIN}")
+
+  # the expert's own address names no other expert, whatever else is registered
+  if local in (expert, own):
+    return False
+
+  # any other registered expert claiming the address by name or by its `git_author` email
+  return any(
+      local in (other, _bare_email_local(_get_git_author(experts, other).get(_EMAIL_KEY) or ""))
+      for other, entry in experts.items() if other != expert and isinstance(entry, dict)
+  )
 
 
 def _resolve_memory_bot_identity(repo: Path, expert: str) -> tuple[str, str]:
   """
   Compute the `(name, email)` pair the worker uses to author memory commits.
 
+  The identity follows the expert the worker was invoked for, never another expert whose session the worker
+  happens to run in.
+
   Resolution order:
   1. `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` env vars (set by the
-     expert pump when the worker is called inside a daemon-spawned expert).
-  2. `lazy.settings.json[experts][<expert>].git_author` derived identity
-     (covers operator-driven invocations like `/lazy-memory.reflect`).
+     expert pump when the worker is called inside a daemon-spawned expert), unless the env email, memory
+     layers aside, names another registered expert than the invoked one, by expert name or by its
+     `git_author` email. Such an email is skipped.
+  2. `lazy.settings.json[experts][<expert>].git_author` derived identity of the invoked expert
+     (covers operator-driven invocations like `/lazy-memory.reflect`, and the skipped env identity of 1).
   3. Hard fallback: bare expert name + `<expert>@<bot-domain>`.
 
   In all cases the `memory.` prefix is applied to both name and email
@@ -233,13 +308,23 @@ def _resolve_memory_bot_identity(repo: Path, expert: str) -> tuple[str, str]:
   # that classifies commits by author recognizes any email whose local part matches the
   # expert's name preceded by zero or more `memory.` prefixes as belonging to that expert's
   # memory-writing activity.
+  # The memory commit always follows the expert whose memory changed — the one the write was made
+  # for — and never another expert whose session the write happens to run in. An identity inherited
+  # from the surrounding session serves as the base only while it is that expert's own or belongs
+  # to no other registered expert. An inherited identity that names another registered expert, by
+  # its name or by its configured commit-author address, is set aside, and the base becomes the
+  # expert's own registered identity, or the bare expert name under the bot domain when none is registered.
 
-  env_name  = os.environ.get("GIT_AUTHOR_NAME",  "").strip()
+  env_name = os.environ.get("GIT_AUTHOR_NAME",  "").strip()
   env_email = os.environ.get("GIT_AUTHOR_EMAIL", "").strip()
-  if env_name and env_email:
+  experts = _load_experts(repo)
+
+  # an inherited identity is the base unless it names another registered expert, as it does for a child agent
+  # writing its own memory inside another expert's session
+  if env_name and env_email and not _is_other_expert_email(experts, expert, env_email):
     base_name, base_email = env_name, env_email
   else:
-    fm = _load_expert_git_author(repo, expert)
+    fm = _get_git_author(experts, expert)
     # waiver: memory-note frontmatter key (canonical home is the note format), not a reusable cross-module key
     base_name  = fm.get("name")  or expert
     # waiver: memory-note frontmatter key (canonical home is the note format), not a reusable cross-module key
@@ -265,12 +350,31 @@ def _query_tracked_paths(repo: Path, paths: list[str]) -> set[str]:
 
   Returns:
     The repo-relative paths among `paths` that git tracks.
+
+  Raises:
+    WriteError: With a `commit-failed` message when git cannot list the tracked paths.
   """
+  # the names are taken literally, and the NUL-separated listing spells each one as written, never
+  # quoted, so it compares equal to the path it was asked about
   result = subprocess.run(
-    ["git", "-c", "core.quotePath=false", "ls-files", "--", *paths],
-    cwd = repo, capture_output = True, text = True, check = False,
+    ["git", "--literal-pathspecs", "ls-files", "-z", "--", *paths],
+    cwd = repo, capture_output = True, check = False,
   )
-  return set(result.stdout.splitlines())
+
+  # guard: a failed listing answers nothing — it is never read as "git tracks none of these"
+  if result.returncode != 0:
+    raise WriteError(
+      f"commit-failed: git ls-files returned {result.returncode}: "
+      f"{result.stderr.decode('utf-8', 'replace').strip()}"
+    )
+
+  # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+  listing = result.stdout.decode(
+    "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+  )
+  return { path for path in listing.split("\0") if path }
 
 
 def _is_diff_empty(repo: Path, paths: list[str]) -> bool:
@@ -288,15 +392,18 @@ def _is_diff_empty(repo: Path, paths: list[str]) -> bool:
     True when none of `paths` differs from HEAD; False when at least one does.
   """
   result = subprocess.run(
-    ["git", "diff", "--quiet", "HEAD", "--", *paths],
+    ["git", "--literal-pathspecs", "diff", "--quiet", "HEAD", "--", *paths],
     cwd = repo, capture_output = True, check = False,
   )
   return result.returncode == 0
 
 
-def _atomic_commit_memory(
-  repo: Path, expert: str, paths: list[Path], title: str,
-) -> str | None:
+def _atomic_commit_memory(repo: Path,
+                          expert: str,
+                          paths: list[Path],
+                          title: str,
+                          *,
+                          identity: tuple[str, str] | None = None) -> str | None:
   """
   Commit the memory-touching paths under the memory-bot identity.
 
@@ -314,12 +421,14 @@ def _atomic_commit_memory(
     expert: Expert identifier used to resolve the memory-bot commit identity.
     paths: Candidate paths to commit; entries missing on disk count as deletions when git tracks them.
     title: Note title used to build the commit subject.
+    identity: The `(name, email)` commit identity the caller already resolved; None resolves it from `expert`.
 
   Returns:
     The new commit SHA (7 hex chars) on success, or `None` when there was nothing to commit.
 
   Raises:
-    WriteError: With a `commit-failed` message when registering new files or committing fails.
+    WriteError: With a `commit-failed` message when looking up the tracked paths, registering new files or
+      committing fails; a failed lookup refuses the commit.
   """
   # split the candidates into files on disk and files gone from it; a gone file only counts
   # when git tracks it (a consolidated drop), since a path git never knew has nothing to delete
@@ -352,7 +461,10 @@ def _atomic_commit_memory(
   # index never holds this write's content, not even when the commit fails
   new_paths = [p for p in present_paths if p not in tracked]
   if new_paths:
-    add = subprocess.run([ "git", "add", "-N", "--", *new_paths ], cwd = repo, capture_output = True, check = False)
+    add = subprocess.run(
+      [ "git", "add", "-N", "--", *_mark_literal(new_paths) ],
+      cwd = repo, capture_output = True, check = False,
+    )
 
     # guard: a failed registration aborts the commit before anything is published
     if add.returncode != 0:
@@ -364,14 +476,16 @@ def _atomic_commit_memory(
   if _is_diff_empty(repo, own_paths):
     return None
 
-  # commit the write's own paths under the memory-bot identity, straight from the worktree
-  name, email = _resolve_memory_bot_identity(repo, expert)
+  # commit the write's own paths under the memory-bot identity, the caller's when it resolved one, straight from the
+  # worktree; each path is marked literal on its own, so the hooks the commit runs inherit no literal-pathspec
+  # setting
+  name, email = identity or _resolve_memory_bot_identity(repo, expert)
   commit_cmd = [
     "git",
     "-c", f"user.name={name}",
     "-c", f"user.email={email}",
     "-c", "commit.gpgsign=false",
-    "commit", "-q", "-m", f"{_MEMORY_PREFIX}{expert}: {title}", "--", *own_paths,
+    "commit", "-q", "-m", f"{_MEMORY_PREFIX}{expert}: {title}", "--", *_mark_literal(own_paths),
   ]
   # git ranks inherited GIT_AUTHOR_* / GIT_COMMITTER_* above `-c user.*`, so the memory-bot identity is pinned in
   # the environment too — otherwise a daemon-spawned expert's own identity would author the commit unprefixed
@@ -386,7 +500,10 @@ def _atomic_commit_memory(
   # was before the write while the changes stay in the worktree; surface as WriteError
   if commit.returncode != 0:
     if new_paths:
-      subprocess.run([ "git", "reset", "-q", "--", *new_paths ], cwd = repo, capture_output = True, check = False)
+      subprocess.run(
+        [ "git", "reset", "-q", "--", *_mark_literal(new_paths) ],
+        cwd = repo, capture_output = True, check = False,
+      )
     raise WriteError(
       f"commit-failed: git commit returned {commit.returncode}: {commit.stderr.decode('utf-8', 'replace').strip()}"
     )
@@ -470,9 +587,8 @@ def write_note(repo: Path, expert: str, body: str,
   # resolve the note slug — honor an explicit override, otherwise derive + deduplicate
   # waiver: memory-note frontmatter key (canonical home is the note format), not a reusable cross-module key
   base = slug_override or slugify(fm["title"])
-  if slug_override is not None:
-    slug = base
-  else:
+  slug = base
+  if slug_override is None:
     slug = resolve_slug(expert_dir, base)
   note_path = expert_dir / f"{slug}.md"
 
@@ -545,7 +661,8 @@ def _main(argv: list[str]) -> int:
   (`memory.<expert>` / `memory.<expert>@<bot-domain>`). The resolved note path is printed
   to stdout on success (followed by a tab and the commit SHA when a commit landed, or the
   literal token `no-commit` when the write was a byte-identical no-op); failures print the
-  error category to stderr.
+  error category to stderr. The commit identity is resolved before anything is written, so a failure to
+  resolve it changes no file.
 
   Args:
     argv: Argument vector without the program name. Supports the positional `expert`,
@@ -567,10 +684,12 @@ def _main(argv: list[str]) -> int:
   parser.add_argument("--repo", default = ".")
   args = parser.parse_args(argv)
 
-  # body content arrives on stdin
+  # body content arrives on stdin; the commit identity is resolved before anything is written, so a failure to
+  # resolve it changes no file
   body = sys.stdin.read()
   repo = Path(args.repo)
   try:
+    identity = _resolve_memory_bot_identity(repo, args.expert)
     note_path, title, touched_paths = write_note(
       repo, args.expert, body, args.slug, args.consolidate,
     )
@@ -580,7 +699,7 @@ def _main(argv: list[str]) -> int:
 
   # commit what the write touched under the memory-bot identity, then report the note and the sha
   try:
-    sha = _atomic_commit_memory(repo, args.expert, touched_paths, title)
+    sha = _atomic_commit_memory(repo, args.expert, touched_paths, title, identity = identity)
   except WriteError as e:
     sys.stderr.write(f"{e}\n")
     return 2

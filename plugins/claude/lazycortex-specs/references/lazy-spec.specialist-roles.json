@@ -1,0 +1,19 @@
+{
+  "specialist_roles": {
+    "developer": {
+      "material": "product code"
+    },
+    "data-writer": {
+      "material": "data files written to the product's schemas"
+    },
+    "docs-writer": {
+      "material": "user-facing documentation"
+    },
+    "ui-designer": {
+      "material": "interface mockups"
+    },
+    "fiction-writer": {
+      "material": "literary text"
+    }
+  }
+}

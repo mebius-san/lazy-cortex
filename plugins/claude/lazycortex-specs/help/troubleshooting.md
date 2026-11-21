@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 7810fe7edbba70c46d14f7200ca57044e3ce640a
-surface_sha: 849372abaaec321838df89ba96700c087259f58ccb1075f7eca51e3a150caa79
+source_sha: 2f7cbc6131378ad2fb07b51fdc460840760d310a
+surface_sha: 9f2ad9cb23b601b0b89df17baa425459052dcc83315c3d83fdc1d6d71284960d
 ---
 # Troubleshooting
 
@@ -364,7 +364,7 @@ surface_sha: 849372abaaec321838df89ba96700c087259f58ccb1075f7eca51e3a150caa79
 
 **Symptom**: The skill rejects the new type name, saying it is already a key in the product's own `asset_types`.
 
-**Likely cause**: A type with that exact name was declared before — re-running the skill with the same name does not overwrite it. Reusing one of the *shipped* names is not a refusal: that is a per-field override of the shipped type for this product, and the wizard says so plainly before continuing.
+**Likely cause**: A type with that exact name was declared before and carries a `playbook` or an `alias_of` — re-running the skill with the same name does not overwrite it. A declaration that carries neither is not refused: the skill resumes it at the playbook question (see the entry below). Reusing one of the *shipped* names is not a refusal either: that is a per-field override of the shipped type for this product, and the wizard says so plainly before continuing.
 
 **Fix**: Pick a different type name, or edit the existing declaration under `products[<key>].asset_types` directly if you only meant to change its icon, folder, start document, or playbook.
 
@@ -406,7 +406,7 @@ surface_sha: 849372abaaec321838df89ba96700c087259f58ccb1075f7eca51e3a150caa79
 
 **Likely cause**: For the "not registered" case, the product key is not in `products`. For the "design-only" case, the product record exists but has no `source` block naming the paths of its code.
 
-**Fix**: For an unregistered product, run `/lazy-spec.product-config` first. For a design-only product, re-run `/lazy-spec.product-config` in edit mode to add its source paths — the wizard adds the `source.paths` block without clobbering the product's existing `asset_types` / `tool_types` declarations or any other field it did not ask about.
+**Fix**: For an unregistered product, run `/lazy-spec.product-config` first. For a design-only product, re-run `/lazy-spec.product-config` in edit mode to add its source paths — the wizard adds the `source.paths` block without clobbering the product's existing `asset_types` declarations or any other field it did not ask about.
 
 ---
 
@@ -797,6 +797,26 @@ surface_sha: 849372abaaec321838df89ba96700c087259f58ccb1075f7eca51e3a150caa79
 **Likely cause**: That source's `url` or `branch` was unreachable, or an existing local clone's `origin` no longer matches the configured `url` — a clone is never re-pointed automatically once it drifts from config.
 
 **Fix**: Fix connectivity to the unreachable source, or reconcile the clone's remote by hand (`git remote set-url origin <url>` inside the clone) to match what's configured. Every other configured source still ran normally in the same pass.
+
+---
+
+## `/lazy-spec.upstream-run` exits `1` and names `writes_failed`
+
+**Symptom**: The pass exits `1` and its summary names `writes_failed`, with a message under `errors`.
+
+**Likely cause**: The `upstream/` folder's own note (`root-note`) or the resume position (`cursor`) could not be written — usually a read-only or full disk.
+
+**Fix**: Free the path and run the pass again. The note is seeded on the next run; until the cursor is written, every pass starts from the same unit.
+
+---
+
+## `/lazy-spec.upstream-run` exits `1` and names `units_failed` or `sources_failed`
+
+**Symptom**: The pass exits `1` and its summary names `units_failed` or `sources_failed`.
+
+**Likely cause**: One unit or one source raised an error; its message under `errors` names it. The other units and sources were still handled in the same pass.
+
+**Fix**: Read the named message and fix its cause. The next pass retries the failed unit or source on its own.
 
 ---
 

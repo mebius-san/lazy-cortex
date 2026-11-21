@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep a Tags/ folder in sync with every tag used across your vault — pages created, updated, and pruned automatically.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-obsidian.gen-tag-pages
@@ -27,9 +27,13 @@ Run `/lazy-obsidian.gen-tag-pages` and the agent handles everything in one pass.
 
 Once the tag set is collected, the agent expands it: `docs/api/endpoints/auth` implicitly requires pages for `docs`, `docs/api`, and `docs/api/endpoints` as well, so those parent entries are added automatically. It then inventories what already exists under `Tags/`, computes the three-way diff (create / keep / delete), and acts on it.
 
-Pages in the "keep" set are left untouched — their summaries survive across runs. Pages in the "delete" set are removed and any directories they leave empty are pruned. Pages in the "create" set are written from your local template: the agent infers a concise 1–2 sentence summary for each tag (drawing on the tag name, the notes that carry it, and its position in the hierarchy) before substituting `{{TAG_PATH}}` and `{{SUMMARY}}` into the template.
+Pages in the "keep" set are left untouched — their summaries survive across runs. Pages in the "delete" set are removed and any directories they leave empty are pruned. Pages in the "create" set are written from your local template: the agent infers a concise 1–2 sentence summary for each tag (drawing on the tag name, the notes that carry it, and its position in the hierarchy) before substituting `{{TAG_PATH}}` and `{{SUMMARY}}` into the template. A tag that no note carries directly but that exists only as a parent of nested tags gets a category-style summary that describes the tags it groups.
+
+The scanning, diffing, deleting and writing are done by the plugin's `tag-pages` verb in two steps: `plan` reports what would be created, kept and deleted, and `apply` carries it out. The agent's own contribution is the summaries between the two. If either step refuses to run, nothing is written and the run reports the reason it gave.
 
 The Dataview `Index` block inside the template is identical for every page and is never modified during a run — all live queries resolve at Obsidian render time.
+
+When the run finishes, the agent reports how many tags it found, which pages already existed, and which pages it created and deleted. It also lists the paths it touched; it does not commit, so committing them is up to you.
 
 Before the agent can run, the template must exist. If it's missing, the agent stops and tells you to run `/lazy-obsidian.install`, which scaffolds the default template in one step.
 

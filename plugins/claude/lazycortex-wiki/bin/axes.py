@@ -133,6 +133,12 @@ class _K:
 # Settings layer with the local overlay merged into the tracked file.
 _LAYER_MERGED: Final = "merged"
 
+# Encoding of the JSON exchanged with the core CLI.
+_ENCODING: Final = "utf-8"
+
+# Codec error handler that turns a byte that is not valid text into a replacement mark instead of failing.
+_DECODE_LOSSY: Final = "replace"
+
 
 def resolve_core_cli() -> Path:
   """
@@ -208,21 +214,27 @@ def read_settings(repo: Path,
 
   Raises:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved or exits non-zero.
+    ValueError: When the CLI exits 0 but its answer is not valid JSON or not valid UTF-8 text
+      (`json.JSONDecodeError` or `UnicodeDecodeError`).
   """
   proc = subprocess.run(
     [
       sys.executable, str(resolve_core_cli()), _K.SUB_SETTINGS_GET, section,
       _K.ARG_SCOPE, layer, _K.ARG_CWD, str(repo),
     ],
-    capture_output = True, text = True, check = False, encoding = "utf-8",
+    capture_output = True, check = False,
   )
 
-  # guard: non-zero exit — surface stdout+stderr for diagnosis rather than a bare JSON parse error
+  # guard: non-zero exit — surface stdout+stderr for diagnosis rather than a bare JSON parse error; the output is
+  # taken as bytes, so the exit status alone tells success from failure
   if proc.returncode != 0:
     raise RuntimeError(
       f"lazycortex-core {_K.SUB_SETTINGS_GET} exit={proc.returncode} "
-      f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+      f"stdout={proc.stdout.decode(_ENCODING, errors = _DECODE_LOSSY)!r} "
+      f"stderr={proc.stderr.decode(_ENCODING, errors = _DECODE_LOSSY)!r}"
     )
+
+  # the section itself is parsed strictly: an answer that is not valid text is no answer
   return json.loads(proc.stdout)
 
 
@@ -355,14 +367,15 @@ def _save_settings(repo: Path, section: str, value: dict) -> None:
   """
   proc = subprocess.run(
     [ sys.executable, str(resolve_core_cli()), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
-    input = json.dumps(value), capture_output = True, text = True, check = False, encoding = "utf-8",
+    input = json.dumps(value).encode(_ENCODING), capture_output = True, check = False,
   )
 
   # guard: non-zero exit — surface stdout+stderr for diagnosis
   if proc.returncode != 0:
     raise RuntimeError(
       f"lazycortex-core {_K.SUB_SETTINGS_SET} exit={proc.returncode} "
-      f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+      f"stdout={proc.stdout.decode(_ENCODING, errors = _DECODE_LOSSY)!r} "
+      f"stderr={proc.stderr.decode(_ENCODING, errors = _DECODE_LOSSY)!r}"
     )
 
 

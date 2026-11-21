@@ -57,8 +57,8 @@ def load(repo_root: Path) -> dict:
     repo_root: Absolute path to the root of the repository.
 
   Returns:
-    The stored state dict, or a fresh default state when no state file exists or the file is
-    not valid JSON.
+    The stored state dict, or a fresh default state when no state file exists, the file is
+    not valid JSON, or it holds a JSON value that is not an object.
   """
   path = _state_path(repo_root)
 
@@ -66,10 +66,13 @@ def load(repo_root: Path) -> dict:
   if not path.exists():
     return _empty_state()
   try:
-    return json.loads(path.read_text(encoding = "utf-8"))
+    stored = json.loads(path.read_text(encoding = "utf-8"))
   except (json.JSONDecodeError, UnicodeDecodeError):
     # corrupt, partial, or undecodable state file — fall back to fresh default
     return _empty_state()
+
+  # a state file holding any JSON value but an object is as unusable as a corrupt one
+  return stored if isinstance(stored, dict) else _empty_state()
 
 
 def save(repo_root: Path, state: dict) -> None:

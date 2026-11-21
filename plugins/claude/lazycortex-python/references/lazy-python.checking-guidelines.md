@@ -20,21 +20,31 @@ These are the tools the wrappers drive, not commands to type: every one of them 
 
 ## Verification order after changes (MANDATORY)
 
-After making code changes, **always** verify in this exact order. Every step goes through the wrappers — `chk-py` orchestrates the canonical pipeline (`pcf` + `toi` + `cmp` + `mypy` + `ruff` + `pylint`) in order with shared config, and `tst-py` applies the project's pytest args and venv; calling the underlying tools directly skips earlier phases and produces misleading findings. `-q` is mandatory on every invocation.
+After making code changes, **always** verify in this order, with the scope the moment of the work calls for:
 
-1. **Lint + type-check each changed file**:
+| Moment | Check | Tests |
+|---|---|---|
+| After every task or fix | local (step 1) | local (step 3) |
+| Implementation complete; after a cycle of review and fixes | whole project (step 2) | local (step 3) |
+| Before any commit | whole project (step 2) | local (step 3) |
+| Final gate (step 5) | whole project | whole suite |
+
+Every step goes through the wrappers — `chk-py` orchestrates the canonical pipeline (`pcf` + `toi` + `cmp` + `mypy` + `ruff` + `pylint`) in order with shared config, and `tst-py` applies the project's pytest args and venv; calling the underlying tools directly skips earlier phases and produces misleading findings. `-q` is mandatory on every invocation.
+
+1. **Local check — lint + type-check each changed file**, after every task and every fix:
    ```bash
    bash ./cli/chk-py all <file>.py -q
    ```
    If more than three files in the same module changed, target the module directory instead of one-by-one — `bash ./cli/chk-py all <module-dir>/ -q`.
-2. **Full-project lint + type-check** after the per-file step is clean:
+2. **Whole-project check — full-project lint + type-check**, when the implementation is complete, after each cycle of review and fixes, and before any commit — not after a single task or fix:
    ```bash
    bash ./cli/chk-py all -q
    ```
-3. **Tests**: run the relevant selection only **after** all checks pass, by bare module name — never a path, never a `.py` file:
+3. **Local tests**: run the affected modules only **after** the check that precedes them passes, by bare module name — never a path, never a `.py` file:
    ```bash
    bash ./cli/tst-py <module> -q
    ```
+   This is the only test run after a task, after a fix, when the implementation is complete, after a cycle of review and fixes, and before a commit. `tst-py` without a module runs the whole suite, and that form belongs to step 5 alone.
 
 Do not run tests before lint and type-check are clean — typing errors mask test failures and create wasted iteration.
 
@@ -44,7 +54,7 @@ Do not run tests before lint and type-check are clean — typing errors mask tes
    ```
    Unlike steps 1-3, this one does not belong in the edit loop: it runs at the end of a logical piece of work, and is mandatory at the end of a full cycle of planned work. See `## Guideline review phase` below.
 
-5. **Final gate** — before any commit and as the closing step of any task or plan: `chk-py all -q` with no path and `tst-py -q` with no module argument, the whole project and the whole suite. Steps 1–3 are the inner loop and never close the work. Read the full output of both; a filtered view (`head`, `grep`, `tail`) hides failures in code the change reaches indirectly. Green means both exit 0; anything red blocks the commit and is reported with the failing names, never presented as passing or dismissed as pre-existing.
+5. **Final gate** — once, when the whole work is finished: `chk-py all -q` with no path and `tst-py -q` with no module argument, the whole project and the whole suite. It starts only when nothing is left open: the implementation is complete, the last review left no open finding, and every fix is done. Never after a single task, a single fix, or one review round, and never as a pre-commit step. A whole-suite run started while a finding or a defect is still open is wasted: the fix that follows invalidates it. Read the full output of both; a filtered view (`head`, `grep`, `tail`) hides failures in code the change reaches indirectly. Green means both exit 0; anything red keeps the work open and is reported with the failing names, never presented as passing or dismissed as pre-existing.
    ```bash
    bash ./cli/chk-py all -q
    bash ./cli/tst-py -q

@@ -181,7 +181,7 @@ class NodePruner:
       True on a match under either resolution, False otherwise.
     """
 
-    # guard: node-relative resolution matches
+    # the target read from the node's own folder names the deleted node; otherwise it is read from the repo root
     if (node_dir / target).resolve() == deleted_abs:
       return True
     return (self._repo / target).resolve() == deleted_abs

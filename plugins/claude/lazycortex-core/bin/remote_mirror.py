@@ -269,6 +269,8 @@ class RemoteMirror:
       for cmd in steps:
         proc = subprocess.run(
           cmd, cwd = str(self._cache_dir), capture_output = True, text = True, check = False, encoding = "utf-8",
+          # waiver: stdlib decode-error mode, not a domain constant
+          errors = "replace",
         )
 
         # Contract:
@@ -287,7 +289,9 @@ class RemoteMirror:
       "git", "clone", "--depth", "1", *( [ "--branch", self._branch ] if self._branch else [] ),
       self._url, str(self._cache_dir),
     ]
-    proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8")
+    proc = subprocess.run(cmd, capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace")
 
     # Contract:
     # A failed clone never touches the destination tree.
@@ -307,6 +311,8 @@ class RemoteMirror:
     proc = subprocess.run(
       [ "git", "rev-parse", "HEAD" ], cwd = str(self._cache_dir),
       capture_output = True, text = True, check = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
     return proc.stdout.strip()
 
@@ -420,12 +426,26 @@ class RemoteMirror:
     Returns:
       Sorted list of clone-relative POSIX path strings.
     """
+    # NUL-separated names come as written, never quoted, so each one opens the file it names
     proc = subprocess.run(
-      [ "git", "ls-files" ], cwd = str(self._cache_dir),
-      capture_output = True, text = True, check = True, encoding = "utf-8",
+      [ "git", "ls-files", "-z" ], cwd = str(self._cache_dir),
+      capture_output = True, check = True,
     )
+
+    # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+    listing = proc.stdout.decode(
+      "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "surrogateescape",
+    )
+
+    # keep the tracked files the include and exclude patterns select
     result: list[str] = []
-    for rel in proc.stdout.splitlines():
+    for rel in listing.split("\0"):
+      # guard: the listing ends with a NUL, which leaves one empty field behind
+      if not rel:
+        continue
+
       # with an include list configured, a tracked file matching none of its patterns is dropped
       if self._include and not any(self._matcher.match(rel, pat) for pat in self._include):
         continue
@@ -569,7 +589,7 @@ def main(argv: list[str]) -> int:
     # same error shape and exit code as every other failure path above
     print(json.dumps({ _Key.ERROR: str(e) }))
     return 1
-  print(json.dumps(result, ensure_ascii = False))
+  print(json.dumps(result, ensure_ascii = True))
   return 1 if _Key.ERROR in result else 0
 
 

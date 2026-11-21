@@ -645,6 +645,7 @@ class EnvVar:
     GIT_CONFIG_PREFIX: Common prefix of every variable in git's environment-config protocol,
       numbered slots and config-file handles alike.
     GIT_HOOKS_PATH: The git config key naming the directory hooks are read from.
+    GIT_EXCLUDES_FILE: The git config key naming the excludes file read after a repository's own ignore files.
     DAEMON_TOKEN_MARK: The marker the daemon exports beside a token it sourced itself — a SHA-256
       digest of that token, never the token.
   """
@@ -669,6 +670,8 @@ class EnvVar:
   GIT_CONFIG_PREFIX = "GIT_CONFIG_"
   # The git config key naming the directory hooks are read from.
   GIT_HOOKS_PATH = "core.hooksPath"
+  # The git config key naming the excludes file read after a repository's own ignore files.
+  GIT_EXCLUDES_FILE = "core.excludesFile"
   # The marker the daemon exports beside a token it sourced itself — a SHA-256 digest of that token, never the token.
   DAEMON_TOKEN_MARK = "LAZYCORTEX_DAEMON_TOKEN_SHA256"
 
@@ -761,6 +764,22 @@ class IncidentPhase:
   OPENED = "opened"
   # The phase of a triage event that classifies an open incident.
   TRIAGED = "triaged"
+
+
+# ----------------------------------------------------------------------------------------
+class IncidentSeverity:
+  """
+  Closed-set severity tokens recorded on an error-ledger event's `severity` field.
+
+  Attributes:
+    ERROR: An incident that stopped or broke the work it names.
+    WARN: An incident recorded for attention while the work went on.
+  """
+
+  # An incident that stopped or broke the work it names.
+  ERROR = "error"
+  # An incident recorded for attention while the work went on.
+  WARN = "warn"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1078,7 +1097,7 @@ class MigrationTerritory:
   """
 
   # Repo-relative directory prefixes (ending in `/`) and exact file paths of the territory.
-  PREFIXES = ( ".claude/", "docs/domains/", ".state/", "upstream/", "pyproject.toml" )
+  PREFIXES = ( ".claude/", "docs/domains/", ".state/", "upstream/", "pyproject.toml", ".obsidian.manifest.json" )
   # The `writes` entry that stands for every terms dictionary and the documents it serves.
   TERMS_TOKEN = "{terms}"
 
@@ -1215,7 +1234,7 @@ class SandboxSyncKey:
 # ----------------------------------------------------------------------------------------
 class JobArtifact:
   """
-  Per-attempt forensic filenames written inside a job bundle directory.
+  Per-attempt forensic and claim-record filenames written inside a job bundle directory.
 
   Attributes:
     DEAD_JSON: The forensic payload describing a job marked dead.
@@ -1228,6 +1247,7 @@ class JobArtifact:
       The commit the work tree stood at when the pump claimed the job — the tree its
       `source/` / `context/` were copied from. A consumer deciding whether the job already
       saw a given commit compares against this, never against the claim's wall-clock time.
+    CLAIM_COPIES: The record of what the latest claim copied into the job's `source/` / `context/`.
   """
 
   # The forensic payload describing a job marked dead.
@@ -1246,6 +1266,8 @@ class JobArtifact:
   # from. A consumer deciding whether the job already saw a given commit compares against this, never against the
   # claim's wall-clock time.
   CLAIM_HEAD = "claim_head"
+  # The record of what the latest claim copied into the job's `source/` / `context/`.
+  CLAIM_COPIES = ".claim_copies.json"
 
 
 # ----------------------------------------------------------------------------------------

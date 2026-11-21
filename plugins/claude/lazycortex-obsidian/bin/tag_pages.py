@@ -253,7 +253,7 @@ def _is_usable_tag(tag: str) -> bool:
     True when the tag is not a template placeholder and has no empty, `.`, or `..` path segment.
   """
 
-  # Domain(unfiled):
+  # Domain(obsidian.tag-pages):
   # # Tags that never become tag pages
   # A tag written as a template placeholder, with angle brackets around a name, is not a real tag and gets no page.
   # A tag whose hierarchy contains an empty, `.` or `..` segment is skipped as well, because such a segment
@@ -276,7 +276,7 @@ def _is_scanned_note(rel: str) -> bool:
     False for notes in the system directory, in the tag-page directory, or under a dot-directory; otherwise True.
   """
 
-  # Domain(unfiled):
+  # Domain(obsidian.tag-pages):
   # # Notes that feed the vault's tag set
   # Notes in the vault's system directory never contribute tags, and neither do the tag pages themselves, since a
   # page is derived from the tags and must not feed them back. Notes under any dot-directory are hidden
@@ -366,7 +366,7 @@ def build_plan(vault: Path) -> TagPlan:
     The plan comparing the pages the vault needs with the pages that exist.
   """
 
-  # Domain(unfiled):
+  # Domain(obsidian.tag-pages):
   # # Tag pages mirror the tag hierarchy
   # The tag pages form a tree that mirrors the tag hierarchy: a slash-separated tag lives at the matching path
   # under the tag-page directory. Every parent prefix of a used tag needs a page of its own, even when no note
@@ -497,7 +497,9 @@ def resolve_summaries_path(vault: Path) -> Path:
   # waiver: git CLI vocabulary, not domain constants
   try:
     proc = subprocess.run([ "git", "rev-parse", "--git-path", SUMMARIES_NAME ], cwd = vault, check = False,
-                          capture_output = True, text = True, encoding = ENCODING)
+                          capture_output = True, text = True, encoding = ENCODING,
+                          # waiver: stdlib decode-error mode, not a domain constant
+                          errors = "surrogateescape")
   except OSError as error:
     raise TagPagesRefusedError(NO_GIT_DIR_REASON.format(vault = vault)) from error
 
@@ -543,7 +545,9 @@ def resolve_language(vault: Path) -> str:
   # waiver: core CLI vocabulary, not domain constants
   argv = [ sys.executable, str(cli), "resolve-language", "--section", SETTINGS_SECTION, "--cwd", str(vault) ]
   try:
-    proc = subprocess.run(argv, check = False, capture_output = True, text = True, encoding = ENCODING)
+    proc = subprocess.run(argv, check = False, capture_output = True, text = True, encoding = ENCODING,
+                          # waiver: stdlib decode-error mode, not a domain constant
+                          errors = "replace")
   except OSError as error:
     raise TagPagesRefusedError(LANGUAGE_FAILED_REASON.format(code = None, detail = error)) from error
 
@@ -567,7 +571,7 @@ def templated_summaries(tags: list[str], language: str) -> dict[str, str]:
     other language.
   """
 
-  # Domain(unfiled):
+  # Domain(obsidian.tag-pages):
   # # Templated tag page description
   # When tag pages are generated without a model, each new page gets one fixed description line that names the tag.
   # The line is worded in the vault's language: Russian has its own wording, and every other language gets the

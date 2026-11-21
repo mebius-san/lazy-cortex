@@ -47,25 +47,37 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import error_report  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_language  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
-    Gate, HistoryEvent, LangId, SpecKey, SpecValue, UPSTREAM_ACTION_LABELS, UPSTREAM_FROZEN_STATUSES, UpstreamAction,
-    UpstreamKey, UpstreamRole, UpstreamSourceKey, UpstreamSourceStatus, UpstreamStatus,
+    Gate, HistoryEvent, LangId, PluginErrorCause, SpecKey, SpecValue, UPSTREAM_ACTION_LABELS,
+    UPSTREAM_FROZEN_STATUSES, UpstreamAction, UpstreamKey, UpstreamRole, UpstreamSourceKey, UpstreamSourceStatus,
+    UpstreamStatus,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_lockit import Lockit  # noqa: E402
 
@@ -94,6 +106,28 @@ _CURSOR_KEY = "cursor"
 
 # Lockit key of the one-line description under the root catalog note's title.
 _ROOT_NOTE_KEY = "upstream-root-note"
+
+# The tick-summary key naming the units that raised while being advanced; present only when some did
+_UNITS_FAILED = "units_failed"
+
+# The tick-summary key naming the sources whose planning or source-note update raised; present only
+# when some did. A fetch failure the planner reports through its own error value is not one of them.
+_SOURCES_FAILED = "sources_failed"
+
+# The tick-summary key naming the tick's own bookkeeping writes that failed; present only when one did
+_WRITES_FAILED = "writes_failed"
+# How `git status --porcelain` opens the line of a path git does not track
+_GIT_UNTRACKED = "??"
+
+# The two bookkeeping writes that key can name: the root catalog note's seed and the continuation cursor
+_WRITE_ROOT_NOTE = "root-note"
+_WRITE_CURSOR = "cursor"
+
+# How a source's planning error is marked when the planner raised instead of reporting the failure
+_PLAN_RAISED_PREFIX = "planning raised: "
+
+# The prefix of the ledger incident key one unit's failed sync is reported under; the unit follows it
+_SYNC_INCIDENT_PREFIX = "upstream-sync:"
 
 
 class _K:
@@ -451,6 +485,9 @@ class _SkipKey:
 # Text encoding used to hash the aggregate state signature.
 _ENCODING = "utf-8"
 
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
+
 # A NUL byte marks a file as binary; only a file without one has its line endings read as LF.
 _NUL = b"\x00"
 _CRLF_BYTES = b"\r\n"
@@ -563,7 +600,8 @@ def _load_upstream_config(repo: Path) -> dict:
     repo: Repository root holding `.claude/lazy.settings.json`.
 
   Returns:
-    Parsed `upstream` sub-section, or `{}` when absent/malformed.
+    Parsed `upstream` sub-section, or `{}` when it is absent or malformed, or when the settings file cannot be read,
+    is not UTF-8 text, is not valid JSON or is not a JSON object.
   """
   path = repo / _SETTINGS_REL
 
@@ -571,14 +609,15 @@ def _load_upstream_config(repo: Path) -> dict:
   if not path.is_file():
     return {}
 
-  # guard: a malformed settings file is treated the same as an absent one — every caller already
-  # falls back to an empty section
+  # guard: settings that cannot be read or do not parse are treated the same as absent ones — every caller
+  # already falls back to an empty section; `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text
+  # and JSON that is not an object
   try:
-    spec = json.loads(path.read_text(encoding = "utf-8")).get(_K.SPEC_SECTION)
-  except json.JSONDecodeError:
+    spec = spec_paths.read_settings(path).get(_K.SPEC_SECTION)
+  except (OSError, ValueError):
     return {}
 
-  # guard: malformed spec section — nothing configured
+  # guard: a missing or malformed spec section — nothing configured
   if not isinstance(spec, dict):
     return {}
 
@@ -615,7 +654,7 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
 
   Raises:
     RuntimeError: The CLI process itself could not be resolved or crashed outside its own
-      documented `{"error": ...}` contract.
+      documented `{"error": ...}` contract, or its answer is valid JSON but not an object.
   """
   cli = spec_paths.resolve_core_cli(repo)
   env = os.environ.copy()
@@ -623,17 +662,23 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
   proc = subprocess.run(
       [sys.executable, str(cli), _K.REMOTE_MIRROR_VERB],
       input = json.dumps(payload), capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
+      errors = _DECODE_ERRORS,
   )
 
   # guard: the CLI's own contract is "0 on success, 1 on any failure — always valid JSON on
   # stdout" (remote_mirror.py `main`); a non-JSON stdout means the process itself crashed
   try:
-    return json.loads(proc.stdout)
+    answer = json.loads(proc.stdout)
   except json.JSONDecodeError as error:
     raise RuntimeError(
         f"remote-mirror crashed: exit={proc.returncode} stdout={proc.stdout!r} "
         f"stderr={proc.stderr!r}"
     ) from error
+
+  # guard: valid JSON that is no object is the same broken contract as no JSON at all
+  if not isinstance(answer, dict):
+    raise RuntimeError(f"remote-mirror answered no JSON object: exit={proc.returncode} stdout={proc.stdout!r}")
+  return answer
 
 
 def _has_source_content_changed(repo: Path, source_dir: Path) -> bool:
@@ -654,8 +699,8 @@ def _has_source_content_changed(repo: Path, source_dir: Path) -> bool:
   """
   status = subprocess.run(
       # waiver: git CLI vocabulary, not a domain constant
-      [_K.GIT, "-C", str(repo), "status", "--porcelain", "--", str(source_dir)],
-      check = False, capture_output = True, text = True, encoding = "utf-8",
+      [_K.GIT, "-C", str(repo), "status", "--porcelain", "-z", "--", str(source_dir)],
+      check = False, capture_output = True,
   )
   return bool(status.stdout.strip())
 
@@ -694,7 +739,7 @@ def _has_clone_origin_mismatch(clone_dir: Path, url: str) -> bool:
     return False
   proc = subprocess.run(
       [_K.GIT, "remote", "get-url", "origin"], cwd = str(clone_dir),
-      capture_output = True, text = True, check = False, encoding = "utf-8",
+      capture_output = True, text = True, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
   )
   return proc.returncode == 0 and proc.stdout.strip() != url
 
@@ -905,13 +950,20 @@ def _plan_all_sources(repo: Path, cfg: dict) -> dict[str, tuple[list[str], str |
     cfg: Parsed `spec.upstream` section.
 
   Returns:
-    `{repo_key: (tree_paths, error)}`, one entry per configured source.
+    `{repo_key: (tree_paths, error)}`, one entry per configured source; a source whose planning raised carries
+    that failure as its `error`, marked as raised and so distinct from a reported fetch failure.
   """
   out: dict[str, tuple[list[str], str | None]] = {}
   for repo_key in _source_keys(cfg):
     source_cfg = cfg[repo_key]
-    mounts = _mount_source_paths(source_cfg)
-    out[repo_key] = _plan_source_tree(repo, repo_key, source_cfg, mounts)
+    # one source that cannot be planned becomes that source's own error, like a failed fetch,
+    # so the sources after it are still planned
+    try:
+      out[repo_key] = _plan_source_tree(repo, repo_key, source_cfg, _mount_source_paths(source_cfg))
+    # waiver: the per-source boundary catches every failure type on purpose — the planner reaches
+    # a sibling CLI and the mirror, and none of their faults may stop the other sources
+    except Exception as error:  # pylint: disable=broad-exception-caught
+      out[repo_key] = ( [], f"{_PLAN_RAISED_PREFIX}{type(error).__name__}: {error}" )
   return out
 
 
@@ -1093,7 +1145,8 @@ def _git_ignored(repo: Path, rel_paths: list[str]) -> set[str]:
     rel_paths: Repo-relative POSIX paths to check.
 
   Returns:
-    Subset of `rel_paths` git would ignore; empty when `rel_paths` is empty.
+    The subset of `rel_paths` git would ignore, each spelled exactly as given (names with non-ASCII characters,
+    spaces or quotes included); empty when `rel_paths` is empty.
   """
 
   # Decision: only the repo's own `.gitignore` / exclude mechanism, not `.lazyignore` as well — a
@@ -1103,11 +1156,15 @@ def _git_ignored(repo: Path, rel_paths: list[str]) -> set[str]:
   # guard: nothing to check
   if not rel_paths:
     return set()
+
+  # the names travel NUL-separated both ways, so git neither splits one on a newline nor quotes one that holds
+  # a non-ASCII character or a quote; they go and come back as bytes, spelled the way the file system spells
+  # them, so no decoder or newline rule changes one
   proc = subprocess.run(
-      [_K.GIT, "check-ignore", "--stdin"], cwd = str(repo),
-      input = "\n".join(rel_paths), capture_output = True, text = True, check = False, encoding = "utf-8",
+      [_K.GIT, "check-ignore", "-z", "--stdin"], cwd = str(repo),
+      input = b"\0".join(os.fsencode(path) for path in rel_paths), capture_output = True, check = False,
   )
-  return set(proc.stdout.splitlines())
+  return { name for name in os.fsdecode(proc.stdout).split("\0") if name }
 
 
 def _apply_ignore_filter(repo: Path, source_dir: Path, plan: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -2207,7 +2264,7 @@ def _commit_unit(
 def _advance_unit(
     repo: Path, content_root: Path, repo_key: str, mount: str, unit_path: str,
     source_cfg: dict, mount_cfg: dict, tree_paths: list[str], tree_error: str | None,
-    mount_refused: bool, max_bytes: int,
+    mount_refused: bool, max_bytes: int, sync_errors: list[str],
 ) -> tuple[bool, str | None]:
   """
   Advance one unit's recorded state for this tick — all three phases, one unit (§ 8).
@@ -2220,6 +2277,9 @@ def _advance_unit(
     - Ticking both the primary action checkbox and the `POSTPONE` checkbox in the same commit
       resolves to the primary take-into-work action (§ 7); postpone never takes effect
       when both are ticked together.
+    - A unit whose sync reports an error also opens a warning incident in the error ledger (cause
+      `upstream-sync-failed`); the unit's next clean sync closes it, and so does the unit being held behind the
+      release gate, becoming excluded, or becoming orphaned.
 
   Args:
     repo: Repository root.
@@ -2234,6 +2294,7 @@ def _advance_unit(
     mount_refused: Whether this unit's mount has overlapping `units` this tick — every unit
       under a refused mount reports `UpstreamStatus.EXCLUDED` regardless of its own glob match.
     max_bytes: Per-file mirror size ceiling.
+    sync_errors: List the caller owns; a unit whose sync reports an error is appended to it.
 
   Returns:
     `(had_work, status)` — whether a commit was made, and the unit's resulting
@@ -2295,6 +2356,10 @@ def _advance_unit(
   source_path = mount_cfg.get(_K.SOURCE_PATH, "")
   prefix = f"{source_path}/" if source_path and source_path != "." else ""
 
+  # one ledger incident per unit: opened while its sync fails, closed by its next clean sync, and closed as well
+  # once the unit is no longer synced at all — held behind the release gate, excluded, or gone from its source
+  sync_incident = f"{_SYNC_INCIDENT_PREFIX}{repo_key}/{mount}/{unit_path}"
+
   # guard: already-materialized unit whose mirrored canon note is an unreleased status note
   # — frozen wholesale, checked against the PRIOR tick's own mirror so a steady-state gated unit
   # never gets re-synced (released-gate: the mirror stays unrefreshed and the status stays put);
@@ -2302,6 +2367,7 @@ def _advance_unit(
   if source_dir.is_dir() and _is_release_gated(source_dir, title) and (
       tree_error is not None or _is_release_gated(_clone_dir(repo, repo_key) / f"{prefix}{unit_path}", title)
   ):
+    error_report.resolve_marked(repo, sync_incident)
     return False, prior_status
 
   # existence-in-source and the pure config-glob match are independent inputs — conflating them
@@ -2324,8 +2390,10 @@ def _advance_unit(
   # then the normal sync-and-compare path
   if tree_error is None and (mount_refused or not glob_matches):
     status = UpstreamStatus.EXCLUDED
+    error_report.resolve_marked(repo, sync_incident)
   elif tree_error is None and not exists_in_source:
     status = UpstreamStatus.ORPHANED
+    error_report.resolve_marked(repo, sync_incident)
   elif tree_error is not None:
     # source unreachable this tick — isolate, leave the unit exactly as it was
     return False, prior_status or UpstreamStatus.NEW
@@ -2335,9 +2403,17 @@ def _advance_unit(
         repo, source_cfg, clone_dir, source_path, unit_path, source_dir, max_bytes,
     )
 
-    # guard: per-unit sync failed — isolate, leave the unit as it was
+    # guard: per-unit sync failed — isolate, leave the unit as it was, and report it: in the tick
+    # summary and in the error ledger, so a unit that fails every tick is never invisible
     if sync_error is not None:
+      sync_errors.append(f"{repo_key}: {mount}/{unit_path}: {sync_error}")
+      error_report.report_marked_warning(
+          repo, cause = PluginErrorCause.UPSTREAM_SYNC_FAILED, incident = sync_incident, detail = str(sync_error),
+      )
       return False, prior_status or UpstreamStatus.NEW
+
+    # the sync went through — whatever incident an earlier failure of this unit opened is closed
+    error_report.resolve_marked(repo, sync_incident)
 
     # the revision names the commit that delivered the current bytes — an upstream commit that
     # left this unit's subtree untouched must not move it, or every tick lands a noise commit
@@ -2480,6 +2556,62 @@ def _source_note_path(repo: Path, repo_key: str) -> Path:
   return repo / _K.UPSTREAM_ROOT / repo_key / f"{repo_key}{_K.MD_SUFFIX}"
 
 
+def _root_note_path(repo: Path) -> Path:
+  """
+  Resolve the root upstream catalog folder-note.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    `<repo>/upstream/upstream.md`.
+  """
+  return repo / _K.UPSTREAM_ROOT / f"{_K.UPSTREAM_ROOT}{_K.MD_SUFFIX}"
+
+
+def _carry_root_note(repo: Path) -> Path | None:
+  """
+  Seed the root upstream catalog folder-note when it is absent, and name it while a source-note commit still has to
+  carry it.
+
+  Asks git whether an existing note is tracked: a note seeded by an earlier tick whose carrying commit never landed
+  is still untracked, and is named again until a commit takes it.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    The note's path when this call created it or git does not track it yet; `None` once it is tracked, or when
+    `repo` is not inside a git checkout and the note already exists.
+
+  Raises:
+    OSError: If the note cannot be written, or git cannot be run.
+  """
+
+  # Domain(spec.upstream):
+  # # The catalog's root note is recorded with the first source that succeeds
+  # The catalog's own root note is seeded once and from then on belongs to the operator. It is recorded together
+  # with the first record of a source that succeeds, whether in the pass that seeded it or, for as long as it has
+  # never been recorded, in a later one, so a source that fails never leaves the note stranded. Once it is
+  # recorded it is never touched again.
+
+  created = _ensure_root_note(repo)
+
+  # a note seeded just now rides this tick's first source-note commit
+  if created is not None:
+    return created
+
+  # a note git lists as untracked was seeded by a tick whose source-note commit failed; a tracked one, changed
+  # or not, is the operator's and is never carried
+  note_path = _root_note_path(repo)
+  status = subprocess.run(
+      [ "git", "status", "--porcelain", "-z", "--", str(note_path) ],
+      cwd = str(repo), capture_output = True, check = False,
+  )
+  untracked = os.fsdecode(status.stdout).startswith(_GIT_UNTRACKED)
+  return note_path if status.returncode == 0 and untracked else None
+
+
 def _ensure_root_note(repo: Path) -> Path | None:
   """
   Seed the root upstream catalog folder-note once, so the `upstream/` folder carries its icon.
@@ -2493,7 +2625,7 @@ def _ensure_root_note(repo: Path) -> Path | None:
     The created `<repo>/upstream/upstream.md` path, or `None` when the note already
     exists — an existing note is operator territory and is never rewritten.
   """
-  note_path = repo / _K.UPSTREAM_ROOT / f"{_K.UPSTREAM_ROOT}{_K.MD_SUFFIX}"
+  note_path = _root_note_path(repo)
 
   # guard: write-once — an existing note is operator-owned, byte-identical after this call
   if note_path.is_file():
@@ -2642,7 +2774,7 @@ def _update_source_note(
       vault-unsafe name (§ 3) — always this tick's own, not carried over from a prior one.
     refused_mounts: Mount names whose `units` globs overlap this tick — always this tick's own.
     extra_paths: Additional freshly written paths folded into this note's own commit — the
-      root catalog note's one-time seed rides here rather than in a commit of its own.
+      root catalog note's seed rides here rather than in a commit of its own, until a commit has taken it.
 
   Returns:
     `True` when the note changed and was committed this tick; `False` otherwise.
@@ -2693,6 +2825,14 @@ def run(repo: Path) -> dict:
     - Every bot commit that writes a unit note or a source note carries that note's
       icon-frontmatter repaint in the same commit; no separate icons commit ever follows a
       note-owning bot commit.
+    - One unit that cannot be advanced never stops the walk: the units after it are still visited in the same tick,
+      the cursor is saved past it, and the unit is named in the summary's `errors` and `units_failed`.
+    - A root catalog note that cannot be seeded, or a continuation cursor that cannot be written, never raises out
+      of the pass and never stops the source notes or the unit walk; it is named in the summary's `errors` and in
+      `writes_failed`.
+    - A root catalog note that was seeded but never committed, because the source-note commit meant to carry it
+      failed, is carried by the next source-note commit that succeeds, in the same tick or a later one, for as long
+      as git does not track it; a note git already tracks is never carried.
 
   Args:
     repo: Repository root.
@@ -2700,14 +2840,28 @@ def run(repo: Path) -> dict:
   Returns:
     Summary dict: `units_ordered` (full unit-list size this tick computed), `units_visited`
     (how many this tick actually looked at), `units_touched` (how many spent the work budget),
-    `statuses` (per-`UpstreamStatus` counts across every visited unit), and `errors` (unique
-    per-source fetch-failure messages, isolated so one dead source never blocks another).
+    `statuses` (per-`UpstreamStatus` counts across every visited unit), and `errors` (sorted
+    messages: per-source fetch failures, units whose sync reported an error, units that failed, and source notes
+    that could not be updated, isolated so one dead source or unit never blocks another; a unit whose sync
+    reported an error does not fail the tick, like a reported fetch failure). Carries `units_failed` (the labels
+    of the units that raised) only when at least one unit raised, and `sources_failed` (the sources whose planning
+    or source-note update raised) only when at least one did; a fetch failure the planner reports through its own
+    error value is not among them. Carries `writes_failed` (the tick's own bookkeeping writes that failed, among
+    `root-note` and `cursor`) only when one failed, and each such failure is also named in `errors`.
   """
 
   # Contract:
   # Every bot commit that writes a unit note or a source note carries that note's
   # icon-frontmatter repaint in the same commit. No separate icons commit ever follows
   # a note-owning bot commit.
+
+  # Contract:
+  # A root catalog note that cannot be seeded, or a continuation cursor that cannot be written, never raises out
+  # of the pass and never stops the source notes or the unit walk. It is named in the summary's `errors` and in
+  # `writes_failed`. A root catalog note that was seeded but never committed, because the
+  # source-note commit meant to carry it failed, is carried by the next source-note commit that
+  # succeeds, in the same tick or a later one, for as long as git does not track it. A note git
+  # already tracks is never carried.
 
   # config + limits first — everything below reads from these
   cfg = _load_upstream_config(repo)
@@ -2724,28 +2878,57 @@ def run(repo: Path) -> dict:
   })
 
   # the root upstream catalog note is seeded once alongside the first configured source —
-  # write-once, then operator-owned; it rides the first source note's own commit below
-  root_note = _ensure_root_note(repo) if tree_by_source else None
+  # write-once, then operator-owned; it rides the first source note's own commit below that
+  # succeeds, in this tick or, while git still does not track it, in a later one. A seed that
+  # cannot be written is reported and retried by the next tick, and never stops the source notes
+  # or the unit walk
+  root_note: Path | None = None
+  failed_writes: list[str] = []
+  try:
+    root_note = _carry_root_note(repo) if tree_by_source else None
+  except OSError as failure:
+    errors.append(f"upstream root note: {type(failure).__name__}: {failure}")
+    failed_writes.append(_WRITE_ROOT_NOTE)
+
+  # the sources that raised rather than reported — they fail the tick, a reported fetch failure does not
+  failed_sources: list[str] = [
+      repo_key for repo_key, (_paths, error) in tree_by_source.items()
+      if error is not None and error.startswith(_PLAN_RAISED_PREFIX)
+  ]
 
   # every configured source gets its own repo-level note kept current — independent of
   # max_units_per_tick and of whether it has any matched units yet (§ 5)
   today = flip_gate.effective_today(None)
   for repo_key, (_paths, error) in tree_by_source.items():
-    _update_source_note(
-        repo, repo_key, error, failure_threshold, today,
-        invalid = invalid_names.get(repo_key, []),
-        refused_mounts = sorted(
-            mount_name for source_key, mount_name in refused_mounts if source_key == repo_key
-        ),
-        extra_paths = [root_note] if root_note is not None else None,
-    )
+    # one source note that cannot be updated is reported against its source and never stops
+    # the notes of the other sources or the unit walk below
+    try:
+      _update_source_note(
+          repo, repo_key, error, failure_threshold, today,
+          invalid = invalid_names.get(repo_key, []),
+          refused_mounts = sorted(
+              mount_name for source_key, mount_name in refused_mounts if source_key == repo_key
+          ),
+          extra_paths = [root_note] if root_note is not None else None,
+      )
+    # waiver: the per-source boundary catches every failure type on purpose — a note read, a
+    # rewrite and a commit all sit behind this call
+    except Exception as failure:  # pylint: disable=broad-exception-caught
+      errors.append(f"{repo_key}: source note: {type(failure).__name__}: {failure}")
+      if repo_key not in failed_sources:
+        failed_sources.append(repo_key)
+      continue
 
     # the seed rides exactly one commit — once handed to the first source note, it is spent
     root_note = None
 
   # guard: nothing configured or nothing landed yet — no units to visit
   if not ordered:
-    return { "units_ordered": 0, "units_visited": 0, "units_touched": 0, "statuses": {}, "errors": errors }
+    return {
+        "units_ordered": 0, "units_visited": 0, "units_touched": 0, "statuses": {}, "errors": sorted(errors),
+        **({ _SOURCES_FAILED: failed_sources } if failed_sources else {}),
+        **({ _WRITES_FAILED: failed_writes } if failed_writes else {}),
+    }
 
   # walk the ordered list circularly from the persisted cursor, spending budget only on work
   budget = max_units
@@ -2753,19 +2936,38 @@ def run(repo: Path) -> dict:
   idx = _load_cursor(repo) % len(ordered)
   statuses: dict[str, int] = {}
   touched = 0
+  failed_units: list[str] = []
+
+  # Contract:
+  # One unit that cannot be advanced never stops the walk: the units after it are still visited
+  # in the same tick, the cursor is saved past it, and the unit is named in the summary's
+  # `errors` and `units_failed`.
+
+  # visit units until the list is exhausted or the work budget is spent
   while visited < len(ordered) and budget > 0:
     repo_key, mount, unit_path = ordered[idx]
     tree_paths, tree_error = tree_by_source[repo_key]
     source_cfg = cfg[repo_key]
     mount_cfg = (source_cfg.get(_K.MOUNTS) or {}).get(mount) or {}
     mount_refused = (repo_key, mount) in refused_mounts
-    had_work, status = _advance_unit(
-        repo, content_root, repo_key, mount, unit_path, source_cfg, mount_cfg,
-        tree_paths, tree_error, mount_refused, max_bytes,
-    )
 
-    # a `None` status is a released-gated unit's undone first landing — it never materialized, so
-    # there is nothing to count here (contrast every other status, which always counts)
+    # the per-unit boundary — a unit that raises spent its turn, so the walk steps over it
+    # exactly as over a unit that had work
+    try:
+      had_work, status = _advance_unit(
+          repo, content_root, repo_key, mount, unit_path, source_cfg, mount_cfg,
+          tree_paths, tree_error, mount_refused, max_bytes, sync_errors = errors,
+      )
+    # waiver: the per-unit boundary catches every failure type on purpose — a narrower list is
+    # what let one unreadable note stop every unit behind it
+    except Exception as failure:  # pylint: disable=broad-exception-caught
+      unit_label = f"{repo_key}: {mount}/{unit_path}"
+      failed_units.append(unit_label)
+      errors.append(f"{unit_label}: {type(failure).__name__}: {failure}")
+      had_work, status = True, None
+
+    # a `None` status is a unit with no status to count: a released-gated unit's undone first
+    # landing, which never materialized, or a unit whose advance raised; every other status counts
     if status is not None:
       statuses[status] = statuses.get(status, 0) + 1
     if had_work:
@@ -2775,12 +2977,28 @@ def run(repo: Path) -> dict:
     idx = (idx + 1) % len(ordered)
 
   # a full pass with budget to spare resets the cursor; an early stop resumes at the next unit
-  next_cursor = 0 if visited >= len(ordered) else idx
-  _save_cursor(repo, next_cursor)
-  return {
+  # a cursor that cannot be written is reported, so the tick fails loudly instead of silently
+  # restarting from the same unit forever
+  try:
+    _save_cursor(repo, 0 if visited >= len(ordered) else idx)
+  except OSError as failure:
+    errors.append(f"upstream cursor: {type(failure).__name__}: {failure}")
+    failed_writes.append(_WRITE_CURSOR)
+
+  # the summary every tick reports
+  summary: dict = {
       "units_ordered": len(ordered), "units_visited": visited, "units_touched": touched,
-      "statuses": statuses, "errors": errors,
+      "statuses": statuses, "errors": sorted(errors),
   }
+
+  # the keys are additive: a tick where nothing raised reports the summary it always has
+  if failed_units:
+    summary[_UNITS_FAILED] = failed_units
+  if failed_sources:
+    summary[_SOURCES_FAILED] = failed_sources
+  if failed_writes:
+    summary[_WRITES_FAILED] = failed_writes
+  return summary
 
 
 class DoctorFinding:
@@ -3231,21 +3449,35 @@ def main(argv: list[str]) -> int:
     argv: Subcommand tail (optional `--cwd`).
 
   Returns:
-    `0` on a completed pass — a per-source fetch failure is isolated and reported in the
-    printed summary's `errors` list, never raised.
+    `0` on a completed pass — a per-source fetch failure or a unit whose sync reported an error is isolated and
+    reported in the printed summary's `errors` list, never raised. Non-zero (`1`) when a unit raised while being
+    advanced, a source's planning raised, a source-note update raised, or a bookkeeping write of the tick failed.
+    Also `1`, with one line naming the settings file on stderr and nothing printed, when the settings file cannot
+    be read as a JSON object; the tick then does not run.
 
   Raises:
     SystemExit: `argparse` rejects an unrecognised flag or a missing option value (exit `2`).
-    RuntimeError: The `lazycortex-core` CLI could not be resolved, or crashed outside its own
-      documented `{"error": ...}` contract.
-    subprocess.CalledProcessError: Staging or committing the pass's writes with git exits non-zero.
+    RuntimeError: The `lazycortex-core` CLI could not be resolved, or crashed outside the pass's per-source and
+      per-unit boundaries, for instance while the tick's configuration is loaded.
   """
   parser = argparse.ArgumentParser(prog = _K.PROG)
   parser.add_argument(_K.ARG_CWD, default = None)
   args = parser.parse_args(argv)
   repo = Path(args.cwd).resolve() if args.cwd else spec_paths.find_settings_root(Path.cwd())
-  print(json.dumps(run(repo)))
-  return 0
+
+  # settings that cannot be read as a JSON object refuse the tick: it never runs as if nothing were configured,
+  # and never against a content root the settings did not name
+  try:
+    spec_paths.require_valid_settings(repo)
+    summary = run(repo)
+  except (spec_paths.SettingsError, spec_paths.VaultRootError) as error:
+    sys.stderr.write(f"{_K.PROG}: {error}\n")
+    return 1
+  print(json.dumps(summary))
+
+  # a unit or a source that raised, or a bookkeeping write that failed, is a failed tick for the
+  # daemon, unlike a per-source fetch failure the planner reported through its own error value
+  return 1 if any(summary.get(key) for key in ( _UNITS_FAILED, _SOURCES_FAILED, _WRITES_FAILED )) else 0
 
 
 def main_doctor(argv: list[str]) -> int:

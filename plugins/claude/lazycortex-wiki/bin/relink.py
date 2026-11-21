@@ -19,6 +19,7 @@ GitPython, per the project tech conventions.  Node hashing reuses the
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,9 @@ class RelinkPlanner:
     MODE_INCREMENTAL: Plan mode used when the anchor is a reachable ancestor of HEAD.
     MODE_ANCHOR_LOST: Plan mode used when the anchor is unreachable and content
       hashes decide the plan instead.
+
+    skipped_names: Changed paths the last plan left out because their names are not valid UTF-8, spelled so they
+      can be written, with odd bytes as backslash escapes.
   """
 
   # Contract:
@@ -107,6 +111,9 @@ class RelinkPlanner:
     self._cfg = cfg
     self._resolver = _scope.ScopeResolver(repo = self._repo)
 
+    # the changed paths the last plan left out for a name that is not UTF-8, spelled so they can be written
+    self.skipped_names: list[str] = []
+
   def plan(self) -> dict:
     """
     Compute the relink plan for the scope.
@@ -127,6 +134,10 @@ class RelinkPlanner:
       "classify": [<abs paths>], "link": [<abs paths>], "drop": [<abs paths>]}`.
       The `classify` and `link` lists hold absolute node-path strings; `drop`
       holds absolute paths of nodes deleted since the anchor.  Lists are sorted.
+
+    Raises:
+      subprocess.CalledProcessError: In incremental mode, if git cannot produce the delta since the anchor; no plan
+        is returned, so the anchor is not refreshed.
     """
 
     # Contract:
@@ -349,25 +360,34 @@ class RelinkPlanner:
 
     A rename yields its old path as deleted and its new path as added; a copy yields only its new path as added.
 
+    Notes:
+      - A changed path whose name is not valid UTF-8 never fails the delta; it is reported on stderr, remembered in
+        `skipped_names` and left out of the delta, and every other changed path is returned as usual.
+
     Args:
       sha: The anchor commit to diff against HEAD.
 
     Returns:
-      List of `(status_letter, repo-relative-posix-path)` tuples, empty when the delta cannot be read.
+      List of `(status_letter, repo-relative-posix-path)` tuples; empty only when nothing moved since the anchor.
+
+    Raises:
+      subprocess.CalledProcessError: If git cannot produce the delta, so a failed lookup is never read as nothing
+        having moved.
     """
     proc = subprocess.run(
       [ "git", "-C", str(self._repo), "diff", "--name-status", "-z", f"{sha}..HEAD" ],
-      capture_output = True, text = True, check = False, encoding = "utf-8",
+      capture_output = True, check = False,
     )
 
-    # guard: git failed — yield no delta rather than crashing the plan
+    # guard: git failed — a delta that could not be read is never an empty one, which would read as nothing moved
     if proc.returncode != 0:
-      return []
+      raise subprocess.CalledProcessError(proc.returncode, proc.args, proc.stdout, proc.stderr)
 
     # unpack the NUL-separated fields — a status, then its path, or old and new path for a rename or copy —
-    # into (status, path) pairs the planner can consume
+    # into (status, path) pairs the planner can consume; the bytes are decoded without loss, so a name that is
+    # not UTF-8 cannot fail the plan
     out: list[tuple[str, str]] = []
-    fields = [ field for field in proc.stdout.split(self._NUL) if field ]
+    fields = [ field for field in os.fsdecode(proc.stdout).split(self._NUL) if field ]
     index = 0
     while index < len(fields):
       status = fields[index]
@@ -387,7 +407,23 @@ class RelinkPlanner:
         break
       out.append((status[0], fields[index]))
       index += 1
-    return out
+
+    # a path whose name is not UTF-8 cannot be written or printed; it is reported and left out of the delta, and
+    # the other paths are planned as usual
+    kept: list[tuple[str, str]] = []
+    self.skipped_names = []
+    for status, rel in out:
+      try:
+        rel.encode(self._ENCODING)
+      except UnicodeEncodeError:
+        print(f"relink: skipped a changed path whose name is not UTF-8: {rel!r}", file = sys.stderr)
+
+        # the caller records the skip, so the path is remembered under a spelling that can be written
+        # waiver: `backslashreplace` is the stdlib codec error-handler name that spells an unencodable byte out
+        self.skipped_names.append(rel.encode(self._ENCODING, errors = "backslashreplace").decode(self._ENCODING))
+        continue
+      kept.append((status, rel))
+    return kept
 
   def _is_in_scope(self, rel_path: str, *, apply_filter: bool = True) -> bool:
     """
@@ -434,7 +470,7 @@ class RelinkPlanner:
     try:
       proc = subprocess.run(
         [ "git", "-C", str(self._repo), *args ],
-        capture_output = True, text = True, check = False, encoding = "utf-8",
+        capture_output = True, check = False,
       )
     except OSError:
       # guard: git binary not found / not executable

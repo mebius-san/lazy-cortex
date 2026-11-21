@@ -29,7 +29,7 @@ from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from vault_keys import (  # pylint: disable=import-error
-  AppearanceKey, BundleKey, BundleSourceKind, CachePath, CommandKind, Encoding, Http,
+  AppearanceKey, BundleKey, BundleSourceKind, CachePath, CommandKind, Encoding, Http, IconizeKey,
   ManifestKey, PluginKey, ReportKey, SnippetKey, SnippetSourceKind, TemplatePath, ThemeKey,
   VaultPath,
 )
@@ -45,12 +45,14 @@ MANIFEST_VERSION = 1
 # - workspace* / graph.json: per-device session state, rewritten on every layout change.
 # - community-plugins.json: derived — the manifest's plugin map carries enablement, and
 #   deploy rebuilds the file from it. Two writers for one fact is one too many.
+# - bookmarks.json: the operator's personal state on each device, not configuration of the vault.
 CONFIG_DENYLIST = {
   "workspace.json",
   "workspace-mobile.json",
   "workspaces.json",
   "graph.json",
   VaultPath.COMMUNITY_PLUGINS,
+  VaultPath.BOOKMARKS,
 }
 
 # Per-device keys inside the appearance settings: window zoom belongs to the screen.
@@ -58,9 +60,13 @@ APPEARANCE_DEVICE_KEYS = { AppearanceKey.ZOOM_FACTOR }
 
 # Plugins whose settings file mixes settings with derived state restored by its own writer:
 # only the listed top-level keys are captured, every other key is dropped. Iconize's per-path
-# icon entries are rebuilt by iconize-reloader from note frontmatter; its settings-like keys
-# match the reloader's own reserved-key list.
-PLUGIN_DATA_KEEP = { "obsidian-icon-folder": frozenset({ "settings", "rules", "recentlyUsedIcons" }) }
+# icon entries are rebuilt by iconize-reloader from note frontmatter, and its recently used
+# icons are the operator's personal state on each device; only its settings and rules travel.
+PLUGIN_DATA_KEEP = { IconizeKey.PLUGIN_ID: frozenset({ IconizeKey.SETTINGS, IconizeKey.RULES }) }
+
+# Dotted manifest paths of the personal state an older capture recorded and the strip verb removes
+PERSONAL_BOOKMARKS_PATH = f"{ManifestKey.CONFIG}.{VaultPath.BOOKMARKS}"
+PERSONAL_RECENT_ICONS_PATH = f"{ManifestKey.PLUGINS}.{IconizeKey.PLUGIN_ID}.{IconizeKey.RECENT_ICONS}"
 
 # Key names whose string value is a credential by the name alone. A bare `token` is
 # deliberately absent: plugins use it for syntax-highlighting classes and other harmless
@@ -422,7 +428,9 @@ def resolve_github_token() -> str:
     # waiver: the `gh` CLI is the operator's own credential store, not an injected command
     result = subprocess.run(
       list(GH_TOKEN_COMMAND), capture_output = True, text = True,
-      timeout = GH_TOKEN_TIMEOUT_SEC, check = False, encoding = "utf-8")
+      timeout = GH_TOKEN_TIMEOUT_SEC, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace")
     return result.stdout.strip()
   except (OSError, subprocess.SubprocessError):
     return ""
@@ -973,9 +981,11 @@ def _capture_config(vault: Path, omitted: list[str]) -> dict:  # waiver: Obsidia
   # A vault's configuration directory mixes settings that describe the vault and belong in a
   # portable snapshot with settings that describe the device or session viewing it, which would
   # corrupt every other device the snapshot is later deployed onto.
-  # A whole configuration file is left out of the snapshot when it records nothing but window
-  # layout or session state, or when its entire content is already derived from another part of
-  # the snapshot and restoring it separately would let the two copies disagree.
+  # A whole configuration file is left out of the snapshot for one of three reasons: it records
+  # nothing but window layout or session state; its entire content is already derived from
+  # another part of the snapshot, so restoring it separately would let the two copies disagree;
+  # or it holds the personal state of whoever uses the device, such as bookmarks, which belongs
+  # to that person on that device and must never be laid over another person's own.
   # Within a file that is otherwise worth keeping, a single per-device setting is stripped from
   # it instead of disqualifying the whole file — window zoom is the only such setting today.
 
@@ -1046,8 +1056,9 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
   Snapshot every installed community plugin.
 
   Captures each plugin's settings whole, minus secret-looking values, except a plugin whose
-  settings file mixes settings with derived per-path entries — that one keeps only its
-  settings-like top-level keys.
+  settings file mixes settings with derived per-path entries or the operator's personal
+  per-device state, such as recently used choices — that one keeps only its settings-like
+  top-level keys.
 
   Args:
     vault: The vault's config directory.
@@ -1072,12 +1083,12 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
     # vault's notes on every run. That part is owned by its own writer: restoring a captured copy
     # would only be overwritten on the next run, so only the settings around it are captured,
     # and the derived entries are left for their writer to rebuild after a deploy.
+    # A plugin's settings file may also carry personal per-device state, such as the choices the
+    # user made most recently. That state belongs to whoever uses the device, so it is left out
+    # of the snapshot exactly like derived entries, and only the genuine settings are captured.
 
-    # capture settings whole, keeping only the settings part of a file that mixes in derived state
-    data = load_json(directory / VaultPath.PLUGIN_DATA)
-    keep = PLUGIN_DATA_KEEP.get(directory.name)
-    if keep is not None and isinstance(data, dict):
-      data = { key: value for key, value in data.items() if key in keep }
+    # capture settings whole, keeping only the settings part of a file that mixes in derived or personal state
+    data = _filter_plugin_data(directory.name, load_json(directory / VaultPath.PLUGIN_DATA))
     data = strip_secrets(data, directory.name, omitted)
     plugins[directory.name] = {
       PluginKey.ENABLED: directory.name in enabled,
@@ -1087,6 +1098,66 @@ def _capture_plugins(vault: Path, omitted: list[str]) -> dict:  # waiver: plugin
       PluginKey.DATA: data,
     }
   return plugins
+
+
+def _filter_plugin_data(pid: str,
+                        data: Any) -> Any:  # waiver: arbitrary JSON payload — plugin settings shape is not ours
+  """
+  Keep only the portable part of one plugin's settings payload.
+
+  Args:
+    pid: Plugin id the payload belongs to.
+    data: The plugin's settings payload, of whatever shape the plugin writes.
+
+  Returns:
+    The payload limited to its kept top-level keys for a plugin that mixes settings with
+    derived or personal state, or the payload unchanged for any other plugin.
+  """
+
+  # a plugin with no keep-set keeps its settings whole
+  if (keep := PLUGIN_DATA_KEEP.get(pid)) is None:
+    return data
+
+  # guard: a payload that is not an object has no top-level keys to keep
+  if not isinstance(data, dict):
+    return data
+  return { key: value for key, value in data.items() if key in keep }
+
+
+def _filter_portable(manifest: dict) -> dict:  # waiver: manifest of mixed JSON shapes
+  """
+  Limit a stored manifest to what a capture today would record.
+
+  A manifest written by an older capture may still carry files or settings keys that capture
+  now leaves out; this view drops them, so neither deploy nor drift acts on them.
+
+  Args:
+    manifest: The manifest as read from the repo.
+
+  Returns:
+    A new manifest without the left-out config files and plugin settings keys; every other
+    section is the original's.
+  """
+
+  # Domain(obsidian.vault-capture):
+  # # A snapshot is read through today's exclusions
+  # What a snapshot leaves out changes over time: state once captured may later be judged
+  # personal, derived or per-device. A snapshot written under older exclusions can therefore
+  # still carry what a capture today would leave out.
+  # Such a snapshot is always read through the exclusions in force now. Restoring never lays
+  # down what capture no longer records, so a device's personal state is not overwritten by an
+  # old snapshot, and comparison treats the snapshot as if that content were absent, so it never
+  # reports a difference over something no capture would ever produce. The device's own copy of
+  # such state is never touched by either operation.
+
+  # rebuild both sections that capture can leave entries out of, keeping every other section as is
+  return {
+    **manifest,
+    ManifestKey.CONFIG: { name: data for name, data in (manifest.get(ManifestKey.CONFIG) or {}).items()
+                          if name not in CONFIG_DENYLIST },
+    ManifestKey.PLUGINS: { pid: { **entry, PluginKey.DATA: _filter_plugin_data(pid, entry.get(PluginKey.DATA)) }
+                           for pid, entry in (manifest.get(ManifestKey.PLUGINS) or {}).items() },
+  }
 
 
 # ----------------------------------------------------------------------------------------
@@ -1100,6 +1171,11 @@ def read_drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   Guarantees:
     - Never writes to the manifest or the vault's configuration; only reads state and reports
       differences.
+    - An entry that an older manifest carries but capture now leaves out never appears as a
+      difference.
+
+  Notes:
+    - Reads the manifest at the repo root and the vault's live configuration from disk.
 
   Args:
     root: Vault repo root, the directory holding the manifest.
@@ -1109,17 +1185,28 @@ def read_drift(root: Path) -> dict:  # waiver: report envelope of mixed shapes
 
   Raises:
     WorkerError: When the repo root carries no readable manifest or no config directory.
+    OSError: When a CSS snippet file in the vault cannot be read.
+    UnicodeDecodeError: When a CSS snippet file in the vault is not valid UTF-8 text.
   """
 
   # Contract:
   # This never writes to the manifest or the vault's configuration; it only reads state and
   # reports differences for the operator to arbitrate.
 
+  # Contract:
+  # An entry that an older manifest carries but capture now leaves out never appears as a
+  # difference.
+
+  # read the manifest the live vault is compared against
   stored = load_json(root / VaultPath.MANIFEST)
 
   # guard: there is nothing to compare the vault against
   if not isinstance(stored, dict):
     raise WorkerError(NO_MANIFEST_ERROR.format(manifest = VaultPath.MANIFEST, root = root))
+
+  # prepare both sides: the live vault as capture reads it now, and the stored manifest through today's
+  # exclusions, so an older manifest's left-out entries compare as absent like on the live side
+  stored = _filter_portable(stored)
   live = build_manifest(root)
 
   # accumulate the differences, and the notes that are not differences
@@ -1232,6 +1319,15 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   Guarantees:
     - A plugin id reaches the enablement file only when this run wrote that plugin's bundle
       into the vault; every skipped plugin is named in the report's error list instead.
+    - Never writes a top-level config file or a plugin settings key that capture leaves out, even
+      when an older manifest still carries it; a bookmarks file already in the vault is neither
+      written nor removed.
+
+  Notes:
+    - Creates the vault's config directory when it is missing and overwrites the files it writes there.
+    - Fetches the community catalog and every plugin bundle or theme this plugin does not ship from GitHub, and
+      mirrors what it fetched into the user's cache; an unreachable upstream falls back to that cache and is
+      reported as an error.
 
   Args:
     root: Vault repo root, the directory holding the manifest.
@@ -1242,6 +1338,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
 
   Raises:
     WorkerError: When the repo root carries no readable manifest.
+    OSError: When a file cannot be written into the vault.
   """
   manifest = load_json(root / VaultPath.MANIFEST)
 
@@ -1253,18 +1350,18 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   vault = root / VaultPath.OBSIDIAN
   vault.mkdir(parents = True, exist_ok = True)
 
-  # unpack the sections deploy writes, and the accumulator for what it has to skip
+  # Contract:
+  # Deploy never writes a top-level config file or a plugin settings key that capture leaves out,
+  # even when an older manifest still carries it; a bookmarks file already in the vault is
+  # neither written nor removed.
+
+  # unpack the sections deploy writes, never what an older capture recorded and capture now leaves out
   errors: list[str] = []
-  config = manifest.get(ManifestKey.CONFIG) or {}
-  plugins = manifest.get(ManifestKey.PLUGINS) or {}
+  portable = _filter_portable(manifest)
 
   # lay down every top-level config file the manifest carries
   written_config: list[str] = []
-  for name, data in config.items():
-    # guard: derived and per-device files are rebuilt, never restored
-    if name in CONFIG_DENYLIST:
-      continue
-
+  for name, data in portable[ManifestKey.CONFIG].items():
     # guard: a name that is not a plain filename would escape the config directory
     if not is_safe_name(name):
       errors.append(CONFIG_UNSAFE_ERROR.format(name = name))
@@ -1274,7 +1371,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
 
   # snippets, plugins, enablement, and theme complete the vault
   snippets = _deploy_snippets(vault, manifest.get(ManifestKey.SNIPPETS) or {}, errors)
-  installed = _deploy_plugins(vault, plugins, errors)
+  installed = _deploy_plugins(vault, portable[ManifestKey.PLUGINS], errors)
 
   # Contract:
   # A plugin id appears in the enablement file only when this run wrote that plugin's
@@ -1283,7 +1380,7 @@ def deploy(root: Path) -> dict:  # waiver: report envelope of mixed shapes
   # enable only what actually landed, so the vault never turns on a plugin with no bundle
   landed = { record[PluginKey.ID] for record in installed }
   dump_json(vault / VaultPath.COMMUNITY_PLUGINS,
-            [pid for pid, entry in plugins.items()
+            [pid for pid, entry in portable[ManifestKey.PLUGINS].items()
              if entry.get(PluginKey.ENABLED) and pid in landed])
   theme = _deploy_theme(vault, manifest.get(ManifestKey.THEME), errors)
 
@@ -1492,6 +1589,141 @@ def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | No
 
 
 # ----------------------------------------------------------------------------------------
+def query_personal_state(root: Path) -> list[str]:
+  """
+  Name the personal state an older capture left in a vault's manifest.
+
+  Notes:
+    - Reads the manifest at the repo root and writes nothing.
+
+  Args:
+    root: Vault repo root, the directory holding the manifest.
+
+  Returns:
+    The dotted manifest paths still to strip, empty once the manifest is clean.
+
+  Raises:
+    WorkerError: When the repo root carries no readable manifest.
+  """
+  return _find_all_personal(_read_manifest(root))
+
+
+def delete_personal_state(root: Path) -> dict:  # waiver: report envelope of mixed shapes
+  """
+  Strip the personal state an older capture left in a vault's manifest.
+
+  Guarantees:
+    - Removes exactly the bookmarks config entry and Iconize's recently used icons key; every
+      other key keeps its value and its order.
+    - A manifest with nothing to strip is not rewritten, so its bytes stay unchanged.
+
+  Notes:
+    - Reads the manifest at the repo root and rewrites that file in place, with a trailing newline, when personal
+      state was found.
+
+  Args:
+    root: Vault repo root, the directory holding the manifest.
+
+  Returns:
+    A report naming the manifest and the dotted paths removed from it.
+
+  Raises:
+    WorkerError: When the repo root carries no readable manifest.
+    OSError: When the manifest cannot be rewritten.
+  """
+
+  # Contract:
+  # Exactly the bookmarks config entry and Iconize's recently used icons key are removed;
+  # every other key keeps its value and its order.
+
+  # Contract:
+  # A manifest with nothing to strip is not rewritten; its bytes stay unchanged.
+
+  # read the manifest and name what it still carries before anything is removed
+  path = root / VaultPath.MANIFEST
+  manifest = _read_manifest(root)
+  stripped = _find_all_personal(manifest)
+
+  # remove exactly the two entries in place, so every other key keeps its value and its order
+  if isinstance(config := manifest.get(ManifestKey.CONFIG), dict):
+    config.pop(VaultPath.BOOKMARKS, None)
+  if (iconize := _find_iconize_data(manifest)) is not None:
+    iconize.pop(IconizeKey.RECENT_ICONS, None)
+
+  # a clean manifest is never rewritten, so a repeated run leaves its bytes alone
+  if stripped:
+    dump_json(path, manifest, trailing_newline = True)
+
+  # report what was removed, an empty list meaning the manifest was already clean
+  return {
+    ReportKey.ACTION: CommandKind.STRIP_PERSONAL,
+    ReportKey.MANIFEST: str(path),
+    ReportKey.STRIPPED: stripped,
+    ReportKey.ERRORS: [],
+  }
+
+
+def _read_manifest(root: Path) -> dict:  # waiver: manifest of mixed JSON shapes
+  """
+  Read the manifest at a vault repo root.
+
+  Notes:
+    - Reads the manifest file from disk and writes nothing.
+
+  Args:
+    root: Vault repo root, the directory holding the manifest.
+
+  Returns:
+    The parsed manifest.
+
+  Raises:
+    WorkerError: When the manifest is absent, does not parse, or is not a JSON object.
+  """
+  manifest = load_json(root / VaultPath.MANIFEST)
+
+  # guard: anything but an object is no manifest to work on
+  if not isinstance(manifest, dict):
+    raise WorkerError(NO_MANIFEST_ERROR.format(manifest = VaultPath.MANIFEST, root = root))
+  return manifest
+
+
+def _find_all_personal(manifest: dict) -> list[str]:  # waiver: manifest of mixed JSON shapes
+  """
+  Find the personal state a manifest still carries.
+
+  Args:
+    manifest: The manifest as read from the repo.
+
+  Returns:
+    The dotted manifest paths of the personal entries present, bookmarks first.
+  """
+  found: list[str] = []
+
+  # bookmarks sit in the config map as a whole file; recent icons inside Iconize's settings
+  if VaultPath.BOOKMARKS in (manifest.get(ManifestKey.CONFIG) or {}):
+    found.append(PERSONAL_BOOKMARKS_PATH)
+  if IconizeKey.RECENT_ICONS in (_find_iconize_data(manifest) or {}):
+    found.append(PERSONAL_RECENT_ICONS_PATH)
+  return found
+
+
+def _find_iconize_data(manifest: dict) -> dict | None:  # waiver: manifest of mixed JSON shapes
+  """
+  Find Iconize's captured settings payload inside a manifest.
+
+  Args:
+    manifest: The manifest as read from the repo.
+
+  Returns:
+    The payload object itself, so an edit to it edits the manifest, or None when the manifest
+    carries no Iconize entry or no object payload for it.
+  """
+  entry = (manifest.get(ManifestKey.PLUGINS) or {}).get(IconizeKey.PLUGIN_ID)
+  data = entry.get(PluginKey.DATA) if isinstance(entry, dict) else None
+  return data if isinstance(data, dict) else None
+
+
+# ----------------------------------------------------------------------------------------
 def query_plugin_repo(pid: str, *, write_cache: bool = True) -> dict:  # waiver: report envelope of mixed shapes
   """
   Resolve one community plugin's GitHub repo from the catalog.
@@ -1522,16 +1754,62 @@ def query_plugin_repo(pid: str, *, write_cache: bool = True) -> dict:  # waiver:
   return report
 
 
+def _run_strip_check(root: Path) -> int:
+  """
+  Print which personal state a vault's manifest still carries, writing nothing.
+
+  Notes:
+    - Reads the manifest at the repo root and prints one JSON report on stdout, whether or not the manifest could be
+      read.
+
+  Args:
+    root: Vault repo root, the directory holding the manifest.
+
+  Returns:
+    Zero while personal state is left to strip, one when the manifest is clean, and also when it is absent,
+    unparsable or not a JSON object.
+  """
+  try:
+    pending = query_personal_state(root)
+  # guard: an absent, unparsable or non-object manifest carries no personal state to strip, so the step does not
+  # apply: the next capture rewrites such a file whole
+  except WorkerError as error:
+    print(json.dumps({ ReportKey.ACTION: CommandKind.STRIP_PERSONAL, ReportKey.ERRORS: [str(error)] }, indent = 2))
+    return 1
+
+  # name what is left, so the operator sees why the step still applies
+  print(json.dumps({ ReportKey.ACTION: CommandKind.STRIP_PERSONAL, ReportKey.PERSONAL_STATE: pending,
+                     ReportKey.ERRORS: [] }, indent = 2))
+  return 0 if pending else 1
+
+
 def main(argv: list[str]) -> int:
   """
   Run one subcommand and print its JSON report.
+
+  Guarantees:
+    - `strip-personal --check` exits 0 while personal state is left to strip in the manifest and 1 otherwise, and
+      never writes. A clean manifest, and also an absent, unparsable or non-object manifest, reads as nothing to
+      strip.
+
+  Notes:
+    - Prints the JSON report on stdout, including when the subcommand fails.
 
   Args:
     argv: Command-line arguments without the program name.
 
   Returns:
-    Zero when the run reported no errors, one otherwise.
+    Zero when the run reported no errors, one otherwise. The strip check answers differently: zero
+    while personal state is left to strip, one when the manifest is clean, and also when it is absent, unparsable
+    or not a JSON object.
   """
+
+  # Contract:
+  # `strip-personal --check` exits 0 while personal state is left to strip in the manifest and 1 otherwise,
+  # and never writes. A clean manifest, and also an absent, unparsable or non-object manifest, reads as
+  # nothing to strip.
+
+  # declare every subcommand with its own arguments
   # waiver: argparse CLI signature
   parser = argparse.ArgumentParser(prog = "vault_manifest", description = __doc__)
   # waiver: argparse CLI signature
@@ -1546,6 +1824,13 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature
   sub.add_parser(CommandKind.LOOKUP, help = "print a community plugin's GitHub repo") \
      .add_argument("id", help = "plugin id as the community catalog records it")
+  # waiver: argparse CLI signature
+  strip = sub.add_parser(CommandKind.STRIP_PERSONAL, help = "strip personal per-device state from the manifest")
+  # waiver: argparse CLI signature
+  strip.add_argument("root", nargs = "?", default = ".", help = "vault repo root (default: cwd)")
+  # waiver: argparse CLI signature
+  strip.add_argument("--check", action = "store_true",
+                     help = "write nothing; exit 0 while personal state is left to strip, 1 otherwise")
 
   # `lookup` reads the catalog alone, so it never resolves a vault root
   args = parser.parse_args(argv)
@@ -1556,7 +1841,15 @@ def main(argv: list[str]) -> int:
 
   # resolve the vault root before any subcommand touches disk
   root = Path(args.root).expanduser().resolve()
-  handlers = { CommandKind.CAPTURE: capture, CommandKind.DEPLOY: deploy, CommandKind.DRIFT: read_drift }
+
+  # the check answers the migration predicate: 0 while something is left to strip, 1 for a clean or absent manifest;
+  # the core migration engine applies a step's `verb` predicate only on exit 0
+  if args.command == CommandKind.STRIP_PERSONAL and args.check:
+    return _run_strip_check(root)
+
+  # every other subcommand prints its own report and fails on any error it names
+  handlers = { CommandKind.CAPTURE: capture, CommandKind.DEPLOY: deploy, CommandKind.DRIFT: read_drift,
+               CommandKind.STRIP_PERSONAL: delete_personal_state }
   try:
     report = handlers[args.command](root)
   except WorkerError as error:

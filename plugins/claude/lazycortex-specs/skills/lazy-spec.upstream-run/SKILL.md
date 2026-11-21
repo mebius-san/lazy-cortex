@@ -20,8 +20,13 @@ This skill has 2 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" upstream-tick)`. It prints exactly one JSON object to stdout —
 `{"units_ordered": <n>, "units_visited": <n>, "units_touched": <n>, "statuses": {"<status>": <n>, ...}, "errors": [<message>, ...]}`
-— and always exits `0`; a per-source fetch failure is isolated into `errors`, never a process
-failure, so one unreachable source does not abort the others. Parse the JSON.
+— plus three keys that appear only when something failed: `"units_failed": [<unit>, ...]` (units
+that raised while being advanced), `"sources_failed": [<repo-key>, ...]` (sources whose planning
+or source-note update raised) and `"writes_failed": [<write>, ...]` (the pass's own bookkeeping
+writes that failed: `root-note`, the seed of the `upstream/` folder's note, and `cursor`, the
+position the next pass resumes from). It exits `0` when none of the three is present and `1`
+otherwise; a per-source fetch failure is isolated into `errors`, never a process failure, so one
+unreachable source does not abort the others. Parse the JSON on either exit code.
 
 Outcome: `ran:<units_touched>/<units_ordered>`.
 
@@ -50,6 +55,9 @@ Below the table, list `statuses` as one line per status token present (`new: <n>
 - When `errors` is non-empty, list each message below the table. That source's units were left
   exactly as the last successful fetch found them this pass; the other configured sources still
   ran normally.
+- When `units_failed`, `sources_failed` or `writes_failed` is present, say that the pass failed
+  and list each key with its entries; the matching messages are already in `errors`. Every unit
+  and source not named there was still handled normally.
 - When `units_ordered` is `0`, say plainly that no `spec.upstream` source is configured yet (or
   none has landed a matching unit directory) — point at `lazy-spec.config-protocol.md` Part 4 for the
   config shape.
@@ -66,6 +74,14 @@ Outcome: `rendered`.
   existing clone's `origin` no longer matches the configured `url` (the clone is never
   re-pointed automatically — fix the config or the clone by hand). The rest of the configured
   sources still ran normally this pass.
+- **The pass exits `1` and the summary names `writes_failed`** — the `upstream/` folder's own
+  note (`root-note`) or the resume position (`cursor`) could not be written, usually a
+  read-only or full disk; the message is in `errors`. Free the path and run the pass again: the
+  note is seeded on the next run, and until the cursor is written every pass starts from the
+  same unit.
+- **The pass exits `1` and the summary names `units_failed` or `sources_failed`** — one unit or
+  one source raised; its message in `errors` names it. The other units and sources were still
+  handled, and the next pass retries the failed one.
 - **A unit stays `new` forever with no checkbox visible** — check its own folder-note's
   `# Actions` section directly; a unit whose mirrored root note (`source/<unit>.md`) carries
   `spec_role: status` without `spec_released: true` is deliberately gated and never gets a
@@ -80,4 +96,5 @@ Outcome: `rendered`.
   phases (mirror/detect, request, unfreeze) and renders the result; routing a landed request to
   an expert job is the standard review pipeline's own job, not this pass's.
 - **Idempotent.** Re-running with nothing changed upstream reports every previously-processed
-  unit as `processed` again; the exit code is always `0`.
+  unit as `processed` again; the exit code is `0` unless a unit, a source or a bookkeeping
+  write failed.

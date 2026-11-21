@@ -83,16 +83,18 @@ def get_commit_info() -> dict | None:
 
   Returns:
     A mapping with the repository root, commit SHA, commit date, author, branch, subject, body,
-    list of changed files, and aggregate insertion and deletion counts. `None` when the working
-    directory is not inside a git repository, when no commit exists yet, or when `git` is not on
-    the executable search path.
+    list of changed files, and aggregate insertion and deletion counts. The changed files carry their names as
+    git holds them, with a replacement character in place of any byte that is no text; a rename or copy is
+    recorded as `old => new` with both full paths. The root keeps such bytes undecoded.
+    `None` when the working directory is not inside a git repository, when no commit exists yet, or
+    when `git` is not on the executable search path.
   """
+  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
   try:
-    root = subprocess.check_output(
+    root = os.fsdecode(subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
       stderr = subprocess.DEVNULL,
-      text = True, encoding = "utf-8",
-    ).strip()
+    )).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None
 
@@ -102,6 +104,8 @@ def get_commit_info() -> dict | None:
       [ "git", "log", "-1", "--pretty=format:%H%x00%cI%x00%an <%ae>%x00%s" ],
       stderr = subprocess.DEVNULL,
       text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
     # waiver: inline numeric literal (maxsplit count), not a domain constant
     sha, date, author, subject = raw.split("\x00", 3)
@@ -114,6 +118,8 @@ def get_commit_info() -> dict | None:
       [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
       stderr = subprocess.DEVNULL,
       text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     branch = ""
@@ -124,17 +130,20 @@ def get_commit_info() -> dict | None:
       [ "git", "log", "-1", "--pretty=format:%b" ],
       stderr = subprocess.DEVNULL,
       text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
   except (subprocess.CalledProcessError, FileNotFoundError):
     body = ""
 
-  # file stats from numstat — insertions, deletions, filename per row
+  # file stats from numstat, NUL-separated so no name is ever quoted or split: each record is insertions,
+  # deletions and the name; the output is taken as bytes and decoded here, so a carriage return inside a
+  # name stays one and a byte that is not UTF-8 survives as a surrogate escape
   try:
-    numstat = subprocess.check_output(
-      [ "git", "show", "--numstat", "--format=", "HEAD" ],
+    numstat = os.fsdecode(subprocess.check_output(
+      [ "git", "show", "--numstat", "-z", "--format=", "HEAD" ],
       stderr = subprocess.DEVNULL,
-      text = True, encoding = "utf-8",
-    ).strip()
+    ))
   except (subprocess.CalledProcessError, FileNotFoundError):
     numstat = ""
 
@@ -142,16 +151,29 @@ def get_commit_info() -> dict | None:
   files = []
   total_ins = 0
   total_del = 0
-  for line in numstat.splitlines():
-    parts = line.split("\t")
+  # waiver: git's NUL record separator, not a domain constant
+  records = iter(numstat.split("\0"))
+  for record in records:
+    # the two counts and the name are tab-separated; only the first two tabs separate, a name may hold more
+    # waiver: inline numeric literal (splits after the two count columns), not a domain constant
+    parts = record.lstrip("\n").split("\t", 2)
+    # guard: a record without both counts and a name column is no file entry
     # waiver: inline numeric literal (numstat column count), not a domain constant
-    if len(parts) == 3:
-      ins_raw, del_raw, path = parts
-      ins = int(ins_raw) if ins_raw.isdigit() else 0
-      dl = int(del_raw) if del_raw.isdigit() else 0
-      files.append(path)
-      total_ins += ins
-      total_del += dl
+    if len(parts) != 3:
+      continue
+    ins_raw, del_raw, path = parts
+
+    # a rename or copy leaves the name column empty and gives the old and the new name as the next two records
+    if not path:
+      old_name = next(records, "")
+      path = f"{old_name} => {next(records, '')}"
+
+    # the journal only shows the name, and its file is strict UTF-8 text, so an escaped byte is
+    # rendered as a replacement character
+    # waiver: stdlib codec and decode-error mode names, not domain constants
+    files.append(path.encode("utf-8", "surrogateescape").decode("utf-8", "replace"))
+    total_ins += int(ins_raw) if ins_raw.isdigit() else 0
+    total_del += int(del_raw) if del_raw.isdigit() else 0
 
   # one flat record per commit — the shape the ledger line is serialised from
   return {
@@ -182,6 +204,8 @@ def head_is_fresh() -> bool:
       [ "git", "log", "-1", "--pretty=format:%ct" ],
       stderr = subprocess.DEVNULL,
       text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
     committed_at = int(raw)
   except (subprocess.CalledProcessError, FileNotFoundError, ValueError):

@@ -27,9 +27,13 @@ Every new reference file SHOULD declare its subtype via filename suffix. Existin
 | Aspect | `<name>-aspect.md` | `core/aspect-template.md` | `reference_resolver` (runtime, `category="aspects"`) |
 | Schema | `<name>-schema.md` | `core/schema-template.md` | humans + audits |
 | Contract | `<name>-contract.md` | `core/contract-template.md` | humans + audits |
+| Asset-type playbook | `<type>-type.md` | — | the coordinator of that type's assets |
+| Job playbook | `<job>-job.md` | — | the expert running the job (`protocols`) |
 | Other / freeform | no suffix required | — | varies |
 
-A protocol file is the formal request/response contract for an expert (see `lazy-core.expert-protocols-contract.md`). A schema documents a config or data shape. A contract is the meta-spec for an artifact KIND (e.g. what every protocol file must contain). Mismatches between filename suffix and content (e.g. a `*-schema.md` file lacking a schema table) → `WARN`.
+Consumer references keep free form.
+
+A protocol file is the formal request/response contract for an expert (see `lazy-core.expert-protocols-contract.md`). A schema documents a config or data shape. A contract is the meta-spec for an artifact KIND. Mismatches between filename suffix and content (a `*-schema.md` without a schema table) → `WARN`.
 
 An aspect file is the meta-contract for a behavior layer composed into one or more experts (see `lazy-core.expert-aspects-contract.md`).
 
@@ -75,7 +79,7 @@ Splitting does nothing for a reference that is genuinely read WHOLE: when every 
 - The value must be a concrete one-line reason **and** name the reader — an agent, a skill, a class of consumer — that loads the file whole. `true` / `yes` / `""` → `FAIL` (invalid waiver), exactly as `lazy-log.logging` treats `logging-waiver`.
 - **Per file, never a moved threshold.** 25 KB and 50 KB stand unchanged for every other reference, and a waived file's real size still appears in the audit's measurement row.
 - It waives the size budget and **nothing else** — every other clause in this rule still applies to a waived file.
-- It lives in frontmatter rather than in a repo-root registry because a reference ships inside its plugin to consumers who have no such registry, and because the audit already parses every reference's frontmatter for `description:` — the waiver costs no extra read and cannot drift away from the file it excuses.
+- It lives in frontmatter, not a repo-root registry: a reference ships to consumers who have no such registry, and the audit already parses every reference's frontmatter, so the waiver costs no extra read and cannot drift from its file.
 
 ## 5. Cross-references must resolve
 
@@ -108,7 +112,7 @@ A `*-protocol.md` file MUST NOT include:
 - **Agent-side markup conventions.** Callout shapes, marker formats, intro-callout layouts, "the agent MUST emit `[!question]` with prefix X" — these are agent behaviour, not wire. A "## Markup the agent writes" / "## Output shape" section in a protocol file is a scope violation; that prose belongs in the agent's own `.md` body.
 - **A response envelope of its own.** `outcome` / `error` / `result` belong to `lazy-core.expert-runtime-contract.md` and already reach the expert in its system prompt. A protocol declares which *values* `outcome` takes and which extra fields it adds — never a replacement status key (`"status": "done"`). A protocol that prescribes one silently disarms the runtime: no discriminator is written, every failure classifies as success, and a consumer that drains an input on success destroys it. Do not restate the envelope even correctly; a copy is a future divergence.
 
-`lazy-core.audit` flags any `*-protocol.md` containing the strings `lazy.settings.json`, `review.classes`, `routines:`, top-level `experts:` JSON keys, `## Role rules`, `## Role vocabulary`, `## Per-role`, `## Markup the agent writes`, `role == "`, or `when role ==` as `WARN` ("protocol carries consumer-config / agent-side content; see § 9 of `lazy-core.reference-writing`"). The check has a waiver path for the meta-contract itself (`lazy-core.expert-protocols-contract.md`), which describes what protocols are and necessarily references the forbidden patterns to forbid them.
+`lazy-core.audit` flags any `*-protocol.md` containing the strings `lazy.settings.json`, `review.classes`, `routines:`, top-level `experts:` JSON keys, `## Role rules`, `## Role vocabulary`, `## Per-role`, `## Markup the agent writes`, `role == "`, or `when role ==` as `WARN` ("protocol carries consumer-config / agent-side content; see § 9 of `lazy-core.reference-writing`"). The meta-contract itself (`lazy-core.expert-protocols-contract.md`) is waived: it must name the forbidden patterns to forbid them.
 
 The envelope clause is checked separately and is a `FAIL`, not a `WARN`: any `*-protocol.md` that mentions `response.json` and never mentions `outcome`, or that names a `"status"` / `"state"` key inside a fenced block under a heading mentioning `response.json` / `Output`, gets "protocol overrides the response envelope; `outcome` is owned by `lazy-core.expert-runtime-contract`". Same meta-contract waiver.
 

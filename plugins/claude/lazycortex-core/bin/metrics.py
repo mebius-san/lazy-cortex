@@ -910,6 +910,8 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
     rc = subprocess.run(
       ["git", "remote", "get-url", "origin"],
       cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
     if rc.returncode == 0:
       url = rc.stdout.strip()
@@ -1088,6 +1090,10 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
       except (UnicodeDecodeError, json.JSONDecodeError):
         # malformed line — skip without poisoning the counter
         continue
+
+      # guard: a line that is valid JSON but not an object carries no record
+      if not isinstance(rec, dict):
+        continue
       # waiver: external token-log JSON field name and default, not internal keys
       routine = rec.get("routine") or "expert-pump"
       # waiver: external token-log JSON field name and default, not internal keys
@@ -1167,6 +1173,10 @@ def aggregate_jobs_from_log(repo_root: Path) -> None:
         rec = json.loads(raw.decode("utf-8"))
       except (UnicodeDecodeError, json.JSONDecodeError):
         # malformed line — skip without poisoning the counters
+        continue
+
+      # guard: a line that is valid JSON but not an object carries no record
+      if not isinstance(rec, dict):
         continue
       # waiver: external job-log JSON field names, not internal keys
       expert = rec.get("expert") or ""
@@ -1256,6 +1266,10 @@ def aggregate_incidents_from_ledger(repo_root: Path) -> None:
         rec = json.loads(raw.decode("utf-8"))
       except (UnicodeDecodeError, json.JSONDecodeError):
         # malformed line — skip without poisoning the counter
+        continue
+
+      # guard: a line that is valid JSON but not an object carries no record
+      if not isinstance(rec, dict):
         continue
 
       # Domain(runtime.incidents):

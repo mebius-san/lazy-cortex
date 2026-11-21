@@ -1,12 +1,15 @@
 """
-Logic behind the `lazycortex-specs release-delta <product-key>` verb.
+Logic behind the `lazycortex-specs release-delta <product-key>` and `release-type-guidelines <release-note>` verbs.
 
-The verb names the assets a product's next release carries — every approved, unreleased, uncancelled asset of
-the product that owns releases and of the nested products that ship with it, for a change once its cascade into
-the target designs is done — finds the product's open release, if any, and reports the two facts a release start
-waits on: whether the owner's `architecture.md` is approved later than every design the release carries, and
-which notes carry an open coherence conflict. A product with no architecture document, or a run with
+The `release-delta` verb names the assets a product's next release carries — every approved, unreleased,
+uncancelled asset of the product that owns releases and of the nested products that ship with it, for a change once
+its cascade into the target designs is done — finds the product's open release, if any, and reports the two facts a
+release start waits on: whether the owner's `architecture.md` is approved later than every design the release
+carries, and which notes carry an open coherence conflict. A product with no architecture document, or a run with
 `--no-architecture`, holds no design back.
+
+The `release-type-guidelines` verb answers, for one release note, which guideline paths the type of each included
+asset declares, so a caller reads the guidelines that apply to the release's assets without resolving types itself.
 """
 from __future__ import annotations
 
@@ -70,6 +73,18 @@ _APPROVED_AT = "approved_at"
 _BEHIND = "behind"
 _CONFLICTED = "conflicted"
 
+# Type-guidelines answer keys and its warning prefixes
+_RELEASE = "release"
+_ASSETS = "assets"
+_ASSET = "asset"
+_TYPE = "type"
+_BASE_TYPE = "base_type"
+_GUIDELINES = "guidelines"
+_WARNINGS = "warnings"
+_ERROR = "error"
+_WARN_MEMBER_NOT_FOUND = "included asset not found: "
+_WARN_GUIDELINE_NOT_FOUND = "guideline not found: "
+
 # The wikilink delimiters a `spec_includes` member carries around its target, and what may follow the target inside
 WIKILINK_OPEN = "[["
 WIKILINK_CLOSE = "]]"
@@ -99,19 +114,19 @@ class DeltaEntry:
   approved_at: str = ""
 
 
-def _member_roots(repo: Path, owner_key: str) -> list[Path]:
+def _member_roots(repo: Path, owner_key: str, registry: dict) -> list[Path]:
   """
   List the product roots whose assets ship in the owner's releases.
 
   Args:
     repo: Repository root.
     owner_key: The release owner's product key.
+    registry: The products registry the release is looked up in.
 
   Returns:
     The owner's root first, then the roots of every nested product the owner also owns.
   """
   content_root = spec_paths.spec_content_root(repo)
-  registry = resolve_product.load_products(repo)
   roots = [ content_root / registry[owner_key][_SPEC_PATH_KEY] ]
   pending = [ owner_key ]
   while pending:
@@ -161,7 +176,8 @@ def _is_true(fm_values: dict, key: str) -> bool:
   return flip_gate.is_true(fm_values, key)
 
 
-def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[DeltaEntry | None, DeltaEntry | None]:
+def _read_asset_verdict(repo: Path, owner_root: Path, note: Path, *,
+                        registry: dict) -> tuple[DeltaEntry | None, DeltaEntry | None]:
   """
   Judge one status note by the per-asset rules.
 
@@ -169,6 +185,7 @@ def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[Delta
     repo: Repository root.
     owner_root: The release owner's product root, the tokens' base.
     note: The status note.
+    registry: The products registry the release is looked up in.
 
   Returns:
     An included entry when the asset enters the delta, or an excluded entry when the change's
@@ -199,8 +216,10 @@ def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[Delta
   if fm_values.get(SpecKey.ROLE, "").strip() != SpecValue.ROLE_STATUS or not asset_type:
     return None, None
 
-  # the type's base, read through the owning product's own type declarations
-  _product, record = resolve_product.effective_record_by_path(repo, note.relative_to(repo).as_posix())
+  # the type's base, read through the owning product's own type declarations; no catalog-wide guidelines are read,
+  # since the verdict depends on none
+  _product, record = resolve_product.effective_record_by_path(repo, note.relative_to(repo).as_posix(),
+                                                              products = registry, catalog_guidelines = {})
   base = asset_types.alias_base(asset_type, record or {}) or asset_type
 
   # a release, by its own type name only, and a research asset, aliases included, are never members of a delta
@@ -239,30 +258,37 @@ def _read_asset_verdict(repo: Path, owner_root: Path, note: Path) -> tuple[Delta
   return entry, None
 
 
-def find_all_delta_entries(repo: Path, key: str) -> tuple[list[DeltaEntry], list[DeltaEntry]]:
+def find_all_delta_entries(repo: Path, key: str, *,
+                           products: dict | None = None) -> tuple[list[DeltaEntry], list[DeltaEntry]]:
   """
   Name the assets the next release of a product carries, and the ones held back.
 
   Args:
     repo: Repository root.
     key: A product key; the release owner is resolved from it.
+    products: An already-read products registry; None reads the merged one the expert runtime dispatches from, the
+      local overlay merged on.
 
   Returns:
     The included entries and the excluded entries, each sorted by token. An excluded entry carries its reason.
 
   Raises:
-    ValueError: If no product in the key's chain owns releases.
+    ValueError: If no product in the key's chain owns releases, or if `products` is None and the merged settings
+      cannot be read; the latter is a `spec_paths.SettingsError` naming the settings file, also when no core CLI
+      resolves.
   """
-  owner_key = resolve_product.find_release_owner_key(repo, key)
+  # the registry the whole release is looked up in, as the runtime dispatches from it unless the caller read it
+  registry = products if products is not None else resolve_product.read_runtime_products(repo)
+  owner_key = resolve_product.find_release_owner_key(repo, key, products = registry)
 
   # guard: rejects a product key with no release owner in its chain — an umbrella without code has no delta
   if owner_key is None:
     raise ValueError(f"no release owner above product {key!r}")
 
   # the owner's member products, and the roots of every other product, which the walk never enters
-  roots = _member_roots(repo, owner_key)
+  roots = _member_roots(repo, owner_key, registry)
   content_root = spec_paths.spec_content_root(repo)
-  all_roots = [ content_root / record[_SPEC_PATH_KEY] for record in resolve_product.load_products(repo).values()
+  all_roots = [ content_root / record[_SPEC_PATH_KEY] for record in registry.values()
                 if isinstance(record, dict) and record.get(_SPEC_PATH_KEY) ]
   foreign = [ path for path in all_roots if path not in roots ]
 
@@ -271,7 +297,7 @@ def find_all_delta_entries(repo: Path, key: str) -> tuple[list[DeltaEntry], list
   included: list[DeltaEntry] = []
   excluded: list[DeltaEntry] = []
   for note in _find_all_status_notes(roots[0], foreign):
-    entered, held = _read_asset_verdict(repo, roots[0], note)
+    entered, held = _read_asset_verdict(repo, roots[0], note, registry = registry)
     if entered is not None:
       included.append(entered)
     if held is not None:
@@ -285,7 +311,8 @@ def find_all_delta_entries(repo: Path, key: str) -> tuple[list[DeltaEntry], list
 def find_architecture_lag(repo: Path,
                           owner_key: str,
                           included: list[DeltaEntry], *,
-                          waived: bool = False) -> tuple[Path, str | None, list[str]]:
+                          waived: bool = False,
+                          products: dict | None = None) -> tuple[Path, str | None, list[str]]:
   """
   Name the delta's assets the owner's architecture document does not cover yet.
 
@@ -300,11 +327,17 @@ def find_architecture_lag(repo: Path,
     owner_key: The release owner's product key.
     included: The delta's included entries, in the order they are reported.
     waived: When True, the architecture holds no asset back, whatever the document says.
+    products: An already-read products registry; None reads the merged one the expert runtime dispatches from, the
+      local overlay merged on.
 
   Returns:
     The path of `architecture.md` in the owner's root, its approval moment — `None` when the document is absent,
     not approved, or approved with no recorded moment — and the tokens of the included assets it is behind, in
     the order of `included`; empty when the file is absent or the architecture is waived.
+
+  Raises:
+    ValueError: If `products` is None and the merged settings cannot be read; a `spec_paths.SettingsError` naming
+      the settings file, also when no core CLI resolves.
   """
 
   # Contract:
@@ -332,8 +365,8 @@ def find_architecture_lag(repo: Path,
   # still exists. A document that is present but not approved is no such exception: it still covers nothing.
 
   # the owner's architecture document, named whether or not it exists
-  doc = spec_paths.spec_content_root(repo) / resolve_product.load_products(repo)[owner_key][_SPEC_PATH_KEY] \
-      / LevelDoc.ARCHITECTURE
+  registry = products if products is not None else resolve_product.read_runtime_products(repo)
+  doc = spec_paths.spec_content_root(repo) / registry[owner_key][_SPEC_PATH_KEY] / LevelDoc.ARCHITECTURE
 
   # the document's approval moment, read only from an approved document
   approved_at: str | None = None
@@ -356,7 +389,8 @@ def find_architecture_lag(repo: Path,
   ]
 
 
-def find_all_conflicted_notes(repo: Path, owner_key: str, included: list[DeltaEntry]) -> list[Path]:
+def find_all_conflicted_notes(repo: Path, owner_key: str, included: list[DeltaEntry], *,
+                              products: dict | None = None) -> list[Path]:
   """
   List the notes of a product's next release that carry an open coherence conflict.
 
@@ -368,10 +402,16 @@ def find_all_conflicted_notes(repo: Path, owner_key: str, included: list[DeltaEn
     repo: Repository root.
     owner_key: The release owner's product key.
     included: The delta's included entries.
+    products: An already-read products registry; None reads the merged one the expert runtime dispatches from, the
+      local overlay merged on.
 
   Returns:
     The level notes of the owner's root and of every nested product that ships with it, and the status notes of
     the included assets, that carry `spec_conflicted: true`, sorted by path.
+
+  Raises:
+    ValueError: If `products` is None and the merged settings cannot be read; a `spec_paths.SettingsError` naming
+      the settings file, also when no core CLI resolves.
   """
 
   # Contract:
@@ -380,7 +420,8 @@ def find_all_conflicted_notes(repo: Path, owner_key: str, included: list[DeltaEn
   # so a level left out of the search would let a conflicted release start.
 
   # the level note of every product root that ships in the owner's releases, then the delta's own assets
-  candidates = [ root / f"{root.name}{_MD_SUFFIX}" for root in _member_roots(repo, owner_key) ]
+  registry = products if products is not None else resolve_product.read_runtime_products(repo)
+  candidates = [ root / f"{root.name}{_MD_SUFFIX}" for root in _member_roots(repo, owner_key, registry) ]
   candidates.extend(entry.note for entry in included)
 
   # a note counts only while its conflict flag reads true
@@ -395,21 +436,29 @@ def find_all_conflicted_notes(repo: Path, owner_key: str, included: list[DeltaEn
   return sorted(conflicted)
 
 
-def find_open_release(repo: Path, key: str) -> Path | None:
+def find_open_release(repo: Path, key: str, *, products: dict | None = None) -> Path | None:
   """
   Find the release of a product's owner that is still open.
 
   Args:
     repo: Repository root.
     key: A product key; the release owner is resolved from it.
+    products: An already-read products registry; None reads the merged one the expert runtime dispatches from, the
+      local overlay merged on.
 
   Returns:
     The status note of the first numbered release folder, by name, that is not yet published (`spec_released` is
     not true, a built release included) and not cancelled; None when there is none, or when no product in the
     key's chain owns releases. Only numbered folders directly in `releases/` count, so the archive is never
     searched or returned.
+
+  Raises:
+    ValueError: If `products` is None and the merged settings cannot be read; a `spec_paths.SettingsError` naming
+      the settings file, also when no core CLI resolves.
   """
-  owner_key = resolve_product.find_release_owner_key(repo, key)
+  # the registry the release is looked up in, as the runtime dispatches from it unless the caller read it
+  registry = products if products is not None else resolve_product.read_runtime_products(repo)
+  owner_key = resolve_product.find_release_owner_key(repo, key, products = registry)
 
   # guard: rejects a product key with no release owner in its chain — no owner, no releases
   if owner_key is None:
@@ -422,8 +471,7 @@ def find_open_release(repo: Path, key: str) -> Path | None:
   # named or what it contains.
 
   # the owner's releases folder
-  releases = spec_paths.spec_content_root(repo) / resolve_product.load_products(repo)[owner_key][_SPEC_PATH_KEY] \
-      / ReleaseKey.FOLDER
+  releases = spec_paths.spec_content_root(repo) / registry[owner_key][_SPEC_PATH_KEY] / ReleaseKey.FOLDER
 
   # guard: rejects an owner whose releases folder does not exist yet
   if not releases.is_dir():
@@ -454,16 +502,124 @@ def resolve_included_notes(vault: Path, release_text: str) -> list[Path]:
     release_text: The release note's text.
 
   Returns:
-    One note path per wikilink, in the order listed; display text and anchors are ignored.
+    One note path per wikilink, in the order listed; display text and anchors are ignored. A path need not exist
+    on disk.
   """
-  notes: list[Path] = []
+  return [ spec_paths.resolve_wikilink(target, vault) for target in _find_all_include_targets(release_text) ]
+
+
+def _find_all_include_targets(release_text: str) -> list[str]:
+  """
+  List the bare wikilink targets of a release's `spec_includes`.
+
+  Args:
+    release_text: The release note's text.
+
+  Returns:
+    One target per member, in the order listed, without brackets, display text or anchor.
+  """
+  targets: list[str] = []
 
   # each member loses its brackets first, then whatever follows the target inside them
   for link in spec_frontmatter.read_list(release_text, ReleaseKey.INCLUDES):
     bare = link.strip().removeprefix(WIKILINK_OPEN).removesuffix(WIKILINK_CLOSE)
-    target = bare.split(_WIKILINK_DISPLAY, 1)[0].split(_WIKILINK_ANCHOR, 1)[0].strip()
-    notes.append(spec_paths.resolve_wikilink(target, vault))
-  return notes
+    targets.append(bare.split(_WIKILINK_DISPLAY, 1)[0].split(_WIKILINK_ANCHOR, 1)[0].strip())
+  return targets
+
+
+def read_type_guidelines(repo: Path, release_note: Path) -> dict:
+  """
+  List the guideline paths each type of a release's included assets declares.
+
+  Each member is answered from the type declarations of the product that owns it, so a nested product's own
+  declarations apply to its assets. The declarations are read as the expert runtime dispatches from them, the local
+  overlay merged on.
+
+  Guarantees:
+    - A declared guideline path with no file, and an included member that resolves to no note, are never dropped
+      silently: each is named in `warnings`, once.
+    - Every member that is not cancelled is listed, even with an empty `guidelines` list, in the order the release
+      lists its members.
+    - `base_type` is the alias base the type's alias names, or the type itself when it declares none; a broken alias
+      raises `ValueError` and is never guessed around.
+
+  Args:
+    repo: The repository root holding `.claude/lazy.settings.json`.
+    release_note: The release's status note, as a path inside the repository.
+
+  Returns:
+    `{"release", "assets", "warnings"}` — one `{"asset", "type", "base_type", "guidelines"}` entry per included
+    asset that is not cancelled, in the order the release lists them. `base_type` follows the type's alias, and is
+    the type itself when it is no alias. A declared guideline path with no file is left out of `guidelines`. The
+    warnings name each member that resolves to no note and each declared guideline path with no file.
+
+  Raises:
+    ValueError: If a member's type names a broken alias base, or if the merged settings cannot be read; the latter
+      is a `spec_paths.SettingsError` naming the settings file.
+  """
+
+  # Contract:
+  # Every member that is not cancelled is listed, even with an empty `guidelines` list, in the order the release
+  # lists its members; the release implementer stops the build on an empty list for a member whose `base_type`
+  # is `content`, so a member left out or reordered would hide that stop.
+
+  # Contract:
+  # A declared guideline path with no file, and an included member that resolves to no note, are never dropped
+  # silently: each is named in `warnings`, once.
+
+  # Contract:
+  # `base_type` is the alias base the type's alias names, or the type itself when it declares none. A broken
+  # alias raises `ValueError`; a base type is never guessed.
+
+  # Domain(spec.dispatch):
+  # # Guidelines of a release build
+  # A release build covers the whole product, so the guidelines that an asset kind declares must reach it for
+  # every asset the release carries. For a content kind these include the schema its records are written against.
+  # For each carried asset the build is told its kind, the kind it is coordinated like when it borrows another
+  # kind's playbook, and the files its own kind declares. An abandoned asset is built into nothing and gets none.
+  # A declared file that does not exist, and a carried asset whose note cannot be found, are reported as gaps and
+  # never skipped silently. A kind whose borrowing is broken is an error, never a guess. A data-defined asset whose
+  # kind gives no schema stops the build, because its format must not be inferred from the data that exists.
+
+  # the per-member answers and the gaps reported beside them, filled member by member below
+  assets: list[dict] = []
+  warnings: list[str] = []
+
+  # the registry and the catalog-wide guidelines as the runtime sees them, the local overlay merged on, read once
+  settings = resolve_product.read_runtime_settings(repo)
+  registry = resolve_product.filter_products(settings)
+  catalog = resolve_product.build_catalog_guidelines(settings)
+
+  # each live member is answered for the product that owns its own note, so a nested member reads its own record
+  for target in _find_all_include_targets(release_note.read_text(encoding = _ENCODING)):
+    note = spec_paths.resolve_wikilink(target, repo)
+
+    # guard: a member that resolves to no note has no type to answer for, so it is only reported
+    if not note.is_file():
+      warnings.append(f"{_WARN_MEMBER_NOT_FOUND}{target}")
+      continue
+
+    # a cancelled member is built into nothing, so it is left out of the answer
+    if _is_true(spec_frontmatter.parse(note.read_text(encoding = _ENCODING))[0], Gate.SPEC_CANCELLED):
+      continue
+
+    # the member's type, read against the record of the product that owns its note
+    note_rel = note.relative_to(repo).as_posix()
+    record = resolve_product.effective_record_by_path(repo, note_rel, products = registry,
+                                                      catalog_guidelines = catalog)[1] or {}
+    asset_type = asset_types.type_of(note)
+
+    # a declared path with no file is left out and reported, never silently dropped
+    paths: list[str] = []
+    for rel in asset_types.guidelines(asset_type, record):
+      if (repo / rel).is_file():
+        paths.append(rel)
+      else:
+        warnings.append(f"{_WARN_GUIDELINE_NOT_FOUND}{rel}")
+    assets.append({ _ASSET: note_rel, _TYPE: asset_type,
+                    _BASE_TYPE: asset_types.alias_base(asset_type, record) or asset_type, _GUIDELINES: paths })
+  return { _RELEASE: release_note.relative_to(repo).as_posix(), _ASSETS: assets,
+           _WARNINGS: list(dict.fromkeys(warnings)) }
 
 
 def main(argv: list[str]) -> int:
@@ -479,6 +635,8 @@ def main(argv: list[str]) -> int:
     - `behind` lists the tokens of the included assets in the order of `included`; `conflicted` lists
       repo-relative note paths, sorted.
     - The `--no-architecture` flag empties `behind`.
+    - A failed run exits 1 with the reason on standard error and prints no JSON summary; the summary is read only
+      on exit 0, and a failed run, an unreadable settings file included, is never data about a release owner.
 
   Notes:
     - Prints a JSON summary on stdout with the keys `owner`, `open_release` (repo-relative note path or null),
@@ -493,7 +651,7 @@ def main(argv: list[str]) -> int:
       architecture.
 
   Returns:
-    Exit code: 0 on success, 1 when no product in the key's chain owns releases.
+    Exit code: 0 on success; 1 when the settings cannot be read or no product in the key's chain owns releases.
   """
 
   # Contract:
@@ -502,6 +660,12 @@ def main(argv: list[str]) -> int:
   # start, and a start is held while `behind` or `conflicted` is non-empty. `behind` lists the tokens of the
   # included assets in the order of `included`; `conflicted` lists repo-relative note paths, sorted. The flag
   # `--no-architecture` empties `behind`.
+
+  # Contract:
+  # A run that fails, whether the settings cannot be read or no product in the key's chain owns releases, exits 1,
+  # writes the reason to standard error and prints no JSON summary on standard output; a caller parses the
+  # summary only on exit 0 and never takes a failed run, an unreadable settings file included, as data about a
+  # release owner.
 
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs release-delta")
@@ -512,8 +676,16 @@ def main(argv: list[str]) -> int:
   args = parser.parse_args(argv)
   repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
 
+  # the registry every lookup of this release reads, as the runtime dispatches from it; unreadable settings are an
+  # error, never a product without an owner
+  try:
+    registry = resolve_product.read_runtime_products(repo)
+  except ValueError as error:
+    sys.stderr.write(f"{error}\n")
+    return 1
+
   # the owner decides the delta
-  owner_key = resolve_product.find_release_owner_key(repo, args.product)
+  owner_key = resolve_product.find_release_owner_key(repo, args.product, products = registry)
 
   # guard: rejects a product key with no release owner in its chain
   if owner_key is None:
@@ -521,11 +693,13 @@ def main(argv: list[str]) -> int:
     return 1
 
   # the delta and the release currently open
-  included, excluded = find_all_delta_entries(repo, owner_key)
-  note = find_open_release(repo, owner_key)
+  included, excluded = find_all_delta_entries(repo, owner_key, products = registry)
+  note = find_open_release(repo, owner_key, products = registry)
 
   # the two facts a release start waits on: the architecture's lag and the open conflicts
-  doc, approved_at, behind = find_architecture_lag(repo, owner_key, included, waived = args.no_architecture)
+  doc, approved_at, behind = find_architecture_lag(repo, owner_key, included, waived = args.no_architecture,
+                                                   products = registry)
+  conflicted = find_all_conflicted_notes(repo, owner_key, included, products = registry)
   print(json.dumps({
       _OWNER: owner_key,
       _OPEN_RELEASE: note.relative_to(repo).as_posix() if note is not None else None,
@@ -534,10 +708,65 @@ def main(argv: list[str]) -> int:
       _ARCHITECTURE: {
           _DOC: doc.relative_to(repo).as_posix(), _APPROVED_AT: approved_at, _BEHIND: behind,
       },
-      _CONFLICTED: [
-          path.relative_to(repo).as_posix() for path in find_all_conflicted_notes(repo, owner_key, included)
-      ],
+      _CONFLICTED: [ path.relative_to(repo).as_posix() for path in conflicted ],
   }))
+  return 0
+
+
+def main_type_guidelines(argv: list[str]) -> int:
+  """
+  Print the guideline paths each type of a release's included assets declares.
+
+  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
+  directory.
+
+  Guarantees:
+    - Stdout carries the answer as one JSON line without its warnings; each warning is one line on stderr.
+    - A release note that is no file, a broken alias base, or settings that cannot be read yields exit code 1 and
+      the JSON line `{"release", "assets": null, "error"}`; `assets` is never a partial list.
+
+  Args:
+    argv: Command-line arguments, excluding the program name: the release note, repo-relative or absolute.
+
+  Returns:
+    Exit code: 0 when the release is answered; 1 when the release note is no file, a member's type names a broken
+    alias base, or the settings cannot be read, after printing `{"release", "assets": null, "error"}`.
+  """
+
+  # Contract:
+  # Stdout carries the answer as one JSON line that never contains the warnings; each warning is one line on
+  # stderr. The release coordinator parses stdout and reads stderr as the warnings.
+
+  # Contract:
+  # When the release note is no file, a member's type names a broken alias base, or the merged settings cannot be
+  # read, the exit code is 1 and stdout carries a JSON line whose `assets` is null and whose `error` is set;
+  # `assets` is never a partial list.
+
+  # waiver: argparse CLI signature -- program name shown in --help / usage
+  parser = argparse.ArgumentParser(prog = "lazycortex-specs release-type-guidelines")
+  # waiver: argparse CLI signature -- positional argument name
+  parser.add_argument("release_note")
+  args = parser.parse_args(argv)
+  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  note = repo / args.release_note
+
+  # guard: a release note that is no file has no members to answer for
+  if not note.is_file():
+    print(json.dumps({ _RELEASE: args.release_note, _ASSETS: None, _ERROR: f"release note not found: {note}" }))
+    return 1
+
+  # guard: a member whose type names a broken alias base, or settings that cannot be read, leave no answer to give;
+  # either is an error, never a guess or an empty list
+  try:
+    answer = read_type_guidelines(repo, note)
+  except ValueError as error:
+    print(json.dumps({ _RELEASE: args.release_note, _ASSETS: None, _ERROR: str(error) }))
+    return 1
+
+  # the warnings go beside the answer, never inside it
+  for warning in answer.pop(_WARNINGS):
+    print(warning, file = sys.stderr)
+  print(json.dumps(answer))
   return 0
 
 

@@ -11,9 +11,9 @@ playbook. A product declares its own under
 
 A declaration carries the icon (and optional colour) the folder is painted with, the playbook
 the coordinator loads for the type, the folder name a new asset of the type lands in by
-default, the document it starts from as a `<file>:<doc_type>` pair, and the tools the type
-implies before anyone has judged the asset. A type may borrow another type's playbook with
-`alias_of` while keeping its own identity; an alias of an alias is refused rather than followed.
+default, and the document it starts from as a `<file>:<doc_type>` pair. A type may borrow another
+type's playbook with `alias_of` while keeping its own identity; an alias of an alias is refused
+rather than followed.
 
 Every consumer asks here instead of matching a folder name against a closed list.
 """
@@ -36,11 +36,14 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -56,7 +59,6 @@ class AssetTypeField:
     ALIAS_OF: Name of the concrete type this one borrows its playbook from.
     DEFAULT_PATH: Folder name a new asset of the type lands in when the caller names none.
     START_DOC: The type's starting document as a `<file>:<doc_type>` token.
-    DEFAULT_TOOLS: Tools the type implies before anyone has judged the asset.
     GUIDELINES: Repo-relative guideline paths every job on an asset of the type carries,
       whatever role it dispatches — a content type's record schema lives here.
   """
@@ -73,8 +75,6 @@ class AssetTypeField:
   DEFAULT_PATH = "default_path"
   # The type's starting document as a `<file>:<doc_type>` token.
   START_DOC = "start_doc"
-  # Tools the type implies before anyone has judged the asset.
-  DEFAULT_TOOLS = "default_tools"
   # Repo-relative guideline paths every job on an asset of the type carries, whatever role it dispatches — a content
   # type's record schema lives here.
   GUIDELINES = "guidelines"
@@ -171,8 +171,9 @@ def builtin_defaults() -> dict[str, dict]:
   # The returned mapping is the single instance shared by every caller in the process.
   # Callers MUST treat it as read-only and copy it before making any mutation.
 
-  path = _plugin_root() / _K.REFERENCES_DIR / _K.DEFAULTS_FILE
-  return json.loads(path.read_text(encoding = _K.ENCODING)).get(_K.ASSET_TYPES) or {}
+  # the shipped reference file, parsed once per process
+  shipped = (_plugin_root() / _K.REFERENCES_DIR / _K.DEFAULTS_FILE).read_text(encoding = _K.ENCODING)
+  return json.loads(shipped).get(_K.ASSET_TYPES) or {}
 
 
 def declared(record: dict) -> dict[str, dict]:
@@ -213,8 +214,8 @@ def resolve(asset_type: str, record: dict) -> dict | None:
   # into the tooling. A kind nobody declared is simply absent from the registry, not rejected
   # as invalid; consulting the declaration is the only way any consumer learns what a kind
   # implies — its icon, its playbook, the place it defaults into (a folder under the product
-  # root, or that root itself when the declaration names it), its starting document, or the
-  # tools it carries before anyone has judged it.
+  # root, or that root itself when the declaration names it), or its starting
+  # document.
 
   # ask the declaration directly rather than testing membership in a closed set
   return declared(record).get(asset_type)
@@ -240,7 +241,7 @@ def alias_base(asset_type: str, record: dict) -> str:
   # A type declaration may name another type as its alias base to reuse that type's playbook
   # without duplicating the reference, letting several kinds be coordinated identically while
   # remaining distinct kinds of their own. Only the playbook is borrowed this way — the icon,
-  # the default folder, the starting document, and the implied tools always stay the alias's
+  # the default folder, and the starting document always stay the alias's
   # own. The base a declaration names must itself be a concrete type, never another alias, so
   # resolving which playbook a type ultimately uses never depends on the order aliases happen
   # to be declared in. The release type can never be an alias base: a release is created only
@@ -272,7 +273,7 @@ def _effective(asset_type: str, record: dict) -> dict:
   Resolve the declaration a type reads its playbook from, following one alias hop.
 
   Only the playbook is borrowed. Identity — the folder an asset lands in, the icon its folder
-  is painted with, the document it starts from, the tools it implies — stays the alias's own,
+  is painted with, and the document it starts from — stays the alias's own,
   so an alias is a kind of its own that happens to be coordinated like its base.
 
   Args:
@@ -292,6 +293,8 @@ def _effective(asset_type: str, record: dict) -> dict:
   # guard: an undeclared type has nothing to fall back to
   if own is None:
     return {}
+
+  # an alias lays its own fields over the base type's; a type that borrows from no base stands alone
   base = alias_base(asset_type, record)
   return { **(resolve(base, record) or {}), **own } if base else own
 
@@ -361,22 +364,10 @@ def start_doc(asset_type: str, record: dict) -> tuple[str, str]:
   # guard: a type declaring no starting document has no pair to split
   if _K.START_DOC_SEP not in token:
     return "", ""
+
+  # the token names the file before the separator and its document type after it
   name, _sep, doc_type = token.partition(_K.START_DOC_SEP)
   return name, doc_type
-
-
-def default_tools(asset_type: str, record: dict) -> list[str]:
-  """
-  Resolve the tools an asset of this type implies before anyone has judged it.
-
-  Args:
-    asset_type: The type being created.
-    record: The product's settings record, or `{}` to consult only the shipped set.
-
-  Returns:
-    The declared tool names, empty when the type implies none.
-  """
-  return list((resolve(asset_type, record) or {}).get(AssetTypeField.DEFAULT_TOOLS) or [])
 
 
 def guidelines(asset_type: str, record: dict) -> list[str]:
@@ -415,8 +406,8 @@ def type_of(note: Path) -> str:
   # The folder holding the note is NEVER consulted; only the note's own frontmatter determines
   # the returned type.
 
-  # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-  fm_values, _fm_end = flip_gate.parse_frontmatter(note.read_text(encoding = _K.ENCODING))
+  # the note's own frontmatter names its type
+  fm_values, _fm_end = spec_frontmatter.parse(note.read_text(encoding = _K.ENCODING))
   return fm_values.get(_TYPE_KEY, "")
 
 
@@ -431,16 +422,22 @@ def folder_map(repo: Path) -> dict[str, str]:
     repo: Repository root holding `.claude/lazy.settings.json`.
 
   Returns:
-    Mapping of folder name to the type it implies.
+    Mapping of folder name to the type it implies. Settings that cannot be read or do not parse, a JSON
+    document that is not an object included, contribute nothing: the map is then built from the shipped
+    types alone.
   """
   records: list[dict] = [ {} ]
   path = repo / _K.SETTINGS_REL
   if path.is_file():
+    # guard: settings that cannot be read or do not parse declare nothing; `ValueError` covers a JSON syntax error,
+    # bytes that are not UTF-8 text and JSON that is not an object
     try:
-      data = json.loads(path.read_text(encoding = _K.ENCODING))
-    except json.JSONDecodeError:
-      data = {}
-    records = [ rec for rec in (data.get(_K.PRODUCTS) or {}).values() if isinstance(rec, dict) ] or [ {} ]
+      products = spec_paths.read_settings(path).get(_K.PRODUCTS)
+    except (OSError, ValueError):
+      products = None
+    records = [
+        rec for rec in (products.values() if isinstance(products, dict) else ()) if isinstance(rec, dict)
+    ] or [ {} ]
 
   # Domain(spec.declarations):
   # # Legacy asset typing follows the folder it sits in
@@ -526,10 +523,11 @@ def backfill(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> 
     # guard: a status folder-note is always named after its own folder
     if name not in filenames:
       continue
+
+    # the note's text and frontmatter, read once for the role check and the type write below
     note = folder / name
     text = spec_paths.read_text(note)
-    # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
-    fm_values, fm_end = flip_gate.parse_frontmatter(text)
+    fm_values, fm_end = spec_frontmatter.parse(text)
 
     # guard: only a status folder-note carries the asset's own type
     if fm_values.get(_K.SPEC_ROLE) != _K.STATUS_ROLE:
@@ -539,6 +537,8 @@ def backfill(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> 
     if _TYPE_KEY in fm_values:
       skipped += 1
       continue
+
+    # the type the note's group folder maps to goes into its frontmatter, the unknown marker for an unmapped one
     new_fm, count = _insert_type(text[:fm_end], mapping.get(folder.parent.name, _UNKNOWN))
 
     # guard: no anchor line to insert after — leave the note for the doctor to report

@@ -44,7 +44,7 @@ EOF
 
 Capture stdout — on success the worker prints `<note_path>\t<commit_sha>` (or `<note_path>\tno-commit` when the write was a byte-identical no-op). On failure stderr carries a `WriteError` line of the form `frontmatter-invalid: …` / `consolidate-out-of-scope: …` / `consolidate-io-error: …` / `commit-failed: …`.
 
-The worker derives its commit identity from `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` (set by the expert-pump when spawned inside a daemon-driven expert), falling back to `lazy.settings.json[experts][<expert>].git_author` when those env vars are empty (operator-driven `/lazy-memory.reflect` path). The `memory.` prefix is always applied to both name and email local-part.
+The worker derives its commit identity from `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` (set by the expert-pump when spawned inside a daemon-driven expert), falling back to `lazy.settings.json[experts][<expert>].git_author` when those env vars are empty (operator-driven `/lazy-memory.reflect` path) or name another registered expert — registered in the tracked file or in the `lazy.settings.local.json` overlay — (a child agent writing its own memory inside another expert's session), so the commit always follows the expert the skill was invoked for. The `memory.` prefix is always applied to both name and email local-part.
 
 Outcome: `written` (stdout has a path + sha), `written-no-commit` (sha = `no-commit`, idempotent re-run), or `error:<category>` (stderr has a WriteError).
 

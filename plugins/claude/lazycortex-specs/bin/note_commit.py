@@ -17,9 +17,11 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -42,6 +44,9 @@ _EXIT_REFUSED = 1
 # The text encoding git output is decoded with, and the porcelain status code of a renamed or copied entry.
 _ENCODING = "utf-8"
 _RENAME_CODES = frozenset({ "R", "C" })
+
+# How the bytes of a path name that is not UTF-8 are spelled when the name is only shown: each as a backslash escape.
+_ESCAPE_ERRORS = "backslashreplace"
 
 # The width of a porcelain v1 entry's status field plus its separating space.
 _STATUS_WIDTH = 3
@@ -121,24 +126,54 @@ def _query_dirty_paths(repo: Path) -> list[str]:
     repo: The repository root.
 
   Returns:
-    The repo-relative paths of every changed, staged, or untracked entry, in git's order.
+    The repo-relative paths of every changed, staged, or untracked entry, in git's order. Every listed name is
+    printable UTF-8: a name whose bytes are not UTF-8 is listed in its escaped spelling and reported on stderr,
+    so it stays in the list.
   """
+  # the names are captured as bytes and decoded the way the file system spells them, so none is changed
   status = subprocess.run(
       [ "git", "status", "--porcelain=v1", "-z" ], cwd = str(repo), check = True, capture_output = True,
-      text = True, encoding = _ENCODING,
   )
 
   # each entry is `XY path`; a rename or copy carries its origin path as the next field, which is skipped
-  entries = iter(status.stdout.split("\0"))
+  entries = iter(os.fsdecode(status.stdout).split("\0"))
   dirty: list[str] = []
   for entry in entries:
     # guard: the trailing separator leaves one empty field
     if not entry:
       continue
-    dirty.append(entry[_STATUS_WIDTH:])
+    dirty.append(_printable(entry[_STATUS_WIDTH:]))
     if entry[0] in _RENAME_CODES:
       next(entries, None)
   return dirty
+
+
+def _printable(name: str) -> str:
+  """
+  Return a path name in a form that is safe to list and print.
+
+  Args:
+    name: The path name as decoded from git's output.
+
+  Returns:
+    The name unchanged when it is valid UTF-8 text; otherwise the name with the bytes that are not UTF-8 spelled as
+    backslash escapes (a backslash, `x` and two hex digits per byte). One line naming the escaped path is written
+    to stderr in that case.
+  """
+
+  # a name that is valid UTF-8 text is listed as it is
+  try:
+    name.encode(_ENCODING)
+  except UnicodeEncodeError:
+    pass
+  else:
+    return name
+
+  # the list is only reported, never opened, so a name whose bytes are not UTF-8 is listed with those bytes
+  # spelled out and named on stderr; it stays in the list, so the tree is never reported clean because of it
+  shown = os.fsencode(name).decode(_ENCODING, _ESCAPE_ERRORS)
+  sys.stderr.write(f"commit-paths: a dirty path's name is not UTF-8, listed escaped: {shown}\n")
+  return shown
 
 
 def commit_paths(repo: Path, paths: list[str], *,
@@ -161,11 +196,13 @@ def commit_paths(repo: Path, paths: list[str], *,
 
   Returns:
     The commit's outcome, the new HEAD's hash, the paths it carried, the repainted paths among them, and the paths
-    still dirty in the tree afterwards.
+    still dirty in the tree afterwards, a name that is not UTF-8 appearing escaped. The hash is never an empty string
+    for a commit that landed.
 
   Raises:
     CommitRefusedError: If a bot identity is required and none is pinned.
-    subprocess.CalledProcessError: If the commit fails.
+    subprocess.CalledProcessError: If the commit fails, or reading the new HEAD fails after the commit landed.
+    OSError: If git cannot be run to read the new HEAD after the commit landed.
   """
 
   # Contract:
@@ -186,7 +223,7 @@ def commit_paths(repo: Path, paths: list[str], *,
   )
 
   # the new commit's hash, read back only when there is one
-  sha = flip_gate.git_field(repo, [ "rev-parse", "HEAD" ], "") if committed else None
+  sha = flip_gate.read_head(repo) if committed else None
   return CommitResult(
       status = COMMITTED if committed else NOTHING_TO_COMMIT, sha = sha, paths = carried,
       repainted = repainted, dirty = _query_dirty_paths(repo),

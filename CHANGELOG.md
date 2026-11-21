@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 12.0.1 — 2026-11-21 UTC
+
+- A job that writes a stray copy of its own result under the repository-root `result/` no longer halts the daemon. The pump deletes the identical copy, records a warning naming the expert and the job, and carries on; any other dirt still halts. The runtime doctor gets the same clean-up as a new `drop-stray-copies` recovery verb, for halts raised before this version.
+- One malformed job config or one failing item no longer stops the pump or a routine. Each job and each matched file is handled on its own, and a per-item failure makes the routine exit non-zero so it shows up as a visible `routine_error` incident. A worktree bootstrap no longer writes the shared exclude file or a tracked `.gitignore`, and git output or file names that are not valid UTF-8 no longer crash the daemon. The runtime doctor also ignores the `...` markers in a halt's dirty-path list and reports an unreadable working tree as the cause.
+- Memory notes are committed under the memory-bot identity of the expert they belong to, including when written from another expert's session or for an expert registered only in the local settings overlay. A settings file whose top level is not a JSON object is reported as unreadable instead of crashing the writer.
+- `lazy-expert.dispatch-job` now requires `source`, `context` and `result` entries as `{"path": "..."}` objects; a bare string is refused with an explicit error. Migration steps may now write the Obsidian vault manifest `.obsidian.manifest.json`, so other plugins can clean it during migration. The reference-writing rule now names the `<type>-type.md` and `<job>-job.md` suffixes, and the default agent-model tiers follow the agent renamed to `lazy-experts.developer`.
+
 ### 12.0.0 — 2026-11-18 UTC
 
 - **Breaking:** Terms settings move to the dictionary-directory shape. The new `terms` settings-ladder rung (version 1) converts existing terms settings automatically when settings load.
@@ -838,6 +845,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 14.0.0 — 2026-11-21 UTC
+
+- **Breaking:** assets and asset types no longer say who builds them, so the update strips that data from your repo. It removes `spec_tools` from status folder-notes and drops any tool-set question from `# Status brief`. It drops the asset-type settings `default_tools` and `tools`. It drops the `data-report` and `docs-report` review classes that have no documents left. Your own `tool_types` declarations and any report class that still has documents are left in place and reported for you to settle. Run `/lazy-core.setup` to apply it.
+- **Breaking:** the `code-plan` review class needs a new field, `context_from_verbs`. Without it the planner gets no list of specialists and names none on tasks whose material code does not make. The update adds the field to every `code-plan` class in `.claude/lazy.settings.json` and in the local overlay `.claude/lazy.settings.local.json`. A field you already set is kept. Run `/lazy-core.setup` to apply it.
+- **Breaking:** the shipped playbooks have new names. The asset-type playbooks now end in `-type` (feature, change, bug, content, research, release). The job playbooks are now `build-job`, `test-job` and `research-job`. The update renames the old `lazycortex-specs:lazy-spec.*` keys in asset-type declarations and review-class `protocols`, in both settings files. Without it an old key no longer resolves and the coordinator or job runs with no playbook. Run `/lazy-core.setup` to apply it.
+- A product now builds its release with specialists. The release implementer builds the whole product and hands work that code does not make to the product's specialists, and an asset no longer carries build info.
+- A routine or pump pass no longer stops on one bad item, and every per-item failure is reported.
+
 ### 13.0.0 — 2026-11-18 UTC
 
 - **Breaking:** the review classes of the plan documents (`code-plan`, `test-plan`, `system-test-plan`) no longer carry validators. Updating removes the `tester_review`, `architect_review` and `developer_review` validator blocks that an earlier release seeded into `.claude/lazy.settings.json`, so they stop being dispatched. Product-scoped classes you wired yourself are left alone. `/lazy-core.setup` applies this.
@@ -1321,6 +1336,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 7.0.0 — 2026-11-21 UTC
+
+- **Breaking:** The vault manifest `.obsidian.manifest.json` no longer carries per-user state: Obsidian bookmarks and Iconize's recently used icons. Updating strips both entries from an existing manifest, and `/lazy-core.setup` applies it. Each device keeps its own `.obsidian/bookmarks.json`, which is never touched.
+- Bookmarks and recently used icons now stay per device. Capture no longer records them, deploy never writes them (even from an older manifest), and drift no longer reports them.
+- Icon sync and tag-page generation no longer stop at the first bad item. They carry on with the rest and report every per-item failure.
+
 ### 6.2.3 — 2026-11-14 UTC
 
 - Iconize icon priority gains a terminal-state band (500-599), and the error band moves to 600-699. A cancelled note now stays grey whatever `spec_state` it still carries, while halted, conflicted and failed-upstream-fetch states move to the error band.
@@ -1703,6 +1724,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.16.0 — 2026-11-21 UTC
+
+- A review class can now hand its main writer computed context: the new `context_from_verbs` field names plugin CLI verbs whose answers land in the writer job's `context/` as files. A verb that fails refuses the dispatch with its reason, and its warnings reach the operator.
+- A malformed `context_from_frontmatter` is now refused instead of silently ignored, and frontmatter context links resolve from the spec content root.
+- The decisions and guidelines contexts now warn when the configured vault root is refused.
+- One broken document or job no longer stops a review pass: the watch and collect routines handle each item separately, report every per-item failure to the error ledger and exit non-zero so the daemon records it. A writer result that cannot be applied is retired as failed instead of being retried forever, and git output or file names that are not valid UTF-8 no longer crash a pass.
 
 ### 6.15.1 — 2026-11-18 UTC
 
@@ -2160,6 +2188,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 2.0.0 — 2026-11-21 UTC
+
+- **Breaking:** The agent `lazy-experts.implementer` is renamed `lazy-experts.developer`, so the agent name matches the `developer` role it registers under. Your update rewrites every expert in `lazy.settings.json` (and in the local overlay `lazy.settings.local.json`) whose `agent` still names the old agent. It also moves any `agent_models` tier keyed by the old name to the new one, in those two files and in your user-scope `~/.claude/lazy.settings.json`. `/lazy-core.setup` applies it. An expert you already pointed at another agent is left alone, and the `release.implementer` and `release.implementer_chain` settings of a product keep their names.
+- The `lazy-experts.developer` agent replaces `lazy-experts.implementer` as the one that carries an ordered implementation plan into code, test-first. Its descriptions, and those of the neighbouring experts that refer to it, now use the new name.
+
 ### 1.10.5 — 2026-11-18 UTC
 
 - The tester's test plan now covers the deployed product only. Cases come from the designs and their test cases. Unit tests, tests that run entirely on stubs, and checks that only read the sources are left out.
@@ -2397,6 +2430,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.15.0 — 2026-11-21 UTC
+
+- New `lazy-python.bug-hunter` agent runs a free bug hunt as a task of its own, separate from the guideline review.
+- The code reviewer takes only the review scope from its dispatch prompt and reports real bugs in changed code.
+- The code reviewer reads the operator's test-change approvals from its dispatch prompt.
+- The whole test suite now runs only at the final gate; tasks, fixes and commits run local tests only.
 
 ### 4.14.1 — 2026-11-15 UTC
 
@@ -2695,6 +2735,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 4.0.1 — 2026-11-21 UTC
+
+- One broken node, tag or term file no longer stops a wiki pass: each file is handled on its own and every per-file failure is reported to the error ledger. A deterministic run either commits all the files it changed or restores them, and file names or git output that are not valid UTF-8 no longer crash a pass. `/lazy-wiki.audit` also reports a new `mirror-unreadable` finding for mirror files that cannot be read.
+- `/lazy-wiki.configure` no longer mentions the retired spec tool layer when seeding the terms dictionary's `source_exclude`: the default seed is now `**/code-report.md` and `**/test-report.md`, and a reviewed document type declared `append_only: true` under a product's `doc_types` is offered in the same seed.
 
 ### 4.0.0 — 2026-11-18 UTC
 

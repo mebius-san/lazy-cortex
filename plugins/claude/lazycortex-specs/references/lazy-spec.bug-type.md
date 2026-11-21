@@ -1,10 +1,10 @@
 ---
-name: lazy-spec.bug-playbook
-description: Type playbook for bug assets — the bug-typed primary document written by a tester, no architecture document ever, tool determination from the reproduction, and the two design-only gates of a defect whose fix ships in a product release.
+name: lazy-spec.bug-type
+description: Type playbook for bug assets — the bug-typed primary document written by a tester, no architecture document ever, and the two design-only gates of a defect whose fix ships in a product release.
 ---
 # Bug type playbook — from reproduction to an approved defect
 
-This file is the law of the wake on which `spec.coordinator` works an asset whose status folder-note carries `spec_asset_type: bug`. It covers the whole flow of the asset, which is design-only: what defines the asset, what closes `spec_design_done`, which checkboxes hang on the note, and how the fix reaches a product release. The build and its verification happen inside the release and are declared by `lazy-spec.release-playbook.md` — their labels are not duplicated here.
+This file is the law of the wake on which `spec.coordinator` works an asset whose status folder-note carries `spec_asset_type: bug`. It covers the whole flow of the asset, which is design-only: what defines the asset, what closes `spec_design_done`, which checkboxes hang on the note, and how the fix reaches a product release. The build and its verification happen inside the release and are declared by `lazy-spec.release-type.md` — their labels are not duplicated here.
 
 ## What this type is
 
@@ -20,21 +20,6 @@ This file is the law of the wake on which `spec.coordinator` works an asset whos
 The `Write architecture` checkbox never hangs on a bug — not on a code-bearing judgment, not on an expert's request, not on a large defect. A bug never has an architecture document: an architecture document describes the shape of code an asset introduces, and a bug introduces nothing — it returns the system to a shape already approved. The product's `architecture.md` is brought up to date with the approved `bug.md` on the product note, by the `Revise architecture` row (`lazy-spec.release-owner-playbook.md` § 4), never inside a release build. When the fix does require changing the approved shape, it is not a bug: the coordinator raises an `[!asset-proposal]` for a `change` (or `feature`) asset that names the bug as its source, while the bug itself stays a description of the defect.
 
 Accordingly, no block with that label ever appears in a bug's `# Gates`.
-
-## Tool determination
-
-Tools are determined from the **approved** `bug.md`, not earlier: before approval the reproduction can still change, and with it the defect's location.
-
-The rule is simple: **whatever the defect lives in is what fixes it.**
-
-- defect in product code → `code`;
-- defect in entity data files (a wrong value, a wrong schema, a broken link between records) → `data`;
-- defect in user documentation (what is written is not what the system does) → `docs`;
-- plus `test` — nearly always: the regression case that would have caught this defect is part of the fix. Omitting `test` is a deliberate exception (the defect is not reproducible in the test environment), never a default.
-
-The coordinator writes the resulting list into the status note's `spec_tools` through `note-set-key`, on the wake that sees `bug.md` approved. The asset does not enter a release delta until `bug.md` is approved; once a release carries it, the release implementer reads its `spec_tools` — the tool set IS the answer to "who does the work": the implementer does its own tool's work itself and, for every foreign tool, launches a child agent with that tool's expert (resolved as always from the review class of the tool's `report_doc`), handing it `bug.md` and the tool's guidelines. A tool named in `spec_tools` but not declared in the product's `tool_types` is a finding the coordinator reports in `# Status brief`, not a gap it fills in on its own.
-
-A non-obvious choice is a `[!question]` in the status note listing the candidates with a short case for each. The coordinator invents neither a tool the declarations do not carry, nor a silent verdict in a `data`-versus-`code` split that `bug.md` genuinely leaves open.
 
 ## The gates
 
@@ -77,7 +62,7 @@ The tick is an operator gesture; on its next wake the coordinator enacts it — 
 
 `Write test-plan` rides the same flow with its own document: the coordinator seeds it with `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc <product> <folder-note-path> --doc test-plan.md:test-plan` and branches on `## Source requests` exactly as above; the class's main writer works round 1 inside the review loop, where `bug.md` plays exactly the source role that a design document plays on other types. `test-plan.md` is a definition document with test cases, not a plan of work: it goes through review and approval like `bug.md`, takes part in no gate of the asset, and the tester of the release that ships the fix later composes the release test plan from the product's standing test instructions, these cases and the regression. The row stays open while `test-plan.md` does not exist, including while the bug is already in an open release's `spec_includes`. A new or re-approved `test-plan.md` of an included bug hangs `Rebuild` on the release note, which pulls it into the next build.
 
-The two rows above are the only ones a bug note ever carries. Every implementation and verification row — `Write code-plan`, the release's own `Write test-plan` (the composed release test plan, a different document from the bug's `test-plan.md`), `Build`, `Test`, `Rebuild` and `Publish` — hangs on the release note and is declared by `lazy-spec.release-playbook.md`; none of them ever hangs on a bug.
+The two rows above are the only ones a bug note ever carries. Every implementation and verification row — `Write code-plan`, the release's own `Write test-plan` (the composed release test plan, a different document from the bug's `test-plan.md`), `Build`, `Test`, `Rebuild` and `Publish` — hangs on the release note and is declared by `lazy-spec.release-type.md`; none of them ever hangs on a bug.
 
 ## Duplicates and regressions
 
@@ -93,7 +78,7 @@ A regression arriving from a release's test run is the same mechanism: a red run
 
 ## Attach before a release
 
-When an incoming request attaches to a bug no release has picked up yet and is about to rewrite its reproduction, whatever was already written against the old version has to come down. The drop list for the `attach` line is **`test-plan.md`, when it exists** — its test cases describe the reproduction the request revises. No architecture document and no tool plan appear in that list and none can: a bug never creates the former, and the latter belong to the release.
+When an incoming request attaches to a bug no release has picked up yet and is about to rewrite its reproduction, whatever was already written against the old version has to come down. The drop list for the `attach` line is **`test-plan.md`, when it exists** — its test cases describe the reproduction the request revises. No architecture document and no release plan appear in that list and none can: a bug never creates the former, and the latter belong to the release.
 
 Attach order (`lazy-spec.attach-drop-playbook.md`): stop review on `test-plan.md` when it is being dropped, unlink it from the worktree, then stamp the request's attribution onto `bug.md` (`spec_source_requests`) and return it to review through a fresh writer round — the writer reads the request itself through `context_from_frontmatter`; no delta text is written into the document. No gate is flipped: an attach leaves every gate on the note as it is.
 

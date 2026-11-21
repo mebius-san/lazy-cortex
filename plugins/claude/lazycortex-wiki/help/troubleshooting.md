@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 48d0c91bdebc3dc4278dddd0dcaea32e85d3b100
-surface_sha: 8991daa39c64a5c68d148fbbc6cddd5c2b0857faa48221ed51ec962186e43595
+source_sha: c8db3a16da37483d17108e3fb748f277fb0691b5
+surface_sha: b5285177ac7bded5b30cd66a264f1bef624020c8f2ff4a7059ad5379822ae664
 ---
 # Troubleshooting
 
@@ -297,6 +297,16 @@ surface_sha: 8991daa39c64a5c68d148fbbc6cddd5c2b0857faa48221ed51ec962186e43595
 **Likely cause**: The dictionary predates the one-file-per-term directory shape, or a document still carries the old in-document terms list that the curator removes once it has passed the document.
 
 **Fix**: For the scope, run `/lazy-core.setup`, whose migration step runs the conversion, then commit what it changed. For a leftover `## Terms` section, the finding names the one-curator-job route (`terms-sweep --dispatch` on that document, run in the checkout where the daemon runs; without a daemon, follow it with `/lazy-runtime.tick --drain`). A document under an open review waits for the review to end. A document excluded as a term source is reported as `INFO`; the migration step removes its section.
+
+---
+
+## `/lazy-wiki.audit` reports `mirror-unreadable`
+
+**Symptom**: `/lazy-wiki.audit` fails with `mirror-unreadable` in a scope that has a mirror. The finding either names one mirror file ("mirror file or its source could not be read") or says the mirror source could not be listed and drift was not checked.
+
+**Likely cause**: The audit compares each mirrored file with its copy in the source clone. A file on either side that cannot be read or decoded (a broken text encoding, a permissions problem) is reported under its own path, and the files after it are still compared. When the source clone cannot be listed at all, the finding has no file and says drift was not checked for the whole mirror, because an unreadable source is not the same as no drift. The audit does not stop; every other check still runs.
+
+**Fix**: For a named file, fix its encoding or its permissions (on the mirror side or in the source clone, whichever the message points at). For a source listing failure, re-fetch the clone. Until the file is readable again, the mirror sync skips it and deletes nothing, so no mirrored content is lost in the meantime. Once the cause is fixed, re-run `/lazy-wiki.audit` to confirm the finding is gone.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: lazy-review.doc-review-protocol
-version: 9
+version: 10
 routine_protocol_candidate: true
 description: Markdown-document review protocol for lazycortex-review — minimal request/response contract for jobs dispatched to experts via lazycortex-core's expert runtime queue.
 ---
@@ -19,6 +19,7 @@ Canonical contract for jobs dispatched to experts by the ``lazycortex-review`` d
   "context":               [{"path": "context/<file>"}, ...],
   "result":                [{"path": "result/<file>"}],
   "edit_marker_style":     "simple | diff | criticmarkup | html",
+  "decisions":             ["<repo-relative path>", ...],
   "concerns": [
     {
       "group":            "<section-id>",
@@ -38,6 +39,7 @@ Field notes:
 - ``context[0..N].path`` — auxiliary files (e.g. a prior revision, or a related document the class declares as context). A consumer MAY stage additional materials here beyond what this protocol enumerates; the expert MUST read every file present, not only the ones this protocol names.
 - ``result[0].path`` — relative to the job dir, points at the empty file the expert writes to when ``outcome=edited``. Writer modes (``main`` / ``validation`` / ``terminal`` / ``repair``) return body content this way. A ``mode=main`` writer may declare further ``result`` entries of its own in the response — see § Attachments; the request only ever names the one.
 - ``edit_marker_style`` — names which annotation style is attached to the job. The agent reads this value and locates the matching block of marker rules in the ``lazy-core.markdown-style`` protocol attached to the job's ``config.json`` (one source of truth for marker shape — no per-style template duplicated in the payload). The dispatching consumer fills it from the document's pinned ``review_marker_style`` frontmatter (see § Frontmatter reserved keys), falling back to its settings only when the pin is absent.
+- ``decisions`` — optional array of repo-relative paths pointing into the working tree: the decisions registry of the asset the document belongs to first, the owning product's second, each omitted when its file does not exist. The field is absent when neither exists and on ``mode=repair``. The two files share a basename, so the order is the only thing that distinguishes them and is fixed. The expert opens these paths in the working tree directly, as they stand when it runs; they are not copied into the job dir, and nothing under ``source/`` or ``context/`` corresponds to them.
 - ``concerns`` — present only on ``mode=main`` dispatches AND only when at least one ``mode=validation`` section currently holds non-empty content. Each entry names one validation H1 section and carries its body (heading + ownership tag stripped). The main writer cannot edit the validation section content directly (the dispatcher restores it byte-for-byte on reapply); the field exists so the main writer's agent body has access to what the validator said.
 
 ## Response shape (``response.json``)

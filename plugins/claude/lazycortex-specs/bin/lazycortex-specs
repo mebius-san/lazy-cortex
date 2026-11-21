@@ -54,6 +54,7 @@ _SUB_CORE_CLI = "core-cli"
 _SUB_REVIEW_ROWS = "review-rows"
 _SUB_RELEASE_VERSION = "release-version"
 _SUB_RELEASE_DELTA = "release-delta"
+_SUB_RELEASE_TYPE_GUIDELINES = "release-type-guidelines"
 _SUB_RELEASE_SCAFFOLD = "release-scaffold"
 _SUB_RELEASE_DEPLOY = "release-deploy"
 _SUB_RELEASE_PUBLISH = "release-publish"
@@ -74,6 +75,9 @@ _SUB_MIGRATE_NOTES = "migrate-notes"
 _SUB_MIGRATE_REVIEW_CLASS = "migrate-review-class"
 _SUB_MIGRATE_REQUESTS = "migrate-requests"
 _SUB_MIGRATE_PLAN_VALIDATORS = "migrate-plan-validators"
+_SUB_MIGRATE_SPEC_TOOLS = "migrate-spec-tools"
+_SUB_MIGRATE_PLAN_CONTEXT = "migrate-plan-context"
+_SUB_MIGRATE_PLAYBOOK_NAMES = "migrate-playbook-names"
 _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
 _SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
@@ -86,7 +90,8 @@ _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
     "subcommands:\n"
     "  open-request <file>            mechanical opt-in for naked request file\n"
-    "  resolve-product <by-key|by-path|effective|effective-by-path> ...\n"
+    "  resolve-product <by-key|by-path|effective|effective-by-path|ancestor-chain|own-source-conflicts|\n"
+    "                  release-implementer|specialists|specialists-by-path> ...\n"
     "                                  resolve a product from settings, raw or with inheritance merged\n"
     "  resolve-language <relpath>     resolve a doc's effective language\n"
     "  lockit-text <key> [--lang CODE] [--note PATH] [--cwd DIR]\n"
@@ -132,7 +137,8 @@ _USAGE = (
     "  decide promote <living-doc> [--today D] [--commit]\n"
     "                                  transfer [!decision] blocks into the sibling registry; --commit on any\n"
     "                                  decide op commits what it wrote\n"
-    "  pins [--check] [--cwd DIR]     one-shot backfill: add wiki_pinned_topics to every role-bearing doc missing it\n"
+    "  pins [--check] [--cwd DIR]     one-shot backfill: add wiki_pinned_topics to every role-bearing doc"
+    " missing it\n"
     "                                  and rewrite stale product tags to product/<spec_path>; --check writes\n"
     "                                  nothing and exits 0 when a doc would change, 1 when none would\n"
     "  doc-type of <file> | resolve <type> [--product K] | list [--product K] | backfill [--cwd DIR]\n"
@@ -154,6 +160,8 @@ _USAGE = (
     "  release-delta <product-key> [--no-architecture]\n"
     "                                  print the assets the product's next release carries, the ones held\n"
     "                                  back, and the open release\n"
+    "  release-type-guidelines <release-note>\n"
+    "                                  print each included asset's type, base type and type guideline paths\n"
     "  release-scaffold <product-key> --bump <part> | --refresh <release-note> [--no-architecture]\n"
     "                                  create the next release from the delta, or pull new approvals\n"
     "                                  into an open release\n"
@@ -161,15 +169,19 @@ _USAGE = (
     "                                  run one deploy target of the release's product and journal the outcome\n"
     "  release-publish <release-note>  the Publish tick: deploy to production when declared, release the carried\n"
     "                                  assets, tag them, write the manifest, one commit\n"
-    "  coherence-apply <job_dir>       hang a coherence check's conflicts as callouts on the folder-notes, one commit\n"
-    "  coherence-dismiss <note> <doc>  take down a document's conflict callouts and their mirrors, record the pairs\n"
+    "  coherence-apply <job_dir> [--history-note <note> --history-line <line> --history-date <day>]\n"
+    "                                  hang a coherence check's conflicts as callouts on the folder-notes and,\n"
+    "                                  when asked, record the check's history line in the note, one commit\n"
+    "  coherence-dismiss <note> <doc>  take down a document's conflict callouts and their mirrors, record the"
+    " pairs\n"
     "                                  as no conflict, one commit\n"
     "  coherence-resolve <note> <doc>  take down a document's conflict callouts ticked for resolution and their\n"
     "                                  mirrors, print what they said, one commit\n"
     "  coherence-dispatch <doc>        queue a coherence check of an approved document against its neighbours\n"
     "  set-stage <file> <stage> [--restamp] [--now ISO] [author]\n"
     "                                  move one authored document's spec_stage with its mirror tag, approval\n"
-    "                                  stamp, attachment cascade, container stats and decision transfer (no commit)\n"
+    "                                  stamp, attachment cascade, container stats and decision transfer"
+    " (no commit)\n"
     "  commit-note <note> --subject TEXT [--path P ...] [--require-bot] [--repaint]\n"
     "                                  commit a note and the catalog paths named with it by pathspec, under the\n"
     "                                  runtime's identity\n"
@@ -203,6 +215,19 @@ _USAGE = (
     "                                  drop the validators of the code-plan, test-plan and system-test-plan\n"
     "                                  review classes (no commit); --check exits 0 when a class would change, 1\n"
     "                                  when none would\n"
+    "  migrate-spec-tools [--dry-run | --check] [--cwd DIR]\n"
+    "                                  drop spec_tools and tool-set questions from status notes, default_tools\n"
+    "                                  and tools from products' asset types, and data-report / docs-report\n"
+    "                                  review classes no document uses (no commit); --check exits 0 when\n"
+    "                                  anything would change, 1 when nothing would, 2 on failure\n"
+    "  migrate-plan-context [--dry-run | --check] [--cwd DIR]\n"
+    "                                  add the context_from_verbs field to the code-plan review classes, scoped\n"
+    "                                  ones included, that lack it (no commit); --check exits 0 when a class\n"
+    "                                  would change, 1 when none would, 2 on failure\n"
+    "  migrate-playbook-names [--dry-run | --check] [--cwd DIR]\n"
+    "                                  rewrite the old keys of the renamed shipped playbooks in the settings to\n"
+    "                                  their new keys (no commit); --check exits 0 when a value would change, 1\n"
+    "                                  when none would, 2 on failure\n"
     "  migrate-requests [--dry-run | --check] [--cwd DIR]\n"
     "                                  drop the retired experts= field from spawn-product lines of open requests\n"
     "                                  (no commit); --check exits 0 when a request would change, 1 when none\n"
@@ -264,6 +289,7 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_REVIEW_ROWS: ( "review_rows", _MAIN ),
     _SUB_RELEASE_VERSION: ( "release_version", _MAIN ),
     _SUB_RELEASE_DELTA: ( "release_delta", _MAIN ),
+    _SUB_RELEASE_TYPE_GUIDELINES: ( "release_delta", "main_type_guidelines" ),
     _SUB_RELEASE_SCAFFOLD: ( "release_scaffold", _MAIN ),
     _SUB_RELEASE_DEPLOY: ( "release_deploy", _MAIN ),
     _SUB_RELEASE_PUBLISH: ( "release_publish", _MAIN ),
@@ -284,6 +310,9 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_REVIEW_CLASS: ( "review_class_migrate", _MAIN ),
     _SUB_MIGRATE_REQUESTS: ( "request_migrate", _MAIN ),
     _SUB_MIGRATE_PLAN_VALIDATORS: ( "plan_validators_migrate", _MAIN ),
+    _SUB_MIGRATE_SPEC_TOOLS: ( "spec_tools_migrate", _MAIN ),
+    _SUB_MIGRATE_PLAN_CONTEXT: ( "plan_context_migrate", _MAIN ),
+    _SUB_MIGRATE_PLAYBOOK_NAMES: ( "playbook_names_migrate", _MAIN ),
     _SUB_MIGRATE_SOURCE_LINKS: ( "source_link_migrate", _MAIN ),
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
     _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),
@@ -335,17 +364,30 @@ def main(argv: list[str]) -> int:
   """
   Dispatch a lazycortex-specs subcommand from the CLI argument list.
 
+  Guarantees:
+    - A subcommand that resolves the spec content-root under a refused `spec.vault_root` ends with exit 2 and the
+      refusal's message on stderr, never with a traceback and never with a result computed from a default.
+    - A refusal of the content root or of the settings file that propagates out of the routed subcommand to `main`
+      ends the same way: exit 2, the message naming the file on stderr, no traceback, and no result computed from
+      a default. A subcommand that answers for itself, such as `upstream-tick` with its own exit 1, keeps its own
+      exit code, passed back unchanged.
+
   Args:
     argv: Argument list (typically `sys.argv[1:]`).
 
   Returns:
-    `0` for `-h` / `--help`; `2` for no arguments, an unknown subcommand, or a `spec.vault_root` the
-    subcommand refused; otherwise the routed subcommand's own exit code, unchanged.
+    `0` for `-h` / `--help`; `2` for no arguments, an unknown subcommand, or a refusal of the content root or of
+    the settings file that propagates out of the routed subcommand to `main`; otherwise the routed subcommand's
+    own exit code, unchanged, including the code of a subcommand that answers for broken settings itself.
   """
 
   # Contract:
   # A subcommand that resolves the spec content-root under a refused `spec.vault_root` ends with exit 2 and
   # the refusal's message on stderr, never with a traceback and never with a result computed from a default.
+  # A refusal of the content root or of the settings file that propagates out of the routed subcommand to `main`
+  # ends the same way: exit 2, the message naming the file on stderr, no traceback, and no result computed from
+  # a default. A subcommand that answers for itself, such as `upstream-tick` with its own exit 1, keeps its own
+  # exit code, passed back unchanged.
 
   if not argv or argv[0] in ("-h", "--help"):
     sys.stderr.write(_USAGE)
@@ -363,6 +405,10 @@ def main(argv: list[str]) -> int:
   try:
     return handler(rest)
   except importlib.import_module(_SPEC_PATHS).VaultRootError as exc:
+    sys.stderr.write(f"{exc}\n")
+    return _EXIT_REFUSED
+  # settings that cannot be read as a JSON object refuse the subcommand the same way, the file named
+  except importlib.import_module(_SPEC_PATHS).SettingsError as exc:
     sys.stderr.write(f"{exc}\n")
     return _EXIT_REFUSED
 

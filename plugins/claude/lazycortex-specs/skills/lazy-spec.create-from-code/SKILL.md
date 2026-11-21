@@ -63,7 +63,7 @@ Resolve the product record:
 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product effective <product>
 ```
 
-The `effective` verb merges the record with its ancestor products' (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record), so a nested product reads its parent's `asset_types`, `language` and `mode` rather than looking unconfigured. The command prints `{"key": "<product>", "record": <record-or-null>}`. The record (when present) carries `spec_path` (required, vault-relative), optional `source` (`{ paths }`), optional `language` (defaults to `en`), and optional `asset_types` / `tool_types` (both merged key-by-key over the plugin's shipped set; along the ancestor chain only `asset_types` merges key-by-key — `tool_types`, like every other inheritable field, is taken whole from the nearest product that declares one).
+The `effective` verb merges the record with its ancestor products' (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record), so a nested product reads its parent's `asset_types`, `language` and `mode` rather than looking unconfigured. The command prints `{"key": "<product>", "record": <record-or-null>}`. The record (when present) carries `spec_path` (required, vault-relative), optional `source` (`{ paths }`), optional `language` (defaults to `en`), and optional `asset_types` (merged key-by-key over the plugin's shipped set and along the ancestor chain).
 
 Branch on the record:
 

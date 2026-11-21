@@ -39,6 +39,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -50,9 +51,13 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_keys import CoordinatorTrigger, JobMarker  # noqa: E402
+from spec_keys import CoordinatorTrigger, JobMarker, PluginErrorCause  # noqa: E402
+# waiver: same deferred sibling import as above
+# pylint: disable-next=import-error,wrong-import-position
+import error_report  # noqa: E402
 
 
 # The core CLI verb that cancels an expert job, and the variable naming the repository the core CLI acts on.
@@ -89,8 +94,7 @@ _JOBS_SIDECAR = "lazy-specs.jobs.json"
 # The sibling sidecar recording each stage lag already raised on a note, so a repeat warns instead of waking.
 _STAGE_LAG_SIDECAR = "lazy-specs.stage-lag.json"
 
-# The closed field schema of one note's entry. A field outside it is refused the way `note-set-key`
-# refuses a frontmatter key outside its own schema — a typo must not become state.
+# The closed field schema of one note's entry. A field outside it is refused, so a typo never becomes state.
 _FIELDS = (
     JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE, JobMarker.COHERENCE_JOBS,
     JobMarker.LAST_JOB,
@@ -111,6 +115,12 @@ _FIELD_BY_KIND = {
 # Suffix of the same-directory temp file the atomic write renames over the store.
 _TMP_SUFFIX = ".tmp"
 
+# What follows a sidecar's own name in the name of the file a corrupt sidecar is moved aside to, the format of the
+# time that ends that name, and the leading part of the incident key the move is reported under.
+_CORRUPT_INFIX = ".corrupt-"
+_CORRUPT_TIME_FORMAT = "%Y-%m-%dT%H-%M-%S.%fZ"
+_CORRUPT_INCIDENT_PREFIX = "spec-sidecar-corrupt:"
+
 
 # waiver: generic over any closed-set marker class in spec_keys, not one specific class
 def _enum_values(cls: type[object]) -> frozenset[str]:
@@ -129,14 +139,12 @@ def _enum_values(cls: type[object]) -> frozenset[str]:
   )
 
 
-# Sub-schema per dict-valued field — `(required keys, {field: closed-value-set})`. Moved here with
-# the markers themselves from `note_ops.note_set_key`, which validated the same two shapes while
-# they were frontmatter keys; `lazy-spec.audit`'s own deep-shape checks read this store. The key
-# set is closed in every entry, widened only by the optional counts `_OPTIONAL_COUNTS` names; only
-# the coordinator's `trigger` closes its VALUE set too — a
-# launch checkbox's label is playbook vocabulary, including labels a playbook parameterises by
-# tool, so it is validated for shape alone rather than against a list this worker would have to
-# grow every time a playbook names a new one.
+# Sub-schema per dict-valued field — `(required keys, {field: closed-value-set})`; `lazy-spec.audit`'s own
+# deep-shape checks read this store. The key set is closed in every entry, widened only by the optional keys
+# `_OPTIONAL_COUNTS`, `_OPTIONAL_TEXTS` and `_OPTIONAL_FLAGS` name; only the coordinator's `trigger` closes its
+# VALUE set too — a launch checkbox's label is playbook vocabulary, declared by the asset type's playbook, so it
+# is validated for shape alone rather than against a list this worker would have to grow every time a playbook
+# names a new one.
 _SUB_SCHEMAS: dict[str, tuple[frozenset[str], dict[str, frozenset[str]]]] = {
     JobMarker.ACTIVE_JOB: (
         frozenset({ JobMarker.CHECKBOX, JobMarker.EXPERT, JobMarker.JOB_ID }),
@@ -159,6 +167,11 @@ _SUB_SCHEMAS: dict[str, tuple[frozenset[str], dict[str, frozenset[str]]]] = {
 # The optional keys a field's object may carry beside its required ones, each a positive count when present
 _OPTIONAL_COUNTS: dict[str, frozenset[str]] = {
     JobMarker.COHERENCE_JOBS: frozenset({ JobMarker.DROPPED }),
+}
+
+# The optional keys a field's object may carry beside its required ones, each a non-empty string when present
+_OPTIONAL_TEXTS: dict[str, frozenset[str]] = {
+    JobMarker.COHERENCE_JOBS: frozenset({ JobMarker.HISTORY }),
 }
 
 # waiver: the sidecar's own `last_job` sub-key, private to this store; not a frontmatter key in `spec_keys`
@@ -241,12 +254,10 @@ def check_sub_schema(field: str, value: dict) -> str | None:
 
   Every marker's key set stays closed. A field's VALUE set is closed only where the vocabulary
   belongs to this worker — the coordinator's own `trigger`. A launch checkbox's label does not:
-  which labels exist, and how a playbook parameterises one by tool, is the playbook's decision,
+  which labels exist is decided by the asset type's playbook, which declares its launch rows,
   so the label is validated for shape alone. A member of the `coherence_jobs` list is checked the
-  same way, as one object of that field. Beside its required keys such a member may carry the optional
-  `dropped` key, which must be a positive integer (a boolean is refused). A `last_job` record may carry the
-  optional `unlanded` and `retired_by_cancel` keys, each of which must be the literal `True` (any other value is
-  refused); any other extra key is refused.
+  same way, as one object of that field. A member or record may also carry the optional keys its sub-schema
+  declares, each held to that key's own value rule; any other extra key is refused.
 
   Args:
     field: The entry field being written (`coordinator_job` / `active_job` / `last_job` / `coherence_jobs`).
@@ -261,8 +272,8 @@ def check_sub_schema(field: str, value: dict) -> str | None:
   # # A wake reason is closed vocabulary; a launch label is not
   # The reason a coordinator job is running is always one of a fixed, known set, so it is checked
   # against that set outright. A launch job's own label is never checked the same way, because
-  # which launches exist — and how one launch can be parameterised per tool — is a decision the
-  # coordinating playbook makes, not one this record is entitled to constrain; the label is
+  # which launches exist is a decision the asset type's playbook makes, not one this record
+  # is entitled to constrain; the label is
   # validated only for being a real, non-empty identifier, whatever vocabulary the playbook draws
   # it from.
 
@@ -273,18 +284,23 @@ def check_sub_schema(field: str, value: dict) -> str | None:
     return None
   required_keys, closed_fields = sub_schema
   optional_flags = _OPTIONAL_FLAGS.get(field, frozenset())
-  optional_keys = _OPTIONAL_COUNTS.get(field, frozenset()) | optional_flags
+  optional_texts = _OPTIONAL_TEXTS.get(field, frozenset())
+  optional_keys = _OPTIONAL_COUNTS.get(field, frozenset()) | optional_flags | optional_texts
   if not required_keys <= value.keys() <= required_keys | optional_keys:
     optional = f" plus optionally {sorted(optional_keys)}" if optional_keys else ""
     return f"expected exactly the keys {sorted(required_keys)}{optional}, got {sorted(value.keys())}"
-  for name in sorted((optional_keys - optional_flags) & value.keys()):
+  for name in sorted(optional_texts & value.keys()):
+    # an optional text is a non-empty string or absent; anything else is a violation
+    if not isinstance(value[name], str) or not value[name].strip():
+      return f"{name} must be a non-empty string, got {value[name]!r}"
+  for name in sorted((optional_keys - optional_flags - optional_texts) & value.keys()):
     count = value[name]
 
-    # guard: an optional count is a positive integer or absent; a bool is no count
+    # an optional count is a positive integer or absent; a bool is no count and a violation
     if isinstance(count, bool) or not isinstance(count, int) or count < 1:
       return f"{name} must be a positive integer, got {count!r}"
   for name in sorted(optional_flags & value.keys()):
-    # guard: an optional flag is the literal `True` or absent; any other value marks nothing
+    # an optional flag is the literal `True` or absent; any other value is a violation
     if value[name] is not True:
       return f"{name} must be true, got {value[name]!r}"
   for name, allowed in closed_fields.items():
@@ -307,10 +323,13 @@ def _read_store(repo: Path) -> dict[str, dict]:
     repo: Repository root holding the sidecar.
 
   Returns:
-    The parsed store, or `{}` when the file is absent, unreadable, or not a JSON object — a
-    corrupt sidecar is runtime scratch and re-derives itself, so it never fails a tick.
+    The parsed store, or `{}` when the file is absent or was no JSON object store and was moved aside.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, or cannot be moved aside as no store
+      for a reason other than its being gone.
   """
-  return _read_json(sidecar_path(repo))
+  return _read_json(repo, sidecar_path(repo))
 
 
 def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
@@ -324,21 +343,84 @@ def _write_store(repo: Path, store: Mapping[str, dict]) -> None:
   _write_json(sidecar_path(repo), store)
 
 
-def _read_json(path: Path) -> dict[str, dict]:
+def _read_json(repo: Path, path: Path, *, set_aside: bool = True) -> dict[str, dict]:
   """
-  Read a sidecar store from disk.
+  Read a sidecar store from disk, setting aside a file that is no store.
 
   Args:
+    repo: Repository root the sidecar belongs to.
     path: The sidecar file.
+    set_aside: Whether a file that is no store is moved aside; when False it is left where it is.
 
   Returns:
-    The stored mapping, or an empty one when the file is absent, unreadable, malformed, or not a mapping.
+    The stored mapping, or an empty one when the file is absent or is not UTF-8 text, not valid JSON, or not a
+    JSON object. When the move finds the file already gone, the store is read again once and what stands under
+    the name then is returned, an absent file reading as empty.
+
+  Raises:
+    OSError: If the file cannot be read for a reason other than its absence, or cannot be moved aside for a reason
+      other than its being gone.
   """
+  # limit: concurrent writers of a sidecar are not supported — the daemon loop that owns the sidecars is serial, so
+  # nothing guards a read-modify-write against another process; the upgrade is a lock held around every
+  # read-modify-write of a sidecar
+
+  # an absent sidecar is an empty store; any other failure to read it propagates, so no caller ever writes over a
+  # store it could not read. `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
   try:
     data = json.loads(path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+  except FileNotFoundError:
     return {}
-  return data if isinstance(data, dict) else {}
+  except ValueError:
+    data = None
+
+  # a store that parsed as a JSON object is returned as it is
+  if isinstance(data, dict):
+    return data
+
+  # what was read is no store: the file is kept under another name before anything can be written in its place,
+  # for a caller that only reads as well. Only a dry-run prune and the second read below leave it where it is
+  if not set_aside or _set_aside(repo, path):
+    return {}
+
+  # the file was already gone at the move: the store is read once more and what stands there now is used
+  return _read_json(repo, path, set_aside = False)
+
+
+def _set_aside(repo: Path, path: Path) -> bool:
+  """
+  Move a sidecar that is no store to a time-stamped sibling and report the move.
+
+  The sibling is named `<sidecar name>.corrupt-<UTC time>`. The move is printed as one line on stderr and
+  reported to the error ledger as a warning. A file that is already gone is left alone and nothing is reported.
+
+  Args:
+    repo: Repository root the sidecar belongs to.
+    path: The sidecar file to move aside.
+
+  Returns:
+    True when this call moved the file aside and reported it; False when the file was already gone.
+
+  Raises:
+    OSError: If the move fails for a reason other than the file's absence.
+  """
+  # the sibling name carries the time down to the microsecond, so two files set aside never share a name
+  aside = path.with_name(f"{path.name}{_CORRUPT_INFIX}{datetime.now(UTC).strftime(_CORRUPT_TIME_FORMAT)}")
+
+  # a file that is already gone leaves nothing to move and nothing to report
+  try:
+    os.replace(path, aside)
+  except FileNotFoundError:
+    return False
+
+  # the operator is told where the bytes went, on stderr and in the error ledger
+  detail = f"{path.name} is not a JSON object store; moved aside to {aside.name}, the store starts empty"
+  print(f"spec_job_markers: {detail}", file = sys.stderr)
+  error_report.report_warning(
+      repo, cause = PluginErrorCause.RUNTIME_SIDECAR_CORRUPT, incident = f"{_CORRUPT_INCIDENT_PREFIX}{path.name}",
+      detail = detail,
+  )
+  return True
 
 
 def _write_json(path: Path, store: Mapping[str, dict]) -> None:
@@ -379,9 +461,15 @@ def read_stage_lag(repo: Path, note: Path) -> dict[str, str]:
     note: The asset's status folder-note.
 
   Returns:
-    A mapping of `<basename>:<review_result>` to `woken` or `warned`; empty when nothing is recorded.
+    A mapping of `<basename>:<review_result>` to `woken` or `warned`, plus, per woken lag, a
+    `<basename>:<review_result>/lines-before` entry holding a count as text that marks where the lag's episode
+    began; empty when nothing is recorded.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, or cannot be moved aside as no store
+      for a reason other than its being gone.
   """
-  stored = _read_json(stage_lag_path(repo)).get(note_key(repo, note))
+  stored = _read_json(repo, stage_lag_path(repo)).get(note_key(repo, note))
 
   # guard: nothing (or garbage) recorded for this note reads as no lag ever raised
   if not isinstance(stored, dict):
@@ -397,19 +485,48 @@ def write_stage_lag(repo: Path, note: Path, fingerprints: Mapping[str, str]) -> 
 
   Guarantees:
     - A concurrent reader never observes a partially written record.
+    - Nothing is ever written over a stage-lag sidecar that could not be read: when reading an existing sidecar
+      fails with an `OSError` other than the file's absence, the error propagates and the file is left
+      byte-identical.
+    - A stage-lag sidecar that reads but is not UTF-8 text, not valid JSON, or not a JSON object is first moved
+      aside, bytes intact, to a sibling file named `<sidecar name>.corrupt-<UTC time>`; the move is reported on
+      stderr and to the error ledger as a warning; only then does the store start empty, so the write that
+      follows holds only the new record. A move that finds the sidecar already gone is not an error: the store is
+      read again once, what stands under the name then is used (an absent sidecar reads as empty), and this call
+      makes no report. Any other failure of the move propagates as `OSError`, nothing is written, and the sidecar
+      keeps its bytes under its own name.
 
   Args:
     repo: The repository root.
     note: The asset's status folder-note.
-    fingerprints: The new record, mapping `<basename>:<review_result>` to `woken` or `warned`.
+    fingerprints: The new record, mapping `<basename>:<review_result>` to `woken` or `warned`, plus, per woken lag, a
+      `<basename>:<review_result>/lines-before` entry holding a count as text that marks where the lag's episode
+      began.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, cannot be moved aside as no store
+      for a reason other than its being gone, or the new store cannot be written.
   """
 
   # Contract:
   # A concurrent reader never observes a partially written record;
   # it sees either the previous content or the new one.
 
+  # Contract:
+  # Nothing is ever written over a stage-lag sidecar that could not be read. When reading an existing sidecar fails
+  # with an `OSError` other than the file's absence, the error propagates and the file is left byte-identical.
+
+  # Contract:
+  # A stage-lag sidecar that reads but is not UTF-8 text, not valid JSON, or not a JSON object is first moved aside,
+  # bytes intact, to a sibling file named `<sidecar name>.corrupt-<UTC time>`. The move is reported on stderr and to
+  # the error ledger as a warning, and only then does the store start empty, so the write that follows holds only
+  # the new record. A move that finds the sidecar already gone is not an error: the store is read again once, what
+  # stands under the name then is used (an absent sidecar reads as empty), and this call makes no report. Any other
+  # failure of the move propagates as `OSError`, nothing is written, and the sidecar keeps its bytes under its own
+  # name.
+
   # the whole stored mapping and this note's key in it
-  store = _read_json(stage_lag_path(repo))
+  store = _read_json(repo, stage_lag_path(repo))
   key = note_key(repo, note)
 
   # guard: clearing a record that was never written leaves no file behind
@@ -428,18 +545,49 @@ def prune_stage_lag(repo: Path, drop: Callable[[str], bool], *, dry_run: bool = 
   """
   Remove every stage-lag row whose note key the predicate selects.
 
+  Guarantees:
+    - Nothing is ever written over a stage-lag sidecar that could not be read: when reading an existing sidecar
+      fails with an `OSError` other than the file's absence, the error propagates and the file is left
+      byte-identical.
+    - A stage-lag sidecar that reads but is not UTF-8 text, not valid JSON, or not a JSON object is first moved
+      aside, bytes intact, to a sibling file named `<sidecar name>.corrupt-<UTC time>`; the move is reported on
+      stderr and to the error ledger as a warning; only then does the store start empty, so the write that
+      follows holds only the surviving rows. A move that finds the sidecar already gone is not an error: the store
+      is read again once, what stands under the name then is used (an absent sidecar reads as empty), and this call
+      makes no report. Any other failure of the move propagates as `OSError`, nothing is written, and the sidecar
+      keeps its bytes under its own name.
+    - With `dry_run` set, nothing is written: a corrupt sidecar is left under its own name and reads as empty.
+
   Args:
     repo: The repository root.
     drop: Called with each stored note key; True removes that row.
     dry_run: When True, report the selected keys and write nothing.
 
   Returns:
-    The selected note keys, sorted; empty when the store is absent, unreadable, or holds no match.
+    The selected note keys, sorted; empty when the store is absent, was set aside as no store, or holds no match.
 
   Raises:
-    OSError: The rewritten store could not be written.
+    OSError: If the sidecar cannot be read for a reason other than its absence, cannot be moved aside as no store
+      for a reason other than its being gone, or the rewritten store cannot be written.
   """
-  store = _read_json(stage_lag_path(repo))
+
+  # Contract:
+  # Nothing is ever written over a stage-lag sidecar that could not be read. When reading an existing sidecar fails
+  # with an `OSError` other than the file's absence, the error propagates and the file is left byte-identical.
+
+  # Contract:
+  # A stage-lag sidecar that reads but is not UTF-8 text, not valid JSON, or not a JSON object is first moved aside,
+  # bytes intact, to a sibling file named `<sidecar name>.corrupt-<UTC time>`. The move is reported on stderr and to
+  # the error ledger as a warning, and only then does the store start empty, so the write that follows holds only
+  # the surviving rows. A move that finds the sidecar already gone is not an error: the store is read again once,
+  # what stands under the name then is used (an absent sidecar reads as empty), and this call makes no report. Any
+  # other failure of the move propagates as `OSError`, nothing is written, and the sidecar keeps its bytes under
+  # its own name.
+
+  # Contract:
+  # A dry run writes nothing: a corrupt sidecar is left under its own name and reads as empty.
+
+  store = _read_json(repo, stage_lag_path(repo), set_aside = not dry_run)
   dropped = sorted(key for key in store if drop(key))
 
   # guard: a dry run or a store with nothing to drop leaves the file exactly as it is
@@ -491,13 +639,17 @@ def read(repo: Path, note: Path) -> dict[str, dict | list | str | None]:
 
   Returns:
     The entry with every field of the closed schema present, unrecorded ones as `None`.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, or cannot be moved aside as no store
+      for a reason other than its being gone.
   """
   return _normalize_entry(_read_store(repo).get(note_key(repo, note)))
 
 
 def coherence_jobs(repo: Path, note: Path) -> list[dict]:
   """
-  Read the coherence checks in flight for one note's documents.
+  Read the coherence checks tracked for one note's documents.
 
   Args:
     repo: Repository root holding the sidecar.
@@ -505,7 +657,11 @@ def coherence_jobs(repo: Path, note: Path) -> list[dict]:
 
   Returns:
     The recorded members in recorded order, each `{"doc", "expert", "job_id"}` as strings plus `"dropped"` as an
-    integer when one was recorded; empty when none is recorded.
+    integer and `"history"` as a string when those were recorded; empty when none is recorded.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, or cannot be moved aside as no store
+      for a reason other than its being gone.
   """
   jobs = read(repo, note)[JobMarker.COHERENCE_JOBS]
   return [ { str(key): value if key == JobMarker.DROPPED else str(value) for key, value in job.items() }
@@ -521,7 +677,11 @@ def entries(repo: Path) -> dict[str, dict[str, dict | list | str | None]]:
 
   Returns:
     Mapping of each recorded note's repo-relative POSIX key to its entry, each normalized
-    exactly as `read` normalizes one; `{}` when the sidecar is absent or corrupt.
+    exactly as `read` normalizes one; `{}` when the sidecar is absent or was set aside as no store.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, or cannot be moved aside as no store
+      for a reason other than its being gone.
   """
   return { key: _normalize_entry(stored) for key, stored in _read_store(repo).items() }
 
@@ -562,7 +722,17 @@ def update(repo: Path, note: Path,
 
   Guarantees:
     - When `changes` fails validation, the store is left exactly as it was before the
-      call; no field of `changes` is ever partially persisted.
+      call; no field of `changes` is ever partially persisted. A refused call does not even move a corrupt sidecar
+      aside or report it.
+    - Nothing is ever written over a sidecar that could not be read: when reading an existing sidecar fails with
+      an `OSError` other than the file's absence, the error propagates and the file is left byte-identical.
+    - A sidecar that reads but is not UTF-8 text, not valid JSON, or not a JSON object is first moved aside, bytes
+      intact, to a sibling file named `<sidecar name>.corrupt-<UTC time>`; the move is reported on stderr and to
+      the error ledger as a warning; only then does the store start empty, so the write that follows holds only
+      the new content. A move that finds the sidecar already gone is not an error: the store is read again once,
+      what stands under the name then is used (an absent sidecar reads as empty), and this call makes no report.
+      Any other failure of the move propagates as `OSError`, nothing is written, and the sidecar keeps its bytes
+      under its own name.
 
   Args:
     repo: Repository root holding the sidecar.
@@ -574,13 +744,29 @@ def update(repo: Path, note: Path,
 
   Raises:
     ValueError: If `changes` names a field outside the closed schema, gives a dict-valued field
-      a non-dict value or a list-valued field a non-list one, or gives either an object violating
-      that field's closed sub-schema.
+      a non-dict value, a list-valued field a non-list one, or a scalar field a value that is neither a string
+      nor `None`, or gives a dict-valued or list-valued field an object violating that field's closed sub-schema.
+    OSError: If the sidecar cannot be read for a reason other than its absence, cannot be moved aside as no store
+      for a reason other than its being gone, or the new store cannot be written.
   """
 
   # Contract:
   # When `changes` fails validation for any reason, the sidecar store is left
   # byte-identical to its state before the call — no partial write is ever persisted.
+  # A refused call does not even move a corrupt sidecar aside or report it.
+
+  # Contract:
+  # Nothing is ever written over a sidecar that could not be read. When reading an existing sidecar fails with an
+  # `OSError` other than the file's absence, the error propagates and the file is left byte-identical.
+
+  # Contract:
+  # A sidecar that reads but is not UTF-8 text, not valid JSON, or not a JSON object is first moved aside, bytes
+  # intact, to a sibling file named `<sidecar name>.corrupt-<UTC time>`. The move is reported on stderr and to the
+  # error ledger as a warning, and only then does the store start empty, so the write that follows holds only the
+  # new content. A move that finds the sidecar already gone is not an error: the store is read again once, what
+  # stands under the name then is used (an absent sidecar reads as empty), and this call makes no report. Any other
+  # failure of the move propagates as `OSError`, nothing is written, and the sidecar keeps its bytes under its own
+  # name.
 
   unknown = [field for field in changes if field not in _FIELDS]
 
@@ -588,9 +774,9 @@ def update(repo: Path, note: Path,
   if unknown:
     raise ValueError(f"mark-job: field(s) {unknown} are not in the marker schema {list(_FIELDS)}")
 
-  # overlay the changes on the current entry, validating each dict value against its sub-schema
-  # and normalising a blank scalar to the absent marker
-  entry = read(repo, note)
+  # every change is validated before the sidecar is first read, so a refused call never touches it: each dict
+  # value is checked against its sub-schema and a blank scalar is normalised to the absent marker
+  accepted: dict[str, dict | list | str | None] = {}
   for field, value in changes.items():
     if field in _DICT_FIELDS and value is not None:
       # guard: a dict-valued field never takes a scalar — refuse before it becomes state
@@ -601,11 +787,17 @@ def update(repo: Path, note: Path,
       # guard: an object that violates the field's closed sub-schema is refused just as cleanly
       if error is not None:
         raise ValueError(f"mark-job: {field} {error}")
-      entry[field] = value
+      accepted[field] = value
     elif field in _LIST_FIELDS and value is not None:
-      entry[field] = _check_members(field, value) or None
+      accepted[field] = _check_members(field, value) or None
     else:
-      entry[field] = value.strip() if isinstance(value, str) and value.strip() else None
+      # guard: a scalar field takes a token or nothing — any other value would silently clear what is recorded
+      if value is not None and not isinstance(value, str):
+        raise ValueError(f"mark-job: {field} takes a string, got {value!r}")
+      accepted[field] = value.strip() or None if value is not None else None
+
+  # the accepted changes overlay the note's current entry
+  entry = { **read(repo, note), **accepted }
 
   # an all-`None` entry is indistinguishable from an absent one, so drop the row instead
   store = _read_store(repo)
@@ -623,15 +815,21 @@ def clear(repo: Path, note: Path) -> None:
   Drop one note's entry entirely.
 
   Guarantees:
-    - Clearing a note that carries no recorded entry succeeds as a no-op.
+    - The absence of an entry for the note is never itself an error; clearing a note that carries no recorded entry
+      succeeds as a no-op.
 
   Args:
     repo: Repository root holding the sidecar.
     note: The asset status folder-note's path.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence, cannot be moved aside as no store
+      for a reason other than its being gone, or the new store cannot be written.
   """
 
   # Contract:
-  # Clearing a note that carries no recorded entry succeeds as a no-op; it never raises.
+  # The absence of an entry for the note is never itself an error;
+  # clearing a note that carries no recorded entry succeeds as a no-op.
 
   # clearing every field of the schema at once is what prunes the row from the store
   update(repo, note, dict.fromkeys(_FIELDS))
@@ -857,7 +1055,8 @@ def _read_response_outcome(repo: Path, job_info: Mapping[str, object]) -> str | 
   job_dir = repo / _JOBS_BASE / str(job_info.get(JobMarker.EXPERT)) / str(job_info.get(JobMarker.JOB_ID))
   try:
     response = json.loads((job_dir / _RESPONSE_FILE).read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+  except (OSError, ValueError):
+    # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
     return None
 
   # only a JSON object naming a non-empty outcome reports one
@@ -878,7 +1077,8 @@ def main(argv: list[str]) -> int:
 
   Returns:
     Exit code: 0 on success, 2 when neither a value nor `--clear` was given, or both were; 1 when
-    the value is not a JSON object or violates the marker's closed sub-schema.
+    the value is not a JSON object or violates the marker's closed sub-schema, or when the sidecar
+    cannot be read, moved aside or written (one line naming the sidecar and the error goes to stderr).
   """
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog = "lazycortex-specs mark-job")
@@ -913,6 +1113,11 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"mark-job: expected a JSON object, got {args.value!r}\n")
         return 1
 
+      # guard: a JSON `null` is no object either — only `--clear` clears a marker
+      if value is None:
+        sys.stderr.write(f"mark-job: expected a JSON object, got {args.value!r}\n")
+        return 1
+
   # `note` resolves against `--repo` unless it is already absolute, mirroring every other verb
   # (pathlib drops the left operand of `/` when the right one is absolute). The note need not
   # exist on disk: the marker is runtime state about a path, and a clear on a note that was just
@@ -922,6 +1127,10 @@ def main(argv: list[str]) -> int:
     entry = update(repo, repo / args.note, { field: value })
   except ValueError as error:
     sys.stderr.write(f"{error}\n")
+    return 1
+  # a sidecar that cannot be read, set aside or written refuses the call the same way, named with its error
+  except OSError as error:
+    sys.stderr.write(f"mark-job: {_JOBS_SIDECAR}: {type(error).__name__}: {error}\n")
     return 1
   print(json.dumps(entry))
   return 0

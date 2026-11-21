@@ -28,6 +28,12 @@ import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-
 import tags as _tags  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
+# Encoding of the JSON exchanged with the core CLI.
+_ENCODING = "utf-8"
+
+# Codec error handler that turns a byte that is not valid text into a replacement mark instead of failing.
+_DECODE_LOSSY = "replace"
+
 # lazycortex-wiki reaches lazycortex-core ONLY via its published CLI —
 # no Python-import coupling, and no plugin-cache walk: the binary comes
 # from the wiki's one core resolver.  See the inter-plugin boundary
@@ -63,6 +69,23 @@ class CoreDispatch:
       call of its job committed.
     INCIDENT_TERMS_BATCH_PREFIX: Prefix of that report's incident key, followed by the terms scope id, a colon and
       the repo-relative path of a document of the job.
+    CAUSE_DOMAIN_CODE_UNREADABLE: Stable cause reported while a domain tick's scan meets code files it cannot read.
+    INCIDENT_DOMAIN_CODE: The one incident key that report folds under.
+    CAUSE_DOMAIN_DICTIONARY_UNREADABLE: Stable cause reported while a domain tick finds the group dictionary absent
+      or unreadable.
+    INCIDENT_DOMAIN_DICTIONARY: The one incident key that report folds under.
+    CAUSE_RELINK_NODE_UNREADABLE: Stable cause reported while a relink pass skips nodes it cannot read.
+    INCIDENT_RELINK_PREFIX: Prefix of that report's incident key, followed by the scope whose nodes were skipped.
+    CAUSE_RELINK_NAME_SKIPPED: Stable cause reported while a relink plan leaves out changed paths whose names are
+      not valid UTF-8.
+    INCIDENT_RELINK_PLAN_PREFIX: Prefix of that report's incident key, followed by the planned scope.
+    CAUSE_MIRROR_FILE_UNREADABLE: Stable cause reported while a mirror sync skips files it cannot read or decode.
+    INCIDENT_MIRROR_PREFIX: Prefix of that report's incident key, followed by the mirror scope.
+    CAUSE_DOCTOR_MIRROR_UNREADABLE: Stable cause reported while a doctor run's mirror audit meets files or a source
+      listing it cannot read.
+    INCIDENT_DOCTOR_MIRROR_PREFIX: Prefix of that report's incident key, followed by the audited scope.
+    CAUSE_DOCTOR_DOMAINS_FAILED: Stable cause reported while a doctor run's repo-level domain audit fails.
+    INCIDENT_DOCTOR_DOMAINS: The one incident key that report folds under.
   """
 
   # Contract:
@@ -185,6 +208,46 @@ class CoreDispatch:
   # incident-key prefix it folds under, followed by the terms scope and the document of the job.
   CAUSE_TERMS_BATCH_REFUSED   = "terms-batch-refused"
   INCIDENT_TERMS_BATCH_PREFIX = "wiki-terms-batch:"
+
+  # The key of one `source` / `context` / `result` entry of a dispatch bundle that names its path, and the
+  # bucket a result entry's path sits under.
+  _ENTRY_PATH    = "path"
+  _RESULT_BUCKET = "result"
+
+  # Stable cause a domain tick reports while the scan meets code files it cannot read, and the one incident
+  # key it folds under: the condition belongs to the repository's domain tree as a whole, not to one file.
+  CAUSE_DOMAIN_CODE_UNREADABLE = "domain-code-unreadable"
+  INCIDENT_DOMAIN_CODE         = "wiki-domains:unreadable-code"
+
+  # Stable cause a domain verb reports while the group dictionary cannot be found or read, and the one incident
+  # key it folds under: the dictionary belongs to the repository's domain tree as a whole.
+  CAUSE_DOMAIN_DICTIONARY_UNREADABLE = "domain-dictionary-unreadable"
+  INCIDENT_DOMAIN_DICTIONARY         = "wiki-domains:dictionary"
+
+  # Stable cause a relink pass reports while it skips nodes it cannot read, and the incident-key prefix it folds
+  # under, followed by the scope whose nodes were skipped.
+  CAUSE_RELINK_NODE_UNREADABLE = "relink-node-unreadable"
+  INCIDENT_RELINK_PREFIX       = "wiki-relink:"
+
+  # Stable cause a relink plan reports while it leaves out changed paths whose names are not valid UTF-8, and the
+  # incident-key prefix it folds under, followed by the planned scope.
+  CAUSE_RELINK_NAME_SKIPPED    = "relink-name-skipped"
+  INCIDENT_RELINK_PLAN_PREFIX  = "wiki-relink-plan:"
+
+  # Stable cause a mirror sync reports while it skips files it cannot read or decode, and the incident-key prefix
+  # it folds under, followed by the mirror scope.
+  CAUSE_MIRROR_FILE_UNREADABLE = "mirror-file-unreadable"
+  INCIDENT_MIRROR_PREFIX       = "wiki-mirror:"
+
+  # Stable cause a doctor run reports while a scope's mirror audit meets files or a source listing it cannot read,
+  # and the incident-key prefix it folds under, followed by the audited scope.
+  CAUSE_DOCTOR_MIRROR_UNREADABLE = "doctor-mirror-unreadable"
+  INCIDENT_DOCTOR_MIRROR_PREFIX  = "wiki-doctor-mirror:"
+
+  # Stable cause a doctor run reports while its repo-level domain audit fails, and the one incident key it folds
+  # under: the audit covers the repository's domain tree as a whole.
+  CAUSE_DOCTOR_DOMAINS_FAILED = "doctor-domains-failed"
+  INCIDENT_DOCTOR_DOMAINS     = "wiki-doctor:domains"
 
   # Valid kind values that the curator protocol recognises. Callers place one
   # of these as the payload's `kind` field; the payload is written verbatim to
@@ -310,8 +373,8 @@ class CoreDispatch:
     bundle: dict = {
       "expert":    self.EXPERT_NAME,
       "payload":   self._merge_dictionary_anchor(repo, payload),
-      "source":    [ node_rel ],
-      "result":    [ "curation.json" ],
+      "source":    [ { self._ENTRY_PATH: node_rel } ],
+      "result":    self._build_result_entries([ "curation.json" ]),
       "dedup_key": self.curator_dedup_key(
         repo = repo, node_path = node_path, kind = payload.get(self._PAYLOAD_KIND, ""),
       ),
@@ -382,6 +445,7 @@ class CoreDispatch:
     Raises:
       RuntimeError: When the core subprocess exits non-zero.
       json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+      UnicodeDecodeError: When the core subprocess stdout is not valid UTF-8 text.
     """
 
     # Contract:
@@ -460,7 +524,7 @@ class CoreDispatch:
       "expert":         self.EXPERT_TAG_CURATOR,
       "payload":        payload,
       "context_inline": { self._CONTEXT_COLLECTED_TAGS: json.dumps(collected_tags) },
-      "result":         [ self._RESULT_ALIAS_MAP ],
+      "result":         self._build_result_entries([ self._RESULT_ALIAS_MAP ]),
       "dedup_key":      f"{self.KIND_NORMALIZE_TAGS}:{surface}",
     }
     self._retire_finished(repo, bundle)
@@ -649,7 +713,7 @@ class CoreDispatch:
         { self._JOB_EXPERT: bundle[self._JOB_EXPERT], self._JOB_DEDUP_KEY: bundle[self._JOB_DEDUP_KEY] },
         repo,
       )
-    except (RuntimeError, json.JSONDecodeError) as error:
+    except (RuntimeError, ValueError) as error:
       # waiver: a stdlib exception carries no class_name accessor; its class name is the varying detail of the report
       self.report_open(repo, cause = self._CAUSE_RETIRE_FAILED, incident = incident,
                        detail = f"{type(error).__name__}: {error}")
@@ -657,6 +721,21 @@ class CoreDispatch:
 
     # the success is the proof the condition cleared
     self.close_open_incident(repo, incident)
+
+  # ------------------------------------------------------------------
+  @classmethod
+  def _build_result_entries(cls, names: list[str]) -> list[dict[str, str]]:
+    """
+    Wrap result filenames into the entries a bundle's `result` carries.
+
+    Args:
+      names: The plain filenames the expert is expected to fill.
+
+    Returns:
+      One `{"path": "result/<name>"}` entry per filename, in the same order.
+    """
+    # a result entry names its file the way a response does: under the result bucket
+    return [ { cls._ENTRY_PATH: f"{cls._RESULT_BUCKET}/{name}" } for name in names ]
 
   # ------------------------------------------------------------------
   def report_open(self, repo: Path, *, cause: str, incident: str, detail: str) -> None:
@@ -704,6 +783,21 @@ class CoreDispatch:
     # the marker goes only once core took the close
     if self._resolve_incident(repo, incident):
       self._clear_mark(marker)
+
+  # ------------------------------------------------------------------
+  @classmethod
+  def is_incident_open(cls, repo: Path, incident: str) -> bool:
+    """
+    Tell whether an incident is remembered as open for a repository.
+
+    Args:
+      repo: Absolute path to the repository root.
+      incident: Stable incident key in the core error ledger.
+
+    Returns:
+      `True` while the incident is remembered as open, `False` otherwise.
+    """
+    return cls._incident_marker(repo, incident).is_file()
 
   # ------------------------------------------------------------------
   @classmethod
@@ -808,7 +902,7 @@ class CoreDispatch:
       # waiver: stdlib subprocess idiom, the arguments are the error-record wire contract
       done = subprocess.run(
         [ sys.executable, str(self._cli), self._CMD_ERROR_RECORD, self._ARG_INCIDENT, incident, self._ARG_RESOLVE ],
-        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+        cwd = repo, capture_output = True, check = False,
         timeout = self._LEDGER_TIMEOUT_SEC,
       )
     # waiver: best-effort boundary — a close not delivered in time leaves the marker for the next close
@@ -849,7 +943,7 @@ class CoreDispatch:
         [ sys.executable, str(self._cli), self._CMD_ERROR_RECORD, self._ARG_KIND, self._KIND_PLUGIN_ERROR,
           self._ARG_CAUSE, cause, self._ARG_INCIDENT, incident, self._ARG_SEVERITY, self._SEVERITY_WARN,
           self._ARG_DETAIL, detail ],
-        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+        cwd = repo, capture_output = True, check = False,
         timeout = self._LEDGER_TIMEOUT_SEC,
       )
     # waiver: best-effort boundary — a report not delivered in time is dropped, never raised into the caller
@@ -956,7 +1050,7 @@ class CoreDispatch:
     bundle: dict = {
       "expert":    self.EXPERT_DOMAIN_WRITER,
       "payload":   payload,
-      "result":    list(result_names),
+      "result":    self._build_result_entries(list(result_names)),
       "dedup_key": f"{self.KIND_DOMAIN_SPEC}:{group}",
     }
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
@@ -977,8 +1071,9 @@ class CoreDispatch:
     Raises:
       RuntimeError: When the core subprocess exits non-zero.
       json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+      UnicodeDecodeError: When the core subprocess stdout is not valid UTF-8 text.
     """
-    listing = self._run_core([ self._CMD_LIST_JOBS, self._ARG_EXPERT, expert, self._ARG_CWD, str(repo) ], {}, repo)
+    listing =self._run_core([ self._CMD_LIST_JOBS, self._ARG_EXPERT, expert, self._ARG_CWD, str(repo) ], {}, repo)
     return [ entry for entry in listing if isinstance(entry, dict) ] if isinstance(listing, list) else []
 
   # ------------------------------------------------------------------
@@ -998,6 +1093,7 @@ class CoreDispatch:
     Raises:
       RuntimeError: When the core subprocess exits non-zero.
       json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+      UnicodeDecodeError: When the core subprocess stdout is not valid UTF-8 text.
     """
     return self._call_core(self._CMD_COLLECT, { self._JOB_EXPERT: expert, self._JOB_ID: job_id }, repo)
 
@@ -1018,6 +1114,7 @@ class CoreDispatch:
     Raises:
       RuntimeError: When the core subprocess exits non-zero.
       json.JSONDecodeError: When the core subprocess stdout is not valid JSON.
+      UnicodeDecodeError: When the core subprocess stdout is not valid UTF-8 text.
     """
     return self._call_core(self._CMD_CONSUME, { self._JOB_EXPERT: expert, self._JOB_ID: job_id }, repo)
 
@@ -1041,6 +1138,7 @@ class CoreDispatch:
     Raises:
       RuntimeError: When the subprocess exits non-zero.
       json.JSONDecodeError: When the subprocess stdout is not valid JSON.
+      UnicodeDecodeError: When the subprocess stdout is not valid UTF-8 text.
     """
     # every body-in verb answers with one JSON object
     parsed = self._run_core([ subcommand ], body, repo)
@@ -1062,6 +1160,7 @@ class CoreDispatch:
     Raises:
       RuntimeError: When the subprocess exits non-zero.
       json.JSONDecodeError: When the subprocess stdout is not valid JSON.
+      UnicodeDecodeError: When the subprocess stdout is not valid UTF-8 text.
     """
 
     # Domain(plugin.boundaries):
@@ -1079,17 +1178,21 @@ class CoreDispatch:
     env[self._ENV_REPO_ROOT] = str(repo)
     proc = subprocess.run(
       [ sys.executable, str(self._cli), *argv ],
-      input = json.dumps(body),
+      input = json.dumps(body).encode(_ENCODING),
       capture_output = True,
-      text = True,
       env = env,
-      check = False, encoding = "utf-8",
+      check = False,
     )
 
-    # guard: non-zero exit from core — surface stdout+stderr for diagnosis
+    # guard: non-zero exit from core — surface stdout+stderr for diagnosis; the output is taken as bytes, so the
+    # exit status alone tells success from failure, and in the report a byte that is not valid text becomes a
+    # replacement mark
     if proc.returncode != 0:
       raise RuntimeError(
         f"lazycortex-core {argv[0]} exit={proc.returncode} "
-        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+        f"stdout={proc.stdout.decode(_ENCODING, errors = _DECODE_LOSSY)!r} "
+        f"stderr={proc.stderr.decode(_ENCODING, errors = _DECODE_LOSSY)!r}"
       )
+
+    # the answer itself is parsed strictly: one that is not valid text is no answer, never a patched-up one
     return json.loads(proc.stdout)

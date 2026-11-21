@@ -73,7 +73,7 @@ The expert "classes" are the domain aspects this plugin ships. Enumerate the ava
 
 - `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-experts` prints: the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-experts/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 - **Classes (domain aspects)**: `Glob <installPath>/references/lazy-experts.*-aspect.md`, minus the cross-cutting aspects `discipline`, `research`, `tech-writing`, `terms`, and `structure` (they compose onto experts, they are not classes). The class key is the basename minus the `lazy-experts.` prefix and the `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`.
-- **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The agent basenames minus the `lazy-experts.` prefix and `.md` suffix are the agent set — currently `interpreter`, `designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `implementer`, `data-implementer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `editor`, `fiction-writer`, `fiction-editor`. Which roles a class seeds — and which agent each role resolves to (three roles map onto an agent of a different basename, see Step 5's mapping table) — is decided by the class map in Step 5.
+- **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The agent basenames minus the `lazy-experts.` prefix and `.md` suffix are the agent set — currently `interpreter`, `designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-implementer`, `docs-writer`, `debugger`, `researcher`, `reviewer`, `tester`, `editor`, `fiction-writer`, `fiction-editor`. Which roles a class seeds — and which agent each role resolves to (two roles map onto an agent of a different basename, see Step 5's mapping table) — is decided by the class map in Step 5.
 
 If either glob is empty, abort with `plugin-cache-incomplete: <missing-dir>`.
 
@@ -150,11 +150,10 @@ For each `(class, role)` pair from the class map (restricted to the Step 3 class
 
 The expert key is `<domain>.<role>` — dot-separated. Examples: `claude-plugin.designer`, `game.interpreter`, `dotfiles.planner`. The domain map is closed-set for the eight shipped classes (six technical + two fiction); future classes fall through to the verbatim class name. This is the marketplace-wide expert-key convention `<domain>.<role>` (cf. `review.doc_doctor`, `wiki.curator`, `spec.coordinator`).
 
-Three roles do not share their agent's basename — the role names the job, the agent stays under its own name:
+Two roles do not share their agent's basename — the role names the job, the agent stays under its own name:
 
 | Role | Agent |
 |---|---|
-| `developer` | `lazycortex-experts:lazy-experts.implementer` |
 | `data-writer` | `lazycortex-experts:lazy-experts.data-implementer` |
 | `system-designer` | `lazycortex-experts:lazy-experts.designer` |
 

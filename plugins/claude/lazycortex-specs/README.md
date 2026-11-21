@@ -16,7 +16,7 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 ## Blocks
 
 - **authoring** — Create and populate spec assets of any asset type. Members: lazy-spec.create-asset, lazy-spec.create-feature, lazy-spec.create-change, lazy-spec.create-bug, lazy-spec.add-asset-type, lazy-spec.create-from-code, lazy-spec.create-request, lazy-spec.record-decision.
-- **gates** — Drive an asset's readiness gates and per-file stages, and settle the conflicts the coherence check finds between approved documents. Members: lazy-spec.flip-gate, lazy-spec.gate-tick, lazy-spec.set-stage, spec.coherence-checker.
+- **gates** — Drive an asset's readiness gates and per-file stages, and settle the conflicts the coherence check finds between approved documents. Members: lazy-spec.flip-gate, lazy-spec.gate-tick, lazy-spec.set-stage, lazy-spec.coherence-checker.
 - **code-sync** — Keep specs aligned with the product's code across commits. Members: lazy-spec.sync-with-code, lazy-spec.coverage.
 - **upstream** — Mirror external design sources, route their changes through the request pipeline, and keep a spec doc's visible source list matching its frontmatter. Members: lazy-spec.upstream-run, lazy-spec.refresh-sources.
 - **source-links** — Resolve dependencies and build root links to the product's code files. Members: lazy-spec.resolve-dependency, lazy-spec.source-url.
@@ -87,7 +87,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through its approved design to its publication in a product release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/faq.md) — FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/faq.md) — FAQ on products, assets, vision/design docs, gates, release specialists, requests, decisions, coverage gaps, and spec lookups.
 
 ## Agents
 

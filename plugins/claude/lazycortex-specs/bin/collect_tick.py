@@ -30,13 +30,17 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import JobMarker, TickAction  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -63,7 +67,11 @@ def collect_tick(repo: Path) -> dict:
     `{"notes": N, "ticked": M, "dispatched": D}` — N is the number of rows whose note existed and
     whose poll completed, M is how many of those polls reported a non-noop action, D is how many
     notes had their coordinator dispatched on a raised `job-done` wake. Carries an additional
-    `"error"` field summarizing the failures when one or more polls or dispatches raised.
+    `"error"` field summarizing the failures when one or more polls, sidecar re-reads or dispatches raised.
+
+  Raises:
+    OSError: If the sidecar cannot be read for a reason other than its absence when the sweep starts, or a
+      sidecar that is no store cannot be moved aside.
   """
 
   # Contract:
@@ -95,12 +103,11 @@ def collect_tick(repo: Path) -> dict:
     if result.get(TickAction.ACTION) != TickAction.NOOP:
       ticked += 1
 
-    # guard: only a raised job-done wake is this sweep's to deliver; every other wake rides a commit
-    if spec_job_markers.read(repo, note).get(JobMarker.PENDING_WAKE) != JobMarker.JOB_DONE:
-      continue
-
     # a finished job commits nothing to its note, so the sweep wakes the coordinator itself
     try:
+      # guard: only a raised job-done wake is this sweep's to deliver; every other wake rides a commit
+      if spec_job_markers.read(repo, note).get(JobMarker.PENDING_WAKE) != JobMarker.JOB_DONE:
+        continue
       woken = coordinator_dispatch.coordinator_dispatch(note, {}, job_done = True)
     # waiver: this sweep's per-note error boundary — one failed wake must not stop the rest
     except Exception as error:
@@ -125,7 +132,9 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: `0` when every poll completed, `1` when at least one note failed to tick.
+    Exit code: `0` when every poll completed; `1` when at least one note failed to tick, or when the job sidecar
+    cannot be read or set aside, in which case one line naming the sidecar and the error goes to stderr and nothing
+    is printed to stdout.
   """
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog = "lazycortex-specs collect-tick")
@@ -136,7 +145,14 @@ def main(argv: list[str]) -> int:
   # resolve --repo then run the sweep; only the three counters are printed — the error detail
   # already went to stderr line by line
   repo = Path(args.repo).resolve()
-  summary = collect_tick(repo)
+  try:
+    summary = collect_tick(repo)
+  # a job sidecar that cannot be read, or set aside, lists no note to poll; the sweep is refused with its error
+  except OSError as error:
+    sys.stderr.write(
+        f"collect-tick: {spec_job_markers.sidecar_path(repo).name}: {type(error).__name__}: {error}\n",
+    )
+    return 1
   print(json.dumps({ key: summary[key] for key in ( _NOTES_KEY, _TICKED_KEY, _DISPATCHED_KEY ) }))
   return 1 if _ERROR_KEY in summary else 0
 

@@ -30,6 +30,8 @@ from lazy_setup import installed_plugin_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import error_ledger  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import cron  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import daemon_registry  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import metrics  # pylint: disable=import-error
@@ -111,10 +113,31 @@ _CAPTURE_LOG_NAMES = frozenset({ "launchd.err.log", "launchd.out.log" })
 # Size at which a supervisor capture is trimmed, and the tail kept when it is.
 _CAPTURE_LOG_MAX_BYTES = 1024 * 1024
 _CAPTURE_LOG_TAIL_BYTES = 256 * 1024
+
+# How many characters of a failed routine's failure text its incident keeps — taken from the end
+_ROUTINE_DETAIL_CHARS = 200
+
+# The pause between daemon passes when `daemon.polling_interval_sec` is absent or unusable
+_DEFAULT_POLLING_INTERVAL_SEC = 5.0
 # A tick faster than this with no work done is treated as quiet (not log-worthy).
 _QUIET_TICK_MAX_SEC = 1.5
 # Dirty-tree halt messages truncate the path list to this many lines.
 _MAX_DIRTY_PATH_LINES = 50
+# The entry whose presence in a folder makes it a git checkout: a directory, or a file in a linked worktree.
+_GIT_DIR = ".git"
+# The environment variable naming the directories git never looks in when it searches upward for a checkout.
+_GIT_CEILING_ENV = "GIT_CEILING_DIRECTORIES"
+# The environment variable that lets git's upward search cross onto another filesystem. Git reads it as a
+# boolean: unset, empty, one of the false words in any letter case, or an integer zero keeps the search on one
+# filesystem; the true words and every non-zero integer let it cross, and any other value makes git refuse to run.
+_GIT_ACROSS_FS_ENV = "GIT_DISCOVERY_ACROSS_FILESYSTEM"
+_GIT_FALSE_WORDS = ( "", "false", "no", "off" )
+# An integer zero as git parses it: leading whitespace, a sign, zero in octal or hexadecimal digits, and one unit
+# suffix. Nothing may follow, and no other digit form is zero.
+_GIT_ZERO_PATTERN = re.compile(r"[ \t\n\v\f\r]*[+-]?(?:0+|0[xX]0+)[kKmMgG]?")
+# The one line that stands for the dirt of a tree git could not report. Like the truncation line it starts
+# with the mark of a line that names no path, so a caller that recovers dirty paths passes it over.
+UNREADABLE_TREE_LINE = "... (the working tree could not be read: git status failed)"
 # Home-relative root of the Claude Code plugin cache; layout is <registry>/<plugin>/<version>/bin/<plugin>.
 PLUGIN_CACHE_REL = ".claude/plugins/cache"
 # The main loop's termination event — module-level because the signal handlers set it and the main loop waits on it.
@@ -131,6 +154,12 @@ _TOKEN_MARK_ENV = EnvVar.DAEMON_TOKEN_MARK
 # because the queue it drives is where the halt-exempt jobs are waiting; the pump narrows
 # that queue itself (`expert_pump._is_job_halt_exempt`).
 _PUMP_ROUTINE = "lazy-expert.pump"
+
+# The stderr line for a schedule routine whose cron expression could not be evaluated in a scheduling
+# pass; the routine is skipped for that pass and the others still run.
+_SCHEDULE_FAULT_TEMPLATE = (
+  "[daemon] routine '{name}': schedule not evaluated, skipped for this pass: {error}\n"
+)
 
 LOOP_DETECT_THRESHOLD = 5
 """
@@ -215,6 +244,8 @@ def _git_common_dir(repo_root: Path) -> Path:
   out = subprocess.check_output(
     [ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" ],
     cwd = repo_root, text = True, encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
   )
   return Path(out.strip())
 
@@ -241,6 +272,8 @@ def _operator_hooks_dir(repo_root: Path) -> Path:
     [ "git", "config", "--get", EnvVar.GIT_HOOKS_PATH ],
     cwd = repo_root, capture_output = True, text = True, check = False,
     env = strip_hooks_path(dict(os.environ)), encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
   )
   configured = proc.stdout.strip()
 
@@ -483,6 +516,8 @@ def due_routines(now: float,
 
   Guarantees:
     - Routines tied on priority are returned in the registry's own insertion order.
+    - One routine whose schedule cannot be evaluated never stops the others: it is reported on stderr and skipped
+      for that pass, and the other due routines are still returned.
 
   Args:
     now: Current wall-clock timestamp in seconds since the epoch.
@@ -518,8 +553,14 @@ def due_routines(now: float,
     if system_stuck and not halt_exempt:
       continue
     if cfg.get(RoutineKey.TYPE) == RoutineType.SCHEDULE:
-      if is_schedule_due(name, cfg, now, last_run.get(name, 0)):
-        out.append((name, cfg))
+      try:
+        # a schedule is due once a fire time of its expression has passed since its last run
+        if is_schedule_due(name, cfg, now, last_run.get(name, 0)):
+          out.append((name, cfg))
+      except cron.CronError as error:
+        # one routine's schedule that cannot be evaluated is that routine's own fault: it is
+        # reported and stepped over for this pass, and the routines after it are still judged
+        sys.stderr.write(_SCHEDULE_FAULT_TEMPLATE.format(name = name, error = error))
     # waiver: inline numeric/default literal, not a domain constant
     elif now - last_run.get(name, 0) >= cfg.get(RoutineKey.INTERVAL_SEC, 5):
       out.append((name, cfg))
@@ -527,6 +568,10 @@ def due_routines(now: float,
   # Contract:
   # Routines tied on priority are returned in the registry's own insertion order; how
   # overdue a routine is never decides a priority tie.
+
+  # Contract:
+  # One routine whose schedule cannot be evaluated NEVER stops the others: it is reported on stderr and
+  # skipped for that pass, and the other due routines are still returned.
 
   # sort the eligible routines by ascending priority
   # waiver: inline numeric/default literal, not a domain constant
@@ -648,6 +693,8 @@ def _loop_detect_check(
     meta = subprocess.run(
       [ "git", "--no-optional-locks", "log", f"-{window}", "--no-merges", "--format=%H%x01%ae%x01%s" ],
       cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
     ids = subprocess.run(
       [ "git", "patch-id", "--stable" ],
@@ -694,10 +741,30 @@ def check_working_tree(repo_root: Path) -> list[str] | None:
   """
   Inspect the daemon repository's working tree for uncommitted changes.
 
+  Guarantees:
+    - A tree holding an untracked file is never reported clean, whatever the repository's own
+      `status.showUntrackedFiles` setting says. An untracked folder is reported as one line naming the folder, so
+      the line cap and the callers that recover dirty paths work on folders, not on every file inside them.
+    - `None` is returned only when the tree is known clean: it was read and found clean, or the folder is outside
+      every git checkout. A tree inside a checkout that could not be read, because git is unavailable or failed,
+      is reported as exactly one line that names no path and starts with the same mark as the truncation line, so
+      callers that recover dirty paths pass it over. A folder is inside a checkout when it or any folder above it
+      that git's own upward search would reach holds a `.git` entry of any kind, which is not validated. The search
+      stops at another device, unless git is told to cross filesystems or the setting that tells it holds a value
+      git itself would refuse to read; it also stops at a ceiling directory and at a folder that cannot be looked at.
+    - A dirty path whose bytes are not UTF-8 text is reported as a dirty line like any other, with each such byte
+      kept as a surrogate escape, the form the file system's own name decoding uses, so a caller can hand the path
+      back to the file system or to git unchanged. Such a path never turns the reading into the unreadable-tree
+      line and never makes the call raise.
+    - Every decision that lets work proceed, or that lifts or skips a halt, reads the tree through this function,
+      so a tree that could not be read is never taken for a clean one.
+
   Notes:
     - Uses `--no-optional-locks` so the stat-cache refresh does not race the index lock — the dirty-
       tree check runs every daemon iteration and without this flag would grab the lock dozens of
       times per minute.
+    - Passes `--untracked-files=normal` explicitly, so the repository's own `status.showUntrackedFiles` setting never
+      changes what is reported and an untracked folder arrives as a single entry.
     - Uses `core.quotePath=false` so a non-ASCII name arrives as itself rather than as octal byte
       escapes, which a recovery caller would otherwise hand back to git as a literal pathspec.
 
@@ -706,30 +773,188 @@ def check_working_tree(repo_root: Path) -> list[str] | None:
 
   Returns:
     A list of dirty `git status --porcelain` lines, at most 50 of them, followed by one appended
-    truncation sentinel line when more dirt exists. Returns `None` when the tree is clean, when git
-    is unavailable, or when the path is not a git repository.
+    truncation sentinel line when more dirt exists. A tree inside a checkout that could not be read yields the single
+    unreadable-tree line. Returns `None` for a tree read and found clean and for a folder outside every git checkout.
   """
-  try:
-    rc = subprocess.run(
-      [ "git", "--no-optional-locks", "-c", "color.status=never",
-        "-c", "core.quotePath=false", "status", "--porcelain" ],
-      cwd = str(repo_root), capture_output = True, text = True, check = False, encoding = "utf-8",
-    )
-  except FileNotFoundError:
+
+  # Contract:
+  # A tree holding an untracked file is NEVER reported clean, whatever the repository's own
+  # `status.showUntrackedFiles` setting says. An untracked folder is reported as one line naming the folder, so
+  # the line cap and the callers that recover dirty paths work on folders, not on every file inside them.
+
+  # Contract:
+  # `None` is returned ONLY when the tree is known clean: it was read and found clean, or the folder is outside
+  # every git checkout. A tree inside a checkout that could not be read, because git is unavailable or failed, is
+  # reported as exactly one line that names no path and starts with the same mark as the truncation line, so
+  # callers that recover dirty paths pass it over. A folder is inside a checkout when it or any folder above it
+  # that git's own upward search would reach holds a `.git` entry of any kind, which is not validated. The search
+  # stops at another device, unless git is told to cross filesystems or the setting that tells it holds a value
+  # git itself would refuse to read; it also stops at a ceiling directory and at a folder that cannot be looked at.
+
+  # Contract:
+  # A dirty path whose bytes are not UTF-8 text is reported as a dirty line like any other. The line carries the path
+  # with each such byte kept as a surrogate escape, the form the file system's own name decoding uses, so a caller
+  # can hand the path back to the file system or to git unchanged. Such a path NEVER turns the reading into the
+  # unreadable-tree line and NEVER makes the call raise.
+
+  # Contract:
+  # Every decision that lets work proceed, or that lifts or skips a halt, MUST read the tree through this function,
+  # so a tree that could not be read is NEVER taken for a clean one.
+
+  # the tree is read once, and every answer this function gives comes from that one reading
+  lines = _read_dirty_lines(repo_root)
+
+  # a tree that could not be read is never reported clean: it is named by the one line that names no path
+  if lines is None:
+    return [ UNREADABLE_TREE_LINE ]
+
+  # a clean tree, and a folder outside every checkout, report nothing
+  if not lines:
     return None
 
-  # guard: git invocation failed
-  if rc.returncode != 0:
-    return None
-  raw = rc.stdout.rstrip("\n")
-
-  # guard: clean tree — nothing to report
-  if not raw:
-    return None
-  lines = raw.split("\n")
+  # a long list is cut, and a last line says so
   if len(lines) > _MAX_DIRTY_PATH_LINES:
     lines = [ *lines[:_MAX_DIRTY_PATH_LINES], "... (truncated, more dirty paths exist)" ]
   return lines
+
+
+def _read_dirty_lines(repo_root: Path) -> list[str] | None:
+  """
+  Read the working tree's uncommitted changes from git.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+
+  Returns:
+    The `git status --porcelain` lines, empty for a clean tree and for a folder outside every git checkout when git
+    cannot answer; `None` when, inside a checkout, git is unavailable or fails. A folder is inside a checkout when
+    git's own upward search from it finds a `.git` entry. A path whose bytes are not UTF-8 text is returned in its
+    line with each such byte kept as a surrogate escape, never refused.
+  """
+  # a folder outside every git checkout has no tree to protect, so a git that cannot answer there says nothing
+  # is uncommitted; inside a checkout the same failure leaves the tree's state unknown
+  unread: list[str] | None = None if _is_in_checkout(repo_root) else []
+  try:
+    rc = subprocess.run(
+      [ "git", "--no-optional-locks", "-c", "color.status=never",
+        "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=normal" ],
+      cwd = str(repo_root), capture_output = True, check = False,
+    )
+  # a git that cannot be launched, for whatever reason, leaves the tree as unread as one that fails
+  except OSError:
+    return unread
+
+  # guard: git invocation failed
+  if rc.returncode != 0:
+    return unread
+
+  # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+  raw = rc.stdout.decode(
+    "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+  ).rstrip("\n")
+  return raw.split("\n") if raw else []
+
+
+def _is_in_checkout(folder: Path) -> bool:
+  """
+  Tell whether a folder lies inside a git checkout, searching upward the way git does.
+
+  Notes:
+    - The search starts from the folder's real place, with links followed.
+    - It never looks into the ceiling directory that `GIT_CEILING_DIRECTORIES` names above the folder; the starting
+      folder itself is always looked at, even when it is a ceiling.
+    - It does not go up into a parent on another device unless `GIT_DISCOVERY_ACROSS_FILESYSTEM` lets it. The
+      variable is read as git reads a boolean: unset, empty, `false`, `no` or `off` in any letter case, or an
+      integer zero (C syntax: leading whitespace, a sign, octal or hexadecimal zero, one `k`, `m` or `g` suffix)
+      keep the search on one device. Every other value lets it cross: the true words, any non-zero integer, and
+      also a value git itself would reject, which counts as crossing on purpose so that a checkout is never missed.
+    - A `.git` entry of any kind counts and is not validated.
+    - `GIT_DIR` is not consulted: with it set git does no search at all, while this function still searches.
+
+  Args:
+    folder: The folder to start from.
+
+  Returns:
+    True when the folder, or a folder above it that the search reaches, holds a `.git` entry; False when the
+    search ends without one, including at a folder that cannot be looked at.
+  """
+  # git stays on the starting folder's filesystem unless it is told to cross onto others; only a value git reads
+  # as false keeps it there, so a value git itself would reject counts as crossing and never hides a checkout
+  across = os.environ.get(_GIT_ACROSS_FS_ENV)
+  is_crossing = (
+      across is not None and across.lower() not in _GIT_FALSE_WORDS and _GIT_ZERO_PATTERN.fullmatch(across) is None
+  )
+
+  # the search goes up one folder at a time, from the folder's real place, and ends where git itself stops
+  try:
+    folder = Path(os.path.realpath(folder))
+    ceiling = _find_ceiling(str(folder))
+    device = os.stat(folder).st_dev
+    while not os.path.lexists(folder / _GIT_DIR):
+      parent = folder.parent
+
+      # guard: the root has no folder above it, and a ceiling directory is never looked in
+      if parent == folder or str(parent) == ceiling:
+        return False
+
+      # guard: a folder on another device belongs to another filesystem, which git does not cross into
+      # unless it is told to; the parent is looked at either way, so one that cannot be ends the search
+      if os.stat(parent).st_dev != device and not is_crossing:
+        return False
+      folder = parent
+  # a folder that cannot be looked at ends the search like any other boundary
+  except OSError:
+    return False
+  return True
+
+
+def _find_ceiling(path: str) -> str | None:
+  """
+  Find the directory git's upward search from a folder never looks in.
+
+  Notes:
+    - A relative entry of `GIT_CEILING_DIRECTORIES` is ignored, wherever it stands.
+    - An entry before the first empty entry is resolved through its links, and ignored when it cannot be resolved,
+      for example when a folder inside it does not exist.
+    - An entry after an empty entry is used exactly as written, with no normalisation: less at most one closing
+      separator it must be, character for character, a proper ancestor of `path`.
+    - A folder is never its own ceiling.
+
+  Args:
+    path: The real path of the folder the search starts from.
+
+  Returns:
+    The nearest folder above `path` that `GIT_CEILING_DIRECTORIES` names, or `None` when it names none.
+  """
+  # git drops a relative entry, follows the links of every other entry and drops it when they cannot be followed,
+  # until an empty entry says the entries after it are used exactly as written
+  entries: list[str] = []
+  is_resolving = True
+  for entry in os.environ.get(_GIT_CEILING_ENV, "").split(os.pathsep):
+    if not entry:
+      is_resolving = False
+    elif os.path.isabs(entry) and not is_resolving:
+      entries.append(entry)
+    elif os.path.isabs(entry):
+      try:
+        entries.append(os.path.realpath(entry, strict = True))
+      except OSError:
+        continue
+
+  # git compares characters: an entry, less one closing separator, is a ceiling only when the path goes on below
+  # it, and the longest such entry is the nearest ceiling
+  longest = -1
+  for entry in entries:
+    length = len(entry) - 1 if entry.endswith(os.sep) else len(entry)
+    if path.startswith(entry[:length]) and path[length:length + 1] == os.sep and path[length + 1:]:
+      longest = max(longest, length)
+
+  # guard: no entry names a folder above the path
+  if longest < 0:
+    return None
+  return path[:longest] or os.sep
 
 
 def _halt_daemon(
@@ -1216,8 +1441,19 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
       keeps its writer's incident and moves the halt metric exactly once: only a block its writer
       marked pending is counted, the first time the daemon observes it; an unmarked block is never
       counted on observation.
+    - A failure of one routine, whether its run or the bookkeeping that follows it (the journal line and
+      metrics, the count of a pending halt, the closing of its incident on a clean tick, the advance of its
+      `last_run` stamp), never keeps the routines after it from running in the same pass; only a halt the pass
+      itself records ends the pass early. A bookkeeping failure is recorded as a `daemon_error` incident with
+      cause `internal_exception`, and a `last_run` stamp that cannot be written leaves that routine due again
+      on the next pass.
+    - A failure of the hourly cleanup never stops the pass, and the cleanup's last-run stamp advances whether it
+      succeeded or not. A failure of the worktree sweep is recorded as a `worktree_task_error` incident with
+      cause `sweep_failed`; any other cleanup failure is recorded as a `daemon_error` incident with cause
+      `cleanup_failed`.
 
   Notes:
+    - A `routine_error` incident's `detail` keeps the end of the routine's failure text.
     - When the daemon is halted, the halt is auto-cleared at the start of the iteration in either of
       two cases: an `uncommitted_changes` halt once the tree has become clean, or a `rate_limit` halt
       once `now >= resets_at`. A block whose `resets_at` is missing counts as already expired, and so
@@ -1344,25 +1580,40 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
   # loop's polling interval
   last_cleanup = state.get(StateKey.LAST_CLEANUP_AT, 0)
   if time.time() - last_cleanup >= _CLEANUP_INTERVAL_SEC:
-    # waiver: inline numeric/default literal, not a domain constant
-    _cleanup_runtime_logs(repo_root, daemon.get(DaemonKey.CLEANUP_RUNTIME_LOG_AFTER, "30d"))
 
-    # prune git worktree bookkeeping + remove crashed-job orphan dirs on the same hourly cadence;
-    # the manager is built only here — the sweep is its sole reader in the loop
-    mgr = _build_worktree_manager(repo_root, daemon.get(DaemonKey.GIT))
-    if mgr is not None:
-      try:
-        mgr.sweep()
-      # an orphan-sweep failure lands in the ledger and never crashes the iteration
-      except Exception as e:
-        error_ledger.record(repo_root, {
-          IncidentKey.INCIDENT: f"worktree:sweep/{repo_root.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
-          IncidentKey.KIND: IncidentKind.WORKTREE_TASK_ERROR,
-          IncidentKey.CAUSE: "sweep_failed",
-          IncidentKey.ACTOR: IncidentActor.DAEMON,
-          IncidentKey.DETAIL: str(e)[:200],
-        })
-    _maybe_prune_errors(repo_root)
+    # Contract:
+    # A failure of the hourly cleanup never stops the routines of the pass, and the cleanup is not
+    # retried on every pass: its last-run stamp advances whether it succeeded or not. A failure of
+    # the worktree sweep is recorded as a `worktree_task_error` incident with cause `sweep_failed`;
+    # any other cleanup failure is recorded as a `daemon_error` incident with cause `cleanup_failed`.
+
+    # the housekeeping is best-effort — a bad retention setting or an unreadable log must not
+    # cost the repository its routines, so whatever it raises is recorded and the pass goes on
+    try:
+      # waiver: inline numeric/default literal, not a domain constant
+      _cleanup_runtime_logs(repo_root, daemon.get(DaemonKey.CLEANUP_RUNTIME_LOG_AFTER, "30d"))
+
+      # prune git worktree bookkeeping + remove crashed-job orphan dirs on the same hourly cadence;
+      # the manager is built only here — the sweep is its sole reader in the loop
+      mgr = _build_worktree_manager(repo_root, daemon.get(DaemonKey.GIT))
+      if mgr is not None:
+        try:
+          mgr.sweep()
+        # an orphan-sweep failure lands in the ledger and never crashes the iteration
+        except Exception as e:
+          error_ledger.record(repo_root, {
+            IncidentKey.INCIDENT: f"worktree:sweep/{repo_root.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+            IncidentKey.KIND: IncidentKind.WORKTREE_TASK_ERROR,
+            IncidentKey.CAUSE: "sweep_failed",
+            IncidentKey.ACTOR: IncidentActor.DAEMON,
+            IncidentKey.DETAIL: str(e)[:200],
+          })
+      _maybe_prune_errors(repo_root)
+    # waiver: the cleanup's own boundary catches every failure type on purpose — it reads operator
+    # settings and old files, and none of their faults is a reason to skip the routines
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      # waiver: daemon error/trigger token, not an internal key
+      _record_daemon_error(repo_root, "cleanup_failed", e)
     runtime_state.update(repo_root, lambda s: s.__setitem__(StateKey.LAST_CLEANUP_AT, time.time()))
 
   # the pre-iteration git step brings the tree current before any routine runs — skipped
@@ -1389,19 +1640,32 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
 
   # Domain(runtime.git-safety):
   # # Clean working tree required around every tick
-  # The autonomous runtime never runs routines on a repository whose working tree already carries
-  # uncommitted changes at the start of a cycle of work — that dirt could belong to an operator
-  # mid-edit or another process in flight, and reading or committing over it would silently
-  # discard someone else's work. A tree already dirty when a cycle begins simply defers every
-  # routine that has not deliberately opted into running through trouble, with no halt recorded,
-  # so the cycle resumes cleanly the moment the tree settles on its own. A tree left dirty by a
-  # routine that started with a clean one is judged differently: that dirt is the routine's own
-  # unfinished output, and the runtime halts immediately rather than letting later work build on
-  # a half-committed, unreviewed state — unless the routine is itself one of the few trusted to
-  # triage trouble. Only the routines wait: the runtime's own git synchronization at the start of a
-  # cycle — repairing the index, switching to the base branch, fetching and fast-forwarding — runs
-  # before the tree is looked at and does not depend on it, except while the runtime is already
-  # halted over uncommitted changes.
+  # The working copy is always in one of three states: known clean, known to hold uncommitted
+  # changes, or unknown — the version-control tool could not report on it, because it is missing
+  # or failed, although the folder is a working copy. An untracked file counts as an uncommitted
+  # change whatever the repository's own display settings say, and an untracked folder counts as
+  # one change. A folder that is not a working copy at all has nothing to protect and counts as
+  # clean. A folder is inside a working copy when the version-control tool's own search upward
+  # from it would find one; by default that search does not cross onto another storage device unless the
+  # environment tells the tool to, and it does not look into directories the environment marks as a ceiling,
+  # so a folder the search cannot reach counts as not a working copy. An unknown copy is never taken for a
+  # clean one: work that needs a clean copy does not start on it, and a standing halt over uncommitted
+  # changes is lifted only once the copy is known clean.
+  # The autonomous runtime never runs routines on a repository whose working tree is not known
+  # clean at the start of a cycle of work — dirt could belong to an operator mid-edit or another
+  # process in flight, and reading or committing over it would silently discard someone else's
+  # work, while a copy nobody could read gives no proof that it is safe. A tree not known clean
+  # when a cycle begins simply defers every routine that has not deliberately opted into running
+  # through trouble, with no halt recorded, so the cycle resumes cleanly the moment the tree is
+  # known clean again. A tree left dirty by a routine that started with a clean one is judged
+  # differently: that dirt is the routine's own unfinished output, and the runtime halts
+  # immediately rather than letting later work build on a half-committed, unreviewed state —
+  # unless the routine is itself one of the few trusted to triage trouble. A copy that turns
+  # unknown after such a routine ran is treated exactly like leftover changes, since nothing
+  # proves the routine left it clean. Only the routines wait: the runtime's own git
+  # synchronization at the start of a cycle — repairing the index, switching to the base branch,
+  # fetching and fast-forwarding — runs before the tree is looked at and does not depend on it,
+  # except while the runtime is already halted over uncommitted changes.
 
   # pre-iteration tree check — daemon does NOT run routines while the working tree has uncommitted
   # changes; the operator may be mid-edit, or another process (a manual git op, a hand-run consumer
@@ -1440,7 +1704,24 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
         # waiver: daemon error/trigger token, not an internal key
         TickResultKey.ERROR: f"dispatch_exception: {type(e).__name__}: {e}",
       }
-    _log_routine_result(repo_root, result)
+
+    # Contract:
+    # A failure of one routine, whether its run or the bookkeeping that follows it — the journal line
+    # and metrics, the count of a pending halt, the closing of its incident on a clean tick, and the
+    # advance of its `last_run` stamp — never keeps the routines after it from running in the same
+    # pass; only a halt the pass itself records ends the pass early. A bookkeeping failure is
+    # recorded as a `daemon_error` incident with cause `internal_exception`, and a `last_run` stamp
+    # that cannot be written leaves that routine due again on the next pass.
+
+    # the journal line and the metrics are bookkeeping — a failure to write them is reported and
+    # never keeps this routine's `last_run` from advancing or the routines after it from running
+    try:
+      _log_routine_result(repo_root, result)
+    # waiver: bookkeeping reaches the journal, the metrics and the disk gauges; whatever any of
+    # them raises must not end the iteration
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      # waiver: daemon error/trigger token, not an internal key
+      _record_daemon_error(repo_root, "internal_exception", e)
 
     # Contract:
     # A halt a routine wrote in its own process keeps its writer's incident and moves the halt
@@ -1450,8 +1731,14 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
 
     # a routine running in its own process (the expert pump) may have raised a halt it could not
     # count — its dirty-tree and rate-limit halts alike; it marked the count pending, and the daemon
-    # takes it the moment it sees the mark
-    _count_pending_halt(repo_root)
+    # takes it the moment it sees the mark. Like the journal line above, this is bookkeeping: a
+    # failure to do it is recorded and never keeps the routines after this one from running
+    try:
+      _count_pending_halt(repo_root)
+    # waiver: the count reads and rewrites the runtime state; whatever that raises must not end the pass
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      # waiver: daemon error/trigger token, not an internal key
+      _record_daemon_error(repo_root, "internal_exception", e)
 
     # a failed routine tick (any type) lands in the error ledger
     if result.get(TickResultKey.EXIT, 0) != 0 or result.get(TickResultKey.ERROR):
@@ -1461,7 +1748,8 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
         IncidentKey.INCIDENT: f"routine:{name}", IncidentKey.PHASE: IncidentPhase.OPENED,
         IncidentKey.KIND: IncidentKind.ROUTINE_ERROR,
         IncidentKey.CAUSE: cause, IncidentKey.ACTOR: IncidentActor.DAEMON,
-        IncidentKey.ROUTINE: name, IncidentKey.DETAIL: detail[:200],
+        # the end of the text is kept: a traceback names its cause on its last line
+        IncidentKey.ROUTINE: name, IncidentKey.DETAIL: detail[-_ROUTINE_DETAIL_CHARS:],
       })
 
       # a settings-invariant violation (e.g. `compute_inputs_failed` from a plugin CLI)
@@ -1470,13 +1758,27 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
       # waiver: daemon error/trigger token, not an internal key
       if cause == "config_violation":
         # waiver: daemon error/trigger token, not an internal key
-        _halt_daemon(repo_root, state, "config_violation", name, detail[:200])
+        _halt_daemon(repo_root, state, "config_violation", name, detail[-_ROUTINE_DETAIL_CHARS:])
         halted_this_iter = True
         break
     else:
-      # a clean tick closes whatever the previous failed tick opened on this routine's axis
-      _resolve_routine_incident(repo_root, name, open_incidents)
-    _advance_last_run(repo_root, name)
+      # a clean tick closes whatever the previous failed tick opened on this routine's axis; an
+      # incident that cannot be closed now is closed by the routine's next clean tick
+      try:
+        _resolve_routine_incident(repo_root, name, open_incidents)
+      # waiver: closing the incident writes the ledger and the state; whatever that raises must not end the pass
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        # waiver: daemon error/trigger token, not an internal key
+        _record_daemon_error(repo_root, "internal_exception", e)
+
+    # a `last_run` that cannot be written leaves this routine due again next pass, and never
+    # keeps the routines after it from running in this one
+    try:
+      _advance_last_run(repo_root, name)
+    # waiver: the stamp rewrites the runtime state; whatever that raises must not end the pass
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      # waiver: daemon error/trigger token, not an internal key
+      _record_daemon_error(repo_root, "internal_exception", e)
 
     # tree was clean at iteration start; any dirt now is the routine's own output that didn't make
     # it into a commit — that's a contract violation and the daemon halts so the operator can
@@ -2263,6 +2565,52 @@ def _regate_run_here(repo_root: Path) -> None:
     _record_daemon_error(repo_root, "internal_exception", e)
 
 
+# waiver: `object` is the honest type here — the value is whatever JSON the operator typed into
+# the settings file, and telling a usable number from anything else is this function's whole job
+def _resolve_polling_interval(repo_root: Path, value: object, reported: set[str]) -> float:
+  """
+  Resolve the daemon's polling interval from its settings value.
+
+  Notes:
+    - An absent value yields the default silently; a present but unusable value (anything but a positive finite
+      number the daemon's wait accepts) yields the default and is reported once for each distinct value the
+      caller's `reported` set has not seen: on stderr, and as a `daemon_error` incident with cause
+      `polling_interval_invalid` in the error ledger of `repo_root`.
+
+  Args:
+    repo_root: Repository root whose error ledger receives the incident for an unusable value.
+    value: The raw `daemon.polling_interval_sec` setting, or None when it is absent.
+    reported: The unusable values already reported, owned by the caller and extended here.
+
+  Returns:
+    The interval in seconds, always a positive finite number the daemon's wait accepts; the default when the value
+    is absent or unusable.
+  """
+  # guard: the setting is absent — the default applies and there is nothing to report
+  if value is None:
+    return _DEFAULT_POLLING_INTERVAL_SEC
+
+  # guard: only a real positive number the wait accepts is an interval — a string, a boolean, a not-a-number,
+  # an infinity or a value past the longest wait would raise inside the loop's wait, and zero would spin it
+  # without a pause
+  if isinstance(value, bool) or not isinstance(value, ( int, float )) or not 0 < value <= threading.TIMEOUT_MAX:
+    # the loop resolves the interval on every pass, so an unusable value is reported once —
+    # a line per pass would bury the journal under the operator's one typo
+    if repr(value) not in reported:
+      reported.add(repr(value))
+      message = (
+        f"daemon.polling_interval_sec {value!r} is not a positive number the wait accepts — "
+        f"using {_DEFAULT_POLLING_INTERVAL_SEC}s"
+      )
+      sys.stderr.write(f"[daemon] {message}\n")
+
+      # the ledger is the failure channel: a setting the daemon had to ignore is recorded there
+      # waiver: one-off cause token of the daemon_error contract, not a reusable internal key
+      _record_daemon_error(repo_root, "polling_interval_invalid", ValueError(message))
+    return _DEFAULT_POLLING_INTERVAL_SEC
+  return float(value)
+
+
 def _record_daemon_error(repo_root: Path, cause: str, e: Exception) -> None:
   """
   Record a `daemon_error` incident for an exception the daemon survived.
@@ -2272,7 +2620,8 @@ def _record_daemon_error(repo_root: Path, cause: str, e: Exception) -> None:
 
   Args:
     repo_root: Repository root the daemon is driving.
-    cause: Closed-set cause; one of `internal_exception` / `startup_exception` / `loop_tail_exception`.
+    cause: Closed-set cause; one of `internal_exception` / `startup_exception` / `loop_tail_exception` /
+      `cleanup_failed` / `hook_filter_exception` / `polling_interval_invalid`.
     e: The caught exception whose type and message land in `detail`.
   """
   error_ledger.record(repo_root, {
@@ -2443,6 +2792,9 @@ def run(repo_root: Path) -> None:
   # pause-announce cursor: whether the pause already reported, so each transition logs once
   announced_paused = False
 
+  # the unusable polling-interval values already reported, so each one logs once for this run
+  polling_reported: set[str] = set()
+
   # keep serving ticks until a stop is requested; nothing below may take the process down
   while not _STOP_EVENT.is_set():
 
@@ -2512,8 +2864,9 @@ def run(repo_root: Path) -> None:
 
       # compute sleep based on latest cfg + last_run state
       daemon = load_section(settings_path, SettingsKey.DAEMON)
-      # waiver: inline numeric/default literal, not a domain constant
-      polling = daemon.get(DaemonKey.POLLING_INTERVAL_SEC, 5)
+      polling = _resolve_polling_interval(
+        repo_root, daemon.get(DaemonKey.POLLING_INTERVAL_SEC), polling_reported,
+      )
       state = runtime_state.load(repo_root)
       tail_halt = state.get(StateKey.DAEMON_HALTED)
 
@@ -2685,7 +3038,9 @@ def _run_git(repo_root: Path, args: list[str]) -> None:
     except subprocess.CalledProcessError as e:
       # guard: only a held index lock earns another attempt — computed answers surface at once
       if backoff is None or not _is_lock_contention(e):
-        sys.stderr.write(f"git {' '.join(args)} failed:\n{e.stderr.decode()}\n")
+        # waiver: stdlib decode-error mode, not a domain constant
+        stderr_text = e.stderr.decode("utf-8", errors = "replace")
+        sys.stderr.write(f"git {' '.join(args)} failed:\n{stderr_text}\n")
         raise
       time.sleep(backoff)
 
@@ -2752,27 +3107,39 @@ def _run_git_remote(repo_root: Path, args: list[str]) -> None:
   _run_git(repo_root, args)
 
 
-def _run_git_capture(repo_root: Path, args: list[str]) -> str:
+def _run_git_capture(
+  repo_root: Path,
+  args: list[str],
+  # waiver: stdlib decode-error mode, not a domain constant
+  errors: str = "replace",
+  *,
+  raw: bool = False,
+) -> str:
   """
-  Run a git command in the daemon repository and return its stripped standard output.
+  Run a git command in the daemon repository and return its standard output.
 
-  Used for git plumbing queries whose stripped stdout the daemon needs, returning either a sha (`rev-parse`,
-  `merge-base`) or a branch name (`rev-parse --abbrev-ref`).
+  Used for git plumbing queries the daemon needs: a scalar answer such as a sha (`rev-parse`, `merge-base`) or a
+  branch name (`rev-parse --abbrev-ref`), or a NUL-separated path list read unstripped.
 
   Args:
     repo_root: Absolute path to the repository the git command targets.
     args: Argument vector passed to the `git` executable (without the leading `git` token).
+    errors: How undecodable bytes in the output are decoded; they are replaced by default, and the caller that
+      reads paths asks for surrogate escapes so every byte of a name survives.
+    raw: When `True`, the output is returned exactly as git wrote it, with no whitespace removed.
 
   Returns:
-    The command's standard output with leading and trailing whitespace removed.
+    The command's standard output, with leading and trailing whitespace removed unless `raw` is set.
 
   Raises:
     subprocess.CalledProcessError: When the git invocation exits non-zero.
   """
-  proc = subprocess.run(
-    [ "git", *args ], cwd = repo_root, check = True, capture_output = True, text = True, encoding = "utf-8",
-  )
-  return proc.stdout.strip()
+  # run git, capture its output as bytes and decode it under the caller's decode-error mode
+  proc = subprocess.run([ "git", *args ], cwd = repo_root, check = True, capture_output = True)
+  output = proc.stdout.decode("utf-8", errors = errors)
+
+  # a path list keeps every byte of its names, so only a scalar answer is stripped
+  return output if raw else output.strip()
 
 
 def _repair_lagging_index(repo_root: Path) -> None:
@@ -2791,17 +3158,26 @@ def _repair_lagging_index(repo_root: Path) -> None:
   """
 
   # staged entries as git reports them — an empty index means the fast-forward landed intact
-  staged = _run_git_capture(repo_root, [ "diff", "--cached", "--name-only" ])
+  # the names are read NUL-delimited, unquoted and byte-safe, so each one names its file exactly
+  staged = _run_git_capture(
+    repo_root, [ "diff", "--cached", "--name-only", "-z" ],
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+    raw = True,
+  )
+  paths = [ name for name in staged.split("\0") if name ]
 
   # guard: index clean — nothing lagged
-  if not staged:
+  if not paths:
     return
 
-  # probe the lag signature: the worktree must match HEAD on every staged path
-  paths = staged.splitlines()
+  # probe the lag signature: the worktree must match HEAD on every staged path, each name taken
+  # literally so a glob character in it cannot match another file
   probe = subprocess.run(
-    [ "git", "diff", "--quiet", "HEAD", "--", *paths ],
+    [ "git", "--literal-pathspecs", "diff", "--quiet", "HEAD", "--", *paths ],
     cwd = repo_root, check = False, capture_output = True, text = True, encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace",
   )
 
   # guard: real worktree divergence — parked operator content, never reset it

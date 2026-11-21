@@ -16,6 +16,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -59,6 +60,8 @@ _CANCEL_KILL_GRACE_SEC = 5.0
 _PGREP_TIMEOUT_SEC = 10
 # Poll interval while waiting out the SIGTERM grace window in _kill_group.
 _KILL_POLL_SEC = 0.1
+# The key of a manifest entry that names its path — the same key a request and a response entry carry.
+_ENTRY_PATH = "path"
 
 
 class _RoutineDefaults(TypedDict):
@@ -230,16 +233,155 @@ def _with_routine_protocols(protocols: list[str] | None) -> list[str]:
   return merged
 
 
+def _list_queue(edir: Path) -> list[Path]:
+  """
+  List the entries of one expert's queue folder, yielding nothing when the folder cannot be listed.
+
+  Notes:
+    - A folder that cannot be listed is named on stderr.
+
+  Args:
+    edir: The expert's queue folder.
+
+  Returns:
+    The folder's entries, or an empty list when listing it raises an OS error.
+  """
+  # one expert's unlistable folder must not stop a scan that also serves the other experts
+  try:
+    return list(edir.iterdir())
+  except OSError as error:
+    sys.stderr.write(f"expert queue {edir.name} cannot be listed: {type(error).__name__}: {error}\n")
+    return []
+
+
+def _is_present(path: Path) -> bool:
+  """
+  Tell whether a file is there, without reading a failed look as its absence.
+
+  Args:
+    path: The file to look at.
+
+  Returns:
+    True when the file exists, False when it plainly is not there.
+
+  Raises:
+    OSError: If the file cannot be looked at for any reason other than its absence.
+  """
+  # only a missing file, or a missing or non-folder parent, is an absence; any other failure is unknown
+  try:
+    os.stat(path)
+  except (FileNotFoundError, NotADirectoryError):
+    return False
+  return True
+
+
+# waiver: `object` is the honest type here — a request's dedup key is whatever JSON value the dispatcher wrote
+def _read_active_dedup_key(jdir: Path) -> object:
+  """
+  Read the dedup key an active job holds.
+
+  Args:
+    jdir: One entry of an expert's queue folder.
+
+  Returns:
+    The key the entry's request carries when the entry is an active job: queued and neither dead, consumed nor
+    cancelled. `None` for an entry that is not an active job, and for a request that is missing, is not a JSON
+    object, or carries no key.
+
+  Raises:
+    OSError: If a marker or the request cannot be looked at or read for any reason other than its absence.
+  """
+  # guard: a job that was never queued, or that is dead, consumed or cancelled, holds no key
+  if not _is_present(jdir / JobMarker.READY) or any(
+    _is_present(jdir / marker) for marker in ( JobMarker.DEAD, JobMarker.CONSUMED, JobMarker.CANCELLED )
+  ):
+    return None
+
+  # a bundle with no request is malformed and holds no key; one that is there is read, and a failed read is
+  # not an answer
+  try:
+    existing = json.loads((jdir / JobFile.REQUEST).read_bytes().decode("utf-8"))
+  except (FileNotFoundError, NotADirectoryError):
+    return None
+  # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text: such a request never matches
+  except ValueError:
+    return None
+  return existing.get(JobRequestKey.DEDUP_KEY) if isinstance(existing, dict) else None
+
+
+# waiver: `object` is the honest type here — the manifest arrives from a caller's JSON and its shape is what
+# this function checks
+def _parse_manifest_paths(label: str, manifest: object) -> list[str]:
+  """
+  Validate one bundle manifest and extract its paths, refusing every shape but a list of path objects.
+
+  Args:
+    label: The manifest's name in the bundle, used in the refusal message.
+    manifest: The manifest as the caller passed it, or `None` when it was omitted.
+
+  Returns:
+    The `path` of each entry, in order; empty for an omitted manifest.
+
+  Raises:
+    ValueError: If the manifest is not a list, or an entry is not an object with a string `path`.
+  """
+  # guard: an omitted manifest declares nothing
+  if manifest is None:
+    return []
+
+  # guard: a bare string would otherwise be read one character per entry
+  if not isinstance(manifest, list):
+    raise ValueError(f'{label} must be a list of {{"path": "<string>"}} objects, got {manifest!r}')
+
+  # every entry is an object naming its path; a `description` beside it is the caller's own note
+  paths: list[str] = []
+  for entry in manifest:
+    # guard: an entry that is not an object, or names no string path, declares nothing usable
+    if not isinstance(entry, dict) or not isinstance(entry.get(_ENTRY_PATH), str):
+      raise ValueError(f'{label} entries must be {{"path": "<string>"}} objects, got {entry!r}')
+    paths.append(entry[_ENTRY_PATH])
+  return paths
+
+
+def _refuse_inline_clash(label: str, inline: dict[str, str] | None, paths: list[str]) -> None:
+  """
+  Refuse an inline file named like the copy a claim would make of a declared entry of the same bucket.
+
+  Args:
+    label: The bucket's name in the bundle, used in the refusal message.
+    inline: The bucket's inline files, filename mapped to text, or `None` when there are none.
+    paths: The declared manifest paths of the same bucket.
+
+  Raises:
+    ValueError: If an inline filename equals a declared entry's basename or its `<parent>-<name>` form.
+  """
+  # guard: a bucket without inline files has nothing a claim could overwrite
+  if not inline:
+    return
+
+  # a declared path may not exist yet and its kind is unknown until the claim, so both names a claim could
+  # copy it under count: the basename of a file entry and the `<parent>-<name>` of a directory entry
+  for path in paths:
+    entry = Path(path)
+    for copy_name in ( entry.name, f"{entry.parent.name}-{entry.name}" ):
+      # guard: the claim's copy would overwrite the inline file, and a re-claim would then remove it
+      if copy_name in inline:
+        raise ValueError(
+          f"{label}_inline file {copy_name!r} has the name the claim copies the declared {label} path "
+          f"{path!r} under (a file entry's basename or a directory entry's '<parent>-<name>')"
+        )
+
+
 def dispatch_job(repo: Path,
                  expert: str,
                  payload: dict,
                  *,
                  protocols: list[str] | None = None,
-                 source: list[str] | None = None,
-                 context: list[str] | None = None,
+                 source: list[dict] | None = None,
+                 context: list[dict] | None = None,
                  source_inline: dict[str, str] | None = None,
                  context_inline: dict[str, str] | None = None,
-                 result: list[str] | None = None,
+                 result: list[dict] | None = None,
                  job_id: str | None = None,
                  dedup_key: str | None = None,
                  dedup_fingerprint: str | None = None,
@@ -249,17 +391,23 @@ def dispatch_job(repo: Path,
   Create one job bundle atomically and queue it for the pump.
 
   Writes `request.json` and `config.json` — the latter recording the `source`/`context`
-  path manifests for the pump to copy later — plus any inline `source/`, `context/`, and
+  paths, as plain path strings, for the pump to copy later — plus any inline `source/`, `context/`, and
   `result/` content, in pump-safe order, and touches the `READY` marker last so the pump
   never observes a partial bundle.
 
   When `dedup_key` is set and an active job for the same `(expert, key)`
   pair already exists, no new bundle is written and `already-queued` is
   returned. An "active" job is one with `READY` present and neither
-  `DEAD` nor `CONSUMED` markers — a job that has `response.json` (DONE)
-  but no `CONSUMED` is still active for dedup purposes.
+  `DEAD`, `CONSUMED` nor `CANCELLED` markers — a job that has `response.json` (DONE)
+  but no `CONSUMED` is still active for dedup purposes. A bundle whose `request.json` is missing, or readable
+  but not a JSON object, never counts as a match; one that cannot be read refuses the dispatch.
 
   Guarantees:
+    - `source`, `context` and `result` are accepted only as lists of `{"path": "<string>"}` objects, and a
+      `result` path only as `result/<filename>`; anything else is refused before any job bundle is written.
+    - An inline file name of `source_inline` or `context_inline` that equals the copy name of a declared entry of
+      the same bucket — the entry's basename, or its `<parent>-<name>` directory form — is refused with `ValueError`
+      before any job bundle is written, so a claim can never overwrite or drop a file written at dispatch.
     - The `source/` and `context/` buckets an expert reads carry the work tree as it stands when
       the pump claims the job, never as it stood at dispatch; only `source_inline` and
       `context_inline` are written at dispatch, for content that exists in no file.
@@ -269,6 +417,11 @@ def dispatch_job(repo: Path,
       inside the pump.
     - The job queue's root, `<repo>/.experts/`, gains its own self-ignoring `.gitignore` on
       first use, independent of any install phase having run.
+    - With a `dedup_key` set, an expert queue folder that exists but cannot be listed, or a candidate job in it
+      that cannot be looked at or read for any reason other than plainly not being there, refuses the dispatch
+      with `OSError` and writes nothing, since an active job may already hold the key. Only a candidate that is
+      not an active job, has no request, or has a readable request that is not a JSON object is skipped and
+      never matches. A dispatch without a `dedup_key` is not affected.
 
   Notes:
     - Records a best-effort `unpinned_model` incident on the error ledger when the model
@@ -283,22 +436,25 @@ def dispatch_job(repo: Path,
     payload: JSON-serializable request body written as `request.json`.
     protocols: References the agent reads at spawn time on top of the dispatching
       routine's own; empty for a caller that adds nothing of its own.
-    source: Repo-relative paths recorded into `config.json` as `source_paths`; the pump
+    source: List of `{"path": "<repo-relative path>"}` objects (an optional `description` is ignored); the paths
+      are recorded into `config.json` as plain strings under `source_paths`, and the pump
       copies them under `<job_dir>/source/` when it claims the job, a directory entry
       under `<parent-directory-name>-<directory-name>` and a file entry under its basename.
-    context: Repo-relative paths recorded into `config.json` as `context_paths`; the pump
+    context: List of `{"path": "<repo-relative path>"}` objects (an optional `description` is ignored); the paths
+      are recorded into `config.json` as plain strings under `context_paths`, and the pump
       copies them under `<job_dir>/context/` when it claims the job, a directory entry
       under `<parent-directory-name>-<directory-name>` and a file entry under its basename.
     source_inline: Mapping of filename to text written under `<job_dir>/source/` at
-      dispatch, for content that exists in no file.
+      dispatch, for content that exists in no file; a name equal to the copy name of a `source` entry is refused.
     context_inline: Mapping of filename to text written under `<job_dir>/context/` at
-      dispatch, for content that exists in no file.
-    result: Filenames created as empty placeholders under
-      `<job_dir>/result/` for the agent to fill.
+      dispatch, for content that exists in no file; a name equal to the copy name of a `context` entry is refused.
+    result: List of `{"path": "result/<filename>"}` objects (an optional `description` is ignored); an empty
+      placeholder is created under `<job_dir>/result/` for each filename, for the agent to fill.
     job_id: Caller-computed deterministic identifier; a 12-hex slice of
       a fresh UUID is used when omitted.
     dedup_key: When set, embedded in the payload as `_dedup_key` and
-      short-circuits to `already-queued` on a pre-existing match.
+      short-circuits to `already-queued` on a pre-existing match, and refuses the dispatch when the queue
+      cannot be checked.
     dedup_fingerprint: Identity token of the artifact the dedup key names; embedded in the
       payload as `_dedup_fingerprint` and handed back later by `completed_dedup_jobs`, so a
       caller that destroys its input on success can confirm the artifact is still the one
@@ -318,8 +474,12 @@ def dispatch_job(repo: Path,
     ProviderConfigError: If the expert's configured `provider` entry is missing, incomplete,
       or violates a naming constraint, or if a provider-bound expert pins an explicit `model`
       that is not a tier alias.
-    ValueError: If the expert's configured git author email lies outside the bot email domain.
+    ValueError: If the expert's configured git author email lies outside the bot email domain, or if `source`,
+      `context` or `result` is not a list of `{"path": "<string>"}` objects, or a `result` path is not
+      `result/<filename>`, or an inline file name collides with the copy name of a manifest entry of the same bucket.
     json.JSONDecodeError: If the repository's tracked or local settings file is not valid JSON.
+    OSError: If `dedup_key` is set and the expert's queue folder exists but cannot be listed, or a job in it
+      cannot be looked at or read for any reason other than its absence.
   """
 
   # Contract:
@@ -327,6 +487,35 @@ def dispatch_job(repo: Path,
   # when the pump claims the job, never as it stood at dispatch — the declared paths are recorded
   # here as manifests and copied only at claim. The `source_inline` and `context_inline` buckets
   # are the sole exception: they carry content that exists in no file and are written now.
+
+  # Contract:
+  # `source`, `context` and `result` MUST be lists of `{"path": "<string>"}` objects — the one
+  # shape a path entry has in a bundle, a request and a response alike. A dispatch carrying
+  # anything else is refused with `ValueError` before any job bundle is written, so a malformed
+  # manifest reaches the caller that built it instead of the pump that would later claim the job.
+
+  # Contract:
+  # An inline file name in `source_inline` or `context_inline` that equals the copy name of a declared entry of
+  # the same bucket — the entry's basename, or its `<parent>-<name>` directory form — MUST be refused with
+  # `ValueError` before any job bundle is written, so a claim can never overwrite or drop a file written at dispatch.
+
+  # the manifests are checked first — nothing is on disk yet, so a refusal leaves no bundle behind
+  source_paths = _parse_manifest_paths(JobIODir.SOURCE, source)
+  context_paths = _parse_manifest_paths(JobIODir.CONTEXT, context)
+
+  # an inline file may not take the name a claim copies a declared entry of its bucket under
+  _refuse_inline_clash(JobIODir.SOURCE, source_inline, source_paths)
+  _refuse_inline_clash(JobIODir.CONTEXT, context_inline, context_paths)
+
+  # a result entry names its placeholder the way a response names a result file: `result/<filename>`
+  result_names: list[str] = []
+  for path in _parse_manifest_paths(JobIODir.RESULT, result):
+    prefix, _slash, name = path.partition("/")
+
+    # guard: anything but a plain filename directly under the result bucket is not a placeholder
+    if prefix != JobIODir.RESULT or not name or "/" in name or name in ( ".", ".." ):
+      raise ValueError(f"result entry path must be 'result/<filename>', got {path!r}")
+    result_names.append(name)
 
   # Domain(runtime.jobs):
   # # What counts as an active job for dedup matching
@@ -337,40 +526,39 @@ def dispatch_job(repo: Path,
   # key is only released once whoever asked for the job says they are done with the answer, not
   # once the answer exists.
 
+  # Contract:
+  # When `dedup_key` is set and the expert's queue folder exists but cannot be listed, or a candidate job in it
+  # cannot be looked at or read for any reason other than plainly not being there, the dispatch MUST be refused
+  # with `OSError` and nothing is written, neither a bundle nor a `READY` marker.
+  # An active job may already hold the key, so a failed lookup is NEVER read as "no such job".
+  # Only a candidate that is not an active job, has no request, or has a readable request that is not a JSON
+  # object is skipped, and it never matches.
+  # A dispatch without `dedup_key` does not look at the queue and is not affected.
+
   # dedup short-circuit: scan existing job bundles for a live `_dedup_key` match
   if dedup_key is not None:
     edir = Path(repo) / JOBS_BASE / expert
     if edir.exists():
-      for jdir in edir.iterdir():
-        # guard: only real bundles are queue entries
-        if not is_job_bundle(jdir):
-          continue
-
-        # guard: pre-READY bundles are not yet active
-        if not (jdir / JobMarker.READY).exists():
-          continue
-
-        # guard: DEAD bundles are not eligible for dedup
-        if (jdir / JobMarker.DEAD).exists():
-          continue
-
-        # guard: CONSUMED bundles have been retired by the consumer
-        if (jdir / JobMarker.CONSUMED).exists():
-          continue
-
-        # guard: CANCELLED bundles released their dedup key on cancellation
-        if (jdir / JobMarker.CANCELLED).exists():
-          continue
-        req_file = jdir / JobFile.REQUEST
-
-        # guard: bundle missing request.json is malformed and cannot match
-        if not req_file.exists():
-          continue
+      # a queue that cannot be listed may hold an active job under this key, so the dispatch is refused here,
+      # before anything is written
+      try:
+        queued = list(edir.iterdir())
+      except OSError as error:
+        raise OSError(
+          f"expert queue {expert} cannot be listed, so a job under dedup key {dedup_key!r} may already be "
+          f"queued: {type(error).__name__}: {error}"
+        ) from error
+      for jdir in queued:
+        # a candidate that cannot be looked at may be the active job under this key, so the dispatch is
+        # refused here as well, before anything is written
         try:
-          existing = json.loads(req_file.read_text(encoding = "utf-8"))
-        except (OSError, json.JSONDecodeError):
-          continue
-        if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
+          holder = _read_active_dedup_key(jdir)
+        except OSError as error:
+          raise OSError(
+            f"job {expert}/{jdir.name} cannot be read, so it may hold dedup key {dedup_key!r}: "
+            f"{type(error).__name__}: {error}"
+          ) from error
+        if holder == dedup_key:
           return { JobCollectKey.JOB_ID: jdir.name, JobCollectKey.STATUS: JobStatus.ALREADY_QUEUED }
 
   # resolve expert settings before any filesystem mutation so a misconfigured
@@ -442,9 +630,9 @@ def dispatch_job(repo: Path,
     (bundle_dir / JobIODir.CONTEXT).mkdir(exist_ok = True)
     for fname, text in context_inline.items():
       (bundle_dir / JobIODir.CONTEXT / fname).write_text(text, encoding = "utf-8")
-  if result:
+  if result_names:
     (bundle_dir / JobIODir.RESULT).mkdir(exist_ok = True)
-    for fname in result:
+    for fname in result_names:
       (bundle_dir / JobIODir.RESULT / fname).touch()
 
   # agent: solely the expert entry — every dispatchable agent, built-ins like
@@ -465,8 +653,8 @@ def dispatch_job(repo: Path,
     JobConfigKey.AGENT:             agent_ref,
     JobConfigKey.PROTOCOLS:         _with_routine_protocols(protocols),
     # the pump copies these when it claims the job — recorded here rather than acted on now
-    JobConfigKey.SOURCE_PATHS:      list(source or []),
-    JobConfigKey.CONTEXT_PATHS:     list(context or []),
+    JobConfigKey.SOURCE_PATHS:      source_paths,
+    JobConfigKey.CONTEXT_PATHS:     context_paths,
     JobConfigKey.ASPECTS:           list(expert_entry.get(JobConfigKey.ASPECTS) or []),
     JobConfigKey.ARGUMENTS:         dict(expert_entry.get(JobConfigKey.ARGUMENTS) or {}),
     JobConfigKey.GIT_AUTHOR:        expert_entry.get(JobConfigKey.GIT_AUTHOR, {}),
@@ -703,6 +891,13 @@ def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = Non
   for `deferred` explicitly to list postponed work.
   Bundles in none of these shapes are skipped.
 
+  Guarantees:
+    - One expert's queue folder that cannot be listed never hides the jobs of the other experts and never makes
+      the call raise; that expert contributes no jobs.
+
+  Notes:
+    - An expert queue folder that cannot be listed is named on stderr and read as empty.
+
   Args:
     repo: Absolute path to the repository whose queue is enumerated.
     expert: Restrict the listing to a single expert when provided.
@@ -714,6 +909,11 @@ def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = Non
     `with_dedup_key` is set, `dedup_key` — the key the job was dispatched under, or None when its request
     carries none or cannot be read.
   """
+
+  # Contract:
+  # One expert's queue folder that cannot be listed never hides the jobs of the other experts and
+  # never makes the call raise: that expert contributes no jobs and the others are listed as usual.
+
   base = Path(repo) / JOBS_BASE
   out: list[dict] = []
 
@@ -727,7 +927,7 @@ def list_jobs(repo: Path, *, expert: str | None = None, status: str | None = Non
     # guard: expert filter may name a queue that has never seen a dispatch
     if not edir.exists():
       continue
-    for jdir in edir.iterdir():
+    for jdir in _list_queue(edir):
       # guard: only real bundles are queue entries
       if not is_job_bundle(jdir):
         continue
@@ -764,7 +964,8 @@ def _read_dedup_key(jdir: Path) -> str | None:
   """
   try:
     request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+  except (OSError, ValueError):
+    # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
     return None
 
   # guard: a request that is not an object carries no key
@@ -892,6 +1093,8 @@ def _stop_claimant(pid: int) -> None:
     out = subprocess.run(
       [ "pgrep", "-P", str(pid) ], capture_output = True, text = True,
       timeout = _PGREP_TIMEOUT_SEC, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).stdout
     child_pids = [ int(line) for line in out.split() if line.strip().isdigit() ]
   except (OSError, subprocess.TimeoutExpired):
@@ -960,24 +1163,45 @@ def consume_job(repo: Path, expert: str, job_id: str) -> None:
   Guarantees:
     - Once consumed, the job is invisible to `dispatch_job`'s pre-dispatch dedup check and to
       any consumer-side lookup by dedup key, so a fresh dispatch under the same key is free to run.
-    - Idempotent: a second call on the same job is a no-op.
+    - Idempotent: a second call on the same job is a no-op and records nothing in the unpushed-consumes ledger,
+      so a consume that was already published is never listed again.
+    - A consume that cannot be recorded in the unpushed-consumes ledger raises `OSError` and does not mark the
+      job consumed, so a marker written by this call always has its ledger entry until the publish settles or
+      rolls it back.
 
   Notes:
-    - Also records `<expert>/<job_id>` in the unpushed-consume ledger (`RuntimeFile.CONSUMED_UNPUSHED`,
-      at `.runtime/consumed-unpushed.log`); the runtime daemon settles that entry after a successful
-      publish, and rolls it back — removing the `CONSUMED` marker again — when the publish instead
-      discards the tick on a rebase conflict, so the job is consumed anew on a later tick.
+    - On a job not yet marked consumed, records `<expert>/<job_id>` in the unpushed-consumes ledger
+      (`RuntimeFile.CONSUMED_UNPUSHED`, at `.runtime/consumed-unpushed.log`) first, then marks the job
+      consumed; a call on a job already marked consumed records and writes nothing. The runtime daemon settles
+      that entry after a successful publish, and rolls it back — removing the `CONSUMED` marker again —
+      when the publish instead discards the tick on a rebase conflict, so the job is consumed anew on a
+      later tick.
 
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
     job_id: Identifier of the job to retire.
+
+  Raises:
+    OSError: If the entry in the unpushed-consumes ledger cannot be written; the job is then not marked consumed.
+    OSError: If the entry was written but the `CONSUMED` marker cannot be created in the bundle folder, for example
+      because it is not writable; the ledger then holds the entry while the job is not marked consumed.
   """
 
   # Contract:
   # Once `consume_job` has been called on a job, it MUST become invisible to `dispatch_job`'s
   # dedup check and to any consumer lookup by dedup key, so a fresh dispatch under the same
-  # key is free to run again. A second call on the same job MUST be a no-op.
+  # key is free to run again. A second call on the same job MUST be a no-op, the unpushed-consumes
+  # ledger included: a repeat call on a consumed job records nothing. A publish rollback removes the
+  # markers of the consumes the ledger lists, so a consume that was already published MUST NEVER be
+  # listed again.
+
+  # Contract:
+  # A consume that cannot be recorded in the unpushed-consumes ledger raises `OSError` and MUST NOT
+  # mark the job consumed. A marker written by this call therefore always has its ledger entry until
+  # the publish settles or rolls back, so a caller that sees the call raise can roll its own work back
+  # knowing the job is still unconsumed. A job whose consume was published and settled is consumed
+  # and has no entry; a repeat call adds none.
 
   # Domain(runtime.jobs):
   # # Producer-done versus consumer-done job lifecycle
@@ -993,16 +1217,24 @@ def consume_job(repo: Path, expert: str, job_id: str) -> None:
   # guard: caller may consume a job that no longer exists on disk
   if not bundle_dir.exists():
     return
-  (bundle_dir / JobMarker.CONSUMED).touch()
+
+  # guard: the job is already consumed — a repeated call records nothing, so a later rollback cannot take
+  # back the marker of a consume whose commit was already published. The check keys on the marker, never
+  # on the ledger: an entry without a marker is a consume cut short, and this call completes it
+  if (bundle_dir / JobMarker.CONSUMED).exists():
+    return
 
   # the marker lands before the commit carrying the consumed result is published; the ledger is
-  # what lets the daemon take the marker back off when that commit is discarded on a push conflict
+  # what lets the daemon take the marker back off when that commit is discarded on a push conflict.
+  # The ledger entry is written first: an entry without a marker costs one harmless rollback, a
+  # marker without an entry could never be taken back
   # waiver: stdlib file-mode / encoding literals, not domain constants
   with (
     _unpushed_consumes_lock(repo),
     (Path(repo) / RuntimeFile.CONSUMED_UNPUSHED).open("a", encoding = "utf-8") as fh,
   ):
     fh.write(f"{expert}/{job_id}\n")
+  (bundle_dir / JobMarker.CONSUMED).touch()
 
 
 def read_unpushed_consumes(repo: Path) -> list[str]:
@@ -1123,6 +1355,9 @@ def retire_completed_jobs(repo: Path, expert: str, dedup_key: str) -> list[str]:
   In-flight bundles, bundles already retired, and bundles marked dead are
   left untouched.
 
+  Notes:
+    - An expert queue folder that cannot be listed is named on stderr and read as empty.
+
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
@@ -1130,6 +1365,10 @@ def retire_completed_jobs(repo: Path, expert: str, dedup_key: str) -> list[str]:
 
   Returns:
     The ids of the retired jobs, in directory-iteration order.
+
+  Raises:
+    OSError: If a job's consume cannot be recorded; the jobs before it are already retired, that job and
+      the ones after it are not.
   """
   retired: list[str] = []
   edir = Path(repo) / JOBS_BASE / expert
@@ -1137,7 +1376,7 @@ def retire_completed_jobs(repo: Path, expert: str, dedup_key: str) -> list[str]:
   # guard: no bundles for this expert yet — nothing to retire
   if not edir.exists():
     return retired
-  for jdir in edir.iterdir():
+  for jdir in _list_queue(edir):
     # guard: only real bundles are queue entries
     if not is_job_bundle(jdir):
       continue
@@ -1160,7 +1399,12 @@ def retire_completed_jobs(repo: Path, expert: str, dedup_key: str) -> list[str]:
       continue
     try:
       existing = json.loads(req_file.read_text(encoding = "utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+      # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
+      continue
+
+    # guard: a request that is not an object carries no key and cannot match
+    if not isinstance(existing, dict):
       continue
     if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
       consume_job(repo, expert, jdir.name)
@@ -1177,6 +1421,9 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
   still-unconsumed bundle so the dedup key keeps it from being re-dispatched. Success is never inferred from
   silence — a response that omits its outcome counts as failed.
 
+  Notes:
+    - An expert queue folder that cannot be listed is named on stderr and read as empty.
+
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
@@ -1191,7 +1438,7 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
   # guard: no bundles for this expert yet
   if not edir.exists():
     return out
-  for jdir in edir.iterdir():
+  for jdir in _list_queue(edir):
     # guard: only real bundles are queue entries
     if not is_job_bundle(jdir):
       continue
@@ -1214,7 +1461,12 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
       continue
     try:
       req = json.loads(req_file.read_text(encoding = "utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
+      # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
+      continue
+
+    # guard: a request that is not an object carries no key
+    if not isinstance(req, dict):
       continue
     dedup_key = req.get(JobRequestKey.DEDUP_KEY)
 

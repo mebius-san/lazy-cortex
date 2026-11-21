@@ -25,8 +25,16 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
+# How the core CLI's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
+
+# How many characters of an unusable answer an error message echoes.
+_ANSWER_ECHO = 240
 
 
 # ----------------------------------------------------------------------------------------
@@ -90,20 +98,55 @@ def append(text: str, line: str, today: str | None = None, *, repo: Path | None 
     The note text with the line placed under the right day group of `# History`.
 
   Raises:
-    RuntimeError: When the core verb refuses or cannot be resolved.
+    RuntimeError: When the core verb refuses or cannot be resolved, or exits 0 with an unusable answer — not JSON,
+      not a JSON object, or without the note text.
   """
+  # the request: the note text and the line, plus the pinned day when one is given
   payload: dict[str, str] = {_Wire.TEXT: text, _Wire.LINE: line}
   if today:
     payload[_Wire.DATE] = today
+
+  # undecodable bytes are replaced, so the answer is judged by its exit code and its shape, never by a decode error
   proc = subprocess.run(
       _core_argv(repo, _Wire.STDIN_FLAG),
       input = json.dumps(payload), capture_output = True, text = True, check = False, encoding = "utf-8",
+      errors = _DECODE_ERRORS,
   )
 
   # guard: the verb refused (empty line, bad date, malformed request) — surface its own message
   if proc.returncode != 0:
     raise RuntimeError(f"history-append refused: {proc.stderr.strip() or proc.stdout.strip()}")
-  return json.loads(proc.stdout)[_Wire.TEXT]
+  new_text = _read_answer(proc.stdout).get(_Wire.TEXT)
+
+  # guard: an answer that carries no note text is as unusable as a refusal
+  if not isinstance(new_text, str):
+    raise RuntimeError(f"history-append answered without `{_Wire.TEXT}`: {proc.stdout.strip()[:_ANSWER_ECHO]}")
+  return new_text
+
+
+def _read_answer(stdout: str) -> dict:
+  """
+  Parse the `history-append` verb's standard output as a JSON object.
+
+  Args:
+    stdout: The verb's standard output.
+
+  Returns:
+    The answer as a JSON object.
+
+  Raises:
+    RuntimeError: If the output is not JSON, or is JSON but not an object.
+  """
+  # an answer that does not parse is the verb failing in all but its exit code
+  try:
+    answer = json.loads(stdout)
+  except ValueError as error:
+    raise RuntimeError(f"history-append answered no JSON: {stdout.strip()[:_ANSWER_ECHO]}") from error
+
+  # guard: JSON that is not an object carries no note text either
+  if not isinstance(answer, dict):
+    raise RuntimeError(f"history-append answered no JSON object: {stdout.strip()[:_ANSWER_ECHO]}")
+  return answer
 
 
 def append_to_file(note: Path, line: str, today: str | None = None, *, repo: Path | None = None) -> dict:
@@ -120,16 +163,18 @@ def append_to_file(note: Path, line: str, today: str | None = None, *, repo: Pat
     The verb's own result record (`file`, `date`, `new_day`).
 
   Raises:
-    RuntimeError: When the core verb refuses or cannot be resolved.
+    RuntimeError: When the core verb refuses or cannot be resolved, or exits 0 with an answer that is not a JSON
+      object.
   """
-  tail = [str(note), _Wire.LINE_FLAG, line]
+  tail =[str(note), _Wire.LINE_FLAG, line]
   if today:
     tail += [_Wire.DATE_FLAG, today]
   proc = subprocess.run(
     _core_argv(repo, *tail), capture_output = True, text = True, check = False, encoding = "utf-8",
+    errors = _DECODE_ERRORS,
   )
 
   # guard: the verb refused — surface its own message rather than a bare exit code
   if proc.returncode != 0:
     raise RuntimeError(f"history-append refused: {proc.stderr.strip() or proc.stdout.strip()}")
-  return json.loads(proc.stdout)
+  return _read_answer(proc.stdout)

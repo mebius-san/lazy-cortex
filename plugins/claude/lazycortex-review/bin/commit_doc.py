@@ -8,8 +8,8 @@ the postman uses). The coordinator never runs a raw `git commit`: every pen writ
 wake — question callouts, command mini-plan marks, `# History` lines, verb-made
 frontmatter and banner writes — lands through this verb, once, at the end of the wake.
 
-A wake that changed nothing is a clean no-op: when the document is unmodified and the
-repaint finds nothing to touch, no commit is made and `{"committed": false}` is printed.
+A wake that changed nothing is a clean no-op: when the document is unmodified, no history
+line was handed over and the repaint finds nothing to touch, no commit is made and `{"committed": false}` is printed.
 
 The author identity comes from the consumer's `experts["review.coordinator"]`
 `git_author` entry (seeded at install time); a checkout without one falls back to the
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -87,6 +88,8 @@ def _append_history(repo: Path, file_path: Path, lines: tuple[str, ...]) -> None
     proc = subprocess.run(
         [sys.executable, str(cli), _HistoryWire.VERB, str(file_path), _HistoryWire.LINE_FLAG, line],
         cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
     )
 
     # guard: the verb refused (empty line, no section it could create) — surface its own message
@@ -131,16 +134,20 @@ def commit_doc(
   Commit the document's working-tree state as the coordinator's single wake commit.
 
   Guarantees:
-    - Commits nothing when the document is unmodified, no extra path is dirty, no history line
-      was handed over, and the icon repaint has nothing to touch; a no-op wake leaves the
-      repository's history untouched.
+    - Commits nothing when the document is unmodified, no extra path is dirty (an untracked one counts as dirty,
+      whatever the repository's untracked-files setting says), no history line was handed over, and the icon
+      repaint has nothing to touch; a no-op wake leaves the repository's history untouched. A handed-over history
+      line always makes the wake commit.
+    - When the repository's status cannot be read (`git status` exits non-zero), the call raises `RuntimeError`
+      and writes nothing: no history line is appended and nothing is committed.
 
   Args:
     repo: Repository root.
     file_path: Absolute path to the review document.
     subject: Commit subject line, written verbatim.
     extra_paths: Repo-relative paths the wake also landed — the attachments a `collect-job`
-      put beside the document — committed together with it.
+      put beside the document — committed together with it; each is taken literally, never as a pattern, in the
+      dirty check and in the commit, and an untracked one is found whatever the repository's status settings say.
     history: The wake's `# History` lines, appended through the core verb before the commit.
 
   Returns:
@@ -148,24 +155,40 @@ def commit_doc(
     when nothing this wake touched is dirty.
 
   Raises:
-    RuntimeError: When a history line cannot be landed (no core CLI, or the verb refused it).
+    RuntimeError: When `git status` fails (nothing is written), or when a history line cannot be landed (no core
+      CLI, or the verb refused it).
   """
-  # the journal line lands before the status read below, so it rides in this same commit
-  _append_history(repo, file_path, history)
   rel = str(file_path.relative_to(repo))
-  status = subprocess.run(
+  proc = subprocess.run(
       # waiver: git CLI vocabulary
-      ["git", "-C", str(repo), "status", "--porcelain", "--", rel, *extra_paths],
-      capture_output = True, text = True, check = False, encoding = "utf-8",
-  ).stdout.strip()
+      [ "git", "-C", str(repo), "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all",
+        "--", rel, *extra_paths ],
+      # the listing is captured as bytes: text mode would turn a carriage return inside a name into a line feed
+      capture_output = True, check = False,
+  )
+
+  # guard: a status git could not give says nothing about what is dirty, so the wake is refused before its
+  # journal line is written
+  if proc.returncode != 0:
+    raise RuntimeError(f"git status failed: {os.fsdecode(proc.stderr).strip()}")
+  status = os.fsdecode(proc.stdout).strip()
+
+  # the journal line lands after the status read and rides in this same commit
+  _append_history(repo, file_path, history)
   extras = _git_ops.repaint_inline(repo, [rel])
 
   # Contract:
-  # A wake that leaves the document unmodified, every extra path clean and the icon repaint
-  # untouched commits nothing; the repository's history gains no entry for a no-op wake.
+  # A wake that leaves the document unmodified, every extra path clean (an untracked one counts as dirty, whatever
+  # the repository's untracked-files setting says), no history line handed over and the icon repaint untouched
+  # commits nothing; the repository's history gains no entry for a no-op wake. A handed-over history line ALWAYS
+  # makes the wake commit.
+
+  # Contract:
+  # When the repository's status cannot be read (`git status` exits non-zero), the call raises `RuntimeError` and
+  # writes nothing: no history line is appended and nothing is committed.
 
   # guard: nothing changed this wake — no commit, and saying so is the verb's contract
-  if not status and not extras:
+  if not status and not history and not extras:
     return {"committed": False}
   sha = _git_ops.commit_mechanical(
       repo, file_path, author = _coordinator_author(repo), message = subject,
@@ -183,9 +206,8 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: `0` on success (including the clean no-op), `2` when a `--history` line cannot
-    be landed, when the file does not exist
-    or the subject is empty.
+    Exit code: `0` on success (including the clean no-op), `2` when `git status` fails, when a `--history` line
+    cannot be landed, when the file does not exist or the subject is empty.
   """
   # the CLI surface: one document, its subject, and the extra paths the wake also landed
   # waiver: argparse CLI signature, not a domain key

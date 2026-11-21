@@ -14,13 +14,9 @@ A nested product inherits its ancestors' record through
 nesting reader takes an optional already-loaded registry, so a caller
 walking a whole chain reads the settings file once rather than per link.
 
-The CLI exposes one verb per kind of answer, and every verb exits 0 even when nothing resolves. Each prints one
-JSON line. Record verbs answer with the raw registry record or the inherited one, by key or by path; a reader
-that acts on a product's configuration wants the inherited record, and only a caller that writes the record back
-wants the raw one. The remaining verbs answer about nesting and releases, and an unresolved answer is null.
-
-Every lookup reads the settings JSON directly to stay dependency-light; no
-import of the `lazy_settings` loader, no yaml dependency.
+The CLI exposes one verb per kind of answer and prints one JSON line. Record verbs answer with the raw registry
+record or the inherited one, by key or by path; a reader that acts on a product's configuration wants the
+inherited record, and only a caller that writes the record back wants the raw one.
 """
 from __future__ import annotations
 
@@ -35,13 +31,28 @@ if TYPE_CHECKING:
   pass
 
 
+# Each role mapped to its ordered guideline paths, the shape of every `guidelines` layer.
+type RoleGuidelines = dict[str, list[str]]
+
+
 _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from spec_paths import _vault_root_value, find_settings_root, spec_content_root  # noqa: E402
+from spec_paths import (  # noqa: E402
+    SettingsError, _vault_root_value, find_settings_root, read_merged_sections, read_settings, spec_content_root,
+)
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import ReleaseConfigKey  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+import gate_dispatch  # noqa: E402
 
 
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
@@ -56,12 +67,36 @@ _MODE_EFFECTIVE_BY_PATH = "effective-by-path"
 _MODE_ANCESTOR_CHAIN = "ancestor-chain"
 _MODE_OWN_SOURCE_CONFLICTS = "own-source-conflicts"
 _MODE_RELEASE_IMPLEMENTER = "release-implementer"
+_MODE_SPECIALISTS = "specialists"
+_MODE_SPECIALISTS_BY_PATH = "specialists-by-path"
 _EXPERTS_SECTION = "experts"
-_RELEASE_KEY = "release"
-_IMPLEMENTER_KEY = "implementer"
+_AGENT_KEY = "agent"
+_EXPERT_KEY_SEP = "."
+_ENCODING = "utf-8"
+
+# The shipped role-to-material map and the fields of one specialist entry
+_SPECIALIST_ROLES_PATH = _BIN.parent / "references" / "lazy-spec.specialist-roles.json"
+_SPECIALIST_ROLES_KEY = "specialist_roles"
+_FIELD_ROLE = "role"
+_FIELD_EXPERT = "expert"
+_FIELD_AGENT = "agent"
+_FIELD_ASPECTS = "aspects"
+_FIELD_MATERIAL = "material"
+_FIELD_GUIDELINES = "guidelines"
+_FIELD_ORIGIN = "origin"
+_ORIGIN_DERIVED = "derived"
+_ORIGIN_SPEC = "spec"
+_ORIGIN_PRODUCT = "product"
+_ANSWER_KEY = "key"
+_ANSWER_SPECIALISTS = "specialists"
+_ANSWER_IMPLEMENTER = "implementer"
+_ANSWER_WARNINGS = "warnings"
+_ANSWER_ERROR = "error"
 _IMPLEMENTER_CHAIN_KEY = "implementer_chain"
 _ASSET_TYPES_KEY = "asset_types"
 _GUIDELINES_KEY = "guidelines"
+# The settings sections a release build is ordered from, read as the runtime dispatches from them
+_RUNTIME_SECTIONS = ( _PRODUCTS_SECTION, _EXPERTS_SECTION, _SPEC_SECTION )
 
 # Keys a nested product never takes from an ancestor — a code binding, a dependency list and a
 # paint belong to one product; spec_path names the product itself
@@ -79,20 +114,35 @@ def load_products(vault: Path) -> dict:
   Excludes the section's own schema-version entry, so the result maps product keys to
   records only.
 
+  Guarantees:
+    - A settings file that exists but is not valid JSON, not UTF-8 text or not a JSON object raises `ValueError`
+      naming the file; it never reads as an empty registry.
+
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
 
   Returns:
     A dict of product key to record; empty when the settings file or the
     `products` section is absent.
+
+  Raises:
+    ValueError: If the settings file exists but cannot be read, is not valid JSON, not UTF-8 text or not a JSON
+      object; a `spec_paths.SettingsError` naming the file.
   """
+
+  # Contract:
+  # A settings file that exists but is not valid JSON, not UTF-8 text or not a JSON object raises `ValueError`
+  # naming the file, and never reads as an empty registry; callers rely on the raise to abort before recording state.
+
+  # Decision: the record readers parse the tracked file in process, not the merged view through the core CLI — they
+  # stay dependency-light, with no import of the `lazy_settings` loader and no yaml dependency
+
   settings_path = vault / _SETTINGS_REL
 
   # guard: missing settings file means no products configured
   if not settings_path.is_file():
     return {}
-  data = json.loads(settings_path.read_text(encoding = "utf-8"))
-  products = data.get(_PRODUCTS_SECTION)
+  products = read_settings(settings_path).get(_PRODUCTS_SECTION)
 
   # guard: missing or malformed products section means no products
   if not isinstance(products, dict):
@@ -100,7 +150,7 @@ def load_products(vault: Path) -> dict:
   return { k: v for k, v in products.items() if k != _VERSION_KEY }
 
 
-def load_catalog_guidelines(vault: Path) -> dict[str, list[str]]:
+def load_catalog_guidelines(vault: Path) -> RoleGuidelines:
   """
   Read the catalog-wide guidelines every product inherits, from `spec.guidelines`.
 
@@ -110,13 +160,31 @@ def load_catalog_guidelines(vault: Path) -> dict[str, list[str]]:
   Returns:
     A dict of role to its ordered guideline paths; empty when the settings file, the `spec`
     section or its `guidelines` key is absent. A role whose value is not a list is left out.
+
+  Raises:
+    ValueError: If the settings file exists but cannot be read, is not valid JSON, not UTF-8 text or not a JSON
+      object; a `spec_paths.SettingsError` naming the file.
   """
   settings_path = vault / _SETTINGS_REL
 
   # guard: missing settings file means no catalog guidelines
   if not settings_path.is_file():
     return {}
-  spec = json.loads(settings_path.read_text(encoding = "utf-8")).get(_SPEC_SECTION)
+  return build_catalog_guidelines(read_settings(settings_path))
+
+
+def build_catalog_guidelines(settings: dict) -> RoleGuidelines:
+  """
+  Take the catalog-wide guidelines every product inherits from already-parsed settings.
+
+  Args:
+    settings: The parsed settings file.
+
+  Returns:
+    A dict of role to its ordered guideline paths; empty when the `spec` section or its `guidelines` key is
+    absent. A role whose value is not a list is left out.
+  """
+  spec = settings.get(_SPEC_SECTION)
   declared = spec.get(_GUIDELINES_KEY) if isinstance(spec, dict) else None
 
   # guard: missing or malformed guidelines key means none are declared
@@ -392,12 +460,17 @@ def find_release_owner_key(vault: Path, key: str, *, products: dict | None = Non
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     key: The product's compound-key.
-    products: An already-loaded products registry; None reads it from the settings file.
+    products: An already-read products registry; None reads the merged one the expert runtime dispatches from, the
+      local overlay merged on.
 
   Returns:
     The outermost key in the chain from the outermost ancestor down to `key` whose record declares a `source` of
     its own, or None when no product in that chain does — a design-only umbrella and its nested design-only
     products own no releases.
+
+  Raises:
+    ValueError: If `products` is None and the merged settings cannot be read; a `spec_paths.SettingsError` naming
+      the settings file, also when no core CLI resolves.
   """
 
   # Domain(spec.lifecycle):
@@ -409,7 +482,9 @@ def find_release_owner_key(vault: Path, key: str, *, products: dict | None = Non
   # no releases itself. A product that names no code and sits under no owner is a design-only
   # umbrella, and the products under it that do name code each own their own releases.
 
-  registry = _registry(vault, products)
+  # the registry passed in, else the one the runtime dispatches from, so the owner comes from the same view as the
+  # release's specialists
+  registry = products if products is not None else read_runtime_products(vault)
 
   # the chain from the outermost ancestor down to the product itself, outermost first
   for candidate in [ *ancestor_chain(vault, key, products = registry), key ]:
@@ -425,17 +500,17 @@ def find_release_implementer(vault: Path, key: str, *, settings: dict | None = N
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     key: The product's compound-key.
-    settings: The parsed settings file; None reads it from the vault.
+    settings: The parsed settings to resolve from; None reads the merged view the expert runtime dispatches from.
 
   Returns:
     The product's explicit `release.implementer`, else the first registered expert of the product's
     `release.implementer_chain` — or, when the product declares no chain, of the repository's
-    `spec.release.implementer_chain`; None when no expert resolves, or when `settings` is None and the vault has
-    no settings file.
+    `spec.release.implementer_chain`; None when no expert resolves, which includes a `settings` of None with no
+    settings file and no overlay in the vault.
 
   Raises:
-    OSError: If `settings` is None and the settings file exists but cannot be read.
-    ValueError: If `settings` is None and the settings file exists but is not valid JSON.
+    ValueError: If `settings` is None and the merged settings cannot be read; a `spec_paths.SettingsError` naming
+      the settings file, also when no core CLI resolves.
   """
 
   # Domain(spec.lifecycle):
@@ -448,30 +523,465 @@ def find_release_implementer(vault: Path, key: str, *, settings: dict | None = N
   # without inheriting the repository's, and an empty list of its own means no fallback at all. When nothing
   # on the applicable list is registered there is no implementer, and the release has no expert to build it.
 
-  # guard: no settings passed in — read the file that carries the product record, the repository
-  # chain and the expert registry alike
+  # guard: no settings passed in — read them as the runtime sees them: the product record, the repository chain and
+  # the expert registry alike, the local overlay merged on
   if settings is None:
-    path = vault / _SETTINGS_REL
-
-    # guard: a vault with no settings file configures nothing, so no implementer resolves
-    if not path.is_file():
-      return None
-    settings = json.loads(path.read_text(encoding = "utf-8"))
+    settings = read_runtime_settings(vault)
 
   # the product's own release record, empty when it declares none
-  release =((settings.get(_PRODUCTS_SECTION) or {}).get(key) or {}).get(_RELEASE_KEY) or {}
+  release = ((settings.get(_PRODUCTS_SECTION) or {}).get(key) or {}).get(ReleaseConfigKey.SECTION) or {}
 
   # an explicit implementer is the operator's word and wins over any chain
-  if explicit := release.get(_IMPLEMENTER_KEY):
+  if explicit := release.get(ReleaseConfigKey.IMPLEMENTER):
     return str(explicit)
 
   # the repository chain applies unless the product declares its own, which replaces it whole
-  chain = ((settings.get(_SPEC_SECTION) or {}).get(_RELEASE_KEY) or {}).get(_IMPLEMENTER_CHAIN_KEY) or []
+  chain = ((settings.get(_SPEC_SECTION) or {}).get(ReleaseConfigKey.SECTION) or {}).get(_IMPLEMENTER_CHAIN_KEY) or []
   if _IMPLEMENTER_CHAIN_KEY in release:
     chain = release[_IMPLEMENTER_CHAIN_KEY] or []
 
   # the first chain entry the expert registry knows is the implementer
   return next(( name for name in chain if name in (settings.get(_EXPERTS_SECTION) or {}) ), None)
+
+
+class SpecialistsError(ValueError):
+  """
+  Failure to build a product's specialist list from the settings.
+
+  Signals missing or malformed information, so a caller never mistakes it for an empty list.
+
+  Attributes:
+    key: The product key the failure concerns, or None when no product covers the asked path.
+  """
+
+  def __init__(self, message: str, *, key: str | None) -> None:
+    """
+    Record the failure message and the product it concerns.
+
+    Args:
+      message: What is missing or malformed, naming the role or expert at fault.
+      key: The product key the failure concerns, or None when no product covers the asked path.
+    """
+    # the message is the exception's own text
+    super().__init__(message)
+
+    # the product the failure concerns, printed back by the CLI
+    self.key = key
+
+
+def load_specialist_roles() -> dict[str, dict]:
+  """
+  Read the plugin's shipped map of specialist roles to the material each makes.
+
+  Guarantees:
+    - The roles come back in the order the shipped map declares them.
+
+  Returns:
+    Role to `{ "material": <text> }`, in shipped order; empty when the shipped map declares no roles.
+
+  Raises:
+    OSError: If the shipped map cannot be read.
+    ValueError: If the shipped map is not valid JSON.
+  """
+
+  # Contract:
+  # The roles come back in the order the shipped map declares them; the specialist list orders its shipped
+  # roles by it.
+
+  return json.loads(_SPECIALIST_ROLES_PATH.read_text(encoding = _ENCODING)).get(_SPECIALIST_ROLES_KEY) or {}
+
+
+def read_runtime_settings(vault: Path) -> dict:
+  """
+  Read the settings a release build is ordered from, as the runtime dispatches from them.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`.
+
+  Returns:
+    The `products`, `experts` and `spec` sections, each with the local overlay merged on.
+
+  Raises:
+    ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
+      when no core CLI resolves.
+  """
+  # the expert runtime dispatches from the merged view, so an expert or product declared only in the overlay counts
+  return read_merged_sections(vault, *_RUNTIME_SECTIONS)
+
+
+def read_runtime_products(vault: Path) -> dict:
+  """
+  Read the products registry as the runtime dispatches from it.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`.
+
+  Returns:
+    Product key to record, with the local overlay merged on and without the section's schema-version entry.
+
+  Raises:
+    ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
+      when no core CLI resolves.
+  """
+  # one release is looked up in the view its experts are dispatched from, so an overlay-only product counts
+  return filter_products(read_merged_sections(vault, _PRODUCTS_SECTION))
+
+
+def read_runtime_catalog(vault: Path) -> tuple[dict, RoleGuidelines]:
+  """
+  Read the products registry and the catalog-wide guidelines as the runtime dispatches from them.
+
+  Guarantees:
+    - The registry and the guidelines come from one merged view of the settings, the local overlay merged on.
+    - Merged settings that cannot be read raise `ValueError`; they are never answered as an empty registry or
+      empty guidelines.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`.
+
+  Returns:
+    The products registry, product key to record without the section's schema-version entry, and the catalog-wide
+    `spec.guidelines` by role; both with the local overlay merged on.
+
+  Raises:
+    ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
+      when no core CLI resolves.
+  """
+
+  # Contract:
+  # The registry and the catalog-wide guidelines MUST come from one merged view of the settings, the local overlay
+  # merged on, so a caller holding the registry never gets guidelines from another view.
+
+  # Contract:
+  # Merged settings that cannot be read MUST raise `ValueError` naming the settings file. They are never answered
+  # as an empty registry or empty guidelines: callers that scaffold from the pair rely on the raise to abort.
+
+  # one merged read of both sections, so a caller holding the registry never reads the guidelines from another view
+  settings = read_merged_sections(vault, _PRODUCTS_SECTION, _SPEC_SECTION)
+  return filter_products(settings), build_catalog_guidelines(settings)
+
+
+def filter_products(settings: dict) -> dict:
+  """
+  Take the products registry out of already-read settings.
+
+  Args:
+    settings: Settings holding a `products` section.
+
+  Returns:
+    Product key to record, without the section's schema-version entry.
+  """
+  return { k: v for k, v in (settings.get(_PRODUCTS_SECTION) or {}).items() if k != _VERSION_KEY }
+
+
+def _split_expert_key(expert: str) -> tuple[str, str]:
+  """
+  Split an expert key into its domain and its role.
+
+  Args:
+    expert: A registered expert key, `<domain>.<role>`.
+
+  Returns:
+    The part before the first dot and the part after it; the whole key as the role when it carries no dot.
+  """
+  domain, _sep, role = expert.partition(_EXPERT_KEY_SEP)
+  return domain, role or expert
+
+
+def _parse_overrides(release: object, key: str) -> dict:
+  """
+  Read the per-role specialist overrides of one settings level.
+
+  Args:
+    release: The level's `release` section, as found in the settings.
+    key: The product key the list is built for, named in a failure.
+
+  Returns:
+    Role to its override entry; `{}` when the level declares none.
+
+  Raises:
+    SpecialistsError: If the level's `specialists` value is not an object.
+  """
+  declared = release.get(ReleaseConfigKey.SPECIALISTS) if isinstance(release, dict) else None
+
+  # guard: a level that declares no overrides changes nothing
+  if declared is None:
+    return {}
+
+  # guard: an override set that is not an object is missing information, never an empty set
+  if not isinstance(declared, dict):
+    raise SpecialistsError(f"release.specialists must be an object, got {declared!r}", key = key)
+  return declared
+
+
+def _build_override_entry(role: str,
+                          entry: object,
+                          origin: str,
+                          *,
+                          shipped: dict,
+                          experts: dict,
+                          key: str) -> dict | None:
+  """
+  Validate one override entry and turn it into a specialist entry.
+
+  Args:
+    role: The role the entry overrides or adds.
+    entry: The declared value — an object with `expert` and `material`, or `false`.
+    origin: The settings level that declared it.
+    shipped: The shipped role-to-material map.
+    experts: The registered experts.
+    key: The product key the list is built for, named in a failure.
+
+  Returns:
+    The entry's expert, material and origin; None when the entry switches the role off.
+
+  Raises:
+    SpecialistsError: If the entry is malformed, names no registered expert, or adds a role with no material.
+  """
+
+  # `false` is the documented way to switch the role off
+  if entry is False:
+    return None
+
+  # guard: anything but an object naming an expert is malformed
+  if not isinstance(entry, dict) or not isinstance(entry.get(_FIELD_EXPERT), str):
+    raise SpecialistsError(f"{origin} specialist '{role}' needs an object with a string 'expert' or false, "
+                           f"got {entry!r}", key = key)
+
+  # the expert the entry names
+  expert = entry[_FIELD_EXPERT]
+
+  # guard: an expert the registry does not know cannot be launched
+  if expert not in experts:
+    raise SpecialistsError(f"{origin} specialist '{role}' names expert '{expert}', which is not registered",
+                           key = key)
+
+  # a shipped role may leave the material to the shipped text; a new role must state it
+  material = entry.get(_FIELD_MATERIAL, (shipped.get(role) or {}).get(_FIELD_MATERIAL))
+
+  # guard: an entry with no material, its own or shipped, cannot be ordered
+  if not isinstance(material, str) or not material:
+    raise SpecialistsError(f"{origin} specialist '{role}' has no material", key = key)
+  return { _FIELD_EXPERT: expert, _FIELD_MATERIAL: material, _FIELD_ORIGIN: origin }
+
+
+def _pick_expert(role: str,
+                 candidates: list[str],
+                 *,
+                 implementer_domain: str | None,
+                 key: str) -> str:
+  """
+  Choose the one registered expert that fills a derived role.
+
+  Args:
+    role: The derived role.
+    candidates: Every registered expert holding that role.
+    implementer_domain: The domain of the product's release implementer, or None when it has none.
+    key: The product key the list is built for, named in a failure.
+
+  Returns:
+    The single candidate, or the one candidate sharing the implementer's domain.
+
+  Raises:
+    SpecialistsError: If several candidates hold the role and not exactly one shares the implementer's domain.
+  """
+
+  # one holder of the role is the answer; several are told apart by the implementer's domain
+  if len(candidates) == 1:
+    return candidates[0]
+  same_domain = [ expert for expert in candidates if _split_expert_key(expert)[0] == implementer_domain ]
+
+  # guard: none or several in the implementer's domain is a conflict only the operator settles
+  if len(same_domain) != 1:
+    raise SpecialistsError(
+        f"role '{role}' is held by experts {', '.join(candidates)} and the release implementer's domain "
+        f"'{implementer_domain}' does not pick one; name the expert in release.specialists.{role}",
+        key = key,
+    )
+  return same_domain[0]
+
+
+def build_specialists(vault: Path, key: str, *, settings: dict | None = None) -> dict:
+  """
+  Build a product's list of specialists from its registered experts and the settings overrides.
+
+  The list is built afresh on every call and stored nowhere.
+
+  Guarantees:
+    - Missing or malformed information raises `SpecialistsError`; it never yields an empty or partial list.
+    - With `settings` given, the answer is computed from that object alone; no settings value is read from the
+      settings file.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`; guideline paths resolve against it.
+    key: The product's compound-key.
+    settings: The parsed settings to build from; None reads the merged view the expert runtime dispatches from.
+
+  Returns:
+    `{"key", "specialists", "warnings"}` — one entry per role with its expert, agent, aspects, material,
+    guideline paths and origin, in shipped-role order and then added roles alphabetically; aspects are the
+    expert's registered reference keys copied verbatim into a fresh list, empty when it has none; warnings name
+    declared guideline paths with no file, each once.
+
+  Raises:
+    SpecialistsError: If the key is unknown, an override is malformed, names an unregistered expert or adds a
+      role without material, a derived role is held ambiguously, a listed expert has no agent, or a listed
+      expert's aspects are not a list of strings.
+    ValueError: If `settings` is None and the merged settings cannot be read; a `spec_paths.SettingsError` naming
+      the settings file, also when no core CLI resolves.
+  """
+
+  # Contract:
+  # Missing or malformed information raises `SpecialistsError`; the call never returns an empty or partial
+  # list, so a caller can tell a failed build from a product that has no specialists.
+
+  # Contract:
+  # With `settings` given, the answer is computed from that object alone; no settings value is read from the
+  # settings file, so a caller holding unsaved or already-parsed settings gets an answer that matches them.
+
+  # Domain(spec.lifecycle):
+  # # Who a release build orders material from
+  # A release build has one implementer; every other registered expert whose role the plugin knows
+  # a material for is a specialist the implementer may order that material from. The list is
+  # derived afresh on every request and stored nowhere, and a request by document path is answered
+  # for the product that owns the releases that document ships in. The implementer's own role drops
+  # out of it. When two experts hold one role, the one in the implementer's own domain is taken;
+  # when none or several are, the list fails and names the conflict for the operator to settle.
+  # The repository and then the product may override the list one role at a time: an entry
+  # replaces that role's derived expert, `false` switches the role off, and a later level wins, so
+  # a product can switch a role back on that the repository switched off. An entry may omit the
+  # material only for a role the plugin knows; a new role must state it. Each specialist also
+  # carries the agent that launches its expert, the domain craft of that expert (the aspects it
+  # declares, as references) and the guidelines of its role: the role's own first, then those
+  # that apply to every role. So the expert chosen by domain changes what the build hands the
+  # specialist. Missing information fails the list instead of leaving a gap: an unknown product,
+  # a path no product covers, a request by document path whose product owns no release (the
+  # failure names that product), a malformed override, an expert nobody registered, a role with
+  # no material, an expert with no agent, and domain craft declared in any shape other than a
+  # list of references. Only an expert the list actually names is checked: one whose role is
+  # switched off, or is the implementer's, is not.
+
+  # guard: settings not handed in are read from the vault
+  if settings is None:
+    settings = read_runtime_settings(vault)
+
+  # the settings carry the products, the experts and both override levels alike
+  registry = filter_products(settings)
+  record = registry.get(key)
+
+  # guard: an unknown product has no list, and that is a failure, not an empty answer
+  if not isinstance(record, dict):
+    raise SpecialistsError(f"unknown product key '{key}'", key = key)
+
+  # the registered experts and the shipped role-to-material map the list is built from
+  experts = settings.get(_EXPERTS_SECTION) or {}
+  shipped = load_specialist_roles()
+
+  # the implementer's role leaves the derived list, its domain breaks a tie between two holders of one role
+  implementer = find_release_implementer(vault, key, settings = settings)
+  implementer_domain, implementer_role = _split_expert_key(implementer) if implementer else (None, None)
+  candidates: dict[str, list[str]] = {}
+  for expert in experts:
+    role = _split_expert_key(expert)[1]
+    if role in shipped and role != implementer_role:
+      candidates.setdefault(role, []).append(expert)
+
+  # the repository's overrides apply first, the product's over them
+  chosen: dict[str, dict | None] = {}
+  levels = ( (_ORIGIN_SPEC, (settings.get(_SPEC_SECTION) or {}).get(ReleaseConfigKey.SECTION)),
+             (_ORIGIN_PRODUCT, record.get(ReleaseConfigKey.SECTION)) )
+  for origin, release in levels:
+    for role, declared in _parse_overrides(release, key).items():
+      chosen[role] = _build_override_entry(role, declared, origin, shipped = shipped, experts = experts, key = key)
+
+  # the derived roles not overridden fill in beside the overrides, shipped roles first
+  entries: list[dict] = []
+  for role in [ *shipped, *sorted(role for role in chosen if role not in shipped) ]:
+    entry: dict | None = None
+    if role in chosen:
+      entry = chosen[role]
+    elif role in candidates:
+      entry = { _FIELD_EXPERT: _pick_expert(role, candidates[role], implementer_domain = implementer_domain,
+                                            key = key),
+                _FIELD_MATERIAL: shipped[role][_FIELD_MATERIAL], _FIELD_ORIGIN: _ORIGIN_DERIVED }
+    if entry is not None:
+      entries.append({ _FIELD_ROLE: role, **entry })
+
+  # each entry gains the agent and aspects of its expert and the guideline paths of its role
+  effective = effective_record(vault, key, products = registry,
+                               catalog_guidelines = build_catalog_guidelines(settings))
+  specialists: list[dict] = []
+  warnings: list[str] = []
+  for entry in entries:
+    expert = entry[_FIELD_EXPERT]
+    registration = experts.get(expert) or {}
+    agent = registration.get(_AGENT_KEY)
+
+    # guard: an expert with no agent cannot be launched, so the list cannot name it
+    if not isinstance(agent, str) or not agent:
+      raise SpecialistsError(f"expert '{expert}' for specialist '{entry[_FIELD_ROLE]}' has no agent", key = key)
+
+    # the domain craft the expert declares, as reference keys
+    aspects = registration.get(_FIELD_ASPECTS, [])
+
+    # guard: aspects that are not a list of reference keys are malformed information, never an empty list
+    if not isinstance(aspects, list) or not all(isinstance(aspect, str) for aspect in aspects):
+      raise SpecialistsError(f"expert '{expert}' for specialist '{entry[_FIELD_ROLE]}' has aspects that are not a "
+                             f"list of reference keys: {aspects!r}", key = key)
+
+    # the role's guideline paths; a declared path with no file is warned, never listed
+    paths, missing = gate_dispatch.collect_guideline_paths(vault, effective, entry[_FIELD_ROLE])
+    warnings.extend(missing)
+    specialists.append({ _FIELD_ROLE: entry[_FIELD_ROLE], _FIELD_EXPERT: expert, _FIELD_AGENT: agent,
+                         _FIELD_ASPECTS: list(aspects), _FIELD_MATERIAL: entry[_FIELD_MATERIAL],
+                         _FIELD_GUIDELINES: paths, _FIELD_ORIGIN: entry[_FIELD_ORIGIN] })
+
+  # the list and the warnings, each warning once
+  return { _ANSWER_KEY: key, _ANSWER_SPECIALISTS: specialists, _ANSWER_WARNINGS: list(dict.fromkeys(warnings)) }
+
+
+def build_specialists_by_path(vault: Path, rel_path: str) -> dict:
+  """
+  Build the specialist list of the product that owns the releases a path ships in.
+
+  Guarantees:
+    - A path no product covers, or a product with no release owner, raises `SpecialistsError`; it never yields
+      an empty or null answer.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`; the settings are read from it as the expert
+      runtime dispatches from them, the local overlay merged on.
+    rel_path: Doc path, content-root-relative or repo-relative as `resolve_product_by_path` reads it.
+
+  Returns:
+    The release owner's answer as `build_specialists` gives it, keyed by the owner.
+
+  Raises:
+    SpecialistsError: If no product covers the path, the product has no release owner, or the owner's list
+      fails.
+    ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
+      when no core CLI resolves.
+  """
+
+  # Contract:
+  # A path no product covers, or a product with no release owner, raises `SpecialistsError`; the call never
+  # returns an empty or null answer, so a caller can tell a failed lookup from a product with no specialists.
+
+  settings = read_runtime_settings(vault)
+  registry = filter_products(settings)
+  key, _record = resolve_product_by_path(vault, rel_path, products = registry)
+
+  # guard: a path no product covers has no list
+  if key is None:
+    raise SpecialistsError(f"no product covers '{rel_path}'", key = None)
+
+  # the product that owns the releases the path ships in
+  owner = find_release_owner_key(vault, key, products = registry)
+
+  # guard: a design-only product owns no release, so no build orders material for it
+  if owner is None:
+    raise SpecialistsError(f"product '{key}' has no release owner", key = key)
+  return build_specialists(vault, owner, settings = settings)
 
 
 def _source_paths(record: object) -> list[str]:
@@ -553,16 +1063,21 @@ def find_all_own_source_conflicts(vault: Path, *, products: dict | None = None) 
   return conflicts
 
 
-def effective_record(vault: Path, key: str, *, products: dict | None = None) -> dict:
+def effective_record(vault: Path, key: str, *, products: dict | None = None,
+                     catalog_guidelines: RoleGuidelines | None = None) -> dict:
   """
   Resolve a product's record with every undeclared inheritable key taken from its ancestors.
+
+  Guarantees:
+    - With `catalog_guidelines` given, the settings file's `spec.guidelines` are not read, and the mapping the
+      caller passed is never modified.
 
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     key: The product's compound-key.
     products: An already-loaded products registry covering only the products; None reads one
-      from the settings file. Either way, the catalog-wide `spec.guidelines` are always read
       from the settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the settings file.
 
   Returns:
     The merged record — `asset_types` merged key-by-key outermost first, `guidelines` as the
@@ -571,7 +1086,16 @@ def effective_record(vault: Path, key: str, *, products: dict | None = None) -> 
     with no guidelines declared of its own still carries a `guidelines` key when the catalog
     declares any, every other inheritable scalar from the nearest declaring product, `source` /
     `dependencies` / `icon` / `color` / `spec_path` the product's own only. `{}` for an unknown key.
+
+  Raises:
+    ValueError: If the settings file is read for the registry or the catalog-wide guidelines and cannot be read, is
+      not valid JSON, not UTF-8 text or not a JSON object; a `spec_paths.SettingsError` naming the file.
   """
+
+  # Contract:
+  # With `catalog_guidelines` given, the settings file's `spec.guidelines` are not read and the given mapping
+  # is the catalog-wide layer; the caller's mapping and its lists are never modified.
+
   registry = _registry(vault, products)
   own = registry.get(key)
 
@@ -588,7 +1112,10 @@ def effective_record(vault: Path, key: str, *, products: dict | None = None) -> 
   # top of the catalog share no ancestor, so this is the one place a guideline reaches them all.
 
   # the catalog's own guidelines seed the per-role union
-  guidelines: dict[str, list[str]] = load_catalog_guidelines(vault)
+  guidelines: RoleGuidelines = (
+      load_catalog_guidelines(vault) if catalog_guidelines is None
+      else { role: list(paths) for role, paths in catalog_guidelines.items() }
+  )
 
   # the registry is resolved once above and handed down, so the whole chain costs no extra read
   for link in (*ancestor_chain(vault, key, products = registry), key):
@@ -631,8 +1158,11 @@ def effective_record(vault: Path, key: str, *, products: dict | None = None) -> 
   return merged
 
 
-def effective_record_by_path(vault: Path, rel_path: str, *,
-                             products: dict | None = None) -> tuple[str | None, dict | None]:
+def effective_record_by_path(vault: Path,
+                             rel_path: str,
+                             *,
+                             products: dict | None = None,
+                             catalog_guidelines: RoleGuidelines | None = None) -> tuple[str | None, dict | None]:
   """
   Attribute a path to its innermost product and return that product's effective record.
 
@@ -640,12 +1170,17 @@ def effective_record_by_path(vault: Path, rel_path: str, *,
     vault: Vault root directory holding `.claude/lazy.settings.json`.
     rel_path: Doc path to attribute, content-root-relative or repo-relative as `resolve_product_by_path` reads it.
     products: An already-loaded products registry covering only the products; None reads one
-      from the settings file. Either way, the catalog-wide `spec.guidelines` are always read
       from the settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; with it given, the settings file's
+      `spec.guidelines` are not read. None reads them from the settings file.
 
   Returns:
     A `(key, record)` pair as `resolve_product_by_path` returns it, the record replaced by
-    `effective_record(vault, key)`; `(None, None)` when no product covers the path.
+    `effective_record` for that key; `(None, None)` when no product covers the path.
+
+  Raises:
+    ValueError: If the settings file is read for the registry or the catalog-wide guidelines and cannot be read, is
+      not valid JSON, not UTF-8 text or not a JSON object; a `spec_paths.SettingsError` naming the file.
   """
   registry = _registry(vault, products)
   key, _record = resolve_product_by_path(vault, rel_path, products = registry)
@@ -654,9 +1189,9 @@ def effective_record_by_path(vault: Path, rel_path: str, *,
   if key is None:
     return None, None
 
-  # the products registry is resolved once above and handed down; only the catalog-wide
-  # guidelines are read from the settings file again
-  return key, effective_record(vault, key, products = registry)
+  # the products registry is resolved once above and handed down; the catalog-wide guidelines are read from the
+  # settings file again unless the caller handed them in
+  return key, effective_record(vault, key, products = registry, catalog_guidelines = catalog_guidelines)
 
 
 def owning_product_root(path: Path) -> Path | None:
@@ -724,15 +1259,36 @@ def main(argv: list[str]) -> int:
   """
   Answer one product-configuration query chosen by the command line and print the result as JSON.
 
+  Guarantees:
+    - A failure of `specialists`, `specialists-by-path` or `release-implementer` exits 1 and prints an object whose
+      `specialists` (`implementer` for `release-implementer`) is null and whose `error` carries the reason, never
+      an empty answer; the result is read only on exit 0.
+
+  Notes:
+    - The `specialists` and `specialists-by-path` verbs print each guideline warning to standard error, never
+      inside the JSON answer.
+
   Args:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code, always 0; an unknown key or a path no product owns prints a null result and still exits 0.
+    Exit code: 0 when the query is answered, including a null result for an unknown key, a path no product owns or
+    a product with no release implementer; 1 when `specialists` or `specialists-by-path` finds missing or malformed
+    information, or when one of those verbs or `release-implementer` meets an unreadable or malformed settings
+    file, after printing `{"key", "specialists": null, "error"}`, or `{"key", "implementer": null, "error"}` for
+    `release-implementer`; `key` is the asked key, except null for an unreadable settings file under
+    `specialists-by-path`.
 
   Raises:
     SystemExit: When the command line is not a valid verb with its positional argument.
   """
+
+  # Contract:
+  # A failure of the `specialists`, `specialists-by-path` or `release-implementer` verbs is never an empty answer:
+  # the verb exits 1 and prints an object whose `specialists` (or, for `release-implementer`, `implementer`) is
+  # null and whose `error` carries the reason, so a caller tells a failure from an empty list or a product with
+  # no implementer by the exit code and the null value, and reads the result only on exit 0.
+
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs resolve-product")
   # waiver: argparse namespace attribute name for the chosen verb, read back only by this function
@@ -744,6 +1300,7 @@ def main(argv: list[str]) -> int:
       (_MODE_BY_KEY, "key"), (_MODE_BY_PATH, "relpath"),
       (_MODE_EFFECTIVE, "key"), (_MODE_EFFECTIVE_BY_PATH, "relpath"),
       (_MODE_ANCESTOR_CHAIN, "key"), (_MODE_OWN_SOURCE_CONFLICTS, ""), (_MODE_RELEASE_IMPLEMENTER, "key"),
+      (_MODE_SPECIALISTS, "key"), (_MODE_SPECIALISTS_BY_PATH, "relpath"),
   ):
     # waiver: argparse CLI signature -- subcommand and its positional argument name
     parsed = sub.add_parser(verb)
@@ -767,8 +1324,37 @@ def main(argv: list[str]) -> int:
   if args.mode == _MODE_ANCESTOR_CHAIN:
     print(json.dumps({ "key": args.key, "chain": ancestor_chain(vault, args.key) }))
     return 0
+
+  # the release-implementer verb answers unreadable settings with an error, like the specialist verbs
   if args.mode == _MODE_RELEASE_IMPLEMENTER:
-    print(json.dumps({ "key": args.key, "implementer": find_release_implementer(vault, args.key) }))
+    try:
+      implementer = find_release_implementer(vault, args.key)
+    except SettingsError as error:
+      print(json.dumps({ _ANSWER_KEY: args.key, _ANSWER_IMPLEMENTER: None, _ANSWER_ERROR: str(error) }))
+      return 1
+    print(json.dumps({ _ANSWER_KEY: args.key, _ANSWER_IMPLEMENTER: implementer }))
+    return 0
+
+  # the specialist verbs fail loudly: missing information is an error, never an empty answer
+  if args.mode in (_MODE_SPECIALISTS, _MODE_SPECIALISTS_BY_PATH):
+    try:
+      if args.mode == _MODE_SPECIALISTS:
+        answer = build_specialists(vault, args.key)
+      else:
+        answer = build_specialists_by_path(vault, args.relpath)
+    except SpecialistsError as error:
+      print(json.dumps({ _ANSWER_KEY: error.key, _ANSWER_SPECIALISTS: None, _ANSWER_ERROR: str(error) }))
+      return 1
+    # unreadable settings are missing information too; no product resolved by path, the key asked for by key
+    except SettingsError as error:
+      asked = args.key if args.mode == _MODE_SPECIALISTS else None
+      print(json.dumps({ _ANSWER_KEY: asked, _ANSWER_SPECIALISTS: None, _ANSWER_ERROR: str(error) }))
+      return 1
+
+    # a declared guideline with no file is reported beside the answer, never inside it
+    for warning in answer.pop(_ANSWER_WARNINGS):
+      print(warning, file = sys.stderr)
+    print(json.dumps(answer))
     return 0
 
   # the by-key verbs answer straight from the products registry

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing the three-skill iconize block: iconize-install scaffolds plugins + icon-map + hooks; iconize-config edits the icon-map registry; iconize-sync runs the worker to write iconize_icon/iconize_color into note frontmatter; Iconize plugin and iconize-reloader plugin then paint icons on screen from frontmatter and data.json respectively."
@@ -49,6 +49,8 @@ Once the system is scaffolded, `/lazy-obsidian.iconize-config` is how you grow t
 
 The PostToolUse hook (on Write/Edit) plus the `lazy-obsidian.repaint` daemon routine (repaints after each commit via `reconcile-commit`, when a daemon runs) mean you rarely need to call `iconize-sync` directly — icons stay current as you work. The only time you call it explicitly is after a registry change (`reconcile`) or a bulk operation that bypassed the hook (`reconcile-dirty`). Nothing stages into the git index on your behalf — you stage whatever a sync reports as touched.
 
+Iconize's `data.json` holds three kinds of content, and they are treated differently when the vault's Obsidian config is captured and deployed (`/lazy-obsidian.capture`, `/lazy-obsidian.deploy`). Its `settings` and `rules` blocks travel in the vault manifest like any other plugin's settings. The per-path icon entries do not: the iconize-reloader plugin rebuilds them from your notes' frontmatter. The list of recently used icons (`recentlyUsedIcons`) is each device's own personal state — it is no longer captured into the manifest, never deployed to another machine, and never reported as drift by `/lazy-obsidian.audit`. A manifest captured by an older version that still carries the list does not bring it back on deploy. Picking icons on one machine therefore never changes another machine's recent-icons picker.
+
 ## Common adjustments
 
 **Adding or changing icons for a new frontmatter value.** Run `/lazy-obsidian.iconize-config` and pick the registry that holds the value. The wizard prompts for the key, icon name, and color. After saving, run `/lazy-obsidian.iconize-sync reconcile` to apply everywhere.
@@ -64,6 +66,8 @@ The PostToolUse hook (on Write/Edit) plus the `lazy-obsidian.repaint` daemon rou
 **Editing matcher logic.** The icon-map `matchers` array controls which frontmatter values resolve to which registry entries. Matchers are structural and benefit from seeing the whole file at once — edit `.claude/iconize/obsidian-icon-map.json` directly for that section. Only registry entries (the `registries` key) are managed through `/lazy-obsidian.iconize-config`.
 
 **A plugin ships its own icon registry.** You don't need to add anything to your local icon-map for that. `/lazy-obsidian.iconize-install`'s report lists every plugin registry the worker currently sees, so you can confirm one landed after installing or updating a plugin.
+
+**Your recent icons differ between machines.** That is by design. The recently used icons list lives only in each device's own Iconize `data.json`; capture skips it, deploy does not write it, and audit does not flag a difference in it. Shared icon behaviour comes from the icon-map and your notes' frontmatter, not from that list.
 
 **Migrating off the old pre-commit shim.** Vaults set up before the 3.0 line used a `.githooks/pre-commit` script to repaint icons at commit time. Re-run `/lazy-obsidian.iconize-install` — it deletes the shim (verified by its own `HOOK_VERSION` marker) and unsets `core.hooksPath` if that leaves `.githooks/` empty. Commit-time repaint continues through the `lazy-obsidian.repaint` daemon routine instead.
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -43,17 +44,23 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import SiblingDoc, SpecKey  # noqa: E402
+
 
 
 # Job-bundle layout, mirrored file-wise from `lazycortex-core`'s runtime rather than imported
@@ -584,12 +591,13 @@ def _indexed(repo: Path, paths: list[str]) -> set[str]:
   if not repo.is_dir():
     return set()
 
-  # one listing answers for every path at once, in the same repo-relative spelling the caller used
+  # one listing answers for every path at once, in the same repo-relative spelling the caller used; the names
+  # are captured as bytes and decoded the way the file system spells them, so none is changed
   listing = subprocess.run(
       ["git", "ls-files", "-z", "--", *paths],
-      cwd = str(repo), check = False, capture_output = True, text = True, encoding = "utf-8",
+      cwd = str(repo), check = False, capture_output = True,
   )
-  return {path for path in listing.stdout.split("\0") if path}
+  return {path for path in os.fsdecode(listing.stdout).split("\0") if path}
 
 
 def _unstage(repo: Path, paths: list[str]) -> None:

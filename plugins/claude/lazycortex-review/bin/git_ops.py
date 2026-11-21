@@ -13,7 +13,8 @@ Commit functions all share the same shape:
   (mutated by `body.py` / `banner.py`).
 - They commit under an explicit pathspec, never the shared index as a
   whole: the path argument, plus the extra paths and icon repaints that
-  `commit_mechanical` folds in.
+  `commit_mechanical` folds in. Every path is taken literally, never as a
+  pattern.
 - The commit subject is taken from the `message` argument verbatim;
   the `Doc-Review-Phase` trailer is appended in the commit body,
   separated by a blank line.
@@ -70,6 +71,25 @@ _GIT_LOG_FORMAT = "%H%x00%an%x00%ae%x00%s%x00%B%x1e"
 # waiver: external Claude Code registry path, not an internal key
 _INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 
+# The directory a repository that authors plugins keeps them under, relative to its root.
+_PLUGIN_TREE_REL = "plugins/claude"
+
+# The entry kinds of git's machine-readable status that describe a tracked file, each with the number of
+# space-separated fields standing before the path: a changed file, a renamed or copied one, an unmerged one.
+_STATUS_RENAMED = "2"
+_STATUS_FIELDS_BEFORE_PATH = { "1": 8, _STATUS_RENAMED: 9, "u": 10 }
+
+# How git's undecodable output bytes are read when the output is messages: replaced, so odd output never raises.
+_DECODE_MESSAGES = "replace"
+
+# How git's undecodable output bytes are read when the output is path names: escaped, so a name whose bytes are
+# not UTF-8 text comes back the way the filesystem layer decodes it.
+_DECODE_PATHS = "surrogateescape"
+
+# Git's per-path magic prefix that makes one path argument a literal name. A git call that can run a hook marks its
+# paths with it; the global `--literal-pathspecs` option would reach the hook's environment.
+_LITERAL_MAGIC = ":(literal)"
+
 
 # -------------------------------------------------------- data structures
 
@@ -107,6 +127,7 @@ def _run_git(
     *args: str,
     env: Mapping[str, str] | None = None,
     capture: bool = True,
+    errors: str = _DECODE_MESSAGES,
 ) -> str:
   """
   Run a `git` command against `repo` and return its stripped stdout.
@@ -116,28 +137,46 @@ def _run_git(
     args: Positional `git` arguments, in order.
     env: Extra environment variables to overlay on the current process environment.
     capture: Whether to capture stdout/stderr; when `False`, output is inherited.
+    errors: How output bytes that are not UTF-8 text are decoded by this function itself: replaced for messages (the
+      default), or kept as surrogate escapes when the caller reads paths.
 
   Returns:
-    The command's stdout with surrounding whitespace stripped.
+    The command's stdout, decoded by this function and stripped of surrounding whitespace. A listed name comes back
+    exactly as git wrote it: a carriage return inside it stays a carriage return.
 
   Raises:
     GitOpsError: If the `git` command exits with a non-zero status.
   """
+  # the output is captured as bytes and decoded here: text mode would turn a carriage return inside a listed name
+  # into a line feed
   try:
     proc = subprocess.run(
         [ "git", "-C", str(repo), *args ],
         check = True,
         capture_output = capture,
-        text = True,
-        # waiver: stdlib encoding/mode idiom
-        env = { **os.environ, **(env or {}) }, encoding = "utf-8",
+        env = { **os.environ, **(env or {}) },
     )
   except subprocess.CalledProcessError as error:
     raise GitOpsError(
         f"git command failed: {' '.join(args)}\n"
-        f"  stdout: {error.stdout!r}\n  stderr: {error.stderr!r}"
+        f"  stdout: {_decode(error.stdout, errors)!r}\n  stderr: {_decode(error.stderr, errors)!r}"
     ) from error
-  return (proc.stdout or "").strip()
+  return (_decode(proc.stdout, errors) or "").strip()
+
+
+def _decode(raw: bytes | None, errors: str) -> str | None:
+  """
+  Decode captured git output as UTF-8 text without translating any line ending.
+
+  Args:
+    raw: The captured bytes, or `None` when the stream was not captured.
+    errors: How bytes that are not UTF-8 text are decoded, as `bytes.decode` names the modes.
+
+  Returns:
+    The decoded text, with every carriage return and line feed kept as it was; `None` when the stream was not
+    captured.
+  """
+  return None if raw is None else raw.decode("utf-8", errors = errors)
 
 
 def _build_message(
@@ -191,6 +230,19 @@ def _author_flags(author: Mapping[str, str]) -> list[str]:
   ]
 
 
+def _literal(path: Path | str) -> str:
+  """
+  Mark one path argument of a git call as a literal name.
+
+  Args:
+    path: The path as the git call would pass it.
+
+  Returns:
+    The path argument with git's literal magic prefix.
+  """
+  return f"{_LITERAL_MAGIC}{path}"
+
+
 def _add_and_commit(
     repo: Path,
     path: Path,
@@ -208,7 +260,7 @@ def _add_and_commit(
     author: Mapping with `name` and `email` keys for the commit author identity.
     message_text: Full commit message, trailers included.
     extra_paths: Repo-relative paths already staged by the caller, folded into the
-      commit's pathspec alongside `path`.
+      commit's pathspec alongside `path`; each is taken literally, never as a pattern.
 
   Returns:
     Full SHA of the newly created commit.
@@ -221,14 +273,15 @@ def _add_and_commit(
   # therefore carries exactly the document it commits plus the extra paths its caller staged
   # for it. Content anyone else has staged stays in the index, unpublished.
 
-  # stage the document, then commit under the explicit pathspec
+  # stage the document, then commit under the explicit pathspec; every path is one literal name, never a pattern,
+  # marked per path so the hooks these calls run see no global pathspec option in their environment
   # waiver: git CLI vocabulary
-  _run_git(repo, "add", "--", str(path.relative_to(repo)))
+  _run_git(repo, "add", "--", _literal(path.relative_to(repo)))
   _run_git(
       repo, *_author_flags(author),
       # waiver: git CLI vocabulary
       "commit", "-q", "-m", message_text,
-      "--", str(path.relative_to(repo)), *extra_paths,
+      "--", _literal(path.relative_to(repo)), *( _literal(extra) for extra in extra_paths ),
   )
   # waiver: git CLI vocabulary
   return _run_git(repo, "rev-parse", "HEAD")
@@ -354,6 +407,181 @@ def require_core_cli() -> Path:
   return cli
 
 
+def resolve_plugin_cli(name: str, *, repo: Path) -> Path:
+  """
+  Resolve a sibling plugin's CLI file by the plugin's name, or fail.
+
+  Guarantees:
+    - The lookup order is fixed: the `$LAZYCORTEX_PLUGIN_DIRS` entries, then the dev-vault sibling plugin tree, then
+      the repository's own plugin tree, then the install registry. The first stage that yields an existing file
+      wins, so a checkout runs the sources at hand and never an installed copy found first.
+    - When no stage resolves the CLI, the call raises `RuntimeError` naming every stage and where it looked; it
+      never returns a fallback path.
+
+  Args:
+    name: The plugin's name, which is also the file name of its CLI.
+    repo: The repository root whose own plugin tree is searched.
+
+  Returns:
+    Path of the plugin's CLI file.
+
+  Raises:
+    RuntimeError: When no stage finds the CLI file; the message names every stage and where it looked.
+  """
+
+  # Contract:
+  # The lookup order is fixed: the `$LAZYCORTEX_PLUGIN_DIRS` entries, then the dev-vault sibling plugin tree, then
+  # the repository's own plugin tree, then the install registry. The first stage that yields an existing file wins,
+  # so a checkout runs the sources at hand and never an installed copy found first.
+
+  # Contract:
+  # When no stage resolves the CLI, the call raises `RuntimeError` naming every stage and where it looked. It NEVER
+  # returns a fallback path.
+
+  # env stage — the plugin source trees the runtime daemon exports come first
+  exported = os.environ.get(EnvVar.PLUGIN_DIRS, "")
+  for entry in exported.split(os.pathsep):
+    # guard: empty path segment (from a trailing/double pathsep) — skip it
+    if not entry:
+      continue
+    cli = Path(entry) / Paths.BIN_DIR / name
+    if cli.is_file():
+      return cli
+
+  # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so the sibling plugin's tree is two
+  # levels up
+  sibling = Path(__file__).resolve().parents[2] / name / Paths.BIN_DIR / name
+  if sibling.is_file():
+    return sibling
+
+  # repo stage — a repository that authors the plugin carries it under its own plugin tree
+  authored = repo / _PLUGIN_TREE_REL / name / Paths.BIN_DIR / name
+  if authored.is_file():
+    return authored
+
+  # registry stage — the install root Claude Code's plugin registry records for the plugin
+  root = read_installed_plugin_root(name)
+  installed = None if root is None else root / Paths.BIN_DIR / name
+  if installed is not None and installed.is_file():
+    return installed
+
+  # no stage found the CLI: the raise names each stage and where it looked
+  raise RuntimeError(
+      f"{name} CLI not resolvable: ${EnvVar.PLUGIN_DIRS} ({exported or 'unset'}) yields no {Paths.BIN_DIR}/{name}, "
+      f"the dev-vault sibling {sibling} is absent, the repository tree {authored} is absent, and "
+      f"~/{_INSTALLED_PLUGINS_REL} records no {name} install with a {Paths.BIN_DIR}/{name} entry."
+  )
+
+
+def read_status(repo: Path, paths: list[Path]) -> list[str]:
+  """
+  Report which of the given paths git does not hold unchanged.
+
+  Guarantees:
+    - Each given path is taken literally, never as a pattern; a name that carries pattern characters says nothing
+      about any other file.
+    - An untracked or ignored file among the given paths is reported whatever the repository's own status settings
+      say, and is named by its own path, never by an ignored folder above it.
+    - A renamed file is reported under both its new path and its original path.
+    - A reported name is the name as the file system spells it: a name whose bytes are not UTF-8 text comes back with
+      those bytes kept as surrogate escapes (what `os.fsdecode` gives), never with a replacement character, so it
+      equals the path the caller asked with.
+
+  Args:
+    repo: Absolute path to the repository root.
+    paths: The paths to ask about, each taken literally.
+
+  Returns:
+    The repo-relative path of each given path that is untracked, ignored, modified, staged or deleted, plus the
+    original path of a renamed file, also when it was not among the given paths; empty when every given path is
+    either absent and unknown to git or tracked and unmodified. Names come back as the file system spells them
+    (undecodable bytes as surrogate escapes).
+
+  Raises:
+    GitOpsError: If the `git` command exits with a non-zero status.
+    OSError: If `git` cannot be launched.
+  """
+
+  # Contract:
+  # Each given path is taken literally, never as a pattern; a name that carries pattern characters says nothing
+  # about any other file.
+
+  # Contract:
+  # An untracked or ignored file among the given paths is reported whatever the repository's own status settings
+  # say, and is named by its own path, never by an ignored folder above it.
+
+  # Contract:
+  # A renamed file is reported under both its new path and its original path.
+
+  # Contract:
+  # A reported name is the name as the file system spells it: a name whose bytes are not UTF-8 text comes back with
+  # those bytes kept as surrogate escapes (what `os.fsdecode` gives), never with a replacement character, so it
+  # equals the path the caller asked with.
+
+  # each path is one literal name, never a pattern; untracked and ignored files are asked for whatever the
+  # repository's own settings say, and one by one, so a file is named by its own path and not by a folder;
+  # the machine format with NUL ends gives every path as it is, with no quoting, and a name whose bytes are not
+  # UTF-8 text is read the way the filesystem layer decodes it
+  # waiver: git CLI vocabulary
+  out = _run_git(
+      repo, "--literal-pathspecs", "--no-optional-locks", "status", "--porcelain=v2", "-z", "--ignored",
+      "--untracked-files=all", "--", *( str(path) for path in paths ),
+      errors = _DECODE_PATHS,
+  )
+  dirty: list[str] = []
+  entries = iter(out.split("\0"))
+
+  # every entry starts with its kind, which says how many fields stand before the path
+  for entry in entries:
+    kind = entry[:1]
+
+    # an untracked or ignored file: the kind, a space, the path
+    # waiver: git status v2 entry kinds
+    if kind in ( "?", "!" ):
+      dirty.append(entry[2:])
+
+    # a changed tracked file, a renamed one, an unmerged one
+    # waiver: git status v2 entry kinds
+    elif kind in _STATUS_FIELDS_BEFORE_PATH:
+      dirty.append(entry.split(" ", _STATUS_FIELDS_BEFORE_PATH[kind])[-1])
+
+      # a rename concerns two paths: the old one follows as an entry of its own and is as changed as the new
+      if kind == _STATUS_RENAMED:
+        dirty.append(next(entries, ""))
+  return dirty
+
+
+def restore_from_head(repo: Path, path: Path) -> None:
+  """
+  Put one tracked file back to its committed version in the working tree.
+
+  Guarantees:
+    - The path is taken literally, never as a pattern; a name that carries pattern characters never restores any
+      other file.
+    - Only the working tree is written; the index is left as it is.
+
+  Args:
+    repo: Absolute path to the repository root.
+    path: The file to restore.
+
+  Raises:
+    GitOpsError: If the `git` command exits with a non-zero status.
+    OSError: If `git` cannot be launched.
+  """
+
+  # Contract:
+  # The path is taken literally, never as a pattern; a name that carries pattern characters NEVER restores any
+  # other file.
+
+  # Contract:
+  # Only the working tree is written; the index is left as it is.
+
+  # the path is one literal name, never a pattern, marked per path so no global pathspec option reaches a hook;
+  # only the working tree is written, the index is left as it is
+  # waiver: git CLI vocabulary
+  _run_git(repo, "restore", "--source=HEAD", "--worktree", "--", _literal(path))
+
+
 def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   """
   Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op.
@@ -416,6 +644,8 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
         # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
         [ sys.executable, str(cli), "sync-paths", *paths ],
         cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
     )
 
     # guard: a failing worker must never block the caller's commit
@@ -447,16 +677,26 @@ def commit_mechanical(
   `extra_paths`: the attachments a landing put beside the document ride the document's own
   commit rather than a second one.
 
+  Guarantees:
+    - The document and every extra path are taken literally, never as a pattern: a name that carries pattern
+      characters (`docs/fig?.png`) stages and commits only the file of exactly that name, never a sibling it would
+      match as a pattern.
+
   Args:
     repo: Absolute path to the repository root.
     path: Absolute path to the document being committed.
     author: Mapping with `name` and `email` keys for the commit author identity.
     message: Commit subject, written verbatim.
-    extra_paths: Repo-relative paths to commit alongside `path`.
+    extra_paths: Repo-relative paths to commit alongside `path`; each is taken literally, never as a pattern.
 
   Returns:
     Full SHA of the new commit.
   """
+
+  # Contract:
+  # The document and every extra path are taken literally, never as a pattern: a name that carries pattern
+  # characters (`docs/fig?.png`) stages and commits only the file of exactly that name, never a sibling it would
+  # match as a pattern.
 
   # Domain(review.coordinator):
   # # Icon repaint rides the mechanical commit
@@ -472,7 +712,7 @@ def commit_mechanical(
   extras = tuple(dict.fromkeys([*extra_paths, *repainted]))
   for extra in extras:
     # waiver: git CLI vocabulary
-    _run_git(repo, "add", "--", extra)
+    _run_git(repo, "add", "--", _literal(extra))
 
   # the mechanical-phase trailer marks the commit as the system's own for the recogniser
   return _add_and_commit(
@@ -546,12 +786,15 @@ def _trailer_block(body: str, pattern: re.Pattern[str]) -> list[tuple[str, str]]
     Pairs of key and value in the order they appear in the body, or an empty list when the body has no valid
     trailer block.
   """
-  # the trailer block is the contiguous run of lines matching `pattern` at the end of the body
+  # the trailer block is the contiguous run of lines matching `pattern` at the end of the body; the walk starts at
+  # the last line and steps over the blank lines a message editor leaves at the end
   lines = body.splitlines()
-  collected: list[tuple[str, str]] = []
   idx = len(lines) - 1
   while idx >= 0 and lines[idx].strip() == "":
     idx -= 1
+
+  # trailer-shaped lines are collected upward until the first line that is not one, so they come out last first
+  collected: list[tuple[str, str]] = []
   while idx >= 0:
     match = pattern.match(lines[idx])
     if not match:
@@ -596,6 +839,8 @@ def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
 
   Guarantees:
     - Commits are ordered most-recent-first.
+    - The path is taken literally, never as a pattern: a name carrying pattern characters, such as `docs/fig?.md`,
+      returns only the commits that touched exactly that file.
 
   Args:
     repo: Absolute path to the repository root.
@@ -609,11 +854,17 @@ def read_history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
   # Contract:
   # Returned commits are ordered most-recent-first (reverse-chronological).
 
+  # Contract:
+  # The path is taken literally, NEVER as a pattern: a name carrying pattern characters, such as `docs/fig?.md`,
+  # returns only the commits that touched exactly that file.
+
+  # the path comes from disk, so it is one literal name, never a pattern; reading history runs no hook, so the
+  # global option is safe here
   rel = str(path.relative_to(repo)) if path.is_absolute() else str(path)
   out = _run_git(
       repo,
       # waiver: git CLI vocabulary
-      "log",
+      "--literal-pathspecs", "log",
       f"--format={_GIT_LOG_FORMAT}",
       "--",
       rel,

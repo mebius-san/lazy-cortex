@@ -25,9 +25,11 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from apply_request import _K, parse_frontmatter  # noqa: E402
 
@@ -81,15 +83,19 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
 
   Raises:
     OSError: When a request cannot be read or written.
-    ValueError: When the settings file or a request cannot be decoded.
+    ValueError: When the settings file cannot be read, is not UTF-8 text, not valid JSON or not a JSON object, or a
+      request cannot be decoded.
   """
 
   # Contract:
-  # Only the `experts=` field of a `spawn-product` decision line, with the blanks ahead of it, leaves an open request;
-  # every other byte MUST stay. A closed request MUST never be written. A dry run MUST write no file, and running the
-  # verb again over its own output MUST change nothing.
+  # Only the `experts=` field of a `spawn-product` decision line, with the blanks ahead of it, leaves an open
+  # request; every other byte MUST stay. A closed request MUST never be written. A dry run MUST write no file, and
+  # running the verb again over its own output MUST change nothing.
 
+  # settings that cannot be read as a JSON object stop the migration here: the content root they would name is
+  # unknown, and the default one must never be migrated in its place
   settings_root = spec_paths.find_settings_root(repo)
+  spec_paths.require_valid_settings(settings_root)
   requests_dir = spec_paths.spec_content_root(settings_root) / _K.REQUESTS_DIR
   result: dict = { _CHANGED_KEY: [], _SKIPPED_KEY: [] }
 

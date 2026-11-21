@@ -14,7 +14,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 - `lazy-spec.install` — Ensure consumer spec dirs exist, register the `lazy-spec.gate-tick` routine, report whether a product is registered (registration is `lazy-spec.product-config`). Idempotent.
 - `lazy-spec.product-config` — Wizard to create or edit a product record in `lazy.settings.json[products]`; scaffolds folder-notes with icons and built-in review classes; auto-detects deps.
-- `lazy-spec.add-asset-type` — Declare a new asset type on a product (icon, start document, default tools and path) and settle its playbook; review coverage is inherited from the shared behavior-keyed classes.
+- `lazy-spec.add-asset-type` — Declare a new asset type on a product (icon, start document and default path) and settle its playbook; review coverage is inherited from the shared behavior-keyed classes.
 - `lazy-spec.create-from-code` — Generate product- or feature-level spec from an existing codebase via parallel Explore agents (code-bound products only).
 
 ## Authoring
@@ -64,7 +64,7 @@ See `${CLAUDE_PLUGIN_ROOT}/references/` for the protocol contracts each skill re
 - [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through its approved design to its publication in a product release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/faq.md) — FAQ on products, nested products, assets, vision/design docs, gates, requests, decisions, coverage gaps, and spec lookups.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/plugins/claude/lazycortex-specs/help/faq.md) — FAQ on products, assets, vision/design docs, gates, release specialists, requests, decisions, coverage gaps, and spec lookups.
 
 Offline copy at `~/.claude/plugins/cache/.../plugins/claude/lazycortex-specs/help/`.
 <!-- help-block:end -->

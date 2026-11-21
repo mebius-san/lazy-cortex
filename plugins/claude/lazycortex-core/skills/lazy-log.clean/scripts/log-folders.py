@@ -134,7 +134,7 @@ def classify(root: Path, canonical: set[str], logged: set[str]) -> dict:
     A mapping with the folder names per bucket and the file statistics of every folder, in name order.
   """
 
-  # Domain(unfiled):
+  # Domain(log.run-folders):
   # # Run-log folder buckets
   # A run-log folder is judged by its name against the artifacts that exist, and the first rule that fits decides.
   # A folder named for an artifact that writes a run log is in use. A folder named for an artifact that writes

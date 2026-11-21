@@ -39,8 +39,6 @@ from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-err
 
 
 _SPEC_SECTION_KEY = "spec"
-_VAULT_ROOT_KEY = "vault_root"
-_DEFAULT_VAULT_ROOT = "specs"
 _PRODUCTS_KEY = "products"
 _SPEC_PATH_KEY = "spec_path"
 _GUIDELINES_KEY = "guidelines"
@@ -48,6 +46,9 @@ _WILDCARD_ROLE = "*"
 _ASSET_TYPES_KEY = "asset_types"
 _ASSET_TYPE_KEY = "spec_asset_type"
 _EXPERT_KEY_SEP = "."
+
+# The warning a refused spec content root leaves in place of the guidelines, filled with the refusal.
+_ROOT_REFUSED_TEMPLATE = "guidelines not collected: {error}"
 
 PATHS_KEY = "paths"
 WARNINGS_KEY = "warnings"
@@ -187,7 +188,8 @@ def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   Returns:
     A map with `paths` — repo-relative paths of every declared guideline that resolves to a
     file, in the order the guarantee states — and `warnings` naming every declared path that
-    does not. Both empty outside a registered product.
+    does not. Both empty outside a registered product, and when the settings cannot be read; a refused spec content
+    root leaves `paths` empty and `warnings` holding one warning naming the refusal.
   """
 
   # Contract:
@@ -214,20 +216,21 @@ def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   if settings_root is None:
     return { PATHS_KEY: [], WARNINGS_KEY: [] }
 
-  # Decision: one reader of the merged view, core's `settings-get --scope merged` through `core_settings`, replacing
-  # the direct file read — the local overlay is honoured (a guideline declared only in the overlay still counts) and every reader sees the same values
-
-  # the merged `spec` and `products` sections; an unreadable settings layer declares nothing
+  # guard: the merged `spec` and `products` sections; an unreadable settings layer declares nothing
   try:
     data = _core_settings.read_merged_sections(settings_root, _SPEC_SECTION_KEY, _PRODUCTS_KEY)
   except SettingsReadError:
     return { PATHS_KEY: [], WARNINGS_KEY: [] }
 
-  # the content root mirrors spec_paths.spec_content_root: settings_root / vault_root, default "specs"
+  # the catalog-wide section, empty when the settings carry none or no mapping
   spec_cfg = data.get(_SPEC_SECTION_KEY)
   spec_cfg = spec_cfg if isinstance(spec_cfg, dict) else {}
-  vault_root = spec_cfg.get(_VAULT_ROOT_KEY)
-  content_root = settings_root / (vault_root if isinstance(vault_root, str) and vault_root else _DEFAULT_VAULT_ROOT)
+
+  # guard: the spec content root the product paths resolve under; a refused root declares nothing and is reported
+  try:
+    content_root = _core_settings.spec_content_root(settings_root, spec_cfg)
+  except SettingsReadError as error:
+    return { PATHS_KEY: [], WARNINGS_KEY: [ _ROOT_REFUSED_TEMPLATE.format(error = error) ] }
 
   # every product whose root covers the document, outermost first, is a layer of guidelines
   chain = _build_product_chain(data, content_root, doc_path.parent)

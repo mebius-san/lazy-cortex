@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import posixpath
 import re
 import subprocess
@@ -1721,11 +1722,18 @@ class _RenameHints:
     """
     Name the stem a deleted term file lives on as.
 
+    Notes:
+      - A file of the deleting commit whose name is not valid UTF-8 is never a candidate and is reported on stderr,
+        but it still counts as a file the commit added or changed: when one was left out, neither the rule for
+        exactly one added file nor the rule for none added and exactly one changed settles the hint, and only a
+        document of the commit that moved its link can.
+      - A link target read from a document line that is not valid UTF-8 text is never returned as a hint.
+
     Args:
       stem: The stem whose file is gone.
 
     Returns:
-      The current stem, or `None` when the history names none.
+      The current stem as valid UTF-8 text, or `None` when the history names none.
     """
 
     # Domain(wiki.terms):
@@ -1758,17 +1766,26 @@ class _RenameHints:
       sha, _Git.PATHS, f"{_Git.LITERAL}{self._dir}",
     )
     fields = [ field for field in listing.split(_Git.NUL) if field ]
+    unnamed = 0
     for status, rel in zip(fields[::2], fields[1::2], strict = False):
       stem_of = self._stem_of(rel)
+
+      # a term file whose name is not UTF-8 cannot be named in a link: it is reported and is no candidate, yet
+      # it still counts as a file the commit added or changed
+      if stem_of is not None and not self._is_text(stem_of):
+        print(f"terms: skipped a file of '{self._dir}' whose name is not UTF-8: {rel!r}", file = sys.stderr)
+        unnamed += 1
+        continue
       if stem_of is not None and status == _Git.ADDED:
         added.append(stem_of)
       elif stem_of is not None and status == _Git.MODIFIED:
         modified.append(stem_of)
 
-    # one added file is the new name; no added and one changed file is the term it joined
-    if len(added) == 1:
+    # one added file is the new name; no added and one changed file is the term it joined; a file left out for
+    # its name makes either count uncertain, so neither rule settles it
+    if not unnamed and len(added) == 1:
       return added[0]
-    if not added and len(modified) == 1:
+    if not unnamed and not added and len(modified) == 1:
       return modified[0]
 
     # otherwise a document of the same commit that moved its link names the new file
@@ -1821,7 +1838,7 @@ class _RenameHints:
       stem: The deleted stem.
 
     Returns:
-      The new stems, one per moved link.
+      The new stems, one per moved link; a stem that is not valid UTF-8 text is left out.
     """
     moves: list[str] = []
     for before, after in zip(removed, added, strict = False):
@@ -1832,9 +1849,27 @@ class _RenameHints:
         continue
       moves.extend(
         new for old, new in zip(old_links, new_links, strict = True)
-        if old.casefold() == stem.casefold() and new.casefold() != stem.casefold()
+        if old.casefold() == stem.casefold() and new.casefold() != stem.casefold() and self._is_text(new)
       )
     return moves
+
+  @staticmethod
+  def _is_text(stem: str) -> bool:
+    """
+    Tell whether a stem is valid UTF-8 text.
+
+    Args:
+      stem: The stem to test.
+
+    Returns:
+      `True` when the stem is valid UTF-8 text, `False` otherwise.
+    """
+    # a stem taken from a line that is not valid text carries the odd byte as an unpaired mark
+    try:
+      stem.encode(_ENCODING)
+    except UnicodeEncodeError:
+      return False
+    return True
 
   def _format_file_path(self, stem: str) -> str:
     """
@@ -1879,9 +1914,10 @@ class _RenameHints:
     """
     try:
       proc = subprocess.run(
-        [ *_Git.EXE, *args ], cwd = str(self._repo), capture_output = True, text = True,
-        encoding = _ENCODING, check = False,
+        [ *_Git.EXE, *args ], cwd = str(self._repo), capture_output = True, check = False,
       )
     except OSError:
       return ""
-    return proc.stdout if proc.returncode == 0 else ""
+
+    # the output is taken as bytes and decoded without loss, so a path name that is not UTF-8 cannot fail the hint
+    return os.fsdecode(proc.stdout) if proc.returncode == 0 else ""

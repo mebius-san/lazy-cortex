@@ -31,11 +31,14 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import PlanReview  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -47,10 +50,12 @@ class WireKey:
   Attributes:
     EXPERT: The dispatched expert's name.
     PAYLOAD: The job payload dict (`kind` / `role` / `request`).
-    SOURCE: The repo-relative paths of the source files the pump copies at claim time.
-    CONTEXT: The repo-relative paths of the context files the pump copies at claim time.
+    SOURCE: The list of `{"path": ...}` entries naming the repo-relative source files the pump copies at claim time.
+    CONTEXT: The list of `{"path": ...}` entries naming the repo-relative context files the pump copies at claim
+      time.
     PROTOCOLS: The protocol references the expert reads on top of the dispatching routine's own.
-    RESULT: The list of expected result filenames.
+    RESULT: The list of `{"path": "result/<name>"}` entries naming the expected result files.
+    PATH: The key of one `source` / `context` / `result` entry that names its path.
     DEDUP_KEY: The dedup key guarding against a repeat dispatch.
     JOB_ID: The queued job's id, as returned by the CLI.
     STATUS: The dedup-hit token the CLI echoes back on its own response instead of a fresh
@@ -62,14 +67,16 @@ class WireKey:
   EXPERT = "expert"
   # The job payload dict (`kind` / `role` / `request`).
   PAYLOAD = "payload"
-  # The repo-relative paths of the source files the pump copies at claim time.
+  # The list of `{"path": ...}` entries naming the repo-relative source files the pump copies at claim time.
   SOURCE = "source"
-  # The repo-relative paths of the context files the pump copies at claim time.
+  # The list of `{"path": ...}` entries naming the repo-relative context files the pump copies at claim time.
   CONTEXT = "context"
   # The protocol references the expert reads on top of the dispatching routine's own.
   PROTOCOLS = "protocols"
-  # The list of expected result filenames.
+  # The list of `{"path": "result/<name>"}` entries naming the expected result files.
   RESULT = "result"
+  # The key of one `source` / `context` / `result` entry that names its path.
+  PATH = "path"
   # The dedup key guarding against a repeat dispatch.
   DEDUP_KEY = "dedup_key"
   # The queued job's id, as returned by the CLI.
@@ -120,6 +127,9 @@ class _SettingsKey:
   WILDCARD_ROLE = "*"
 
 
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
+
 # Product-record key holding a product's vault-relative spec-content path, per this bin/ tree's
 # own per-file small-constant convention (see `gate_tick.write_fm_list`'s docstring) — mirrors
 # `resolve_product.py`'s own private `_SPEC_PATH_KEY` rather than importing it.
@@ -149,7 +159,8 @@ def load_settings(repo: Path) -> dict:
     repo: The repository root holding `.claude/lazy.settings.json`.
 
   Returns:
-    Parsed settings dict, or `{}` when the file is absent or unparseable.
+    Parsed settings dict, or `{}` when the file is absent, unreadable, not UTF-8 text, not JSON, or not a JSON
+    object.
   """
   path = repo / _SETTINGS_REL
 
@@ -157,11 +168,13 @@ def load_settings(repo: Path) -> dict:
   if not path.is_file():
     return {}
 
-  # a malformed file is treated the same as an absent one — every caller already has a fallback
+  # guard: a malformed file is treated the same as an absent one — every caller already has a fallback;
+  # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
   try:
-    return json.loads(path.read_text(encoding = "utf-8"))
-  except json.JSONDecodeError:
+    settings = json.loads(path.read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
     return {}
+  return settings if isinstance(settings, dict) else {}
 
 
 def collect_guideline_paths(
@@ -308,9 +321,40 @@ def main_core_cli(argv: list[str]) -> int:
   return 0
 
 
+def build_path_entries(paths: list[str]) -> list[dict[str, str]]:
+  """
+  Wrap repo-relative paths into the entries a bundle's `source` and `context` carry.
+
+  Args:
+    paths: The repo-relative paths, in the order they travel.
+
+  Returns:
+    One `{"path": ...}` entry per path, in the same order.
+  """
+  # one object per path — the shape every path entry has on the wire
+  return [ { WireKey.PATH: path } for path in paths ]
+
+
+def build_result_entries(names: list[str]) -> list[dict[str, str]]:
+  """
+  Wrap result filenames into the entries a bundle's `result` carries.
+
+  Args:
+    names: The plain filenames the expert is expected to fill.
+
+  Returns:
+    One `{"path": "result/<name>"}` entry per filename, in the same order.
+  """
+  # a result entry names its file the way a response does: under the result bucket
+  return [ { WireKey.PATH: f"{WireKey.RESULT}/{name}" } for name in names ]
+
+
 def core_dispatch_job(repo: Path, bundle: dict) -> dict:
   """
   Invoke `lazycortex-core dispatch-job` with a JSON bundle on stdin.
+
+  Guarantees:
+    - A returned answer always names a job: it is a JSON object whose job id is a non-empty string.
 
   Args:
     repo: The repository root passed to the CLI as `$LAZY_REPO_ROOT`, so it resolves settings
@@ -318,12 +362,19 @@ def core_dispatch_job(repo: Path, bundle: dict) -> dict:
     bundle: The dispatch-job wire bundle (see `WireKey`), serialized to stdin as JSON.
 
   Returns:
-    Parsed JSON response dict from the CLI's stdout.
+    The parsed answer from the CLI's stdout: a JSON object whose job id is a non-empty string.
 
   Raises:
-    RuntimeError: When the CLI exits non-zero.
+    RuntimeError: When the CLI exits non-zero, or exits zero with valid JSON that is not an object or that carries
+      no non-empty string job id.
     json.JSONDecodeError: When the CLI exits zero but its stdout is not valid JSON.
   """
+
+  # Contract:
+  # A returned answer always names a job: it is a JSON object whose job id is a non-empty
+  # string. An exit-0 answer that is not an object, or carries no such id, raises
+  # `RuntimeError`, so no caller ever tracks a job it cannot name.
+
   cli = spec_paths.resolve_core_cli(repo)
   env = os.environ.copy()
   env[_REPO_ROOT_ENV] = str(repo)
@@ -336,14 +387,24 @@ def core_dispatch_job(repo: Path, bundle: dict) -> dict:
       capture_output = True,
       text = True,
       env = env,
-      check = False, encoding = "utf-8",
+      check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
   )
   if proc.returncode != 0:
     raise RuntimeError(
         f"lazycortex-core {_DISPATCH_VERB} exit={proc.returncode} "
         f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     )
-  return json.loads(proc.stdout)
+  answer = json.loads(proc.stdout)
+
+  # guard: an answer that is no JSON object names no job — the verb failed in all but its exit code
+  if not isinstance(answer, dict):
+    raise RuntimeError(f"lazycortex-core {_DISPATCH_VERB} answered no JSON object: stdout={proc.stdout!r}")
+  job_id = answer.get(WireKey.JOB_ID)
+
+  # guard: an answer that names no job gives the caller nothing to track
+  if not isinstance(job_id, str) or not job_id:
+    raise RuntimeError(f"lazycortex-core {_DISPATCH_VERB} answered without a job id: stdout={proc.stdout!r}")
+  return answer
 
 
 def cancel_job(repo: Path, expert: str, job_id: str) -> bool:
@@ -380,7 +441,7 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> bool:
         text = True,
         env = env,
         timeout = _CANCEL_TIMEOUT_S,
-        check = False, encoding = "utf-8",
+        check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
     answer = json.loads(proc.stdout)
   except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
@@ -436,7 +497,7 @@ def consume_stale_job(repo: Path, expert: str, job_id: str) -> None:
         text = True,
         env = env,
         timeout = PlanReview.START_TIMEOUT_S,
-        check = False, encoding = "utf-8",
+        check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
   # waiver: fire-and-forget best-effort retirement per the error-ledger contract — any subprocess
   # failure (crash, timeout) degrades to a silent no-op, never raises

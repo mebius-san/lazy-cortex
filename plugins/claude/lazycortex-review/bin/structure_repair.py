@@ -634,9 +634,8 @@ def repair(text: str, *, style: str) -> RepairResult:
   """
   Repair the structural breaks of a review markdown document without guessing.
 
-  Scope:
-    Restores only structure the text itself determines, so no author prose is lost. A break that cannot be settled
-    without a guess is left alone, and the document stays untouched.
+  Restores only structure the text itself determines, so no author prose is lost. A break that cannot be settled
+  without a guess is left alone, and the document stays untouched.
 
   Guarantees:
     - An `unclassified` result carries the input unchanged and lists only the defects that are not repairable.
@@ -736,14 +735,58 @@ def _read_style(file_path: Path) -> str:
     return _finalize.read_settings_edit_marker_style(file_path)
 
 
+def _build_report(result: RepairResult, *, changed: bool) -> dict:
+  """
+  Shape one repair pass as the JSON report the `repair-structure` verb prints.
+
+  Args:
+    result: The outcome of the repair pass.
+    changed: Whether the file was written.
+
+  Returns:
+    A report with `status`, `changed`, `repaired` and `unclassified`.
+  """
+  # the wire shape of one repair pass: its status, whether the file was written, and each defect by kind and line
+  return {
+      "status": str(result.status),
+      "changed": changed,
+      "repaired": [ { "kind": str(defect.kind), "line": defect.line } for defect in result.repaired ],
+      "unclassified": [
+          { "kind": str(defect.kind), "line": defect.line, "excerpt": defect.excerpt }
+          for defect in result.unclassified
+      ],
+  }
+
+
+def build_check_report(file_path: Path) -> dict:
+  """
+  Report the structural defects of a review document without writing it.
+
+  Gives the same report the `repair-structure --check` verb prints.
+
+  Args:
+    file_path: The review document.
+
+  Returns:
+    A report with `status`, `changed`, `repaired` and `unclassified`.
+
+  Raises:
+    ValueError: If the document pins an unknown edit-marker style.
+    OSError: If the document cannot be read.
+    RuntimeError: If the repair pass left a structural defect behind.
+  """
+  # the same pass the verb runs under `--check`: the document is read and judged, never written
+  result = repair(_atomic_io.read_text(file_path), style = _read_style(file_path))
+  return _build_report(result, changed = False)
+
+
 def main(argv: list[str]) -> int:
   """
   Run the `repair-structure` verb on one review document.
 
-  Scope:
-    Prints one JSON line with the keys `status`, `changed`, `repaired` (kind and line per defect), and
-    `unclassified` (kind, line, and excerpt per defect). The file is written only when the status is `repaired`
-    and `--check` is absent; nothing is ever committed.
+  Prints one JSON line with the keys `status`, `changed`, `repaired` (kind and line per defect), and
+  `unclassified` (kind, line, and excerpt per defect). The file is written only when the status is `repaired`
+  and `--check` is absent; nothing is ever committed.
 
   Guarantees:
     - The file is written only for a `repaired` status without `--check`, and never for a `clean` or `unclassified`
@@ -798,15 +841,7 @@ def main(argv: list[str]) -> int:
     _atomic_io.write_text_atomic(file_path, result.text)
 
   # the report names what was repaired and what was left for a human, one JSON object on stdout
-  print(json.dumps({
-      "status": result.status,
-      "changed": changed,
-      "repaired": [ { "kind": str(defect.kind), "line": defect.line } for defect in result.repaired ],
-      "unclassified": [
-          { "kind": str(defect.kind), "line": defect.line, "excerpt": defect.excerpt }
-          for defect in result.unclassified
-      ],
-  }))
+  print(json.dumps(_build_report(result, changed = changed)))
 
   # a defect left unclassified is a non-zero exit, so a caller cannot take the document for sound
   return _EXIT_UNCLASSIFIED if result.status == RepairState.UNCLASSIFIED else _EXIT_OK

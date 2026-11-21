@@ -1186,7 +1186,9 @@ def _read_and_unlink_debug_file(debug_file: str) -> str:
   # an unreadable log is reported as empty, which classifies every server as unknown
   try:
     # waiver: stdlib encoding idiom
-    text = Path(debug_file).read_text(encoding = "utf-8", errors = "replace")
+    text = Path(debug_file).read_text(encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace")
   except OSError:
     text = ""
 
@@ -1322,6 +1324,8 @@ def _run_probe(repo: Path, entry: dict) -> dict:
       proc = subprocess.run(
         argv, cwd = repo, env = env,
         capture_output = True, text = True, timeout = _PROBE_TIMEOUT_SEC, check = False, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
       )
       exit_code = proc.returncode
       stdout = proc.stdout or ""

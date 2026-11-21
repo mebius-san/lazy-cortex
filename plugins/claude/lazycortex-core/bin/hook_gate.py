@@ -139,11 +139,12 @@ def _repo_root() -> Path | None:
     The repository root as a `Path`, or None when the current directory is not inside a git
     repository or the `git` binary is missing.
   """
+  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
   try:
-    out = subprocess.check_output(
+    out = os.fsdecode(subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, text = True, encoding = "utf-8",
-    ).strip()
+      stderr = subprocess.DEVNULL,
+    )).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None
   return Path(out) if out else None

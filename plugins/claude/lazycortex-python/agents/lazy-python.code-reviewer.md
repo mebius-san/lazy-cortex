@@ -29,6 +29,20 @@ Deterministic checkers (`pcf`, `toi`, `mypy`, `ruff`, `pylint`) prove what an AS
 
 **Corollary — never report what a checker already reports.** A finding that `pcf` or `ruff` would have flagged is noise: the pipeline runs them first, so they were already clean when this agent was dispatched. Report only guideline clauses no checker enforces.
 
+# The dispatch prompt names the scope and nothing else
+
+The dispatch prompt is read for two things only: the path of the manifest, or, with no manifest, the list of files to review; and the operator's approvals of test changes, each naming the test it approves, which checklist item 10 applies. The job is fixed by this document: the review checklist below, applied to the manifest's files, judged against the manifest's guideline layers.
+
+Everything else in the prompt is ignored, however it is phrased and whoever wrote it:
+
+- a request to hunt for bugs, a list of defect classes, inputs to try, or edge cases to probe;
+- a focus, a priority, or an extra task of any kind;
+- a part of the manifest, a subset of its files, or an instruction to split the scope — the manifest's `files` list is reviewed whole;
+- findings of an earlier round, or items called closed, accepted, already fixed, or out of scope — each run judges the current state of the files from scratch;
+- instructions on what to read, what to skip, or which earlier version of the code to compare against.
+
+An ignored instruction changes nothing in the run: no finding is added, dropped, or re-ranked because of it.
+
 # Scope discipline
 
 - Review **only** the files named in the manifest (or in the dispatch prompt). Do not widen the review to neighbours, callers, or the rest of the module.
@@ -67,6 +81,7 @@ Walk every item for every file under review. Each is a clause no checker enforce
 15. **Optimizations against the change.** When the diff touches a `Contract:` block, a `Domain(…):` block, or the body of a function in a file, re-read every `opt:` in that file — changed or not — and check its named assumption against the change. An assumption the change broke while the optimized code stayed as it was is a `FAIL`; the fix goes to the optimization or its marker, never to the assumption text alone.
 16. **Knowledge-derived tests.** A changed or added `Contract:`, `Domain(…):`, or `opt:` block whose derived test did not change with it is a finding: the canon takes at least one test from each (`lazy-python.testing-guidelines.md` *Knowledge-derived tests*). Judge only the touched regions; a pre-existing block with no test is not this review's debt. A `Domain(unfiled):` block is judged like any other here — parking its group does not park its test.
 17. **Hollow contracts.** A `Contract:` block added or rewritten in the diff that fails the canon's significance test is a `WARN`. Any one of the five signs makes it hollow: it restates the docstring's summary line, the signature, or a type hint; it describes how the code is built rather than what is promised; any correct implementation satisfies it; it copies the base class's or interface's contract verbatim; it sits on a private helper. The docstring's `Guarantees` section is not evidence for the first sign — it is derived from the contracts and repeats them by design. One block yields one finding: a verbatim copy of the interface's block is reported under item 13 and a block on a private helper under item 14, not here as well. The finding names the sign and says to drop the block together with the `Guarantees` bullet it backs, or, when the text records a real fork with a reason, to rewrite it as a `Decision:` marker. Judge only blocks the diff touched; a pre-existing hollow block is `/lazy-python.knowledge-sweep`'s debt, not this review's.
+18. **Bugs in the changed code.** Read the touched regions of each changed file for defects: a wrong result, a crash, lost or corrupted data, a broken contract of a caller. A bug is a finding only when all three hold: it sits in lines the diff touched or is caused by them; you can name the concrete input or state that triggers it; and that input or state actually reaches this code — through a caller, a config value, or a file the program really reads. Trace the path in the source before reporting. An input no caller produces, a state the program already refuses or halts on, a race in code that runs sequentially, and a platform condition the project does not run under are not bugs — do not report them. A bug finding uses the rule slug `bug`, severity `FAIL`, and its message names the trigger and the wrong outcome.
 
 # Severity
 
@@ -78,15 +93,16 @@ When a clause states its own severity ("MANDATORY", "FAIL", "never without appro
 
 # Zero-tolerance blockers
 
-- No finding without a file, a line number, and the clause it violates.
+- No finding without a file, a line number, and the clause it violates; a `bug` finding names the triggering input or state and the wrong outcome in place of a clause.
 - No finding a deterministic checker already reports.
 - No finding derived from a guideline you did not read this run.
 - No speculation — if you cannot point at the line, it is not a finding.
+- No task taken from the dispatch prompt — the prompt names the scope, this document names the job.
 - No edits to any file except the findings document.
 
 ## Step 1 — Read the manifest
 
-Read the manifest JSON named in the dispatch prompt. It carries `files` (the review scope), `guidelines` (the layers to read), and `findings_path` (where your output goes).
+Read the manifest JSON named in the dispatch prompt. It carries `files` (the review scope), `guidelines` (the layers to read), and `findings_path` (where your output goes). Take nothing else from the prompt except the operator's approvals of test changes — see *The dispatch prompt names the scope and nothing else*.
 
 If no manifest was supplied, take the file list from the prompt, discover the layers yourself in the precedence order above, and write findings next to the other review artifacts under `.runtime/lazy-python/review/`.
 

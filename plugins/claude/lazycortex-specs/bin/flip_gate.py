@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -47,23 +48,30 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import error_report  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import iconize_inline  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_FALSE,
     BOOL_TRUE,
-    DESIGN_ONLY_GATES,
+    RELEASE_ONLY_GATES,
     FLIP_GATE_NAME,
     FLIPPABLE_GATES,
     LEVEL_ROLES,
@@ -83,7 +91,8 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     SpecMomentKey,
     SpecValue,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from summary_render import parent_container_note, apply_container_stats, is_shelf_note  # noqa: E402
 
@@ -93,9 +102,23 @@ _MOMENT_MIDNIGHT = "T00:00:00Z"
 _UTC_OFFSET = "+00:00"
 _UTC_SUFFIX = "Z"
 
-# the markdown suffix the icon repaint reads, and the text encoding git output is decoded with
+# the markdown suffix the icon repaint reads
 _MD_SUFFIX = ".md"
-_ENCODING = "utf-8"
+
+# How git's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
+
+# The exit code `git rev-parse --verify -q` and `git ls-files --error-unmatch` answer "no such thing" with.
+_GIT_NO_MATCH = 1
+
+# The entry a repository, a worktree or a submodule carries at its top level.
+_GIT_ENTRY = ".git"
+
+# The locale git is asked in, so its messages come untranslated, and the words it refuses a folder outside every
+# repository with.
+_GIT_LOCALE_VAR = "LC_ALL"
+_GIT_LOCALE = "C"
+_NOT_A_REPOSITORY = "not a git repository"
 
 # Error-ledger incident key a failed icon repaint opens; every failed repaint of the repo folds into it
 _REPAINT_INCIDENT = "spec-icon-repaint"
@@ -127,7 +150,7 @@ def effective_today(today: str | None) -> str:
   Returns:
     The supplied `today` when given, else the current UTC date in ISO form.
   """
-  # guard: caller-supplied date wins so tests pin deterministic output
+  # a caller-supplied date wins, so tests pin deterministic output
   if today is not None:
     return today
   return datetime.now(UTC).date().isoformat()
@@ -145,7 +168,7 @@ def _moment(today: str | None) -> str:
     `<today>T00:00:00Z` when a date was pinned (deterministic for tests), else the current UTC
     time to the second, `Z`-suffixed.
   """
-  # guard: a pinned date yields a pinned moment so tests stay deterministic
+  # a pinned date yields a pinned moment, so tests stay deterministic
   if today is not None:
     return f"{today}{_MOMENT_MIDNIGHT}"
   return datetime.now(UTC).replace(microsecond = 0).isoformat().replace(_UTC_OFFSET, _UTC_SUFFIX)
@@ -307,8 +330,8 @@ def _design_only_refusal(fm_values: dict, gate: str, *, off: bool) -> str | None
   """
   Report why any non-release note forbids opening this gate, or nothing when it allows it.
 
-  Only a release note may open the plan, build, tests and built gates; a note that declares no asset type counts as a
-  non-release note. Turning a gate off, and any gate outside those four, is never refused.
+  Only a release note may open the plan, develop, tests and built gates; a note that declares no asset type counts
+  as a non-release note. Turning a gate off, and any gate outside those four, is never refused.
 
   Args:
     fm_values: The folder-note's parsed frontmatter values.
@@ -329,7 +352,7 @@ def _design_only_refusal(fm_values: dict, gate: str, *, off: bool) -> str | None
   # note that still carries one from before the rule only needs it cleared.
 
   # only opening one of the four middle gates is release-only; every other flip stays allowed
-  if off or gate not in DESIGN_ONLY_GATES:
+  if off or gate not in RELEASE_ONLY_GATES:
     return None
 
   # a release note runs the full ladder by design; every other note, untyped included, is design-only
@@ -348,18 +371,21 @@ def _write_log(asset_dir: Path, gate: str, value: bool, reason: str) -> None:
     value: The boolean the gate was set to.
     reason: Optional human-or-source note recorded with the flip.
   """
+  # the commit and branch the flip ran on, and the one UTC moment both the file name and the frontmatter carry
   sha = git_field(asset_dir, ["rev-parse", "HEAD"], LOG_NO_GIT)
   branch = git_field(asset_dir, ["rev-parse", "--abbrev-ref", "HEAD"], LOG_NO_GIT)
   now = datetime.now(UTC)
-  stamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-  date_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+  # the opted-in log directory of this artifact, created on first use
   log_dir = repo_root(asset_dir) / LOG_ROOT / LOG_CLAUDE / FLIP_GATE_NAME
   log_dir.mkdir(parents = True, exist_ok = True)
+
+  # the log in the run-log format: frontmatter, then the actions and the result
   body = (
       "---\n"
       f"git_sha: {sha}\n"
       f"git_branch: {branch}\n"
-      f"date: {date_str}\n"
+      f"date: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
       f"input: flip-gate {asset_dir.name} {gate} (value={value}, reason={reason or 'none'})\n"
       "---\n\n"
       "# lazy-spec.flip-gate\n\n"
@@ -368,7 +394,7 @@ def _write_log(asset_dir: Path, gate: str, value: bool, reason: str) -> None:
       "## Result\n\n"
       f"- success — `{gate}` set to {str(value).lower()}\n"
   )
-  spec_paths.write_text_atomic((log_dir / f"{stamp}.md"), body)
+  spec_paths.write_text_atomic((log_dir / f"{now.strftime('%Y-%m-%d_%H-%M-%S')}.md"), body)
 
 
 def git_field(cwd: Path, args: list[str], fallback: str) -> str:
@@ -386,10 +412,181 @@ def git_field(cwd: Path, args: list[str], fallback: str) -> str:
   try:
     out = subprocess.run(
         ["git", *args], cwd = cwd, check = True, capture_output = True, text = True, encoding = "utf-8",
+        errors = _DECODE_ERRORS,
     )
   except (subprocess.CalledProcessError, FileNotFoundError):
     return fallback
   return out.stdout.strip() or fallback
+
+
+def read_head(cwd: Path) -> str:
+  """
+  Return the commit id that HEAD names for the repository holding `cwd`.
+
+  Guarantees:
+    - The answer `""` means exactly "no commit to name": the folder lies in no git repository, or the repository
+      has no commit yet.
+    - A git failure is never answered with `""`; it raises, so two failed lookups never compare equal as if they
+      were answers.
+
+  Args:
+    cwd: The folder whose repository is asked.
+
+  Returns:
+    The commit id HEAD names, or an empty string when the folder lies in no git repository or the repository has no
+    commit yet.
+
+  Raises:
+    subprocess.CalledProcessError: If git fails inside a repository.
+    OSError: If git cannot be run inside a repository.
+  """
+
+  # Contract:
+  # The answer `""` means exactly "no commit to name": the folder lies in no git repository,
+  # or the repository has no commit yet. A git failure is NEVER answered with `""`: it raises
+  # `subprocess.CalledProcessError` or `OSError`, so two failed lookups never compare equal as if they were answers.
+
+  # a folder in no repository names no HEAD; a git failure inside one raised from the lookup
+  top = find_repo_top(cwd)
+  if top is None:
+    return ""
+
+  # the commit HEAD names, asked quietly so a repository with no commit yet answers with its own exit code
+  done = subprocess.run(
+      [ "git", "rev-parse", "--verify", "-q", "HEAD" ], cwd = top, check = False, capture_output = True,
+      text = True, encoding = "utf-8", errors = _DECODE_ERRORS,
+  )
+
+  # guard: a repository with no commit yet names no HEAD
+  if done.returncode == _GIT_NO_MATCH:
+    return ""
+
+  # guard: any other refusal is git failing, never "no commit"
+  if done.returncode != 0:
+    raise subprocess.CalledProcessError(done.returncode, done.args, done.stdout, done.stderr)
+  return done.stdout.strip()
+
+
+def is_tracked(repo: Path, path: Path | str) -> bool:
+  """
+  Report whether git tracks `path` in the repository holding `repo`.
+
+  Guarantees:
+    - The answer `False` means git does not know the path, or the folder lies in no repository.
+    - A git failure inside a repository is never answered with `False`; it raises.
+
+  Args:
+    repo: The folder the question is asked in.
+    path: The path to look up, repo-relative or absolute.
+
+  Returns:
+    `True` when git tracks the path; `False` when it does not, or when the folder lies in no repository.
+
+  Raises:
+    subprocess.CalledProcessError: If git fails inside a repository.
+    OSError: If git cannot be run.
+  """
+
+  # Contract:
+  # The answer `False` means git does not know the path or the folder lies in no repository.
+  # A git failure inside a repository raises `subprocess.CalledProcessError`, or `OSError` when git cannot be run;
+  # it is NEVER answered with `False`.
+
+  # git's own answer for one path; nothing is decoded, only the exit code is read
+  done = subprocess.run(
+      [ "git", "ls-files", "--error-unmatch", "--", str(path) ], cwd = str(repo), check = False,
+      capture_output = True,
+  )
+
+  # git knows the path
+  if done.returncode == 0:
+    return True
+
+  # git does not know the path, or the folder lies in no repository at all
+  if done.returncode == _GIT_NO_MATCH or find_repo_top(repo) is None:
+    return False
+
+  # any other refusal inside a repository is git failing, never an answer
+  raise subprocess.CalledProcessError(done.returncode, done.args, done.stdout, done.stderr)
+
+
+def find_repo_top(cwd: Path) -> Path | None:
+  """
+  Find the top-level folder of the git repository that holds a folder.
+
+  Guarantees:
+    - A result of `None` is given in three cases only: git itself refuses the folder with its "not a git repository"
+      message, no `.git` entry exists at the folder or above it, or git exits zero but names no folder.
+    - Every other git failure is never answered with `None`: git exiting non-zero for another reason, such as a
+      refused ownership check, or git being unable to run while a `.git` entry is in sight raises
+      `subprocess.CalledProcessError` or `OSError`, so a caller that skips its commit on `None` never skips it
+      over such a failure.
+
+  Args:
+    cwd: The folder the lookup starts from.
+
+  Returns:
+    The repository's top-level folder, or `None` when git itself says the folder is in no git repository, when no
+    `.git` entry is at the folder or above it, or when git names no folder.
+
+  Raises:
+    subprocess.CalledProcessError: If git exits non-zero for any other reason inside a repository, such as a refused
+      ownership check.
+    OSError: If git cannot be run while a `.git` entry is in sight.
+  """
+
+  # Contract:
+  # The answer `None` is given in three cases only: git itself refuses the folder with its "not a git repository"
+  # message; no `.git` entry exists at the folder or above it, so a failing or missing git cannot have been
+  # reading a repository; or git exits zero but names no folder, so there is no work tree to commit into.
+  # Every other git failure is never answered with `None`: git exiting non-zero for another reason, such as a
+  # refused ownership check, or git being unable to run while a `.git` entry is in sight raises
+  # `subprocess.CalledProcessError` or `OSError`, so a caller that skips its commit on `None` never skips it
+  # over such a failure.
+
+  # a folder that does not exist yet is looked up from its nearest existing ancestor, so a missing folder is never
+  # mistaken for a missing git
+  folder = next(( candidate for candidate in ( cwd, *cwd.parents ) if candidate.is_dir() ), cwd)
+
+  # the top level git names for the folder, asked in git's own untranslated words so its refusal can be read;
+  # the answer is captured as bytes, so no byte of the folder's name is changed by a decoder or a newline rule
+  try:
+    done = subprocess.run(
+        [ "git", "rev-parse", "--show-toplevel" ], cwd = folder, check = True, capture_output = True,
+        env = { **os.environ, _GIT_LOCALE_VAR: _GIT_LOCALE },
+    )
+  except subprocess.CalledProcessError as error:
+    # guard: git itself says the folder lies in no repository, or no `.git` is in sight at or above it — the
+    # silent answer; any other refusal inside a repository is git's own failure and the caller's too
+    if _NOT_A_REPOSITORY in os.fsdecode(error.stderr or b"") or not _is_inside_git_dir(cwd):
+      return None
+    raise
+  except OSError:
+    # guard: git cannot be run at all — silent only where no `.git` is in sight
+    if not _is_inside_git_dir(cwd):
+      return None
+    raise
+
+  # the name as the file system spells it, less the one line end git closes its answer with
+  top = os.fsdecode(done.stdout).removesuffix("\n")
+
+  # an answer that names no folder names no work tree to commit into
+  return Path(top) if top else None
+
+
+def _is_inside_git_dir(cwd: Path) -> bool:
+  """
+  Report whether a `.git` entry exists at a folder or above it.
+
+  Args:
+    cwd: The folder the search starts from.
+
+  Returns:
+    True when the folder or any of its ancestors carries a `.git` directory or file.
+  """
+  # a `.git` entry — a directory, or the file a worktree or a submodule carries — at the folder or above it
+  folder = cwd.resolve()
+  return any(( candidate / _GIT_ENTRY ).exists() for candidate in ( folder, *folder.parents ))
 
 
 def repo_root(cwd: Path) -> Path:
@@ -400,14 +597,19 @@ def repo_root(cwd: Path) -> Path:
     cwd: The directory the lookup starts from.
 
   Returns:
-    The repository top-level `Path`, or `cwd` when not inside a git repo.
-  """
-  top = git_field(cwd, ["rev-parse", "--show-toplevel"], "")
+    The repository top-level `Path`, or `cwd` when the folder is in no git repository.
 
-  # guard: not a git repo — log beside the asset
-  if not top:
+  Raises:
+    subprocess.CalledProcessError: If git fails inside a repository.
+    OSError: If git cannot be run inside a repository.
+  """
+  top = find_repo_top(cwd)
+
+  # guard: not a git repo — log beside the asset; a git failure inside a repository raised above, so the folder
+  # itself is never mistaken for the repository root
+  if top is None:
     return cwd
-  return Path(top)
+  return top
 
 
 def committable_paths(repo: Path, paths: Iterable[Path | str]) -> list[str]:
@@ -461,12 +663,14 @@ def _register_paths(repo: Path, paths: Iterable[Path | str]) -> tuple[list[str],
     as intent-to-add.
 
   Raises:
-    subprocess.CalledProcessError: If registering a new file with `git add -N` fails.
+    subprocess.CalledProcessError: If registering a new file with `git add -N` fails; the intent-to-add entries
+      this call already made are reset first.
+    OSError: If git cannot be run for the registration; the entries already made are reset first.
   """
   # the paths that may join a pathspec commit, each kept in the caller's own spelling, and the
   # brand-new ones among them this call registered
-  kept = []
-  registered = []
+  kept: list[str] = []
+  registered: list[str] = []
   for path in paths:
     tracked = subprocess.run(
         ["git", "ls-files", "--error-unmatch", "--", str(path)],
@@ -478,9 +682,19 @@ def _register_paths(repo: Path, paths: Iterable[Path | str]) -> tuple[list[str],
       continue
 
     # a brand-new file is registered as intent-to-add, which stages none of its content, so the
-    # pathspec commit can name it at all
+    # pathspec commit can name it at all; a registration that fails takes back the entries this call
+    # already made, so the shared index is left as it was found
     if not tracked:
-      subprocess.run(["git", "add", "-N", "--", str(path)], cwd = str(repo), check = True, capture_output = True)
+      try:
+        subprocess.run(
+            ["git", "add", "-N", "--", str(path)], cwd = str(repo), check = True, capture_output = True,
+        )
+      except (subprocess.CalledProcessError, OSError):
+        if registered:
+          subprocess.run(
+              ["git", "reset", "-q", "--", *registered], cwd = str(repo), check = False, capture_output = True,
+          )
+        raise
       registered.append(str(path))
     kept.append(str(path))
   return kept, registered
@@ -493,8 +707,8 @@ def commit_exact(repo: Path, paths: Iterable[Path | str], *, author_name: str | 
 
   Guarantees:
     - The operator's staged entries stay staged and out of the commit.
-    - A rejected commit resets exactly the intent-to-add entries this call registered, leaving the shared git
-      index as it was found.
+    - A rejected commit, or a failed registration of a new file, resets exactly the intent-to-add entries this
+      call registered, leaving the shared git index as it was found.
     - No commit is made when no path is committable, so an empty pathspec never commits the whole index.
 
   Notes:
@@ -510,7 +724,8 @@ def commit_exact(repo: Path, paths: Iterable[Path | str], *, author_name: str | 
     subject: The commit subject.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails.
+    subprocess.CalledProcessError: If the commit fails, or registering a new file fails.
+    OSError: If git cannot be run for the registration.
   """
 
   # Contract:
@@ -518,8 +733,9 @@ def commit_exact(repo: Path, paths: Iterable[Path | str], *, author_name: str | 
   # the commit carries the named paths and nothing else.
 
   # Contract:
-  # A rejected commit resets exactly the intent-to-add entries this call registered
-  # and leaves the shared git index as it was found; the failure is re-raised unchanged.
+  # A rejected commit, or a failed registration of a new file, resets exactly the intent-to-add entries
+  # this call registered and leaves the shared git index as it was found;
+  # the failure is re-raised unchanged.
 
   # Contract:
   # When no path is committable, NO commit is made;
@@ -593,11 +809,12 @@ def _query_untracked_under(repo: Path, rel_paths: list[str]) -> list[str]:
     return []
 
   # a tracked directory's brand-new files are invisible to a pathspec commit until registered
+  # the names are captured as bytes and decoded the way the file system spells them, so none is changed
   listed = subprocess.run(
       [ "git", "ls-files", "--others", "--exclude-standard", "-z", "--", *dirs ],
-      cwd = str(repo), check = True, capture_output = True, text = True, encoding = _ENCODING,
+      cwd = str(repo), check = True, capture_output = True,
   )
-  return [ entry for entry in listed.stdout.split("\0") if entry ]
+  return [ entry for entry in os.fsdecode(listed.stdout).split("\0") if entry ]
 
 
 def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
@@ -620,6 +837,12 @@ def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
       closes that incident.
     - The path of a `deferred_write` always joins the commit set, so the write is carried by the commit and never
       left behind as a dirty path.
+    - Any exception raised after the `deferred_write` landed and before the commit landed, a git failure, any other
+      error or an interrupt alike, gives the deferred path back the bytes it held before the write, or removes it
+      again if it did not exist, and is re-raised unchanged; nothing is left written and uncommitted.
+    - The icon repaint's own rewrite of a note is taken back the same way when the commit does not land: each
+      repainted note gets back the bytes it held before the repaint, which are the bytes the caller had written
+      into it, and those stay the caller's to put back.
 
   Notes:
     - New files under the paths are registered as intent-to-add only, which stages no content.
@@ -637,9 +860,18 @@ def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
 
   Returns:
     Whether a commit was made, the repo-relative paths it carried, and the repainted paths among them.
+    `(False, [], [])` only when there is truly no repository, a path lies outside `repo`, or nothing changed.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails.
+    subprocess.CalledProcessError: If the commit fails, or git fails inside a repository during the repository
+      lookup or the status query; a lookup failure is never read as "no repository". A failure of the status
+      query or the commit after a `deferred_write` landed is re-raised after the deferred path is put back; a
+      commit that does not land also takes back the icon repaint's own rewrite of each repainted note, back to
+      the bytes the caller had written.
+    OSError: If git cannot be run during the repository lookup, the status query or the commit; after a
+      `deferred_write` landed, the deferred path is put back first.
+    BaseException: Any other exception raised after a `deferred_write` landed and before the commit landed is
+      re-raised unchanged once the deferred path is put back.
   """
 
   # Contract:
@@ -664,18 +896,34 @@ def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
   # The path of a `deferred_write` ALWAYS joins the commit set,
   # so the write is carried by the commit and never left behind as a dirty path.
 
+  # Contract:
+  # Any exception raised after the `deferred_write` landed and before the commit landed, a git failure,
+  # any other error or an interrupt alike, gives the deferred path back the bytes it held before the write,
+  # or removes it again if it did not exist, and is re-raised unchanged;
+  # nothing is left written and uncommitted.
+
+  # Contract:
+  # The icon repaint's own rewrite of a note is taken back the same way when the commit does not land:
+  # each repainted note gets back the bytes it held before the repaint, which are the bytes the caller
+  # had written into it, and those stay the caller's to put back.
+
   # the held-back write's own path joins the commit set, so the write it makes is always carried
   named = [ *paths, *( [ deferred_write[0] ] if deferred_write is not None else [] ) ]
   candidates = [ Path(path) if Path(path).is_absolute() else repo / path for path in named ]
 
-  # guard: no git repository, or a path outside it, means nothing to commit into
-  if not git_field(repo, [ "rev-parse", "--show-toplevel" ], "") or any(
+  # guard: no git repository, or a path outside it, means nothing to commit into; a git failure inside a
+  # repository raises from the lookup, so it is never read as "no repository"
+  if find_repo_top(repo) is None or any(
       not path.resolve().is_relative_to(repo.resolve()) for path in candidates):
     return False, [], []
 
   # the repaint of the markdown paths rides the same commit so no second, foreign-identity commit follows
   rel_paths = list(dict.fromkeys(path.resolve().relative_to(repo.resolve()).as_posix() for path in candidates))
   notes = [ path for path in rel_paths if path.endswith(_MD_SUFFIX) ]
+
+  # the bytes each note holds before the repaint, so a commit that does not land takes the repaint's own rewrite
+  # back; what the caller wrote into the note is the caller's to put back
+  unpainted = { path: ( repo / path ).read_bytes() for path in notes if repaint and ( repo / path ).is_file() }
   try:
     repainted = iconize_inline.repaint_paths_checked(repo, notes) if repaint and notes else []
   # waiver: best-effort boundary — a cosmetic repaint never gates the commit it rides with, so a failed one is
@@ -691,26 +939,56 @@ def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
       error_report.resolve_marked(repo, _REPAINT_INCIDENT)
   all_paths = list(dict.fromkeys([ *rel_paths, *repainted ]))
 
-  # the held-back write lands here, past the slow repaint step and one step away from the commit
+  # the held-back write lands here, past the slow repaint step and one step away from the commit; the bytes it
+  # replaces are kept, so a failure between the write and the commit puts them back
+  before: bytes | None = None
   if deferred_write is not None:
+    before = deferred_write[0].read_bytes() if deferred_write[0].is_file() else None
     spec_paths.write_text_atomic(deferred_write[0], deferred_write[1])
 
   # guard: an empty pathspec would reach the whole tree
   if not all_paths:
     return False, [], []
 
-  # what the paths carry against the last commit
-  status = subprocess.run([ "git", "status", "--porcelain", "--", *all_paths ], cwd = str(repo), check = True,
-                          capture_output = True, text = True, encoding = _ENCODING)
+  # whatever stops the call between the write and a landed commit leaves nothing written and uncommitted: the
+  # held-back write is taken back and the failure travels on as it arrived
+  try:
+    # what the paths carry against the last commit
+    status = subprocess.run([ "git", "status", "--porcelain", "-z", "--", *all_paths ], cwd = str(repo),
+                            check = True, capture_output = True)
 
-  # guard: a run that changed no byte commits nothing
-  if not status.stdout.strip():
-    return False, [], []
+    # guard: a run that changed no byte commits nothing
+    if not status.stdout.strip():
+      return False, [], []
 
-  # the commit, under the given identity and these paths alone, the shared index left to the operator
-  commit_exact(repo, [ *all_paths, *_query_untracked_under(repo, all_paths) ], author_name = author_name,
-               author_email = author_email, subject = subject)
+    # the commit, under the given identity and these paths alone, the shared index left to the operator
+    commit_exact(repo, [ *all_paths, *_query_untracked_under(repo, all_paths) ], author_name = author_name,
+                 author_email = author_email, subject = subject)
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — the write must
+  # never outlive a commit that did not land, and the exception is re-raised unchanged
+  except BaseException:
+    for path in repainted:
+      if path in unpainted:
+        _restore_bytes(repo / path, unpainted[path])
+    if deferred_write is not None:
+      _restore_bytes(deferred_write[0], before)
+    raise
   return True, all_paths, repainted
+
+
+def _restore_bytes(path: Path, before: bytes | None) -> None:
+  """
+  Put a file back to the state it had before a write.
+
+  Args:
+    path: The file to restore.
+    before: The bytes the file held before the write, or None when it did not exist and is removed again.
+  """
+  # a file that did not exist is removed again; any other gets the bytes it held
+  if before is None:
+    path.unlink(missing_ok = True)
+  else:
+    path.write_bytes(before)
 
 
 def commit_paths(repo: Path, paths: Iterable[Path | str], *,
@@ -737,7 +1015,11 @@ def commit_paths(repo: Path, paths: Iterable[Path | str], *,
     True when a commit was made.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails.
+    subprocess.CalledProcessError: If the commit fails, or git fails inside a repository during the repository
+      lookup; such a failure is never read as "no repository".
+    OSError: If git cannot be run inside a repository during the repository lookup.
+    BaseException: Any other exception raised after a `deferred_write` landed and before the commit landed is
+      re-raised unchanged once the deferred path is put back.
   """
   return commit_paths_detail(
       repo, paths, subject = subject, author_name = author_name, author_email = author_email,
@@ -803,7 +1085,9 @@ def _commit_flip(
   repo, so production reaches the commit branch every time. Any subprocess error inside the
   commit branch propagates — the flip is a state mutation the caller promised was atomic, and
   silently swallowing a commit failure would leave the daemon's dirty-tree guard tripping every
-  subsequent iteration with no visible cause.
+  subsequent iteration with no visible cause. Before it propagates, the container notes this call
+  refreshed and the notes the icon repaint rewrote are given back the bytes they held; the
+  folder-note itself is put back by the caller.
 
   Args:
     asset_dir: The asset folder; used to resolve the enclosing repo root for the `git` cwd.
@@ -819,43 +1103,61 @@ def _commit_flip(
       (e.g. sibling files a rollback already deleted from the worktree). A path that was never
       tracked and is gone from disk drops out. None commits the note (and the container note,
       when refreshed) alone.
+
+  Raises:
+    subprocess.CalledProcessError: If a git command in the commit branch fails, including the repository lookup
+      when git fails inside a repository; such a failure is never read as "no repository".
+    OSError: If git cannot be run inside a repository during the repository lookup.
   """
-  # an empty toplevel means there is no repo to commit into
-  top = git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+  # no top level means there is no repo to commit into; a git failure inside a repository raises here
+  repo = find_repo_top(asset_dir)
 
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # write above remains and is the entire mutation the bare-fixture caller observes
-  if not top:
+  if repo is None:
     return
 
   # the flipped folder-note is the base of the commit set
-  repo = Path(top)
   add_paths = [str(note)]
 
-  # every container note that counted this asset goes stale on a flip, so refresh each and carry
-  # it along — the group note for a grouped asset, then every shelf above it, up to and including
-  # the product note that reads through them; a level note's own flip refreshes nothing, since
-  # its stats are its children's flips to recompute and the level above it counts products by
-  # role, which no gate flip on this note moves
-  for container in (() if role in LEVEL_ROLES else containers_above(asset_dir)):
-    if apply_container_stats(container):
-      add_paths.append(str(container))
+  # the bytes of every file this call rewrites on its own, held before the rewrite: a commit that does not land
+  # gives each of them back, so a failed flip leaves the tree as clean as it found it
+  held: dict[Path, bytes | None] = {}
+  try:
+    # every container note that counted this asset goes stale on a flip, so refresh each and carry
+    # it along — the group note for a grouped asset, then every shelf above it, up to and including
+    # the product note that reads through them; a level note's own flip refreshes nothing, since
+    # its stats are its children's flips to recompute and the level above it counts products by
+    # role, which no gate flip on this note moves
+    for container in (() if role in LEVEL_ROLES else containers_above(asset_dir)):
+      held[container] = container.read_bytes() if container.is_file() else None
+      if apply_container_stats(container):
+        add_paths.append(str(container))
 
-  # fold the icon repaint of every committed note into this same commit so no separate icons commit follows;
-  # a caller's path gone from disk has no icon left to repaint
-  repaint_set = [ *add_paths, *(str(path) for path in (extra_paths or []) if Path(path).is_file()) ]
-  add_paths.extend(iconize_inline.repaint_paths(
-      repo, [Path(path).resolve().relative_to(repo.resolve()).as_posix() for path in dict.fromkeys(repaint_set)],
-  ))
+    # fold the icon repaint of every committed note into this same commit so no separate icons commit
+    # follows; a caller's path gone from disk has no icon left to repaint
+    repaint_set = [ *add_paths, *(str(path) for path in (extra_paths or []) if Path(path).is_file()) ]
+    for path in repaint_set:
+      held.setdefault(Path(path), Path(path).read_bytes())
+    add_paths.extend(iconize_inline.repaint_paths(
+        repo,
+        [Path(path).resolve().relative_to(repo.resolve()).as_posix() for path in dict.fromkeys(repaint_set)],
+    ))
 
-  # commit under the dedicated bot identity so the operator's authorship stays untouched; the
-  # caller's own paths (e.g. a rollback's already-deleted plan siblings) join the same commit,
-  # and one that was never tracked and is gone from disk drops out
-  subject = f"{FLIP_GATE_NAME}: {gate} → {str(value).lower()} on {asset_dir.name}"
-  commit_exact(
-      repo, [ *add_paths, *(extra_paths or []) ],
-      author_name = _FLIP_AUTHOR_NAME, author_email = _FLIP_AUTHOR_EMAIL, subject = subject,
-  )
+    # commit under the dedicated bot identity so the operator's authorship stays untouched; the
+    # caller's own paths (e.g. a rollback's already-deleted plan siblings) join the same commit,
+    # and one that was never tracked and is gone from disk drops out
+    subject = f"{FLIP_GATE_NAME}: {gate} → {str(value).lower()} on {asset_dir.name}"
+    commit_exact(
+        repo, [ *add_paths, *(extra_paths or []) ],
+        author_name = _FLIP_AUTHOR_NAME, author_email = _FLIP_AUTHOR_EMAIL, subject = subject,
+    )
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — a refreshed or
+  # repainted file must never outlive a commit that did not land, and the exception is re-raised unchanged
+  except BaseException:
+    for held_path, data in held.items():
+      _restore_bytes(held_path, data)
+    raise
 
 
 def flip_gate(
@@ -886,6 +1188,11 @@ def flip_gate(
       refusal check has passed.
     - A cancelled asset accepts exactly one flip, `spec_cancelled` turned off; every other flip, on or off, is
       refused.
+    - A flip whose commit does not land leaves the working tree as it found it: when anything raises after the
+      note is written and before its commit lands, the folder-note, every container note whose stats the flip
+      refreshed and every note the icon repaint rewrote get back the bytes they held before the flip, a file
+      the flip created is removed again, and the exception propagates unchanged, so a retry finds the gate
+      unflipped and redoes the whole flip.
 
   Args:
     asset_dir: The asset or level folder holding `<asset_dir.name>.md` and siblings.
@@ -901,6 +1208,14 @@ def flip_gate(
   Returns:
     `{"status": "flipped", "gate": gate, "value": <bool>}` on success, or
     `{"status": "refused", "gate": gate, "reason": <message>}` when refused.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit or a git query it makes fails; the folder-note, every container
+      note the flip refreshed and every note the icon repaint rewrote are first put back to the bytes they held
+      before the flip (a file the flip created is removed again), so the tree is as it was found and the gate
+      stays unflipped.
+    OSError: If git cannot be run; the folder-note, the refreshed container notes and the repainted notes are first
+      put back the same way.
   """
 
   # Contract:
@@ -911,6 +1226,15 @@ def flip_gate(
   # Contract:
   # A cancelled asset accepts exactly one flip, `spec_cancelled` turned off;
   # every other flip, on or off, is refused.
+
+  # Contract:
+  # A flip whose commit does not land leaves the working tree as it found it. When anything raises
+  # between the note's write and its commit landing — a git failure, a failed repository
+  # lookup, any other error, an interrupt — the folder-note, every container note whose stats
+  # the flip refreshed and every note the icon repaint rewrote get back the bytes they held
+  # before the flip, a file the flip created is removed again, and the exception is re-raised
+  # unchanged, so a retry finds the gate unflipped and redoes the whole flip instead of
+  # reporting a flip over an uncommitted tree.
 
   # Domain(spec.lifecycle):
   # # Two gate ladders, one shared checkpoint
@@ -942,7 +1266,8 @@ def flip_gate(
   if (role_refusal := _role_refusal(role, gate)) is not None:
     return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": role_refusal}
 
-  # guard: a middle gate on a typed design-only asset is refused — only a release note runs the full ladder
+  # guard: a middle gate on any non-release note, typed or untyped, is refused — only a release note runs the full
+  # ladder
   if (design_only_refusal := _design_only_refusal(fm_values, gate, off = off)) is not None:
     return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": design_only_refusal}
 
@@ -973,12 +1298,20 @@ def flip_gate(
   # write and commit only when the note actually changed — a gate already at this value leaves
   # it byte-identical, there is no history line to add, and a commit of nothing would fail
   if new_text != text:
+    before = note.read_bytes()
     spec_paths.write_text_atomic(note, new_text)
 
     # atomic commit of the folder-note edit under the flip-gate bot identity; without this the
     # daemon's next iteration trips its dirty-tree guard and silently skips every routine until
-    # the operator commits by hand
-    _commit_flip(asset_dir, note, gate, value, role = role, extra_paths = extra_paths)
+    # the operator commits by hand. A flip whose commit does not land takes its write back, so a
+    # retry finds the gate unflipped and redoes the whole flip
+    try:
+      _commit_flip(asset_dir, note, gate, value, role = role, extra_paths = extra_paths)
+    # waiver: the rollback boundary catches every exception on purpose, an interrupt included — the
+    # flipped note must never outlive a commit that did not land, and the exception is re-raised unchanged
+    except BaseException:
+      _restore_bytes(note, before)
+      raise
 
   # the run log records the flip and its reason, then the caller gets the outcome
   _write_log(asset_dir, gate, value, note_text)
@@ -1024,20 +1357,25 @@ def _commit_halt(
     extra_paths: Additional paths to fold into this same commit, named explicitly by the
       caller. A path that was never tracked and is gone from disk drops out. None commits the
       note alone.
+
+  Raises:
+    subprocess.CalledProcessError: If a git command in the commit branch fails, including the repository lookup
+      when git fails inside a repository; such a failure is never read as "no repository".
+    OSError: If git cannot be run inside a repository during the repository lookup.
   """
-  # an empty toplevel means there is no repo to commit into
-  top = git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+  # no top level means there is no repo to commit into; a git failure inside a repository raises here
+  repo = find_repo_top(asset_dir)
 
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # write above remains and is the entire mutation the bare-fixture caller observes
-  if not top:
+  if repo is None:
     return
 
   # commit the halted folder-note under the caller's bot identity so the operator's authorship
   # stays untouched; the caller's own paths join the same commit, and one that was never
   # tracked and is gone from disk drops out
   commit_exact(
-      Path(top), [ note, *(extra_paths or []) ],
+      repo, [ note, *(extra_paths or []) ],
       author_name = author_name, author_email = author_email,
       subject = f"{author_name}: halt {asset_dir.name} — {reason}",
   )
@@ -1127,6 +1465,8 @@ def halt_asset(
   Guarantees:
     - Once set, the halt persists until an operator resolves it by hand; nothing in this
       codebase clears `spec_halted` or its failure callout automatically.
+    - A halt whose commit does not land takes the folder-note's write back and the exception propagates
+      unchanged, so a retry records the halt again instead of answering `noop` over an uncommitted note.
 
   Args:
     asset_dir: The asset folder holding `<asset_dir.name>.md`.
@@ -1140,11 +1480,21 @@ def halt_asset(
   Returns:
     `{"status": "halted", "reason": reason}` on a fresh halt, or `{"status": "noop", "reason":
     reason}` when the asset was already halted with this exact failure recorded.
+
+  Raises:
+    subprocess.CalledProcessError: If the commit or a git query it makes fails; the note is first put back to the
+      bytes it held before the halt, so the asset stays unhalted.
+    OSError: If git cannot be run; the note is first put back to the bytes it held before the halt.
   """
 
   # Contract:
   # Once an asset is halted, nothing in this codebase clears the halt automatically — the
   # `spec_halted` flag and its failure callout persist until an operator resolves them by hand.
+
+  # Contract:
+  # A halt whose commit does not land takes the folder-note's write back and re-raises the
+  # exception unchanged, so a retry records the halt again instead of answering `noop` over
+  # an uncommitted note.
 
   # Domain(spec.lifecycle):
   # # Halting a stuck asset
@@ -1169,13 +1519,21 @@ def halt_asset(
     return {FlipResult.STATUS: _HALT_STATUS_NOOP, "reason": reason}
 
   # a fresh halt writes the note, then commits under the caller's bot identity, mirroring
-  # `flip_gate`'s own commit-inline shape
+  # `flip_gate`'s own commit-inline shape; a halt whose commit does not land takes its write back,
+  # so a retry finds the asset unhalted and records the halt again
+  before = note.read_bytes()
   spec_paths.write_text_atomic(
       note, fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
-  _commit_halt(
-      asset_dir, note, reason,
-      author_name = author_name, author_email = author_email, extra_paths = extra_paths,
-  )
+  try:
+    _commit_halt(
+        asset_dir, note, reason,
+        author_name = author_name, author_email = author_email, extra_paths = extra_paths,
+    )
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — the
+  # halted note must never outlive a commit that did not land, and the exception is re-raised unchanged
+  except BaseException:
+    _restore_bytes(note, before)
+    raise
   return {FlipResult.STATUS: _HALT_STATUS_HALTED, "reason": reason}
 
 
@@ -1223,8 +1581,7 @@ def main(argv: list[str]) -> int:
 
   # --halt takes an asset straight to the halt primitive, bypassing gate-flip entirely
   if args.halt is not None:
-    result = halt_asset(asset_dir, args.halt)
-    print(json.dumps(result))
+    print(json.dumps(halt_asset(asset_dir, args.halt)))
     return 0
 
   # guard: neither a gate nor --halt was given — nothing to do

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import overload
 
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -134,6 +135,9 @@ _DIFF_FILTER_FLAGS = { "A": "A", "M": "M", "D": "D", "R": "AMDR" }
 _NUL = "\0"
 _TWO_PATH_STATUSES = ( "R", "C" )
 
+# the per-path pathspec magic that makes git take one path as written, never as a pattern
+_LITERAL_MAGIC = ":(literal)"
+
 # Per-type schemas. `command`, `expert`, `request` are all optional in every
 # type — the EITHER/OR invariant is enforced separately by
 # `_validate_command_or_expert`. Type-specific required fields (cron, branch,
@@ -190,6 +194,22 @@ ROUTINE_TIMEOUT_ENV = "LAZY_ROUTINE_TIMEOUT_SEC"
 # How much of a worker's stderr tail, or of a spawn fault's text, a git watch keeps in the reason it
 # stores with a failed item in `state.json`.
 _REASON_MAX_CHARS = 300
+
+# What a git watch reports for stored retry items its current request template can no longer render:
+# the tick result's error text, and the stderr line, each filled with the number of items dropped.
+STALE_ITEMS_DROPPED_TEMPLATE = "{count} stored retry item(s) dropped — the request template no longer renders them"
+STALE_ITEMS_WARNING_TEMPLATE = (
+  "routine '{name}': dropped {count} stored retry item(s) the current request template cannot render\n"
+)
+
+# How much of a consumer's stderr tail one entry of a tick result's `errors` list keeps, and how many
+# entries that list carries; `errors_count` beside it always holds the full number of failed files.
+_STDERR_TAIL_CHARS = 500
+_ERRORS_REPORTED_MAX = 10
+
+# The fixed detail a git watch puts after `command_dispatch_failed` in a tick result's `error` when a
+# worker spawn raised; the text of the exception goes under the result's `errors` instead.
+_SPAWN_FAULT_ERROR_TEXT = "a worker spawn raised — that item and every item not yet attempted are owed next tick"
 
 # The flat sub-keys a composite filter block accepts — reused for the top-level
 # `filter` dict, each `filter.any_of[i]` member, and the any_of/flat-key exclusion check
@@ -534,6 +554,31 @@ def _validate_command_or_expert(name: str, cfg: dict, rtype: str) -> None:
     )
 
 
+# opt: the verdict depends only on the expression — it is searched over one full calendar cycle from a
+# fixed start, never from the current moment, so no clock and no other input can change it.
+@functools.cache
+def _cron_defect(expression: str) -> str | None:
+  """
+  Tell what makes a cron expression unusable for the scheduler.
+
+  An expression that cannot fire within a full 28-year calendar cycle is unusable, whatever the current date.
+
+  Args:
+    expression: The cron expression as written in the routine entry.
+
+  Returns:
+    The defect text when the expression is refused by the parser or can never fire, `None` when it
+    is usable.
+  """
+  try:
+    # the expression is parsed and searched for one fire over a full calendar cycle from a fixed
+    # start: an expression that fires in any year fires inside that cycle, whatever today's date is
+    cron.next_fire(cron.parse(expression), cron.CYCLE_START, horizon_days = cron.CYCLE_HORIZON_DAYS)
+  except cron.CronError as error:
+    return str(error)
+  return None
+
+
 def validate_routine_entry(name: str, cfg: dict) -> None:
   """
   Validate one entry from the `routines` section.
@@ -541,17 +586,22 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   Guarantees:
     - An entry that passes carries a recognised type, every field that type's schema requires, and
       no field outside that schema's closed vocabulary.
+    - A `cron` expression is accepted when it can fire at least once within one full 28-year calendar cycle and
+      refused with `RoutineConfigError` when it can never fire; the verdict depends on the expression alone, never
+      on the current date.
 
   Args:
     name: Routine name (used in error messages).
     cfg: Routine configuration dict.
 
   Raises:
-    RoutineConfigError: When the type is unknown, required fields are missing,
-      unknown fields are present, the EITHER/OR shape between `command` and
-      `expert + request` is violated, a common field (`hooks_enabled`,
-      `git_author`) has the wrong shape, the `filter` block's own shape is
-      invalid, or a per-type constraint fails.
+    RoutineConfigError: When the entry is not an object, the type is not a string or is unknown, required
+      fields are missing, unknown fields are present, the EITHER/OR shape between `command` and
+      `expert + request` is violated, a common field (`hooks_enabled`, `git_author`) has the wrong shape,
+      `interval_sec` or `priority` is present and not a real number (a present `null` and a boolean are
+      rejected), a `cron` expression is refused by the parser or cannot fire within a full 28-year calendar
+      cycle, whatever the current date, the `filter` block's
+      own shape is invalid, or a per-type constraint fails.
   """
 
   # Domain(runtime.routines):
@@ -574,8 +624,22 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   # conditions always raises `RoutineConfigError` — nothing is silently accepted with
   # an unrecognised or missing field ignored.
 
+  # Contract:
+  # A `cron` expression is accepted when it can fire at least once within one full 28-year calendar cycle and
+  # refused with `RoutineConfigError` when it can never fire; the verdict depends on the expression alone,
+  # never on the current date.
+
+  # guard: an entry that is not an object declares no routine at all
+  if not isinstance(cfg, dict):
+    raise RoutineConfigError(f"routine '{name}': the entry must be an object, got {type(cfg).__name__}")
+
+  # the declared type picks the schema; an entry that names none is a plain subprocess routine
   # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
   rtype = cfg.get(RoutineKey.TYPE, "subprocess")
+
+  # guard: the type is looked up in a set, so it has to be a plain string
+  if not isinstance(rtype, str):
+    raise RoutineConfigError(f"routine '{name}': 'type' must be a string")
 
   # guard: unknown routine type — reject before further validation
   if rtype not in VALID_TYPES:
@@ -621,6 +685,36 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
 
   # the command/expert pair carries its own cross-field rule
   _validate_command_or_expert(name, cfg, rtype)
+
+  # the scheduler compares and sorts these two as numbers on every pass of the daemon loop, so a
+  # hand-typed string here would raise there and stop every routine, not only this one
+  for field in ( RoutineKey.INTERVAL_SEC, RoutineKey.PRIORITY ):
+    # guard: an absent field takes the scheduler's default
+    if field not in cfg:
+      continue
+    value = cfg[field]
+
+    # guard: a scheduling number that is present must be a real number — a boolean is not one,
+    # and neither is a null, which the scheduler would read in place of its default
+    if isinstance(value, bool) or not isinstance(value, ( int, float )):
+      raise RoutineConfigError(f"routine '{name}': '{field}' must be a number, got {value!r}")
+
+  # the cron expression is parsed and searched for its next fire time on every pass too — an
+  # expression the parser refuses, or one that parses and never fires, is this entry's own defect,
+  # found here instead of inside the scheduler
+  # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+  if "cron" in cfg:
+    try:
+      # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+      defect = _cron_defect(cfg["cron"])
+    except (TypeError, AttributeError) as error:
+      # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+      raise RoutineConfigError(f"routine '{name}': invalid 'cron' {cfg['cron']!r}: {error}") from error
+
+    # guard: the expression is refused by the parser or has no fire time
+    if defect is not None:
+      # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+      raise RoutineConfigError(f"routine '{name}': invalid 'cron' {cfg['cron']!r}: {defect}")
 
   # Domain(settings.versioning):
   # # Retired config field tolerance
@@ -843,6 +937,8 @@ def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
     proc = subprocess.run(
       argv, cwd = repo_root, timeout = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC),
       capture_output = True, text = True, env = subprocess_env, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
     return {
       TickResultKey.NAME: name, TickResultKey.EXIT: proc.returncode,
@@ -1226,7 +1322,11 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
     - `command`: spawn `command + [<absolute-path-to-inbox-file>]` as a
       blocking subprocess per file. The file stays in the inbox until the
       consumer command moves or deletes it — the routine never removes the
-      input file itself.
+      input file itself. A consumer that exits non-zero fails that file; the
+      failed file is listed under `errors`.
+
+  A consumer run or a job dispatch that fails for one file does not end the tick at that file: every file
+  gets its turn, and the tick then reports the failures under `errors`, with a fixed-text `error` and a count.
 
   Guarantees:
     - The inbox file is never copied into a dispatched job; the file at its original path is the
@@ -1239,6 +1339,12 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
     - A file is dispatched only when it passes the routine's composite `filter`: an absent or empty
       filter accepts every file, declared sub-conditions must all pass, and under `any_of` passing
       any one alternative suffices.
+    - A file that fails — a consumer command that cannot run or exits non-zero, or a job dispatch that
+      raises — never stops the files after it in the same tick. The tick result then carries a non-zero
+      `exit` and a fixed-text `error` field with the number of failed files, so the daemon records a
+      `routine_error`; a tick with a failed file is never reported as clean. The failed files NEVER
+      appear in `error`; they are listed under `errors` (path, exit code and reason per file, capped),
+      with the total under `errors_count`.
 
   Notes:
     - On every tick over an existing inbox directory, removes empty harness bookkeeping
@@ -1252,7 +1358,8 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
 
   Returns:
     The standard tick result dict — `exit = 0` and `dispatched_count = N` on
-    success, `exit = -1` and an `error` field on failure.
+    success, `exit = -1` and a fixed-text `error` field with the number of failed files on failure; the failed
+    files are listed under `errors` (path, exit code and reason, capped), with the total under `errors_count`.
   """
 
   # Contract:
@@ -1268,6 +1375,15 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # A file is dispatched only when it passes the routine's composite `filter`. An absent or empty
   # filter accepts every file; every declared sub-condition (`frontmatter`, `folder_note`,
   # `basename`) must pass; under `any_of`, passing any one alternative composite suffices.
+
+  # Contract:
+  # One file that fails — a consumer command that cannot run or exits non-zero, or a job dispatch
+  # that raises — never stops the files after it in the same tick. The tick result then carries a
+  # non-zero `exit` and a fixed-text `error` field with the number of failed files, so the daemon
+  # records a `routine_error`; a tick with a failed file is never reported as clean. The failed
+  # files NEVER appear in `error`, because the daemon classifies that text and a file name in it
+  # could be read as a cause that halts the daemon; they are listed under `errors`, one entry per
+  # failed file with its path, exit code and reason, capped, with the total under `errors_count`.
 
   started = time.time()
   repo = Path(repo)
@@ -1348,26 +1464,54 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       }
     subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
     dispatched = 0
+
+    # the files whose consumer could not be run — candidates are sorted, so stopping at the first
+    # would retry that same file first on every tick and never reach the files behind it
+    faults: list[dict] = []
     for candidate in candidates:
       try:
         # blocking — one process at a time, no parallel spawns
-        subprocess.run(
+        proc = subprocess.run(
           [ *resolved_cmd, str(candidate.resolve()) ],
           cwd = str(repo),
           timeout = timeout_sec,
           capture_output = True,
           text = True,
           env = subprocess_env,
-          check = False, encoding = "utf-8"
+          check = False, encoding = "utf-8",
+          # waiver: stdlib decode-error mode, not a domain constant
+          errors = "replace"
         )
-        dispatched += 1
       except Exception as error:
-        return {
-          TickResultKey.NAME: name, TickResultKey.EXIT: -1,
-          TickResultKey.DURATION_SEC: time.time() - started,
-          "dispatched_count": dispatched,
-          TickResultKey.ERROR: f"inbox subprocess dispatch failed at {candidate.name}: {error}",
-        }
+        faults.append({
+          "file": str(candidate),
+          TickResultKey.EXIT: -1,
+          "stderr_tail": f"spawn failed: {error}",
+        })
+        continue
+
+      # a consumer that ran and reported failure through its exit code failed this file
+      if proc.returncode != 0:
+        faults.append({
+          "file": str(candidate),
+          TickResultKey.EXIT: proc.returncode,
+          "stderr_tail": (proc.stderr or "")[-_STDERR_TAIL_CHARS:].strip(),
+        })
+        continue
+      dispatched += 1
+
+    # some consumer run faulted — the tick is a failure, reported after every file had its turn;
+    # the count alone goes into `error`: the daemon classifies that text by substring, and a file
+    # name or a consumer's own output in it could be read as a cause — both stay under `errors`
+    if faults:
+      return {
+        TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+        TickResultKey.DURATION_SEC: time.time() - started,
+        "dispatched_count": dispatched,
+        "errors_count": len(faults),
+        "errors": faults[:_ERRORS_REPORTED_MAX],
+        TickResultKey.ERROR: f"inbox: consumer failed for {len(faults)} file(s)",
+      }
     return {
       TickResultKey.NAME: name, TickResultKey.EXIT: 0,
       TickResultKey.DURATION_SEC: time.time() - started,
@@ -1454,6 +1598,9 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
 
   # every surviving candidate becomes one dispatched job
   dispatched = 0
+
+  # the files whose dispatch raised — collected, so the files behind a bad one still go out
+  dispatch_faults: list[dict] = []
   for candidate in candidates:
     # guard: reconcile (or an external actor) drained this file — nothing to send
     if not candidate.exists():
@@ -1474,17 +1621,29 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
         dedup_fingerprint = fingerprint,
       )
     except Exception as error:
-      return {
-        TickResultKey.NAME: name, TickResultKey.EXIT: -1,
-        TickResultKey.DURATION_SEC: time.time() - started,
-        "dispatched_count": dispatched,
-        TickResultKey.ERROR: f"inbox dispatch failed at {candidate.name}: {error}",
-      }
+      dispatch_faults.append({
+        "file": str(candidate),
+        TickResultKey.EXIT: -1,
+        "stderr_tail": f"dispatch raised: {error}",
+      })
+      continue
 
     # an in-flight or parked (dead-letter) bundle already owns this file
     if result.get(JobCollectKey.STATUS) == JobStatus.ALREADY_QUEUED:
       continue
     dispatched += 1
+
+  # some dispatch raised — the tick is a failure, reported after every file had its turn; the
+  # count alone goes into `error`, the file names and the reasons stay under `errors`
+  if dispatch_faults:
+    return {
+      TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+      TickResultKey.DURATION_SEC: time.time() - started,
+      "dispatched_count": dispatched,
+      "errors_count": len(dispatch_faults),
+      "errors": dispatch_faults[:_ERRORS_REPORTED_MAX],
+      TickResultKey.ERROR: f"inbox: job dispatch failed for {len(dispatch_faults)} file(s)",
+    }
 
   # the tick result reports how many jobs went out this pass
   return {
@@ -1585,7 +1744,7 @@ def is_schedule_due(name: str, cfg: dict, now_unix: float, last_run_unix: float)
 
 def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   """
-  Watch local HEAD and fire one dispatch per matching item.
+  Watch local HEAD and fire one dispatch per matching item, owed retry items first.
 
   Two sub-shapes (validator enforces exactly-one):
 
@@ -1599,13 +1758,15 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       advances past it so one broken item never stalls the rest. A spawn that
       raises (a timeout, an OS error) does not end the tick before the state
       write: that item and every item not yet attempted are recorded in
-      `failed_items` too, and the tick then returns the failure.
+      `failed_items` too, the faulted item last, behind the items the fault
+      left unattempted, and the tick then returns the failure.
 
   `last_seen_sha` is tracked in `state.json`'s `git_watch.<name>` block. First
   run records the current ref and dispatches nothing (no history backfill).
   Non-ancestor (force-push / rebase) resets baseline and computes no fresh
   items over the discarded range; any `failed_items` still reachable from the
-  new ref are dispatched regardless (an unreachable one is dropped instead).
+  new ref are dispatched regardless (an unreachable one is dropped instead, and
+  so is one the current request template can no longer render).
 
   `remote` is read from config but ignored by the watch — remote sync is the
   daemon's responsibility (`daemon.git.remote_sync`). The field is kept for
@@ -1615,8 +1776,13 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     - `last_seen_sha` always advances to the tick's HEAD by the time the tick returns, on every tick
       after the first that got as far as dispatching — including a tick whose range was discarded by a
       force-push or rebase and a tick that ends in a worker spawn failure. A tick that fails earlier
-      (not a git repo, HEAD unreadable, command unresolvable, invalid request template) leaves it
-      where it was.
+      (not a git repo, HEAD unreadable, command unresolvable, a fresh item the request template
+      cannot render) leaves it where it was.
+    - Owed retry items are dispatched before any fresh item, and the state recording that they are no longer owed
+      is written even when a fresh item then fails the tick, so an owed item is never dispatched twice because a
+      later fresh item failed.
+    - When a command worker's spawn fails, `error` of the tick result is fixed text; the exception's own text, which
+      can carry the whole argv, never appears in `error`, and the detail travels under `errors`.
     - When spawning a command worker raises, the tick loses no finished work: items that already
       succeeded are not replayed, items that exited non-zero earlier stay owed, and the item whose
       spawn failed together with every item not yet attempted is owed to the next tick. The failure
@@ -1629,12 +1795,26 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     - An item a worker subprocess failed on is retried on a later tick, ahead of any fresh item, for
       as long as its commit stays reachable from HEAD; once history rewrites it away it is dropped
       rather than redelivered.
+    - A stored retry item that the routine's current request template can no longer render is dropped,
+      not kept: the tick goes on, the cursor advances, and that one tick reports the drop with a
+      non-zero `exit` and an `error` of fixed text and a count, never naming the item. Only a fresh
+      item that cannot be rendered fails the tick as a defect of the routine's configuration, with
+      the cursor left where it was.
     - When a worker reports the members of a multi-path unit it did not handle, the retry carries
       only those members; without such a report the unit is retried whole. A narrowed rename unit
       keeps `old_paths` aligned index by index with `paths`.
     - A fresh item is dispatched only when it passes the routine's composite `filter`: an absent or
       empty filter accepts every item, declared sub-conditions must all pass, and under `any_of`
       passing any one alternative suffices.
+    - A command worker that exits non-zero on one item never stops the items after it in the same tick.
+      A tick that leaves any item failing, whether the worker exited non-zero or its spawn faulted, is
+      never reported as clean: the result carries a non-zero `exit` and an `error` field, so the daemon
+      records a `routine_error`. The failed item is retried on the next tick.
+
+  Notes:
+    - Owed retry items are dispatched before fresh items are rendered, so a fresh item that cannot be rendered
+      never keeps an owed item waiting.
+    - A spawn that fails puts fixed text in `error`; the failure detail is carried under `errors`.
 
   Args:
     repo: Path-like reference to the repository.
@@ -1643,18 +1823,34 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
 
   Returns:
     The standard tick result dict — `exit = 0` with `dispatched_count` on
-    success, `exit = -1` and an `error` field on failure.
+    success, `exit = -1` and an `error` field on failure; for a failed spawn `error` is fixed text and the
+    detail sits under `errors`. A tick that leaves an item failing
+    returns a non-zero `exit` and an `error` as well, with the cursor advanced and the other
+    items run as before. A stored retry item the current request template can no longer render is dropped and
+    the tick goes on, but that tick too returns a non-zero `exit` and an `error`.
   """
 
   # Contract:
   # `last_seen_sha` always advances to the tick's HEAD by the time the tick returns, on every tick
   # after the first that got as far as dispatching — including a tick whose range was discarded by a
   # force-push or rebase and a tick that ends in a worker spawn failure. A tick that fails earlier
-  # (not a git repo, HEAD unreadable, command unresolvable, invalid request template) leaves it where
-  # it was. The very first tick after a watch is configured records the current HEAD as the baseline
+  # (not a git repo, HEAD unreadable, command unresolvable, a fresh item the request template cannot
+  # render) leaves it where it was. The very first tick after a watch is configured records the current HEAD as the baseline
   # and dispatches nothing; no prior history is ever backfilled. An item a worker subprocess failed
   # on is retried on a later tick, ahead of any fresh item, for as long as its commit stays reachable
   # from HEAD; once history rewrites it away it is dropped rather than redelivered.
+
+  # Contract:
+  # A stored retry item that the routine's current request template can no longer render is dropped,
+  # not kept: the tick goes on, the cursor advances, and that one tick reports the drop with a
+  # non-zero `exit` and an `error` of fixed text and a count, never naming the item. Only a fresh
+  # item that cannot be rendered is a defect of the routine's configuration: it fails the tick and
+  # leaves the cursor where it was.
+
+  # Contract:
+  # Owed retry items are dispatched before any fresh item, and the state recording that they are no longer
+  # owed is written even when a fresh item then fails the tick, so an owed item is NEVER dispatched twice
+  # because a later fresh item failed.
 
   # Contract:
   # When spawning a command worker raises (a timeout, an OS error), the tick loses no finished work:
@@ -1662,6 +1858,10 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # the tick stay owed, and the item whose spawn failed together with every item of the tick not yet
   # attempted, retry and fresh alike, is owed to the next tick. Only after that state is stored does
   # the tick report the failure (`exit = -1`, error `command_dispatch_failed`).
+
+  # Contract:
+  # When a command worker's spawn fails, `error` of the tick result is fixed text; the exception's own text,
+  # which can carry the whole argv, NEVER appears in `error`, and the detail travels under `errors`.
 
   # Contract:
   # A commit whose message carries the `Lazy-Watch: skip` trailer contributes no item to any watch.
@@ -1680,6 +1880,12 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # A fresh item is dispatched only when it passes the routine's composite `filter`. An absent or
   # empty filter accepts every item; every declared sub-condition (`frontmatter`, `folder_note`,
   # `basename`) must pass; under `any_of`, passing any one alternative composite suffices.
+
+  # Contract:
+  # A command worker that exits non-zero on one item never stops the items after it in the same
+  # tick. A tick that leaves any item failing, whether the worker exited non-zero or its spawn
+  # faulted, is never reported as clean: the result carries a non-zero `exit` and an `error`
+  # field, so the daemon records a `routine_error`. The failed item is retried on the next tick.
 
   started = time.time()
   repo = Path(repo)
@@ -1706,6 +1912,8 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     head_sha = subprocess.check_output(
       [ "git", "rev-parse", "HEAD" ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
   except subprocess.CalledProcessError as error:
     # waiver: one-off routine-outcome note/reason token, not an internal key
@@ -1831,6 +2039,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # limit: retried items skip the composite filter re-match; re-run it over `retry_items` if filter drift matters
   next_failed_items = retry_items
   spawn_fault: str | None = None
+  stale_count = 0
   if RoutineKey.COMMAND in cfg:
     timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
     try:
@@ -1840,6 +2049,11 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       return _err(name, started, "command_resolution_failed", str(error))
     subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
     still_failing = []
+
+    # the item whose spawn faulted is owed last, behind every item the fault left unattempted —
+    # retries run first, so an item that faults on every tick would otherwise be tried ahead of
+    # the items behind it forever and they would never run
+    faulted_entry: dict | None = None
     for item in retry_items + fresh_items:
       # a retried item carries its own `reason` from a prior failure — strip it before
       # resending the item-json payload; the worker only ever expects the raw item shape
@@ -1863,6 +2077,8 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
           text = True,
           env = subprocess_env,
           check = False, encoding = "utf-8",
+          # waiver: stdlib decode-error mode, not a domain constant
+          errors = "replace",
         )
       except Exception as error:
         # the spawn itself faulted (e.g. TimeoutExpired) rather than the worker reporting a
@@ -1871,7 +2087,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
         # tick finished is not replayed and the range does not grow tick after tick
         spawn_fault = str(error)
         # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
-        still_failing.append({ **clean_item, "reason": f"spawn failed: {spawn_fault}"[:_REASON_MAX_CHARS] })
+        faulted_entry = { **clean_item, "reason": f"spawn failed: {spawn_fault}"[:_REASON_MAX_CHARS] }
         continue
 
       # worker failed on this item — keep it for the next tick's retry pass; the cursor
@@ -1883,6 +2099,10 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
           **_narrow_failed_item(clean_item, proc.stdout),
           "reason": f"exit {proc.returncode}: {stderr_tail}",
         })
+
+    # the faulted item joins the owed list behind the unattempted ones
+    if faulted_entry is not None:
+      still_failing.append(faulted_entry)
     next_failed_items = still_failing
   else:
     expert = cfg[RoutineKey.EXPERT]
@@ -1902,24 +2122,84 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       if isinstance(done_key, str) and done_key.startswith(f"{name}:"):
         expert_runtime.consume_job(target_repo, expert, done_job[JobCollectKey.JOB_ID])
 
-    # every surviving item becomes one dispatched job, folded into any live job for its place
-    for item in fresh_items:
+    # the owed pass: an item an earlier tick could not dispatch is rendered and dispatched before
+    # any fresh item is even rendered, so nothing a fresh item does can make it be dispatched twice
+    undispatched: list[dict] = []
+    sent: list[dict] = []
+    batch: list[tuple[dict, dict]] = []
+    for queued_item in retry_items:
+      # a retried item carries the `reason` of its earlier failure — the request is rendered
+      # from the raw item shape alone
+      # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
+      item = { key: value for key, value in queued_item.items() if key != "reason" }
       try:
-        rendered = _render_template(request_template, item)
-      except KeyError as error:
-        # a template naming a field the item does not carry (a `{path}` kept from before the
-        # routine moved to a grouped `group` mode, whose items carry `paths`) is a config defect
-        # of this routine — reported as its failed tick, with the cursor left where it was so
-        # the tick retries once the template is fixed
-        # waiver: one-off routine-outcome note/reason token, not an internal key
-        return _err(
-          name, started, "request_template_invalid",
-          f"placeholder {{{error.args[0]}}} not among item keys {sorted(item)}",
+        batch.append((item, _render_template(request_template, item)))
+      except KeyError:
+        # a stored item the current template cannot render was stored before the operator changed
+        # the routine's grouping or template; no later tick could render it either, so it is
+        # dropped instead of owed, and the tick goes on and reports the drop once
+        stale_count += 1
+
+    # two passes share one dispatch loop: the owed batch rendered above goes out first, and only
+    # then is the fresh batch rendered, whole, before the first fresh item is dispatched
+    template_fault: str | None = None
+    for is_fresh_pass in ( False, True ):
+      # the fresh pass renders every fresh item before any of them is dispatched, so a fresh item
+      # that cannot be rendered fails the tick with no fresh item of the range already sent
+      if is_fresh_pass:
+        batch = []
+        for fresh_item in fresh_items:
+          try:
+            batch.append((fresh_item, _render_template(request_template, fresh_item)))
+          except KeyError as error:
+            # a template naming a field a fresh item does not carry (a `{path}` kept from before
+            # the routine moved to a grouped `group` mode, whose items carry `paths`) is a config
+            # defect of this routine
+            template_fault = f"placeholder {{{error.args[0]}}} not among item keys {sorted(fresh_item)}"
+            break
+
+      # guard: a fresh item cannot be rendered — nothing fresh is dispatched this tick
+      if template_fault is not None:
+        break
+
+      # every item of the pass becomes one dispatched job, folded into any live job for its place
+      for item, rendered in batch:
+        # one item whose dispatch raises is kept for the next tick's retry and stepped over; the
+        # cursor still advances below, so it never stalls the items behind it or the ticks after it
+        try:
+          expert_runtime.dispatch_job(
+            target_repo, expert, rendered, protocols = protocols,
+            dedup_key = _git_dedup_key(name, item),
+          )
+        # waiver: the broad catch is the per-item isolation boundary — whatever one item makes the
+        # dispatch raise, the item is owed to the next tick and the rest of the range still runs
+        except Exception as error:  # pylint: disable=broad-exception-caught
+          # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
+          undispatched.append({ **item, "reason": f"dispatch failed: {error}"[:_REASON_MAX_CHARS] })
+        else:
+          sent.append(item)
+
+    # guard: an unrenderable fresh item fails the tick as a defect of the routine's configuration,
+    # with the cursor left where it was so the range is scanned again once the template is fixed
+    if template_fault is not None:
+      # the owed pass is over all the same: an item it dispatched is no longer owed, and the state
+      # says so now, or a later tick would dispatch it again; every other stored entry stays as it
+      # was, for the tick that closes the range to retry, drop and report
+      if sent:
+        # waiver: this module's own FAILED_ITEMS entry key, not a reusable domain key
+        still_owed = [
+          entry for entry in stored_failed
+          if { key: value for key, value in entry.items() if key != "reason" } not in sent
+        ]
+        runtime_state.update(
+          repo,
+          lambda stored: stored.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {}).update({
+            StateKey.FAILED_ITEMS: still_owed,
+          })
         )
-      expert_runtime.dispatch_job(
-        target_repo, expert, rendered, protocols = protocols,
-        dedup_key = _git_dedup_key(name, item),
-      )
+      # waiver: one-off routine-outcome note/reason token, not an internal key
+      return _err(name, started, "request_template_invalid", template_fault)
+    next_failed_items = undispatched
 
   # the scanned range is closed by advancing the last-seen sha to HEAD; failed items persist
   # (or clear) alongside it so the next tick knows what to retry
@@ -1934,8 +2214,16 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   # guard: a spawn faulted — the tick is a failure the daemon records, now that the state holds
   # what is owed
   if spawn_fault is not None:
+    # `error` is fixed text: the daemon classifies it by substring, and the text of the exception
+    # (a timeout carries the whole argv, file paths included) could be read as a cause — it stays
+    # under `errors`
     # waiver: one-off routine-outcome note/reason token, not an internal key
-    return _err(name, started, "command_dispatch_failed", spawn_fault)
+    fault_result = _err(name, started, "command_dispatch_failed", _SPAWN_FAULT_ERROR_TEXT)
+    # waiver: small internal subkeys, not reusable domain keys
+    fault_result["errors"] = [
+      { TickResultKey.EXIT: -1, "stderr_tail": f"spawn failed: {spawn_fault}"[:_STDERR_TAIL_CHARS] },
+    ]
+    return fault_result
 
   # fold every status worth a daemon-log line into one note — a persistent per-item failure
   # stays a visible line on every tick until it clears or its sha is dropped, per design
@@ -1947,10 +2235,29 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     notes.append(f"dropped {dropped_count} unreachable failed item(s) after history rewrite")
   if next_failed_items:
     notes.append(f"{len(next_failed_items)} item(s) still failing — retried next tick")
-  return _ok(
-    name, started, dispatched_count = len(retry_items) + len(fresh_items),
+  result = _ok(
+    name, started, dispatched_count = len(retry_items) + len(fresh_items) - stale_count,
     **({ TickResultKey.NOTE: "; ".join(notes) } if notes else {}),
   )
+
+  # a tick that left an item failing is a failed tick for the daemon's error ledger, even though
+  # the cursor moved and every other item ran — an exit of 0 would hide the failure for as long
+  # as the item keeps failing
+  failures = []
+  if next_failed_items:
+    failures.append(f"{len(next_failed_items)} item(s) failed — retried next tick")
+
+  # a dropped stored item is reported by the one tick that dropped it: fixed text and a count, never
+  # the item's own paths or the template's placeholder names, which the daemon could read as a cause
+  if stale_count:
+    failures.append(STALE_ITEMS_DROPPED_TEMPLATE.format(count = stale_count))
+    sys.stderr.write(STALE_ITEMS_WARNING_TEMPLATE.format(name = name, count = stale_count))
+
+  # any failure of the tick turns its result into a failed one
+  if failures:
+    result[TickResultKey.EXIT] = 1
+    result[TickResultKey.ERROR] = "; ".join(failures)
+  return result
 
 
 def _ok(name: str, started: float, **extra: object) -> dict:
@@ -2099,6 +2406,8 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
         "--format=%H%x09%h%x09%an%x09%ae%x09%ct%x09%s",
         rng, *pathspec ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
     items: list[dict[str, object]] = []
     if out:
@@ -2123,7 +2432,11 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
     # use diff --name-status for added/modified/deleted classification, NUL-separated so paths come as written
     out = subprocess.check_output(
       [ "git", "diff", "--name-status", "-z", rng, *pathspec ],
-      cwd = str(work_dir), text = True, encoding = "utf-8",
+      cwd = str(work_dir),
+    ).decode(
+      "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "surrogateescape",
     )
     wanted = {
       "new_files": { "A" },
@@ -2155,7 +2468,11 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
   if watch == "renamed_files":
     out = subprocess.check_output(
       [ "git", "diff", "--name-status", "--find-renames", "-z", rng, *pathspec ],
-      cwd = str(work_dir), text = True, encoding = "utf-8",
+      cwd = str(work_dir),
+    ).decode(
+      "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "surrogateescape",
     )
     items = []
     for score, paths in _name_status_records(out):
@@ -2414,12 +2731,15 @@ def _group_git_items(work_dir: Path, items: list[dict], mode: str | list, rng: s
     members = groups[gdir]
 
     # attribute the unit to the last commit touching it in range — one log call per unit; the
-    # root unit is the whole range, so no pathspec narrows the log for it
-    pathspec = [] if gdir == GROUP_ROOT_DIR else [ "--", gdir ]
+    # root unit is the whole range, so no pathspec narrows the log for it; a unit directory is read off a
+    # changed path, so git takes it as written, never as a pattern
+    pathspec = [] if gdir == GROUP_ROOT_DIR else [ "--", f"{_LITERAL_MAGIC}{gdir}" ]
     try:
       line = subprocess.check_output(
         [ "git", "log", "-1", "--format=%H%x09%an%x09%ae", rng, *pathspec ],
         cwd = str(work_dir), text = True, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
       ).strip()
     except subprocess.CalledProcessError:
       line = ""
@@ -2545,6 +2865,8 @@ def _query_skipped_shas(work_dir: Path, rng: str) -> set[str]:
     out = subprocess.check_output(
       [ "git", "log", f"--format=%H%x09%(trailers:key={SKIP_TRAILER_KEY},valueonly,separator=%x2C)", rng ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
   except subprocess.CalledProcessError:
     # guard: an unreadable range hides nothing — the items stay as computed
@@ -2581,6 +2903,8 @@ def _query_skipped_from_messages(work_dir: Path, rng: str) -> set[str]:
   try:
     out = subprocess.check_output(
       [ "git", "log", _MESSAGE_LOG_FORMAT, rng ], cwd = str(work_dir), text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
   except subprocess.CalledProcessError:
     # guard: an unreadable range hides nothing — the items stay as computed
@@ -2689,8 +3013,12 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
     flag = _DIFF_FILTER_FLAGS.get(str(item.get("status")), _DIFF_FILTER_FLAGS["R"])
     try:
       log = subprocess.check_output(
-        [ "git", "log", "--format=%H%x09%an%x09%ae", f"--diff-filter={flag}", rng, "--", str(path) ],
+        # the path comes from a diff listing, so git takes it as written, never as a pattern
+        [ "git", "--literal-pathspecs", "log", "--format=%H%x09%an%x09%ae", f"--diff-filter={flag}",
+          rng, "--", str(path) ],
         cwd = str(work_dir), text = True, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
       )
     except subprocess.CalledProcessError:
       # guard: an unreadable log never drops work silently — the item stands as computed
@@ -2729,9 +3057,12 @@ def _query_last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> 
   flag = _DIFF_FILTER_FLAGS.get(status, _DIFF_FILTER_FLAGS["R"])
   try:
     out = subprocess.check_output(
-      [ "git", "log", f"--diff-filter={flag}",
+      # the path comes from a diff listing, so git takes it as written, never as a pattern
+      [ "git", "--literal-pathspecs", "log", f"--diff-filter={flag}",
         "--format=%H", "-1", rng, "--", path ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
     return out or "unknown"
   except subprocess.CalledProcessError:
@@ -2760,9 +3091,12 @@ def _query_last_change_author(work_dir: Path, path: str, rng: str, status: str) 
   flag = _DIFF_FILTER_FLAGS.get(status, _DIFF_FILTER_FLAGS["R"])
   try:
     out = subprocess.check_output(
-      [ "git", "log", f"--diff-filter={flag}",
+      # the path comes from a diff listing, so git takes it as written, never as a pattern
+      [ "git", "--literal-pathspecs", "log", f"--diff-filter={flag}",
         "--format=%an%x09%ae", "-1", rng, "--", path ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
   except subprocess.CalledProcessError:
     # guard: git log failed for this range/path — best-effort, empty strings not a raise
@@ -3020,6 +3354,11 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     - A candidate is dispatched only when it passes the routine's composite `filter`: an absent or
       empty filter accepts every candidate, declared sub-conditions must all pass, and under
       `any_of` passing any one alternative suffices.
+    - A tick in which any candidate failed — it could not be read, its consumer command exited non-zero,
+      or its dispatch raised — is never reported as clean: the result carries a non-zero `exit` and an
+      `error` field, so the daemon records a `routine_error`. When every candidate failed the exit is
+      `-1`; the failed candidates are listed under `errors` (total under `errors_count`) and are NEVER
+      named in `error`, which carries fixed text and a count.
 
   Args:
     repo: Path-like reference to the repository.
@@ -3030,9 +3369,11 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       right-anchored, shell-glob, `*` never crosses `/`.
 
   Returns:
-    The standard tick result dict — `exit = 0` on a pass (possibly with
-    accumulated per-file errors under `errors`), `exit = -1` and an `error`
-    field when every candidate failed or a shared-state setup failed.
+    The standard tick result dict — `exit = 0` on a pass with no failed candidate,
+    `exit = -1` and an `error` field when every candidate failed, the failed candidates then being listed
+    under `errors`, or when a shared-state setup failed. A mixed pass, where some candidates failed and some were
+    processed, carries the failures under `errors` and returns a non-zero `exit`
+    and an `error` naming the number of failed candidates.
   """
 
   # Contract:
@@ -3049,6 +3390,13 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   # empty filter accepts every candidate; every declared sub-condition (`frontmatter`,
   # `folder_note`, `basename`) must pass; under `any_of`, passing any one alternative composite
   # suffices.
+
+  # Contract:
+  # A tick in which any candidate failed — it could not be read, its consumer command exited
+  # non-zero, or its dispatch raised — is never reported as clean: the result carries a non-zero
+  # `exit` and an `error` field, so the daemon records a `routine_error`. When every candidate
+  # failed, the exit is `-1`. The failed candidates are listed under `errors`, with the total
+  # under `errors_count`, and are NEVER named in `error`, which carries fixed text and a count.
 
   started = time.time()
   repo = Path(repo)
@@ -3192,10 +3540,12 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
           capture_output = True,
           text = True,
           env = subprocess_env,
-          check = False, encoding = "utf-8"
+          check = False, encoding = "utf-8",
+          # waiver: stdlib decode-error mode, not a domain constant
+          errors = "replace"
         )
         if proc.returncode != 0:
-          tail = (proc.stderr or "")[-500:].strip()
+          tail = (proc.stderr or "")[-_STDERR_TAIL_CHARS:].strip()
           errors.append({
             "file": str(candidate),
             TickResultKey.EXIT: proc.returncode,
@@ -3261,25 +3611,22 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   if use_command and next_state != scan_state:
     _save_scan_state(repo, name, next_state)
 
-  # Surface aggregated per-file errors in the routine result. Exit code is
-  # non-zero only when EVERY candidate failed (= the whole tick was lost) so
-  # operators can distinguish "one fixture broken" from "the routine is
-  # down". A mixed pass returns exit=0 with `errors=[…]` for visibility.
+  # Surface aggregated per-file errors in the routine result. A tick in which every candidate
+  # failed (= the whole tick was lost) says so in its `error`, so operators can distinguish "one
+  # fixture broken" from "the routine is down"; a mixed pass reports its failed candidates too,
+  # further down — either way the exit is non-zero, so the failure reaches the error ledger.
+  # the count alone goes into `error`: the daemon classifies that text by substring, and a file
+  # name or a consumer's own output in it could be read as a cause — both stay under `errors`
   if errors and dispatched + skipped + unchanged == 0:
-    first = errors[0]
     return {
       TickResultKey.NAME: name,
-      TickResultKey.EXIT: first.get(TickResultKey.EXIT, 1) or 1,
+      TickResultKey.EXIT: -1,
       TickResultKey.DURATION_SEC: time.time() - started,
       "dispatched_count": dispatched,
       "skipped_count": skipped,
       "errors_count": len(errors),
-      "errors": errors[:10],
-      TickResultKey.ERROR: (
-        f"md-scan: all {len(errors)} candidate(s) failed; "
-        # waiver: small internal subkey, not a reusable domain key
-        f"first at {first['file']}: {first.get('stderr_tail', '')[:200]}"
-      ),
+      "errors": errors[:_ERRORS_REPORTED_MAX],
+      TickResultKey.ERROR: f"md-scan: all {len(errors)} candidate(s) failed — retried next tick",
     }
   result = {
     TickResultKey.NAME: name, TickResultKey.EXIT: 0,
@@ -3293,5 +3640,12 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: small internal subkey, not a reusable domain key
     result["errors_count"] = len(errors)
     # waiver: small internal subkey, not a reusable domain key
-    result["errors"] = errors[:10]
+    result["errors"] = errors[:_ERRORS_REPORTED_MAX]
+
+    # a mixed pass is still a failed tick for the error ledger: the candidates that failed are
+    # retried every tick, and an exit of 0 would hide them for as long as they keep failing
+    # the count alone goes into `error`: the daemon classifies that text by substring, and a
+    # file name in it could be read as a cause — the names stay under `errors`
+    result[TickResultKey.EXIT] = 1
+    result[TickResultKey.ERROR] = f"md-scan: {len(errors)} candidate(s) failed — retried next tick"
   return result

@@ -51,6 +51,10 @@ _SUB_RESOLVE_LANGUAGE = "resolve-language"
 _ARG_SECTION = "--section"
 # Core CLI flag naming the repository root.
 _ARG_CWD = "--cwd"
+# Encoding of the core CLI's output.
+_ENCODING = "utf-8"
+# Codec error handler that turns a byte that is not valid text into a replacement mark instead of failing.
+_DECODE_LOSSY = "replace"
 
 
 # ----------------------------------------------------------------------------------------
@@ -133,16 +137,19 @@ def resolve_language(repo: Path) -> str:
       sys.executable, str(_axes.resolve_core_cli()), _SUB_RESOLVE_LANGUAGE,
       _ARG_SECTION, _WIKI_SECTION, _ARG_CWD, str(repo),
     ],
-    capture_output = True, text = True, check = False, encoding = "utf-8",
+    capture_output = True, check = False,
   )
 
+  # core's output is taken as bytes, so its exit status alone tells success from failure
+  answer = proc.stdout.decode(_ENCODING, errors = _DECODE_LOSSY)
+
   # guard: a non-zero exit or an empty answer — surface stdout+stderr instead of inventing a language
-  if proc.returncode != 0 or not proc.stdout.strip():
+  if proc.returncode != 0 or not answer.strip():
     raise RuntimeError(
       f"lazycortex-core {_SUB_RESOLVE_LANGUAGE} exit={proc.returncode} "
-      f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+      f"stdout={answer!r} stderr={proc.stderr.decode(_ENCODING, errors = _DECODE_LOSSY)!r}"
     )
-  return proc.stdout.removesuffix("\n")
+  return answer.removesuffix("\n")
 
 
 def language_name(code: str) -> str:

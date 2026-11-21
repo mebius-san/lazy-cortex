@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results — including deferred and fail-closed outcomes.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-expert.collect-job
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
-source_sha: 3fadd77433a2100975275f22c7c7e8cb8e544c9d
-surface_sha: 87bbb66d5275e82acb1ffdaf5110933ad1bc35b5bb8843553606071938981ce5
+source_sha: cd5be25450dbd5c7ade3e7cc1ecf31d707a2f132
+surface_sha: 7712666a531061a669aa9fcceff874508323fa304fb85efb4400a98dec9330ac
 ---
 # Expert workers — dispatch, keep working, collect later
 
@@ -32,7 +32,7 @@ Collection is **fail-closed**: an expert's response is only ever read as a succe
 
 ## What's in this block
 
-**`/lazy-expert.dispatch-job`** is the entry point into the async team. You supply the expert name, the job payload (kind, role, and request are required), and an optional list of protocol refs. Input files are named by path: `source` and `context` are lists of repo-relative paths that nothing copies at dispatch — the runtime copies them into the job when it claims it, so the expert sees the files as they stand at that moment. Content that exists in no file can be passed inline (`source_inline`, `context_inline`), and `result` names placeholder files the expert fills in. The skill validates the payload, checks `.experts/` exists, checks the expert is registered in `lazy.settings.json[experts]`, writes the job directory under `.experts/.jobs/<expert_name>/`, and returns `{job_id, queue_path}` immediately. From that point the main session is free. Dispatching the same job again under the same dedup key does not queue a duplicate — you get back the already-queued job's `job_id` (`status: "already-queued"`) instead.
+**`/lazy-expert.dispatch-job`** is the entry point into the async team. You supply the expert name, the job payload (kind, role, and request are required), and an optional list of protocol refs. Input files are named by path: `source` and `context` are lists of `{"path": "<repo-relative path>"}` objects (each may carry a `description`) that nothing copies at dispatch — the runtime copies them into the job when it claims it, so the expert sees the files as they stand at that moment. A bare string in place of an object is refused. Content that exists in no file can be passed inline (`source_inline`, `context_inline`), and `result` lists `{"path": "result/<filename>"}` objects naming placeholder files the expert fills in. The skill validates the payload, checks `.experts/` exists, checks the expert is registered in `lazy.settings.json[experts]`, writes the job directory under `.experts/.jobs/<expert_name>/`, and returns `{job_id, queue_path}` immediately. From that point the main session is free. Dispatching the same job again under the same dedup key does not queue a duplicate — you get back the already-queued job's `job_id` (`status: "already-queued"`) instead.
 
 **`/lazy-expert.list-jobs`** gives you a live snapshot of every job in the queue, sorted oldest-first. Each row shows expert, job_id, status, and age. The statuses map directly to what the daemon writes to disk: `queued` (READY marker present, no PID — waiting to be picked up), `active` (READY + PID — daemon is running it now), `cancelled` (a CANCELLED marker was written — outranks every other marker), `dead` (DEAD marker present — the runtime killed the job as stuck), `done` (DONE marker + a response whose outcome reports finished work — neither `error` nor `deferred`), `deferred` (DONE marker + a response whose outcome is the reserved `deferred` token: the work was postponed on purpose and its input left untouched), and `failed` (DONE marker + a response whose outcome is `error`, or a response missing/malformed/without an `outcome` field). Pass `expert=<name>` or `status=<value>` — one of `queued`, `active`, `cancelled`, `dead`, `done`, `deferred`, `failed` — to narrow the listing; any other value is rejected. Use this before collecting to confirm a job has finished, or to locate a `job_id` you have lost track of.
 
@@ -52,7 +52,7 @@ When you see a job reach a terminal status in the list (`done`, `deferred`, `fai
 
 ## Common adjustments
 
-- **Add file references to the dispatch payload.** Pass `source` for files the expert should read as primary input, `context` for background material, and `result` for files where the expert should write its output. `source` and `context` are repo-relative paths, never file content; use `source_inline` / `context_inline` only for text that no file holds. If a named path is deleted or renamed before the runtime claims the job, the job fails with a `logical` error ("declared path ... does not exist at claim time") — re-dispatch with the path the file has now.
+- **Add file references to the dispatch payload.** Pass `source` for files the expert should read as primary input, `context` for background material, and `result` for files where the expert should write its output. `source` and `context` entries are `{"path": "<repo-relative path>"}` objects, never file content, and each `result` entry is `{"path": "result/<filename>"}`; use `source_inline` / `context_inline` only for text that no file holds. A bare string entry is refused with an error saying entries must be `{"path": "<string>"}` objects — rewrite each entry as an object and dispatch again. If a named path is deleted or renamed before the runtime claims the job, the job fails with a `logical` error ("declared path ... does not exist at claim time") — re-dispatch with the path the file has now.
 - **Verify the expert name before dispatching.** If you mistype the expert key, `/lazy-expert.dispatch-job` aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`." Correct the name, or register the expert through the `/lazy-core.install` expert wizard. `/lazy-expert.list-jobs` shows only experts that currently have jobs in the queue, so it is not a full registry listing.
 - **Run `/lazy-core.install` if dispatch says `.experts/` is not initialised.** The skill refuses to queue a job until that directory layout exists.
 - **Filter the job list by expert.** `/lazy-expert.list-jobs expert=<name>` is the fastest way to check the queue for one worker when you have several experts configured.

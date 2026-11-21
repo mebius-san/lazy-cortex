@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
-from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
@@ -26,7 +26,7 @@ from repo_root import resolve_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from pathlib import Path
 
 
 # waiver: external-format guard config field names, read by guard_checks under the same spelling
@@ -246,14 +246,15 @@ def find_public_scan_files(root: Path) -> dict:
   # read the same way, and the public-scope, encrypted-file and skip-path exclusions are the same, so the skill and
   # the hook never disagree on which files count as public.
 
-  # the tracked files are the starting list; `-z` keeps unusual paths unquoted
+  # the tracked files are the starting list; `-z` keeps unusual paths unquoted, and the output is taken as bytes
+  # because text mode would turn a carriage return inside a name into a line feed
   # waiver: git CLI argument vector, not a domain key
-  proc = subprocess.run([ "git", "ls-files", "-z" ], cwd = root, capture_output = True, text = True, check = False)
+  proc = subprocess.run([ "git", "ls-files", "-z" ], cwd = root, capture_output = True, check = False)
 
   # guard: no tracked list to filter outside a readable repository
   if proc.returncode != 0:
-    raise RuntimeError(f"git ls-files failed: {proc.stderr.strip()}")
-  tracked = [ path for path in proc.stdout.split("\0") if path ]
+    raise RuntimeError(f"git ls-files failed: {os.fsdecode(proc.stderr).strip()}")
+  tracked = [ path for path in os.fsdecode(proc.stdout).split("\0") if path ]
 
   # the same config reader and path predicates the pre-commit hook applies
   _, scope_globs, skip_globs = guard_checks.load_config(str(root))

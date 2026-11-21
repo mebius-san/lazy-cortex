@@ -62,7 +62,7 @@ Outcome: `fresh`, `overwrite-approved`, or `cancelled-by-operator`.
 
 The worker prints a JSON report. A non-zero exit means `errors` is non-empty; every error names one plugin, snippet, or theme that was skipped — the rest of the vault was still written.
 
-The worker never touches `workspace*`, caches, or obsidian-git authentication. Iconize's `data.json` is laid down like any other plugin's settings, but carries only its settings-like blocks (`settings`, `rules`, `recentlyUsedIcons`) — the per-path icon entries were never captured, and `iconize-reloader` rebuilds them from note frontmatter.
+The worker never touches `workspace*`, `bookmarks.json`, caches, or obsidian-git authentication — bookmarks are each device's own, and a manifest from an older capture that still carries them does not bring them back. Iconize's `data.json` is laid down like any other plugin's settings, but carries only its `settings` and `rules` blocks — the per-path icon entries were never captured, and `iconize-reloader` rebuilds them from note frontmatter; the recently used icons are each device's own.
 
 Outcome: `deployed` or `deployed-with-errors: <N>`.
 

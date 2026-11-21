@@ -72,6 +72,10 @@ from review_lockit import Lockit  # noqa: E402  # pylint: disable=import-error,w
 # The per-cycle autorun choices a review entry removes from the frontmatter.
 _AUTORUN_KEYS = ( ReviewKey.SKIP_VALIDATION, ReviewKey.AUTORUN, ReviewKey.AUTORUN_CYCLES )
 
+# Git's per-path magic prefix that makes one path argument a literal name. A git call that can run a hook marks its
+# paths with it; the global `--literal-pathspecs` option would reach the hook's environment.
+_LITERAL_MAGIC = ":(literal)"
+
 
 def _history_explainer(file_path: Path) -> str:
   """
@@ -334,18 +338,24 @@ def _atomic_commit(file_path: Path) -> None:
   Commit the file under the caller's git identity with a human-shaped subject and no Doc-Review trailer.
 
   Args:
-    file_path: Document to stage and commit; the commit carries only this file.
+    file_path: Document to stage and commit; the commit carries only this file, and its file name is taken
+      literally, never as a pattern.
   """
+  # the document is staged from its own folder, under its literal name, never as a pattern; the name is marked per
+  # path, so the hooks these calls run see no global pathspec option in their environment
   cwd = file_path.parent
   subprocess.run(
-      ["git", "add", "--", str(file_path.name)],
-      cwd=cwd, check=True, capture_output=True,
+      ["git", "add", "--", f"{_LITERAL_MAGIC}{file_path.name}"],
+      cwd = cwd, check = True, capture_output = True,
   )
 
   # the pathspec keeps a concurrently staged foreign file out of the opt-in commit
   subprocess.run(
-      ["git", "commit", "-q", "-m", f"review: opt-in {file_path.name}", "--", str(file_path.name)],
-      cwd=cwd, check=True, capture_output=True,
+      [
+          "git", "commit", "-q",
+          "-m", f"review: opt-in {file_path.name}", "--", f"{_LITERAL_MAGIC}{file_path.name}",
+      ],
+      cwd = cwd, check = True, capture_output = True,
   )
 
 

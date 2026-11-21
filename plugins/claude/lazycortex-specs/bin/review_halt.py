@@ -15,15 +15,20 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import SpecKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -122,6 +127,10 @@ class ReviewHalt:
 
     Args:
       repo: The repository the call commits into.
+
+    Raises:
+      subprocess.CalledProcessError: If git fails while reading HEAD.
+      OSError: If git cannot be run to read HEAD.
     """
     self._repo, self._head = repo, _read_head(repo)
 
@@ -137,6 +146,11 @@ class ReviewHalt:
 
     Returns:
       True when the stops and writes were taken back; False when a commit had already landed.
+
+    Raises:
+      subprocess.CalledProcessError: If git fails while reading HEAD; a failed read is never compared with the held
+        commit, and nothing is taken back.
+      OSError: If git cannot be run to read HEAD; nothing is taken back.
     """
 
     # Contract:
@@ -244,6 +258,9 @@ class ReviewHalt:
     """
     Give every held file its bytes back, then raise again the wake of every review that may have lost a job.
 
+    A wake that cannot be raised, one whose repository cannot be looked up included, is reported on stderr and
+    skipped; the other wakes still run.
+
     Guarantees:
       - Every held file has exactly the bytes it was held with, and a held file that did not exist is removed.
       - A wake that cannot be raised is reported on stderr, never raised, and never stops the next one.
@@ -265,8 +282,13 @@ class ReviewHalt:
 
     # each review whose job a stop cancelled carries on from its wake
     for doc in dict.fromkeys(self._wake):
-      if (failure := run_review_verb(doc, ( _WAKE_VERB, _REPO_FLAG, str(flip_gate.repo_root(doc.parent)) ),
-                                     _WAKE_FAILED).failure) is not None:
+      # guard: a wake whose repository cannot be named is reported and skipped, so it never stops the next one
+      try:
+        repo = flip_gate.repo_root(doc.parent)
+      except (subprocess.CalledProcessError, OSError) as error:
+        sys.stderr.write(f"review-halt: {doc.name}: {_WAKE_FAILED}: {error}\n")
+        continue
+      if (failure := run_review_verb(doc, ( _WAKE_VERB, _REPO_FLAG, str(repo) ), _WAKE_FAILED).failure) is not None:
         sys.stderr.write(f"review-halt: {doc.name}: {failure}\n")
 
 
@@ -278,10 +300,15 @@ def _read_head(repo: Path) -> str:
     repo: The folder whose repository is read.
 
   Returns:
-    The commit id, empty when the folder is not in a git repository or has no commit.
+    The commit id, empty only when the folder is not in a git repository or the repository has no commit.
+
+  Raises:
+    subprocess.CalledProcessError: If git fails while reading HEAD.
+    OSError: If git cannot be run to read HEAD.
   """
-  # a folder outside git, or a repository with no commit yet, names no HEAD
-  return flip_gate.git_field(repo, [ "rev-parse", "HEAD" ], "")
+  # a folder outside git, or a repository with no commit yet, names no HEAD; a git failure raises, so a failed
+  # lookup is never compared as if it were an answer
+  return flip_gate.read_head(repo)
 
 
 def _has_lost_jobs(stdout: str) -> bool:

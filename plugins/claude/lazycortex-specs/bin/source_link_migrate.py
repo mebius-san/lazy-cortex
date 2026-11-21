@@ -4,9 +4,9 @@ own code off forge URLs and onto root links.
 
 An earlier release linked a spec document to the product's code through the forge's web view and could pin those
 links to a branch with a `spec_source_branches` key. The code now lives in the catalog's own repository, so this verb
-turns every forge link into a file of this same repository into a `[<name>](/<path>)` root link, names a linked folder
-as backticked text, leaves a link to a path no longer in the tree or into any other repository as it is, and drops the
-retired key. It never commits.
+turns every forge link into a file of this same repository into a `[<name>](/<path>)` root link, names a linked
+folder as backticked text, leaves a link to a path no longer in the tree or into any other repository as it is,
+and drops the retired key. It never commits.
 """
 from __future__ import annotations
 
@@ -30,9 +30,11 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -102,6 +104,8 @@ _LF = "\n"
 _MD_SUFFIX = ".md"
 # The encoding of git's output.
 _ENCODING = "utf-8"
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 # The environment variable naming the repository root when `--cwd` is absent.
 _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
@@ -140,9 +144,8 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
     list of paths relative to the settings root, in walk order.
 
   Raises:
-    OSError: When git cannot be started or a document cannot be read or written.
-    ValueError: When the settings file is not valid JSON.
-    AttributeError: When the settings file holds JSON that is not an object.
+    OSError: When git cannot be started, or a document cannot be read or written.
+    ValueError: When the settings file cannot be read, is not UTF-8 text, not valid JSON or not a JSON object.
   """
 
   # Contract:
@@ -150,7 +153,10 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
   # link into another repository is never touched; every other line keeps its bytes, a uniform line ending included.
   # A dry run MUST write no file, and running the verb again over its own output MUST change nothing.
 
+  # settings that cannot be read as a JSON object stop the migration here: the content root they would name is
+  # unknown, and the default one must never be migrated in its place
   settings_root = spec_paths.find_settings_root(repo)
+  spec_paths.require_valid_settings(settings_root)
   identity = _read_forge_identity(settings_root)
   result: dict = { _CHANGED_KEY: [], _SKIPPED_KEY: [] }
 
@@ -240,7 +246,7 @@ def _resolve_ssh_host(host: str) -> str:
     prints no `hostname`, or the host reads as an option.
   """
 
-  # Domain(unfiled):
+  # Domain(spec.source-links):
   # # Ssh config aliases in remotes
   # An ssh remote may name a host alias from the user's ssh config rather than the forge host itself, so that one
   # machine can reach the same forge under several identities. The forge's web links always carry the real host, so
@@ -256,7 +262,7 @@ def _resolve_ssh_host(host: str) -> str:
   # the effective config ssh would use for the host
   try:
     proc = subprocess.run([ ssh, _SSH_PRINT_CONFIG, host ], capture_output = True, text = True, check = False,
-                          encoding = _ENCODING, timeout = _SSH_TIMEOUT_S)
+                          encoding = _ENCODING, errors = _DECODE_ERRORS, timeout = _SSH_TIMEOUT_S)
   except (OSError, subprocess.TimeoutExpired):
     return host
 
@@ -285,7 +291,7 @@ def _run_git(root: Path, *args: str) -> str | None:
     OSError: When git cannot be started.
   """
   proc = subprocess.run(list(args), cwd = str(root), capture_output = True, text = True, check = False,
-                        encoding = _ENCODING)
+                        encoding = _ENCODING, errors = _DECODE_ERRORS)
   return proc.stdout.strip() or None if proc.returncode == 0 else None
 
 
@@ -417,7 +423,7 @@ def _find_repo_path(url: str, *, root: Path, identity: tuple[str, tuple[str, ...
     repository, when no split names a path in the tree, or when several do.
   """
 
-  # Domain(unfiled):
+  # Domain(spec.source-links):
   # # Forge view links into the repository's own code
   # A forge shows a file or a folder of a repository at an address made of the forge host, the owner and repository
   # name, a view marker, a revision and the path. The view marker differs per forge: GitLab writes `-/blob` or

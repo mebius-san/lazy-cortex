@@ -3,16 +3,15 @@ Note canonization verbs for `spec.coordinator`.
 
 `spec.coordinator` canonizes an asset status folder-note with two tools: its own pen for body
 prose (`# Status brief`, `[!question]` callouts, `# Coordinator commands` locking — see
-`lazy-spec.coordinator.md`'s "Your pen" section) and these two CLI verbs for everything else.
+`lazy-spec.coordinator.md`'s "Your pen" section) and the CLI verbs of this module for everything else.
 
 `note-set-key` validates and writes one frontmatter key drawn from the CLOSED schema the
-coordinator is allowed to own — the five gate booleans plus `spec_cancelled`, the halt flag, the
-cascade-target list (`spec_targets`), the change-cascade keys, the draft flag, the derived
-`spec_state` token, and the `spec_tools` verdict list. Every other frontmatter key on a status
-folder-note (`spec_role`, `tags`, `spec_source_requests`) belongs to a different worker's own
-primitive and is refused here. The two job markers are not frontmatter at all — they live in
-`spec_job_markers.py`'s runtime sidecar and are written through `mark-job`, so this verb refuses
-their names like any other key outside its schema.
+coordinator is allowed to own — its own lifecycle, cascade and release bookkeeping keys, nothing
+else. Every other frontmatter key on a status folder-note (`spec_role`, `tags`,
+`spec_source_requests`) belongs to a different worker's own primitive and is refused here. The
+two job markers are not frontmatter at all — they live in `spec_job_markers.py`'s runtime
+sidecar and are written through `mark-job`, so this verb refuses their names like any other key
+outside its schema.
 
 `note-check` is a read-only structural scan: unrecognized or mistyped frontmatter keys, and a
 missing or misordered required section from the canonical roster (`# Gates`, `# Status brief`
@@ -41,27 +40,38 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import summary_render  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     BOOL_FALSE,
     BOOL_TRUE,
@@ -240,11 +250,7 @@ _SPEC_KEY_PREFIX = "spec_"
 
 
 # The closed schema `note-set-key` may write — exactly the coordinator's own frontmatter-owned keys
-# per `lazy-spec.coordinator.md`'s verb table: the six gate booleans plus `spec_cancelled`, the
-# halt flag, the cascade-target list (`spec_targets`), the change-cascade keys, the
-# derived `spec_state` token the coordinator rewrites on every wake that rebuilds `# Status brief`,
-# the `spec_tools` verdict list the coordinator determines once the defining documents settle, and the
-# `spec_asset_type` the coordinator records, held to the types its product scope declares.
+# per `lazy-spec.coordinator.md`'s verb table: its lifecycle, cascade and release bookkeeping keys.
 # Every other frontmatter key on a status folder-note is written by a different worker's own
 # primitive and stays out of this verb's reach; the two job markers are written through `mark-job`
 # into the runtime sidecar instead.
@@ -278,9 +284,6 @@ _WRITABLE_SCHEMA = {
     ReleaseKey.BUILD_JOB: _Kind.STR,
     ReleaseKey.TEST_JOB: _Kind.STR,
     ReleaseKey.VERSION_PINNED: _Kind.BOOL,
-    # the coordinator's tool verdict — LIST of open-vocabulary tool names (products declare
-    # their own beyond the shipped four), so no member regex; an empty list is a legal verdict
-    AssetTypeKey.TOOLS: _Kind.LIST,
     # the asset's kind the coordinator records, held to the types declared in the note's product scope
     AssetTypeKey.TYPE: _Kind.STR,
     # the level ladder's own five gates, spread from the closed set so the schema cannot drift
@@ -290,9 +293,8 @@ _WRITABLE_SCHEMA = {
 
 # Member-shape regex for the product-relative path token list — `spec_targets` is the only
 # `_Kind.LIST` key whose members name another asset folder
-# (`resolve_product.resolve_asset_token`'s own contract); every other LIST-kind key
-# (`spec_cascade_targets_done`, `spec_tools`, `tags`, `spec_source_requests`) keeps its own
-# shape and is unchecked here (M8).
+# (`resolve_product.resolve_asset_token`'s own contract); every other LIST-kind key keeps its own
+# member shape and is unchecked here.
 _ASSET_PATH_TOKEN_RE = re.compile(r"^[^/]+(/[^/]+)*$")
 
 # The one spelling of a frontmatter moment: an ISO 8601 UTC moment to the second, `Z`-suffixed, so moments compare
@@ -494,14 +496,13 @@ def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
       return None, f"expected an ISO 8601 UTC moment YYYY-MM-DDTHH:MM:SSZ, got {raw!r}"
     return raw, None
 
-  # only _Kind.LIST remains — every key in `_WRITABLE_SCHEMA` maps to one of the three kinds
-  # left once the two dict-valued job markers moved to the runtime sidecar
+  # every other kind returned above, so only `_Kind.LIST` remains
   try:
     parsed = json.loads(raw)
   except json.JSONDecodeError:
     return None, f"expected a JSON list of strings, got {raw!r}"
 
-  # guard: not a list, or a list with a non-string member — neither is a legal `spec_targets`
+  # guard: not a list, or a list with a non-string member — no `_Kind.LIST` key takes either
   if not isinstance(parsed, list) or not all(isinstance(member, str) for member in parsed):
     return None, f"expected a JSON list of strings, got {raw!r}"
 
@@ -585,15 +586,16 @@ def _commit(asset_dir: Path, note: Path, key: str, value_str: str, *, containers
     containers: The container notes whose stats region the write moved, carried by the same commit.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails.
+    subprocess.CalledProcessError: If the commit fails, or git fails inside a repository while the repository is
+      looked up; such a failure is never read as "no repository".
+    OSError: If git cannot be run inside a repository while the repository is looked up.
   """
-  top = flip_gate.git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
+  repo = flip_gate.find_repo_top(asset_dir)
 
   # guard: the vault lives outside a git checkout — nothing to commit into; the file write
-  # above stays and is the whole mutation
-  if not top:
+  # above stays and is the whole mutation. A git failure inside a checkout raised above
+  if repo is None:
     return
-  repo = Path(top)
 
   # Domain(obsidian.icon-repaint):
   # # Paint rides the same commit as the state it reflects
@@ -658,13 +660,16 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
     - A write of a key that decides the asset's bucket carries every container note above the asset whose stats
       region changed in the same commit as the asset's note, so no container is left counting the asset's old
       state.
+    - A key write whose commit does not land leaves the working tree as it found it: the note and every container
+      note whose counts were refreshed get back the bytes they held before the write, and the exception
+      propagates unchanged, so a retry redoes the change instead of answering `noop` over an uncommitted note.
 
   Args:
     asset_dir: The asset folder holding `<asset_dir.name>.md`.
     key: The `spec_*` frontmatter key to set.
     raw_value: The value as a CLI argument string — `true`/`false` for a bool-typed key, a bare
-      string for a str-typed key, a run of digits for an int-typed key, a JSON array of strings for a
-      list-typed key.
+      string for a str-typed key, a run of digits for an int-typed key, a UTC moment `YYYY-MM-DDTHH:MM:SSZ` for a
+      moment-typed key, a JSON array of strings for a list-typed key.
 
   Returns:
     `{"status": "set", "key", "value"}` on a fresh write, `{"status": "noop", "key"}` when the
@@ -672,19 +677,21 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
     parse, or the asset type is not declared in the note's product scope.
 
   Raises:
-    subprocess.CalledProcessError: When the commit of the rewritten note fails.
+    subprocess.CalledProcessError: When the commit or a git query it makes fails; the note and every container note
+      whose counts were refreshed are first put back to the bytes they held, and the error propagates.
+    OSError: When git cannot be run; the note and the refreshed container notes are first put back the same way.
   """
 
   # Domain(spec.notes):
   # # Closed vocabulary for coordinator-owned frontmatter
   # An asset's status note carries state contributed by several independent workers sharing one
   # file, and the coordinator's own share of it is a fixed, closed set of keys — the lifecycle
-  # gates, the halt flag, the cascade lists, the draft flag, the derived state token, the tool verdict, the asset's
-  # kind, and a release's build bookkeeping. A key outside that set is never the coordinator's to set,
-  # however plausible its name looks, because writing it would silently overwrite state another
-  # worker owns and relies on staying exactly as it left it. The asset's kind is held to the kinds declared for the
-  # asset's product: a kind that no declaration in that product's scope names is refused, so the note never claims
-  # a kind the product does not know.
+  # gates of both the asset ladder and the level ladder, the cancellation and halt flags, the cascade lists,
+  # the derived state token, the asset's kind, and a release's version, contents and build bookkeeping. A key
+  # outside that set is never the coordinator's to set, however plausible its name looks, because writing it would
+  # silently overwrite state another worker owns and relies on staying exactly as it left it. The asset's kind is
+  # held to the kinds declared for the asset's product: a kind that no declaration in that product's scope names is
+  # refused, so the note never claims a kind the product does not know.
 
   # Contract:
   # A key outside the coordinator's closed writable schema is always refused with no file
@@ -703,6 +710,11 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
   # A write of a key that decides which bucket the asset counts in carries every container note above the asset
   # whose stats region changed in the same commit as the asset's note; no commit of such a write leaves a container
   # counting the asset's old state.
+
+  # Contract:
+  # A key write whose commit does not land leaves the working tree as it found it: the note and every container
+  # note whose counts were refreshed get back the bytes they held before the write, and the exception is
+  # re-raised unchanged, so a retry redoes the change instead of answering `noop` over an uncommitted note.
 
   # guard: key outside the coordinator's closed writable schema — clean refusal, no write
   if (kind := _WRITABLE_SCHEMA.get(key)) is None:
@@ -733,19 +745,47 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str) -> dict:
   if new_fm_text == fm_text:
     return {_ResultKey.STATUS: _SetKeyStatus.NOOP, _ResultKey.KEY: key}
 
-  # render the value and refresh the section explainers before writing; a key write is the
-  # ladder's mechanics and leaves no `# History` line — the journal is for events the operator
-  # reads, and the commit below already records the write
+  # the value as the commit message names it
   value_str = _format_value(kind, value)
-  spec_paths.write_text_atomic(
-      note, new_fm_text + note_explainers.ensure_explainers(text[fm_end:], note_explainers.lang_for_note(note)))
 
-  # a key that decides the asset's bucket moves the counts of every container above it; those that changed ride
-  # the note's commit, so no container ever reads a count the note no longer matches
-  containers = [ container for container in flip_gate.containers_above(asset_dir)
-                 if summary_render.apply_container_stats(container) ] if key in _CLASSIFYING_KEYS else []
-  _commit(asset_dir, note, key, value_str, containers = containers)
+  # the bytes of every file this call rewrites, held before the rewrite: a commit that does not land gives each
+  # of them back, so a failed write leaves the tree clean and a retry redoes it
+  above = flip_gate.containers_above(asset_dir) if key in _CLASSIFYING_KEYS else []
+  held: dict[Path, bytes | None] = {
+      path: path.read_bytes() if path.is_file() else None for path in ( note, *above )
+  }
+  try:
+    # the note is written with its section explainers refreshed; a key write is the ladder's mechanics and leaves no
+    # `# History` line — the journal is for events the operator reads, and the commit below already records the write
+    spec_paths.write_text_atomic(
+        note,
+        new_fm_text + note_explainers.ensure_explainers(text[fm_end:], note_explainers.lang_for_note(note)))
+
+    # a key that decides the asset's bucket moves the counts of every container above it; those that changed
+    # ride the note's commit, so no container ever reads a count the note no longer matches
+    containers = [ container for container in above if summary_render.apply_container_stats(container) ]
+    _commit(asset_dir, note, key, value_str, containers = containers)
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — a written file
+  # must never outlive a commit that did not land, and the exception is re-raised unchanged
+  except BaseException:
+    _restore_held(held)
+    raise
   return {_ResultKey.STATUS: _SetKeyStatus.SET, _ResultKey.KEY: key, _ResultKey.VALUE: value_str}
+
+
+def _restore_held(held: dict[Path, bytes | None]) -> None:
+  """
+  Put every held file back to the state it had before a write.
+
+  Args:
+    held: The bytes each file held before the write, or None for a file that did not exist and is removed again.
+  """
+  # a file that did not exist is removed again; any other gets the bytes it held
+  for path, data in held.items():
+    if data is None:
+      path.unlink(missing_ok = True)
+    else:
+      path.write_bytes(data)
 
 
 def _drop_fm_key(fm_text: str, key: str) -> str:
@@ -797,6 +837,9 @@ def note_drop_key(asset_dir: Path, key: str) -> dict:
   Guarantees:
     - A key recognized by the note schema, or one outside this plugin's own `spec_` namespace,
       is always refused with no file mutation.
+    - A key drop whose commit does not land leaves the working tree as it found it: the note gets back the bytes
+      it held before the drop and the exception propagates unchanged, so a retry redoes the removal instead of
+      answering `absent` over an uncommitted note.
 
   Args:
     asset_dir: The folder holding `<asset_dir.name>.md` — an asset's folder or a level's.
@@ -808,8 +851,9 @@ def note_drop_key(asset_dir: Path, key: str) -> dict:
     or belongs to another worker.
 
   Raises:
-    subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
-      from `_commit`.
+    subprocess.CalledProcessError: When the commit or a git query it makes fails; the note is first put back to the
+      bytes it held before the drop, and the error propagates.
+    OSError: When git cannot be run; the note is first put back the same way.
   """
 
   # Domain(spec.notes):
@@ -818,15 +862,20 @@ def note_drop_key(asset_dir: Path, key: str) -> dict:
   # belongs to this worker's own namespace and is unrecognized by its schema counts as litter
   # this worker may sweep. Ownership is judged before recognition: a key can be unrecognized here
   # yet still belong to another worker, and removing it on that basis alone would delete state
-  # that worker still needs, rather than debris of this worker's own making.
+  # that worker still needs, rather than debris of this worker's own making. The same order settles
+  # the overlap: a key that is both outside this worker's namespace and recognized by the schema is
+  # refused for whose key it is, never for being recognized, because the schema also recognizes
+  # several keys that other workers own and the refusal must name the real reason.
 
   # Contract:
   # A key recognized by the note schema, or one outside this plugin's own `spec_` namespace, is
   # always refused with no file mutation — this verb only ever removes unrecognized litter it
   # itself owns.
 
-  # Decision: ownership is checked before recognition, not after — the schema also recognizes several foreign keys,
-  # and a recognition-first refusal would name the wrong reason for one that is really about whose key it is
+  # Contract:
+  # A key drop whose commit does not land leaves the working tree as it found it: the note gets back the bytes
+  # it held before the drop and the exception is re-raised unchanged, so a retry redoes the removal instead of
+  # answering `absent` over an uncommitted note.
 
   # guard: a key outside this plugin's namespace belongs to another worker — never ours to remove
   if not key.startswith(_SPEC_KEY_PREFIX):
@@ -849,11 +898,18 @@ def note_drop_key(asset_dir: Path, key: str) -> dict:
 
   # strip the key and refresh the section explainers before writing; no `# History` line, as
   # for a key write — the commit records the drop
-  spec_paths.write_text_atomic(
-      note,
-      _drop_fm_key(text[:fm_end], key)
-      + note_explainers.ensure_explainers(text[fm_end:], note_explainers.lang_for_note(note)))
-  _commit(asset_dir, note, key, _DropKeyStatus.DROPPED)
+  held: dict[Path, bytes | None] = { note: note.read_bytes() }
+  try:
+    spec_paths.write_text_atomic(
+        note,
+        _drop_fm_key(text[:fm_end], key)
+        + note_explainers.ensure_explainers(text[fm_end:], note_explainers.lang_for_note(note)))
+    _commit(asset_dir, note, key, _DropKeyStatus.DROPPED)
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — the written note
+  # must never outlive a commit that did not land, and the exception is re-raised unchanged
+  except BaseException:
+    _restore_held(held)
+    raise
   return {_ResultKey.STATUS: _DropKeyStatus.DROPPED, _ResultKey.KEY: key}
 
 

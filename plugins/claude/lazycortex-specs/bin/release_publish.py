@@ -26,41 +26,57 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import release_delta  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import release_deploy  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import release_version  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import review_halt  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
     AssetState, AssetTypeKey, Gate, HistoryEvent, LangId, LevelDoc, MemberBuildState, ReleaseConfigKey, ReleaseKey,
     Section, SpecMomentKey, SpecStateKey, Stage, StageKey,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_lockit import Lockit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -476,7 +492,9 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
 
   Once the publish commit has landed, the release owner's level note is woken once (`release-published`) and so is
   every member the publish wrote. The wakes are best-effort: any failure finding or waking them only writes a line
-  to stderr and never changes the publish outcome. A failed production deploy wakes nothing.
+  to stderr and never changes the publish outcome. A failed production deploy wakes neither the release owner nor the
+  members, whose wakes run only after the publish commit has landed; it raises again only the `job-done` wake of
+  every review whose stop cancelled a job or left no readable report.
 
   A product whose manifest version cannot be replaced in place is refused before anything runs. A failure after a
   successful production deploy and before the publish commit lands rolls back every other write, journals the deploy
@@ -519,7 +537,10 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
       tree stays as HEAD has it, and the exception is re-raised.
     - `assets` lists only the released members, and only those are counted in the History `published` line.
     - A successful publish wakes the release owner, when the release has one, exactly once and only after the
-      publish commit has landed; a failed production deploy or a refusal wakes nobody.
+      publish commit has landed. A failed production deploy, or a refusal because a review could not be stopped,
+      wakes neither the release owner nor any asset the release carries; it only raises again the `job-done` wake of
+      every review whose stop cancelled a job or left no readable report. A refusal that comes before any review is
+      stopped wakes nobody.
     - A failure of the owner wake never changes the publish outcome: the release stays published and is reported
       as published.
 
@@ -540,14 +561,19 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
     deploy target and the release's current build has no successful last staging deploy, an included note is not on
     disk,
     the product's manifest version cannot be replaced in place, or a review in the release folder could not be
-    stopped, the reason then naming that document. A refusal, like a failed deploy, leaves the stopped reviews as
-    they were.
+    stopped, the reason then naming that document. A refusal, like a failed deploy, gives every stopped document its
+    bytes back; it wakes neither the release owner nor any member, and raises again only the `job-done` wake of every
+    review whose stop cancelled a job or left no readable report, so a refusal that comes before any review is
+    stopped wakes nobody.
 
   Raises:
-    ValueError: If the settings file is not valid JSON, or an included note lies outside `repo`.
+    ValueError: If the settings file exists but cannot be read, is not valid JSON, not UTF-8 text or not a JSON
+      object (a `spec_paths.SettingsError` naming the file), or an included note lies outside `repo`.
+    VaultRootError: If the spec content root cannot be resolved: `spec.vault_root` is refused, or the settings file
+      cannot be read as a JSON object.
     RuntimeError: If the history verb refuses to journal a line on the release note.
     subprocess.CalledProcessError: If staging or committing the publish fails.
-    OSError: If a note, the settings file or the manifest cannot be read or written.
+    OSError: If a note or the manifest cannot be read or written.
     Exception: Any other failure while the deploy runs or the publish writes, raised again once every stopped review
       and held file is put back.
   """
@@ -563,10 +589,10 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
 
   # Contract:
   # A refused publish writes nothing: a cancelled, already published, unbuilt (`spec_built`, `spec_develop_done`
-  # or `spec_tests_passing` not true, or `spec_plan_done` not true), rebuild-owing (`spec_rebuild_owed: true`), versionless or uncovered release,
-  # a release whose product declares a `staging` deploy target without a successful staging deploy of the release's
-  # current build, a release with an included note missing from disk, and a release with a review that could not
-  # be stopped, keep every byte of every file.
+  # or `spec_tests_passing` not true, or `spec_plan_done` not true), rebuild-owing (`spec_rebuild_owed: true`),
+  # versionless or uncovered release, a release whose product declares a `staging` deploy target without a
+  # successful staging deploy of the release's current build, a release with an included note missing from disk,
+  # and a release with a review that could not be stopped, keep every byte of every file.
 
   # Contract:
   # A release whose product names a manifest whose version cannot be replaced in place (unknown format, invalid
@@ -635,12 +661,21 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
   # A publish also ends the review of every document in the release folder, so that nothing is still being written
   # into what ships. A publish that does not land, because it is refused, because its production deploy fails or
   # because it fails part-way before the publish commit has landed, leaves those reviews exactly as they were, and
-  # every review that lost a job to the stop has its wake raised again so it carries on. A failure after the publish
-  # commit has landed puts nothing back: the published state stands and the failure is reported.
+  # every review whose stop cancelled a job, or left no readable report to rule that out, has its wake raised again
+  # so it carries on, once its document is back as it was; a review whose stop plainly cancelled nothing is not
+  # woken. That holds for the review whose own stop failed as well: a refused publish wakes it when its report shows
+  # a cancelled job or cannot be read. A refusal that comes before any review is stopped has none to wake. A failed
+  # production deploy publishes nothing and does not wake the product that owns releases; the same reviews, and only
+  # those, are woken again.
+  # A failure after the publish commit has landed puts nothing back: the
+  # published state stands and the failure is reported.
 
   # Contract:
   # A successful publish wakes the release owner, when the release has one, exactly once and only after the
-  # publish commit has landed. A publish whose production deploy failed, or that was refused, wakes nobody.
+  # publish commit has landed. A publish whose production deploy failed, or that was refused because a review could
+  # not be stopped, wakes neither the release owner nor any asset the release carries; the only wakes it raises are
+  # the `job-done` wakes of the reviews whose stop cancelled a job or left no readable report to rule that out. A
+  # refusal that comes before any review is stopped wakes nobody.
 
   # Contract:
   # A failure of the owner wake NEVER changes the publish outcome: the release stays published and the result
@@ -725,7 +760,9 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
   # noinspection PyBroadException
   try:
     deployed = _deploy_production(repo, release_note, record)
-  except Exception:
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — a stopped review
+  # must never stay stopped over a deploy that did not end, and the exception is re-raised unchanged
+  except BaseException:
     halt.rollback()
     raise
 
@@ -799,7 +836,9 @@ def publish(repo: Path, release_note: Path, *, today: str | None = None) -> dict
     # one commit carries the whole publish
     release_version.commit_paths(repo, touched, author = PUBLISH_NAME,
                                  subject = f"{PUBLISH_NAME}: {version} published from {release_note.parent.name}")
-  except Exception as error:
+  # waiver: the rollback boundary catches every exception on purpose, an interrupt included — a write must never
+  # outlive a publish commit that did not land, and the exception is re-raised unchanged
+  except BaseException as error:
     # a failure before the publish commit takes every write back; one after it leaves the committed tree alone
     restored = halt.rollback_uncommitted()
     if not restored:

@@ -309,7 +309,7 @@ Both helpers are idempotent and use the atomic write path in `lazy_settings.py`.
 
 `_version` is sticky to tracked — migration ladders never run against the local file, and any `_version` field in the overlay is ignored.
 
-**Write semantics** — `save_section(...)` writes **only** to the tracked file. The local overlay is never touched programmatically; the operator edits it by hand. Callers that perform a load → modify → save round-trip on a single layer (e.g. `register_routine`, `unregister_routine`) call `load_tracked_section(...)` instead of `load_section(...)` to avoid leaking overlay entries into the shared tracked file.
+**Write semantics** — `save_section(...)` writes **only** to the tracked file. The local overlay is written only on an explicit request — `settings-get` / `settings-set --scope local`, which a plugin's migration verb uses to migrate the overlay's own keys; nothing else writes it, and the operator otherwise edits it by hand. Callers that perform a load → modify → save round-trip on a single layer (e.g. `register_routine`, `unregister_routine`) call `load_tracked_section(...)` instead of `load_section(...)` to avoid leaking overlay entries into the shared tracked file.
 
 **Read-only inspection** — `load_local_only_section(path, key)` returns just the overlay's view of one section (or `{}` when the file is absent). Used by diagnostics and audits.
 

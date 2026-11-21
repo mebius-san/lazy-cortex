@@ -599,6 +599,8 @@ def resolve_language(file_path: Path) -> str:
   proc = subprocess.run(
       [ sys.executable, str(_git_ops.require_core_cli()), CoreCommand.RESOLVE_LANGUAGE, _ARG_CWD, str(root) ],
       capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
   )
 
   # guard: a non-zero exit or an empty answer — surface stdout+stderr instead of inventing a language

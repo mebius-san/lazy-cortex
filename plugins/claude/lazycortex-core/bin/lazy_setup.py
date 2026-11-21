@@ -389,22 +389,28 @@ def dirty_paths(repo: Path) -> list[str]:
     repo: Repo root.
 
   Returns:
-    Sorted repo-relative paths; a rename contributes its new name only. Untracked files are
-    listed one by one, never collapsed into their directory.
+    Sorted repo-relative paths, unquoted with undecodable bytes kept as surrogate escapes; a
+    rename or copy, marked in either status column, contributes its new name only. Untracked
+    files are listed one by one, never collapsed into their directory.
   """
-  # NUL-separated porcelain: `XY path` per entry, a rename carrying the old name as a second field
-  out = subprocess.run(
+  # NUL-separated porcelain: `XY path` per entry, a rename carrying the old name as a second field;
+  # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+  fields = subprocess.run(
       [ "git", "-C", str(repo), "status", "--porcelain", "-z", "--untracked-files=all" ],
-      check = True, capture_output = True, text = True, encoding = "utf-8",
-  ).stdout
-  fields = out.split("\0")
+      check = True, capture_output = True,
+  ).stdout.decode(
+      "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "surrogateescape",
+  ).split("\0")
   paths: list[str] = []
   i = 0
   while i < len(fields) and fields[i]:
     entry = fields[i]
     paths.append(entry[3:])
-    # a rename or copy status is followed by the source path, which is not a dirty path of its own
-    i += 2 if entry[0] in _RENAME_STATUSES else 1
+    # a rename or copy status, in either column, is followed by the source path, which is not a dirty
+    # path of its own
+    i += 2 if set(entry[:2]) & set(_RENAME_STATUSES) else 1
   return sorted(set(paths))
 
 
@@ -570,9 +576,13 @@ def verify(repo: Path, snapshot: Path) -> dict:
   after = dirty_paths(repo)
   touched = [ p for p in after if p not in recorded and p != snapshot_rel ]
   tracked = set(subprocess.run(
-      [ "git", "-C", str(repo), "ls-files", "-z", "--", *touched ],
-      check = True, capture_output = True, text = True, encoding = "utf-8",
-  ).stdout.split("\0")) if touched else set()
+      [ "git", "-C", str(repo), "--literal-pathspecs", "ls-files", "-z", "--", *touched ],
+      check = True, capture_output = True,
+  ).stdout.decode(
+      "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "surrogateescape",
+  ).split("\0")) if touched else set()
   new = [ p for p in touched if p not in tracked ]
   violations = [ p for p in recorded if _fingerprint(repo, p) != fingerprints.get(p) ]
 
@@ -750,7 +760,7 @@ def main(argv: list[str] | None = None) -> int:
       report = save_snapshot(repo, target)
     else:
       report = verify(repo, target)
-  print(json.dumps(report, indent = 2, ensure_ascii = False))
+  print(json.dumps(report, indent = 2, ensure_ascii = True))
   return 0
 
 

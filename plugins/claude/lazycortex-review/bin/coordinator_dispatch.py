@@ -63,18 +63,13 @@ import parser as _parser  # noqa: E402  # pylint: disable=wrong-import-position,
 from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, Paths, ReviewKey, Tag, Trailer,
+    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, Paths, ReviewKey, ReviewProtocol, Tag, Trailer,
 )
 
 
 # The fixed expert this worker ever dispatches — one persona for every document, never resolved
 # from a review class (unlike the per-document main-writer resolution the review loop itself does).
 _COORDINATOR_EXPERT = "review.coordinator"
-
-# The routine's own attached protocol, folded into every dispatched job's config.json on top of
-# whatever the daemon already unions in from the routine registration (`dev.plugin-boundaries.md`
-# § 1c) — see `lazy-review.coordination-playbook.md`.
-_COORDINATION_PLAYBOOK_PROTOCOL = "lazycortex-review:lazy-review.coordination-playbook"
 
 # `[!todo] #review/command` callout detection — trigger 3 (`lazy-review.coordination-playbook.md` §
 # 5's "Coordinator commands" contract, ported narrowly from `lazy-spec.coordination-playbook.md`'s
@@ -90,6 +85,9 @@ _ITEM_DIR = "dir"
 _ITEM_SHA = "sha"
 _ITEM_AUTHOR_NAME = "author_name"
 _ITEM_AUTHOR_EMAIL = "author_email"
+
+# The git pathspec magic that makes one path match itself only, never as a glob.
+_LITERAL_PATHSPEC = ":(literal)"
 
 # The partial-failure line a `command` worker prints LAST on stdout so the daemon narrows the retry
 # to the named subset of the unit's `paths` (`lazy-core.routine-types-schema.md`).
@@ -401,7 +399,7 @@ def _coordinator_job_id(markers: dict) -> str:
   Read the document's tracked coordinator job id.
 
   Args:
-    markers: The document's runtime marker entry, from `job_markers.read`.
+    markers: The document's runtime marker entry, as the dispatch decision read it.
 
   Returns:
     The tracked job id, or an empty string when no job is recorded.
@@ -456,6 +454,8 @@ def _read_blob(repo: Path, sha: str, path: str) -> str | None:
   result = subprocess.run(
       ["git", "show", f"{sha}^:{path}"],
       cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
   )
   return result.stdout if result.returncode == 0 else None
 
@@ -472,7 +472,7 @@ def _resolve_trigger(current_report: dict, blob_report: dict, is_operator_edit: 
     blob_report: `note_ops.build_report` of the document's pre-commit blob (an empty report
       when there was no parent commit).
     is_operator_edit: Whether the git-watch item's own commit is operator-authored.
-    markers: The document's runtime marker entry, from `job_markers.read`.
+    markers: The document's runtime marker entry, as the dispatch decision read it.
 
   Returns:
     A `_Trigger` token, or None when nothing wakes the coordinator this tick.
@@ -536,7 +536,7 @@ def _resolve_trigger(current_report: dict, blob_report: dict, is_operator_edit: 
 # --------------------------------------------------------------------------------- core dispatch
 
 
-def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
+def core_dispatch_job(repo: Path, bundle: dict) -> dict:
   """
   Queue a new coordinator job via the `lazycortex-core dispatch-job` CLI.
 
@@ -551,22 +551,28 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
     Parsed JSON response dict from the CLI's stdout.
 
   Raises:
-    RuntimeError: When the CLI can't be resolved or exits non-zero.
+    RuntimeError: When the CLI can't be resolved or exits non-zero, whatever bytes it printed.
+    OSError: When the CLI cannot be launched.
+    ValueError: When the CLI exited 0 and its stdout is not UTF-8 text or not JSON.
   """
+  # the output is taken as bytes, so the exit code is read before anything the CLI printed is decoded
   env = os.environ.copy()
   env[EnvVar.LAZY_REPO_ROOT] = str(repo)
   proc = subprocess.run(
       [ sys.executable, str(_git_ops.require_core_cli()), CoreCommand.DISPATCH_JOB ],
-      input = json.dumps(bundle), capture_output = True, text = True, env = env, check = False, encoding = "utf-8",
+      input = json.dumps(bundle).encode("utf-8"), capture_output = True, env = env, check = False,
   )
 
-  # guard: the CLI call itself failed — surface stdout/stderr for diagnosis
+  # guard: the CLI call itself failed, whatever bytes it printed — surface stdout/stderr for diagnosis
   if proc.returncode != 0:
     raise RuntimeError(
         f"lazycortex-core {CoreCommand.DISPATCH_JOB} exit={proc.returncode} "
-        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+        f"stdout={proc.stdout.decode('utf-8', errors = 'replace')!r} "
+        f"stderr={proc.stderr.decode('utf-8', errors = 'replace')!r}"
     )
-  return json.loads(proc.stdout)
+
+  # the CLI reported success; an answer that is not UTF-8 text or not JSON is refused as a value error
+  return json.loads(proc.stdout.decode("utf-8"))
 
 
 # ------------------------------------------------------------------------------------- worker
@@ -580,10 +586,14 @@ def dispatch_coordinator(repo: Path, asset_note: Path, item: dict) -> dict:
     - At most one coordinator job runs per document: a `coordinator_job` marker naming a bundle
       that is still running blocks a new dispatch, while one naming a finished, dead, cancelled,
       or vanished bundle is cleared before the trigger is resolved.
+    - The decision NEVER reads a failed lookup as "no job is running": when the marker store exists but cannot be
+      read, or reads but is no store (not UTF-8 text, not valid JSON, not a JSON object), the wake is refused before
+      anything is queued; the `OSError` propagates, the core dispatch is not called and nothing is written.
 
   Notes:
     - Stamps the item's commit sha as the document's `last_seen_sha` cursor on every call,
-      dispatched or not, so the next invocation's buried-operator rescue has an accurate cursor.
+      dispatched or not, so the next invocation's buried-operator rescue has an accurate cursor;
+      when the marker store cannot be read or is no store, nothing is stamped or written.
 
   Args:
     repo: Repository root.
@@ -598,12 +608,17 @@ def dispatch_coordinator(repo: Path, asset_note: Path, item: dict) -> dict:
   Raises:
     RuntimeError: When a settings layer is not valid JSON, or when the `lazycortex-core` CLI
       cannot be resolved or its dispatch call exits non-zero.
+    OSError: When the marker store exists but cannot be read or reads but is no store, the `lazycortex-core` CLI
+      cannot be launched, or a marker write fails.
   """
 
   # Contract:
   # At most one coordinator job runs per document: a `coordinator_job` marker naming a bundle
   # that is still running blocks a new dispatch, while one naming a finished, dead, cancelled,
-  # or vanished bundle is cleared before the trigger is resolved.
+  # or vanished bundle is cleared before the trigger is resolved. The decision NEVER reads a failed lookup as
+  # "no job is running": when the marker store exists but cannot be read, or reads but is no store (not UTF-8 text,
+  # not valid JSON, not a JSON object), the wake is refused before anything is queued; the `OSError` propagates, the
+  # core dispatch is not called and nothing is written.
 
   result = _resolve_and_dispatch(repo, asset_note, item)
 
@@ -622,6 +637,8 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
       finished, dead, cancelled, or vanished bundle is cleared before the trigger is resolved.
     - Clearing a stale job marker and stamping a fresh dispatch never touch the document itself,
       so neither action costs a commit.
+    - A marker store that exists but cannot be read, or reads but is no store, refuses the wake before anything is
+      queued or cleared.
 
   Args:
     repo: Repository root.
@@ -632,9 +649,15 @@ def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   Returns:
     `{"action": "noop"}` when nothing wakes the coordinator or a live job is already tracked; or
     `{"action": "dispatched", "trigger", "job_id"}` on a fresh dispatch.
+
+  Raises:
+    OSError: When the marker store exists but cannot be read or reads but is no store, the `lazycortex-core` CLI
+      cannot be launched, or a marker write fails.
   """
 
-  markers = _job_markers.read(repo, asset_note)
+  # the decision reads the markers through the checked reader: a sidecar that cannot be read refuses the wake
+  # here, before anything is queued, instead of reading as "no job running"
+  markers = _job_markers.read_checked(repo, asset_note)
 
   # one active coordinator job per document — but only while that job is genuinely live. A marker
   # left behind by a job that finished, died, or was cancelled is cleared here and this same
@@ -693,7 +716,7 @@ def _is_under_review(current_report: dict, markers: dict) -> bool:
 
   Args:
     current_report: The document's structural report, as `note_ops.build_report` returns it.
-    markers: The document's runtime marker entry, from `job_markers.read`.
+    markers: The document's runtime marker entry, as the dispatch decision read it.
 
   Returns:
     True when the document carries an active review, or when a landed expert payload is
@@ -721,6 +744,10 @@ def _dispatch(repo: Path, asset_note: Path, trigger: str, dedup_key: str) -> dic
   """
   Queue one coordinator job for `asset_note` and stamp the runtime marker.
 
+  Notes:
+    - Stamps the `coordinator_job` marker with the queued job; for a `job-done` trigger the same write consumes the
+      pending wake, so one landed payload wakes one coordinator job.
+
   Args:
     repo: Repository root.
     asset_note: The reviewed document's path.
@@ -729,26 +756,35 @@ def _dispatch(repo: Path, asset_note: Path, trigger: str, dedup_key: str) -> dic
 
   Returns:
     `{"action": "dispatched", "trigger", "job_id"}`.
-  """
-  # consume the pending wake so the same landed payload cannot wake a second coordinator job.
-  # A wake the entry trigger preempted keeps its flag and fires on a later tick instead.
-  if trigger == _Trigger.JOB_DONE:
-    _job_markers.update(repo, asset_note, { JobMarker.PENDING_WAKE: None })
 
+  Raises:
+    RuntimeError: When the `lazycortex-core` CLI cannot be resolved or its dispatch call exits non-zero; a pending
+      `job-done` wake is then left raised.
+    OSError: When the `lazycortex-core` CLI cannot be launched, or the marker cannot be written once the job is
+      queued; a pending `job-done` wake is then left raised.
+    ValueError: When the queue call's answer cannot be read; a pending `job-done` wake is then left raised.
+  """
   # assemble and queue the coordinator job's wire bundle
   bundle = {
       JobKey.EXPERT: _COORDINATOR_EXPERT,
       JobKey.PAYLOAD: { JobKey.TARGET_FILE: str(asset_note), "trigger": trigger },
       # the pump copies the note at claim, so the bundle names it rather than snapshotting it
-      JobKey.SOURCE: [ str(_rel_to_repo(asset_note, repo)) ],
+      JobKey.SOURCE: [ { JobKey.PATH: str(_rel_to_repo(asset_note, repo)) } ],
       JobKey.DEDUP_KEY: dedup_key,
-      JobKey.PROTOCOLS: [_COORDINATION_PLAYBOOK_PROTOCOL],
+      # the routine's own attached protocol, folded into the job's config.json on top of whatever the daemon
+      # already unions in from the routine registration (`dev.plugin-boundaries.md` § 1c)
+      JobKey.PROTOCOLS: [ReviewProtocol.COORDINATION_PLAYBOOK],
   }
-  job_id = str(_core_dispatch_job(repo, bundle).get(JobKey.JOB_ID, ""))
+  job_id = str(core_dispatch_job(repo, bundle).get(JobKey.JOB_ID, ""))
 
   # stamp the dedup marker in runtime state — no document write, so no commit and nothing an
-  # operator editing the document can break
-  _job_markers.update(repo, asset_note, { JobMarker.COORDINATOR_JOB: job_id })
+  # operator editing the document can break; the same write consumes the pending wake, so the same
+  # landed payload cannot wake a second coordinator job. A wake the entry trigger preempted keeps its
+  # flag and fires on a later tick instead.
+  changes: dict[str, str | None] = { JobMarker.COORDINATOR_JOB: job_id }
+  if trigger == _Trigger.JOB_DONE:
+    changes[JobMarker.PENDING_WAKE] = None
+  _job_markers.update(repo, asset_note, changes)
   return {"action": "dispatched", "trigger": trigger, "job_id": job_id}
 
 
@@ -765,6 +801,11 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
     - At most one coordinator job runs per document across both dispatch paths: a live
       tracked job blocks a new dispatch, and a terminal or vanished one is cleared before
       this call queues its own job.
+    - The decision NEVER reads a failed lookup as "no job is running": when the marker store exists but cannot be
+      read, or reads but is no store (not UTF-8 text, not valid JSON, not a JSON object), the wake is refused before
+      anything is queued; the `OSError` propagates, the core dispatch is not called and nothing is written.
+    - The pending wake is consumed only once the coordinator job is queued: when the queue call raises, the wake
+      is still raised, so a later tick dispatches it.
 
   Args:
     repo: Repository root.
@@ -778,17 +819,24 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
   Raises:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved or its dispatch call
       exits non-zero — the caller's sweep boundary decides what a failed dispatch means.
+    OSError: When the marker store exists but cannot be read or reads but is no store (nothing is queued), the
+      `lazycortex-core` CLI cannot be launched, or the marker cannot be written once the job is queued.
+    ValueError: When the queue call's answer is not JSON.
   """
 
   # Contract:
   # At most one coordinator job runs per document across both dispatch paths: a
   # `coordinator_job` marker naming a bundle that is still running blocks a new dispatch,
   # while one naming a finished, dead, cancelled, or vanished bundle is cleared before this
-  # call queues its own job.
+  # call queues its own job. The decision NEVER reads a failed lookup as "no job is running": when the marker store
+  # exists but cannot be read, or reads but is no store (not UTF-8 text, not valid JSON, not a JSON object), the wake
+  # is refused before anything is queued; the `OSError` propagates, the core dispatch is not called and nothing is
+  # written.
 
   # same one-live-job mutex as the git path: a running bundle keeps the turn, a terminal
-  # one is cleared and this same call goes on to dispatch
-  tracked_job = _coordinator_job_id(_job_markers.read(repo, asset_note))
+  # one is cleared and this same call goes on to dispatch; a sidecar that cannot be read refuses the wake
+  # here, before anything is queued
+  tracked_job = _coordinator_job_id(_job_markers.read_checked(repo, asset_note))
   if tracked_job:
     # a still-running bundle keeps its turn — the pending wake stays raised for a later tick
     if is_job_live(repo, tracked_job):
@@ -797,6 +845,12 @@ def dispatch_job_done(repo: Path, asset_note: Path, dedup_hint: str) -> dict:
 
   # dedup on the DONE job set so a retry of the same landing folds into one queued job
   dedup_key = f"{_rel_to_repo(asset_note, repo)}:{_Trigger.JOB_DONE}:{dedup_hint}"
+
+  # Contract:
+  # The pending wake is consumed only once the coordinator job is queued: when the queue call raises, the
+  # wake MUST still be raised, so a later tick dispatches it.
+
+  # queue the coordinator job; only a queued job consumes the wake
   return _dispatch(repo, asset_note, _Trigger.JOB_DONE, dedup_key)
 
 
@@ -816,6 +870,8 @@ def _dispatch_path(repo: Path, raw_path: str, item: dict) -> dict:
   Raises:
     RuntimeError: When a settings layer is not valid JSON, or when the `lazycortex-core` CLI
       cannot be resolved or its dispatch call exits non-zero.
+    OSError: When the marker store exists but cannot be read or reads but is no store, the `lazycortex-core` CLI
+      cannot be launched, or a marker write fails.
   """
   asset_note = (repo / raw_path).resolve()
 
@@ -835,7 +891,7 @@ def _rekey_path_item(repo: Path, item: dict, raw_path: str) -> dict:
   Args:
     repo: Repository root to walk the document's history in.
     item: The grouped unit (`dir`, `paths`, `sha`, `author_name`, `author_email`).
-    raw_path: The member path to build the file-level item for.
+    raw_path: The member path to build the file-level item for; taken literally, never as a pattern.
 
   Returns:
     A copy of `item` without `paths` / `dir`, carrying `path = raw_path` and the document's own
@@ -858,12 +914,15 @@ def _rekey_path_item(repo: Path, item: dict, raw_path: str) -> dict:
   per_path = { key: value for key, value in item.items() if key not in (_ITEM_PATHS, _ITEM_DIR) }
   per_path[_ITEM_PATH] = raw_path
 
-  # the document's own last commit, bounded at the unit's range tip when the unit carries one
+  # the document's own last commit, bounded at the unit's range tip when the unit carries one; the member
+  # path is taken literally, so a name carrying glob characters never borrows a sibling's commit
   tip = item.get(_ITEM_SHA)
   head = subprocess.run(
       [ "git", "log", "-1", "--format=%H%x00%an%x00%ae", *([ tip ] if isinstance(tip, str) and tip else []),
-        "--", raw_path ],
+        "--", f"{_LITERAL_PATHSPEC}{raw_path}" ],
       cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
   )
 
   # guard: no commit to key off — the range-level fields stay rather than losing the tick
@@ -939,9 +998,11 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
-    Exit code: 0 on success; 1 when a grouped unit had at least one path whose dispatch raised
-    (the last stdout line is then `{"failed_paths": [...]}`); 2 when the item JSON is malformed
-    or carries neither a usable `path` nor a non-empty `paths` list.
+    Exit code: 0 on success; 1 when a grouped unit had at least one path whose dispatch raised, including a wake
+    refused for a marker store that cannot be read or is no store (the last stdout line is then
+    `{"failed_paths": [...]}`); 2 when the item JSON is malformed or carries neither a usable `path` nor a non-empty
+    `paths` list. A single file-level item whose dispatch raises is not caught: the exception escapes and the
+    process exits non-zero.
   """
 
   # Contract:

@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.debugger
-description: "Use when something fails, returns a wrong result, or behaves unexpectedly and nobody knows why yet — the cause is explained first, then fixed. Dispatched by the expert runtime or directly. Pick it over the tester when the defect is known and needs a root cause, over the implementer when the problem itself is the unknown."
+description: "Use when something fails, returns a wrong result, or behaves unexpectedly and nobody knows why yet — the cause is explained first, then fixed. Dispatched by the expert runtime or directly. Pick it over the tester when the defect is known and needs a root cause, over the developer when the problem itself is the unknown."
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

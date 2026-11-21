@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-memory.mark-persona
   - lazy-memory.reflect
   - lazy-memory.write
-source_sha: 4662bd907b9439e62b704146b65d311529d4da7f
-surface_sha: 5c8a4d8f72b72e428450a16661656a6399564c656a3d030ae125ecee50f32c71
+source_sha: 89f50038ff1a4fc16921c20d9fabda3c6653800a
+surface_sha: 29103d742b75291b1e671175bf8193a2f6c5c158ed8364bc5d88f201bbbd882c
 ---
 # Add long-term memory to an existing expert
 
@@ -130,7 +130,7 @@ Expected state:
 - One `<topic>.md` per tag the expert used, under `.memory/<expert>/.tags/`, listing the notes tagged with that topic.
 - Matching entries in the global `.memory/.tags/` aggregator, pointing at the per-expert tag file.
 
-Notes land already committed: `/lazy-memory.write` commits each note atomically under the `memory.<expert>` identity before returning, so the `.memory/` tree is in a clean git state as soon as the reflect job finishes. You do not need to commit these files yourself.
+Notes land already committed: `/lazy-memory.write` commits each note atomically under the `memory.<expert>` identity before returning, so the `.memory/` tree is in a clean git state as soon as the reflect job finishes. The commit always follows the expert the note was written for, even when a child agent records it from inside another expert's session. You do not need to commit these files yourself.
 
 If a tag is missing the `memory/` prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags. If `/lazy-memory.write` reports `consolidate-target-missing: <path>`, the note still writes successfully — this is a non-fatal warning telling you a path passed via `--consolidate` no longer exists; it can be safely ignored or removed from the consolidate list on the next call.
 

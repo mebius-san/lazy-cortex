@@ -90,18 +90,23 @@ def dictionary_values(repo: Path) -> dict[str, list[str]]:
 
 
 # ----------------------------------------------------------------------------------------
-def dictionary_entries(repo: Path) -> dict[str, dict[str, str]]:
+def dictionary_entries(repo: Path, *, strict: bool = False) -> dict[str, dict[str, str]]:
   """
   Read the per-axis values of the tag-values dictionary together with their glosses.
 
   Args:
     repo: Absolute repository root that owns the dictionary file.
+    strict: Whether a dictionary that exists but cannot be read or decoded raises instead of counting as empty.
 
   Returns:
     A dict `{<axis>: {<value>: <gloss>}}` built from the dictionary's `## <axis>` sections and their
     `- <value> — <gloss>` bullets, in file order; a value repeated within an axis keeps its first gloss, and a
-    value without a gloss maps to an empty string. Empty when the file is absent or unreadable — the dictionary
-    is advisory, so neither case is an error.
+    value without a gloss maps to an empty string. Empty when the file is absent or, unless `strict` is set,
+    unreadable — the dictionary is advisory, so neither case is an error.
+
+  Raises:
+    OSError: If `strict` is set and the dictionary cannot be read.
+    UnicodeDecodeError: If `strict` is set and the dictionary cannot be decoded.
   """
   dictionary = Path(repo) / dictionary_rel(repo)
 
@@ -114,6 +119,9 @@ def dictionary_entries(repo: Path) -> dict[str, dict[str, str]]:
   try:
     text = dictionary.read_text(encoding = _ENCODING)
   except (OSError, UnicodeDecodeError):
+    # a caller that decides on the entries needs the failure itself, never an empty dictionary in its place
+    if strict:
+      raise
     return {}
 
   # walk the file top-down: each heading opens the section its following bullets belong to
@@ -220,6 +228,7 @@ class TagOps:
     self._cfg = cfg
     self._node_paths = node_paths
     self._resolver = _scope.ScopeResolver(repo = repo)
+    self._unreadable: list[Path] = []
 
   @classmethod
   def for_domains(cls, *, repo: Path) -> TagOps:
@@ -234,14 +243,39 @@ class TagOps:
 
     Returns:
       A `TagOps` whose `collect`/`retag` calls report `scope: "domains"` and
-      operate over the domain-spec output tree; enumerates zero nodes when
-      `wiki.domains` is not configured or the output tree does not exist yet.
+      operate over the domain-spec output tree, with every doc the walk finds, in sorted order; enumerates zero
+      nodes when `wiki.domains` is not configured or the output tree does not exist yet.
     """
+
     domain_cfg = _domains.DomainConfig.load(repo)
     node_paths = cls._domain_doc_paths(domain_cfg) if domain_cfg is not None else []
     return cls(repo = repo, scope_id = _SURFACE_DOMAINS, cfg = {}, node_paths = node_paths)
 
-  def collect(self) -> dict:
+  @property
+  def unreadable_paths(self) -> list[Path]:
+    """
+    Nodes the latest `collect` skipped because they could not be read, in enumeration order.
+
+    Guarantees:
+      - Always describes the latest `collect` call only; nodes skipped by an earlier call never appear.
+    """
+
+    # Contract:
+    # The paths always describe the latest `collect` call alone: each call replaces them, so a node an
+    # earlier call skipped never appears once a later call has read it.
+
+    return list(self._unreadable)
+
+  def find_all_node_paths(self) -> list[Path]:
+    """
+    Enumerate the node files the operations run over.
+
+    Returns:
+      Absolute paths of the surface's nodes, in enumeration order.
+    """
+    return list(self._iter_node_paths())
+
+  def collect(self, *, skip_unreadable: bool = False) -> dict:
     """
     Survey the distinct tag values per axis across the scope.
 
@@ -249,11 +283,20 @@ class TagOps:
       - Axes and their values are reported in sorted order, so two surveys of an unchanged scope return
         identical results.
       - The survey is read-only and never modifies any node in the scope.
+      - By default a node that cannot be read or decoded raises, so the census is whole or absent; with
+        `skip_unreadable` true such nodes are left out of the census and named by `unreadable_paths`.
+
+    Args:
+      skip_unreadable: Whether to leave out a node that cannot be read or decoded instead of failing the survey.
 
     Returns:
       A dict `{"scope": <id>, "axes": {<axis>: [{"value", "count",
       "examples"}, ...]}}`. Axes and values are sorted; each value carries
       its node count and up to two example node summaries as light context.
+
+    Raises:
+      OSError: When a node cannot be read and `skip_unreadable` is false.
+      UnicodeError: When a node cannot be decoded and `skip_unreadable` is false.
     """
 
     # Contract:
@@ -262,6 +305,11 @@ class TagOps:
 
     # Contract:
     # The survey is read-only and NEVER modifies any node in the scope.
+
+    # Contract:
+    # By default a node that cannot be read or decoded makes the call raise, so the census is whole or
+    # absent. With `skip_unreadable` true such nodes are left out of the census and named by
+    # `unreadable_paths` instead.
 
     # Domain(wiki.taxonomy):
     # # The value census of an axis
@@ -274,8 +322,17 @@ class TagOps:
 
     # tally the distinct values every axis holds across the scope
     axes: dict = {}
+    self._unreadable = []
     for node_path in self._iter_node_paths():
-      node = _nodes.node_for(node_path)
+      # a node that cannot be read or decoded stops the census, unless the caller asked to pass over it
+      try:
+        node = _nodes.node_for(node_path)
+      except (OSError, UnicodeError):
+        # a caller that did not ask to pass over such nodes gets the whole census or none
+        if not skip_unreadable:
+          raise
+        self._unreadable.append(node_path)
+        continue
 
       # guard: unrecognised file type — skip
       if node is None:
@@ -671,7 +728,8 @@ class TagDictionary:
     """
     entries = self._renamed(alias_map)
 
-    # a value needs a gloss when neither the dictionary (after renames) nor the supplied glosses carry a non-blank one
+    # a value needs a gloss when neither the dictionary (after renames) nor the supplied glosses carry a non-blank
+    # one
     return [
       (axis, value)
       for axis in sorted(post_values)

@@ -485,6 +485,8 @@ class Doctor:
     CHECK_MIRROR_UNCOVERED: Check identifier for a `mirror_path` the scope's `paths` globs miss.
     CHECK_MIRROR_STALE: Check identifier for a mirror clone that has not been fetched recently.
     CHECK_MIRROR_LOCAL_EDIT: Check identifier for a mirror node whose body drifted from the source.
+    CHECK_MIRROR_UNREADABLE: Check identifier for a mirror file, its source, or the source listing that could
+      not be read, so drift was not checked.
   """
 
   # Contract:
@@ -513,6 +515,7 @@ class Doctor:
   CHECK_MIRROR_UNCOVERED    = "mirror-paths-uncovered"
   CHECK_MIRROR_STALE        = "mirror-stale-fetch"
   CHECK_MIRROR_LOCAL_EDIT   = "mirror-local-edit"
+  CHECK_MIRROR_UNREADABLE   = "mirror-unreadable"
 
   def __init__(self, *,
                repo: Path,
@@ -549,6 +552,9 @@ class Doctor:
       - A finding whose `fixable` flag is false is never repaired automatically.
       - A repair that locates a See-also line by its target text runs before that line's path base
         is rewritten, and the topics index is rebuilt once, after every per-node repair.
+      - A mirror file or its source that cannot be read or decoded, and a source that cannot be listed, become
+        `CHECK_MIRROR_UNREADABLE` FAIL findings; the audit never aborts on them, every other check still runs,
+        and an unreadable file never stops the comparison of the files after it.
 
     Returns:
       List of finding dicts, each with keys `check`, `severity`, `node`,
@@ -561,6 +567,12 @@ class Doctor:
 
     # Contract:
     # A finding whose `fixable` flag is false is NEVER repaired automatically, under any setting.
+
+    # Contract:
+    # A mirror file or its source that cannot be read or decoded, and a source that cannot be listed,
+    # become FAIL findings of the `CHECK_MIRROR_UNREADABLE` check. The audit NEVER aborts on them:
+    # every other check still runs, and a file that cannot be read never stops the comparison of the
+    # files after it.
 
     # the scope's axes and index address gate the classification checks below; the vocabulary is
     # the repository's, narrowed by whatever this scope declares
@@ -1334,14 +1346,15 @@ class Doctor:
 
   def _check_mirror(self) -> list[dict]:
     """
-    Audit the scope's mirror wiring and content drift (all report-only).
+    Audit the scope's mirror wiring and content drift (report-only).
 
     Reports findings on how the scope's mirror is wired and on content drift between the
     mirror and its source.  The drift and staleness checks need the clone on disk and are
     skipped without one.
 
     Returns:
-      List of `WARN` findings.
+      List of findings: `WARN` for wiring, staleness and drift, and `FAIL` for a mirror file or its source that
+      cannot be read and for a source that cannot be listed.
     """
     findings: list[dict] = []
     sync = _mirror.MirrorSync(repo = self._repo, scope_id = self._scope_id, cfg = self._cfg)
@@ -1372,6 +1385,9 @@ class Doctor:
     # from the last fetch, and a threshold of `7` days separates a live mirror from a lagging one.
     # A divergence between the body of the copy and the source is an edit made around the wiki superstructure; the
     # next synchronisation will overwrite it, so the warning comes in advance.
+    # A mirrored document, its source, or the source listing that cannot be read leaves its drift unknown. That is
+    # reported as a failure of the audit itself and never as the absence of drift, and the other documents are
+    # still compared.
 
     # a configured mirror whose directory never materialised has not been synced yet
     if not (self._repo / sync.mirror_path).is_dir():
@@ -1413,18 +1429,40 @@ class Doctor:
         ),
       ))
 
+    # a source that cannot be listed leaves the drift unknown, which is reported rather than read as no drift
+    try:
+      source_files = sync.find_all_source_files()
+    except _mirror.MirrorSourceError as error:
+      findings.append(_build_finding(
+        check    = self.CHECK_MIRROR_UNREADABLE,
+        severity = SEV_FAIL,
+        message  = f"mirror source could not be listed, drift not checked: {error}",
+      ))
+      return findings
+
     # body drift outside the wiki layer is work the next sync silently erases
-    for source_rel in sync.find_all_source_files():
+    for source_rel in source_files:
       mirror_rel = f"{sync.mirror_path}/{source_rel}"
       mirror_abs = self._repo / mirror_rel
 
       # guard: not mirrored yet — nothing to drift
       if not mirror_abs.is_file():
         continue
-      mirror_side = sync.to_source_remainder(mirror_abs.read_text(encoding = _ENCODING))
-      source_side = sync.to_source_remainder(
-        (sync.clone_dir / source_rel).read_text(encoding = _ENCODING)
-      )
+
+      # one file that cannot be read or decoded, on either side, is reported and the files after it still compared
+      try:
+        mirror_side = sync.to_source_remainder(mirror_abs.read_text(encoding = _ENCODING))
+        source_side = sync.to_source_remainder(
+          (sync.clone_dir / source_rel).read_text(encoding = _ENCODING)
+        )
+      except (OSError, UnicodeError) as error:
+        findings.append(_build_finding(
+          check    = self.CHECK_MIRROR_UNREADABLE,
+          severity = SEV_FAIL,
+          message  = f"mirror file or its source could not be read: {type(error).__name__}: {error}",
+          node     = mirror_rel,
+        ))
+        continue
       if mirror_side != source_side:
         findings.append(_build_finding(
           check    = self.CHECK_MIRROR_LOCAL_EDIT,
@@ -1672,13 +1710,13 @@ class DomainDoctor:
     # outranks the code: a group met in the code but not declared in the dictionary silently drops out of the build —
     # its knowledge reaches nowhere.
     # Hence four kinds of divergence. A group present in the code but absent from the dictionary — knowledge is lost.
-    # A group declared without its gloss line — it stays unnamed in the index, and the overview of its folder note has
-    # to be synthesised from the blocks alone. A file in the output tree that sits in no declared group's folder, or
-    # the single document per group the earlier layout wrote beside the folder — it is left over from a rename or a
-    # layout change, or was put there by a foreign hand; a path that a current document of the layout owns is never
-    # foreign. A group's folder note lagging behind the code — the content of the group's blocks and of the guarantees
-    # attributed to them is folded into a fingerprint, and a mismatch with the fingerprint recorded in the folder note
-    # means the code was edited after the last build.
+    # A group declared without its gloss line — it stays unnamed in the index, and the overview of its folder note
+    # has to be synthesised from the blocks alone. A file in the output tree that sits in no declared group's
+    # folder, or the single document per group the earlier layout wrote beside the folder — it is left over from a
+    # rename or a layout change, or was put there by a foreign hand; a path that a current document of the layout
+    # owns is never foreign. A group's folder note lagging behind the code — the content of the group's blocks and
+    # of the guarantees attributed to them is folded into a fingerprint, and a mismatch with the fingerprint
+    # recorded in the folder note means the code was edited after the last build.
     # None of these divergences repairs itself: editing the dictionary, rebuilding, and re-registering the background
     # work are the operator's decisions.
 

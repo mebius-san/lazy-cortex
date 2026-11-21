@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,25 +26,35 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import release_delta  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import release_version  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 import summary_render  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import AssetState, Gate, ReleaseKey, SpecStateKey  # noqa: E402
 
@@ -317,7 +328,8 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
     refused.
 
   Raises:
-    ValueError: If the settings file is not valid JSON.
+    ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
+      when no core CLI resolves.
     subprocess.CalledProcessError: If staging or committing the release fails.
     OSError: If a note cannot be read or written, or a closed release folder cannot be moved into the archive for a
       filesystem reason other than a taken or doubly claimed slot.
@@ -337,26 +349,28 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   # folder is created, no member is repainted, no closed release is moved and nothing is committed. The refusal
   # is returned as a result, never raised, so callers MUST handle it.
 
-  # resolve who owns the product's releases
-  owner = resolve_product.find_release_owner_key(repo, key)
+  # resolve who owns the product's releases, in the registry and catalog-wide guidelines the runtime dispatches from,
+  # read once for the release
+  registry, catalog = resolve_product.read_runtime_catalog(repo)
+  owner = resolve_product.find_release_owner_key(repo, key, products = registry)
 
   # guard: an umbrella without code owns no releases
   if owner is None:
     return _create_refusal(f"no release owner above product {key!r}")
 
   # guard: one open release at a time
-  if (open_note := release_delta.find_open_release(repo, owner)) is not None:
+  if (open_note := release_delta.find_open_release(repo, owner, products = registry)) is not None:
     return _create_refusal(f"a release is already open: {open_note.relative_to(repo).as_posix()}")
 
   # the delta: the approved assets the new release would carry
-  included, _excluded = release_delta.find_all_delta_entries(repo, owner)
+  included, _excluded = release_delta.find_all_delta_entries(repo, owner, products = registry)
 
   # guard: nothing to ship, nothing to create
   if not included:
     return _create_refusal(_MSG_EMPTY_DELTA)
 
   # the owner's record names where its releases live and the number the new one takes
-  record = resolve_product.load_products(repo)[owner]
+  record = registry[owner]
   releases_dir = spec_paths.spec_content_root(repo) / record[_SPEC_PATH_KEY] / ReleaseKey.FOLDER
   slug = read_next_slug(releases_dir)
 
@@ -384,10 +398,12 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
     # guard: a group-note template that does not resolve refuses before anything is written, under the same
     # condition the writing step below acts on
     if (moves or archive_note.parent.is_dir()) and not archive_note.exists():
-      scaffold_asset.resolve_template(repo, ReleaseKey.ASSET_TYPE, owner, scaffold_asset.Keys.GROUP_NOTE_TMPL)
+      scaffold_asset.resolve_template(repo, ReleaseKey.ASSET_TYPE, owner, scaffold_asset.Keys.GROUP_NOTE_TMPL,
+                                      products = registry)
 
     # the new release's folder and note, from the release type's own template chain
-    created = scaffold_asset.scaffold(repo, owner, ReleaseKey.ASSET_TYPE, slug)
+    created = scaffold_asset.scaffold(repo, owner, ReleaseKey.ASSET_TYPE, slug, products = registry,
+                                      catalog_guidelines = catalog)
   except scaffold_asset.ScaffoldRefusal as refusal:
     return _create_refusal(refusal.message)
 
@@ -418,9 +434,9 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   # an archive without its group note gets one written; an existing note has its count refreshed
   if archive_note.parent.is_dir():
     seeded = not archive_note.exists()
+    owner_record = resolve_product.effective_record(repo, owner, products = registry, catalog_guidelines = catalog)
     scaffold_asset.ensure_group_note(repo, archive_note.parent, asset_type = ReleaseKey.ASSET_TYPE,
-                                     owner_key = owner,
-                                     owner_record = resolve_product.effective_record(repo, owner))
+                                     owner_key = owner, owner_record = owner_record, products = registry)
     if summary_render.apply_container_stats(archive_note) or seeded:
       written.append(archive_note)
 
@@ -471,7 +487,8 @@ def refresh_includes(repo: Path, release_note: Path, *, waived: bool = False) ->
 
   Raises:
     OSError: If the release note or an included asset's note cannot be read or written.
-    ValueError: If `release_note` does not lie under `repo`.
+    ValueError: If `release_note` does not lie under `repo`, or if the merged settings cannot be read; the latter is
+      a `spec_paths.SettingsError` naming the settings file, also when no core CLI resolves.
     subprocess.CalledProcessError: If the commit of the new members fails.
   """
 
@@ -500,19 +517,23 @@ def refresh_includes(repo: Path, release_note: Path, *, waived: bool = False) ->
   if flip_gate.is_true(fm_values, Gate.RELEASED):
     return _create_refusal(_MSG_PUBLISHED)
 
-  # the product the release note sits under
-  key, _record = resolve_product.effective_record_by_path(repo, release_note.relative_to(repo).as_posix())
+  # the product the release note sits under, in the registry and catalog-wide guidelines the runtime dispatches
+  # from, read once for the release
+  registry, catalog = resolve_product.read_runtime_catalog(repo)
+  key, _record = resolve_product.effective_record_by_path(repo, release_note.relative_to(repo).as_posix(),
+                                                          products = registry, catalog_guidelines = catalog)
 
   # guard: a release note under a product that owns no releases has no delta to refresh from
-  if key is None or (owner := resolve_product.find_release_owner_key(repo, key)) is None:
+  if key is None or (owner := resolve_product.find_release_owner_key(repo, key, products = registry)) is None:
     return _create_refusal(f"no release owner above the release note {release_note.name!r}")
 
   # the delta as it stands now, against the members already listed; a new asset the owner's architecture does not
   # cover yet is held out
-  included, _excluded = release_delta.find_all_delta_entries(repo, key)
+  included, _excluded = release_delta.find_all_delta_entries(repo, key, products = registry)
   existing = spec_frontmatter.read_list(text, ReleaseKey.INCLUDES)
   fresh = [ entry for entry in included if _render_include_link(repo, entry.note) not in existing ]
-  _doc, _approved_at, behind = release_delta.find_architecture_lag(repo, owner, fresh, waived = waived)
+  _doc, _approved_at, behind = release_delta.find_architecture_lag(repo, owner, fresh, waived = waived,
+                                                                   products = registry)
   added = [ entry for entry in fresh if entry.token not in behind ]
   kept = [ entry.token for entry in included if _render_include_link(repo, entry.note) in existing ]
 
@@ -541,13 +562,16 @@ def main(argv: list[str]) -> int:
 
   Notes:
     - Prints the JSON result of `scaffold_release` or `refresh_includes` on stdout.
+    - A failed commit or file-system step is reported as one line on stderr, `release-scaffold: <ErrorType>:
+      <message>`; whatever the verb already wrote stays in place.
 
   Args:
     argv: Command-line arguments, excluding the program name; `--no-architecture` is meaningful with `--refresh`
       and holds no new asset out of the release.
 
   Returns:
-    Exit code: 0 on success, 1 on a refusal, 2 when the arguments name no product or no existing note.
+    Exit code: 0 on success, 1 on a refusal or on a commit or file-system failure, 2 when the arguments name no
+    product or no existing note.
   """
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs release-scaffold")
@@ -562,22 +586,28 @@ def main(argv: list[str]) -> int:
   args = parser.parse_args(argv)
   repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
 
-  # the refresh form names a note; the create form names a product and a bump
-  if args.refresh:
-    note = (repo / args.refresh).resolve()
+  # a commit that does not land is the verb's failure, named on stderr; what the verb wrote stays as it is, and
+  # the dirty tree it leaves is the alarm
+  try:
+    # the refresh form names a note; the create form names a product and a bump
+    if args.refresh:
+      note = (repo / args.refresh).resolve()
 
-    # guard: the refresh form names a note that must exist
-    if not note.is_file():
-      sys.stderr.write(f"no such note: {note}\n")
+      # guard: the refresh form names a note that must exist
+      if not note.is_file():
+        sys.stderr.write(f"no such note: {note}\n")
+        return 2
+
+      # the refresh pulls the delta's new members into the open release
+      result = refresh_includes(repo, note, waived = args.no_architecture)
+    elif args.product and args.bump:
+      result = scaffold_release(repo, args.product, bump = args.bump)
+    else:
+      sys.stderr.write(_MSG_USAGE)
       return 2
-
-    # the refresh pulls the delta's new members into the open release
-    result = refresh_includes(repo, note, waived = args.no_architecture)
-  elif args.product and args.bump:
-    result = scaffold_release(repo, args.product, bump = args.bump)
-  else:
-    sys.stderr.write(_MSG_USAGE)
-    return 2
+  except (subprocess.CalledProcessError, OSError) as error:
+    sys.stderr.write(f"release-scaffold: {type(error).__name__}: {error}\n")
+    return 1
 
   # the result goes out as one JSON line; a refusal exits 1
   print(json.dumps(result))

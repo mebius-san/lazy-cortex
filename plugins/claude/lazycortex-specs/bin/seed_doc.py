@@ -19,8 +19,8 @@ CLI: `seed-doc <product> <folder-note-path> --doc <name>:<spec_doc_type>
 [--replace-cancelled] [--cwd <repo>]`. The folder-note path is repo-relative and must exist; the
 target doc must not, unless `--replace-cancelled` is given and the target sits at `spec_stage: cancelled`, in
 which case a fresh seed replaces it and nothing of the old content survives. A target at any other stage is
-refused either way, and `--replace-cancelled` beside `--refresh-sources` is refused. The seeded doc starts at stage `empty` and inherits
-the folder-note's `spec_source_requests` list, so the review dispatcher's
+refused either way, and `--replace-cancelled` beside `--refresh-sources` is refused. The seeded doc starts at
+stage `empty` and inherits the folder-note's `spec_source_requests` list, so the review dispatcher's
 `context_from_frontmatter` can resolve the originating request(s) when the
 doc's writer is dispatched.
 
@@ -258,12 +258,13 @@ def _product_for_note(repo: Path, note_path: Path) -> tuple[str, dict]:
 
   Returns:
     The `(product_key, effective_record)` pair (`resolve_product.effective_record`), or `("", {})`
-    when no registered product owns the folder.
+    when no registered product owns the folder or the settings cannot be read or do not parse.
   """
-  settings_path = repo / scaffold_asset.Keys.CLAUDE_DIR / scaffold_asset.Keys.SETTINGS_FILE
+  # guard: settings that cannot be read or do not parse register no product; `ValueError` covers a JSON syntax
+  # error, bytes that are not UTF-8 text and JSON that is not an object
   try:
-    products = json.loads(settings_path.read_text(encoding = "utf-8")).get(scaffold_asset.Keys.PRODUCTS) or {}
-  except (OSError, json.JSONDecodeError):
+    products = resolve_product.load_products(repo)
+  except (OSError, ValueError):
     return "", {}
   content_root = spec_paths.spec_content_root(repo)
   folder = note_path.parent.resolve()
@@ -445,7 +446,8 @@ def main(argv: list[str]) -> int:
   parser.add_argument(_ARG_ROOT, default = None, help = _HELP_ROOT)
   parser.add_argument(scaffold_asset.Keys.ARG_DOC, default = None, help = _HELP_DOC)
   parser.add_argument(_ARG_REFRESH, default = None, help = _HELP_REFRESH)
-  # waiver: argparse CLI signature -- an opt-in switch, off by default so an existing document is never replaced unasked
+  # waiver: argparse CLI signature -- an opt-in switch, off by default so an existing document is never replaced
+  # unasked
   parser.add_argument(_ARG_REPLACE_CANCELLED, action = "store_true", help = _HELP_REPLACE_CANCELLED)
   parser.add_argument(scaffold_asset.Keys.ARG_CWD, default = None, help = scaffold_asset.Keys.HELP_CWD)
   args = parser.parse_args(argv)

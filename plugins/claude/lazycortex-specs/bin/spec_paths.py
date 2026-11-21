@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
@@ -29,6 +31,8 @@ _VAULT_ROOT_REFUSAL = (
     "sub-directory of the repository: move the catalog into one (the default is `specs`) and set "
     "spec.vault_root to that directory"
 )
+# The refusal of a content-root lookup under settings that cannot be read as a JSON object; the error names the file.
+_SETTINGS_REFUSAL = "the spec content root cannot be resolved: {error}"
 _REASON_REPO_ROOT = "names the repository root"
 _REASON_ABSOLUTE = "is an absolute path"
 _REASON_PARENT = "climbs out through `..`"
@@ -42,12 +46,20 @@ _REG_INSTALL_PATH = "installPath"
 _BIN_DIR = "bin"
 # The core plugin, whose CLI every caller of `resolve_core_cli` reaches.
 _CORE_CLI_NAME = "lazycortex-core"
+# The core verb and flags that print one settings section as the runtime sees it: the tracked file with the local
+# overlay merged on.
+_CORE_SETTINGS_GET = "settings-get"
+_SCOPE_FLAG = "--scope"
+_MERGED_SCOPE = "merged"
+_CWD_FLAG = "--cwd"
+# How long one merged-settings read may take before it counts as failed.
+_CORE_TIMEOUT_S: float = 60
 # The plugin tree a checkout that authors the plugins carries them under.
 _PLUGIN_TREE_REL = Path("plugins") / "claude"
 _TMP_SUFFIX = ".tmp"
 _ENCODING = "utf-8"
 _WRITE_MODE = "w"
-# the mode a plain `open()` would give a new file before the umask is applied
+# The mode a plain `open()` would give a new file before the umask is applied.
 _NEW_FILE_MODE = 0o666
 _LF = "\n"
 _CRLF = "\r\n"
@@ -60,14 +72,32 @@ _SEP = "/"
 
 class VaultRootError(BaseException):
   """
-  Refusal of a `spec.vault_root` value that is not a sub-directory of the settings-root.
+  Refusal to resolve the spec content-root.
 
-  The message names the setting and tells the operator to move the catalog into a sub-directory and
-  point the setting at it.
+  Raised when `spec.vault_root` is not a sub-directory of the settings-root, and when the settings file cannot be
+  read as a JSON object, so no content root can be named. For a bad `spec.vault_root` the message names the setting
+  and tells the operator to move the catalog into a sub-directory and point the setting at it; for an unreadable
+  settings file the message names the file.
   """
 
   # Decision: chose a `BaseException` subclass, not `Exception` -- a per-item `except Exception` in a routine
   # tick would otherwise record the refusal and carry on, while every verb resolving the content-root must stop
+
+
+class SettingsError(ValueError):
+  """
+  Refusal of a settings file that cannot be read as a JSON object.
+
+  The message names the file.
+  """
+
+
+class SettingsSyntaxError(SettingsError, json.JSONDecodeError):
+  """
+  Refusal of a settings file that is not valid JSON.
+
+  The message names the file. Callers that catch `json.JSONDecodeError` catch it as well.
+  """
 
 
 def find_settings_root(start: Path) -> Path:
@@ -110,26 +140,109 @@ def require_settings_root(start: Path) -> Path:
   return root
 
 
+def read_settings(settings_path: Path) -> dict:
+  """
+  Read an existing settings file as one JSON object.
+
+  Guarantees:
+    - Every failure to read the file as one JSON object raises `SettingsError`, a `ValueError` whose message names
+      the file: the file cannot be read, is not UTF-8 text, is not valid JSON, or is valid JSON that is not an
+      object.
+    - A JSON syntax error is raised as `SettingsSyntaxError`, which is also a `json.JSONDecodeError`, so a caller
+      catching that class still catches it.
+    - No other exception is raised and no default is ever returned in those cases.
+
+  Args:
+    settings_path: The `lazy.settings.json` file, which must exist.
+
+  Returns:
+    The parsed settings object.
+
+  Raises:
+    SettingsSyntaxError: If the file is not valid JSON; also a `json.JSONDecodeError`, and the message names the
+      file.
+    SettingsError: If the file cannot be read, is not UTF-8 text, or its JSON is not an object; a `ValueError`, and
+      the message names the file.
+  """
+
+  # Contract:
+  # Every failure to read the file as one JSON object raises `SettingsError`, a `ValueError` whose message
+  # names the file: the file cannot be read, is not UTF-8 text, is not valid JSON, or is valid JSON that is
+  # not an object.
+  # A JSON syntax error is raised as `SettingsSyntaxError`, which is also a `json.JSONDecodeError`, so a
+  # caller catching that class still catches it.
+  # Nothing else is raised and no default is ever returned in those cases.
+
+  # a file that cannot be read, or is not text at all, is named, so the failure says which file is broken
+  try:
+    text = settings_path.read_text(encoding = "utf-8")
+  except UnicodeDecodeError as error:
+    raise SettingsError(f"{settings_path}: settings file is not UTF-8 text: {error}") from error
+  except OSError as error:
+    raise SettingsError(f"{settings_path}: settings file cannot be read: {error}") from error
+
+  # a syntax error stays a JSON decode error for the callers that catch one, and gains the file's name
+  try:
+    data = json.loads(text)
+  except json.JSONDecodeError as error:
+    raise SettingsSyntaxError(f"{settings_path}: {error.msg}", error.doc, error.pos) from error
+
+  # guard: valid JSON that is not an object configures nothing and is refused by name
+  if not isinstance(data, dict):
+    raise SettingsError(f"{settings_path}: settings file is not a JSON object, got {type(data).__name__}")
+  return data
+
+
+def require_valid_settings(settings_root: Path) -> None:
+  """
+  Require the settings file under a settings root, when there is one, to read as a JSON object.
+
+  A settings root without a `lazy.settings.json` is accepted as one with nothing configured.
+
+  Args:
+    settings_root: Dir holding `.claude/lazy.settings.json`.
+
+  Raises:
+    SettingsError: If the settings file exists and cannot be read, is not UTF-8 text, is not valid JSON
+      (`SettingsSyntaxError`, also a `json.JSONDecodeError`), or is valid JSON that is not an object.
+  """
+
+  # an absent settings file is a valid "nothing configured"; one that exists must read as a JSON object
+  path = settings_root / _SETTINGS_REL
+  if path.is_file():
+    read_settings(path)
+
+
 def _vault_root_value(settings_root: Path) -> str:
   """
   Read `spec.vault_root` from settings, defaulting to `specs`.
+
+  Guarantees:
+    - The returned root is always a sub-directory strictly below the settings-root; a value naming the settings-root
+      itself, an absolute path, or one with a `..` segment is refused, never replaced by the default.
+    - A settings file that exists but cannot be read as a JSON object (unreadable, not UTF-8 text, not valid JSON, or
+      not an object) is refused the same way, with the file named, never replaced by the default.
+    - Only an absent settings file or an unset, empty, or non-string value falls back to `specs`.
 
   Args:
     settings_root: Dir holding `.claude/lazy.settings.json`.
 
   Returns:
-    The configured vault-root sub-directory, relative to the settings-root, or `specs` when the
-    value is unset, empty, or not a string.
+    The configured vault-root sub-directory, relative to the settings-root, or `specs` when the settings file is
+    absent or the value is unset, empty, or not a string.
 
   Raises:
     VaultRootError: When the value names the settings-root itself (`.`), is an absolute path, or
-      climbs out through `..`.
+      climbs out through `..`, or when the settings file exists but cannot be read as a JSON object; the message
+      names the file.
   """
 
   # Contract:
   # The returned vault root is always a sub-directory strictly below the settings-root: a value naming
   # the settings-root itself, an absolute path, or one with a `..` segment is refused, never replaced by
-  # the default; only an unset, empty, or non-string value falls back to `specs`.
+  # the default. A settings file that exists but cannot be read as a JSON object (unreadable, not UTF-8 text,
+  # not valid JSON, or not an object) is refused the same way, with the file named, never replaced by the
+  # default. Only an absent settings file or an unset, empty, or non-string value falls back to `specs`.
 
   path = settings_root / _SETTINGS_REL
 
@@ -137,9 +250,12 @@ def _vault_root_value(settings_root: Path) -> str:
   if not path.is_file():
     return DEFAULT_VAULT_ROOT
 
-  # the spec section of the tracked settings
-  data = json.loads(path.read_text(encoding = "utf-8"))
-  spec = data.get(_SPEC_SECTION)
+  # settings that exist but cannot be read as a JSON object name no root at all: the lookup is refused, never
+  # answered with the default root, so nothing acts on a tree the operator may not have configured
+  try:
+    spec = read_settings(path).get(_SPEC_SECTION)
+  except SettingsError as error:
+    raise VaultRootError(_SETTINGS_REFUSAL.format(error = error)) from error
 
   # guard: missing/malformed spec section — default
   if not isinstance(spec, dict):
@@ -160,6 +276,11 @@ def _vault_root_value(settings_root: Path) -> str:
   # promise that upgrades never touch the project's own code could not be kept. A setting that points at
   # the root, at an absolute location, or out of the repository is refused with an instruction to move
   # the catalog into a sub-directory; it is never silently replaced by the default location.
+  # When the project's configuration exists but cannot be read at all — it is unreadable, or is not the
+  # structured record it must be — the catalog's location is unknown, and that is refused too, naming the
+  # configuration file. The default location is never assumed in its place, because every automatic step
+  # would then act on a tree the operator may never have set up as the catalog. Only a project with no
+  # configuration at all, or one whose configuration does not name a location, uses the default location.
 
   # the configured value read as a relative POSIX path
   rel = PurePosixPath(value)
@@ -190,7 +311,8 @@ def spec_content_root(settings_root: Path) -> Path:
 
   Raises:
     VaultRootError: When `spec.vault_root` names the settings-root itself, an absolute path, or a
-      path climbing out through `..`.
+      path climbing out through `..`, or when the settings file exists but cannot be read as a JSON object; the
+      message names the file.
   """
 
   # Domain(spec.config):
@@ -238,8 +360,6 @@ def installed_plugin_root(name: str, *, home: Path | None = None) -> Path | None
     The recorded install root when it exists on disk, else None.
   """
 
-  # the registry names the one install per version; the cache keeps every version ever installed
-
   # the registry as it stands on disk; an unreadable one records nothing
   registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
   try:
@@ -256,9 +376,12 @@ def installed_plugin_root(name: str, *, home: Path | None = None) -> Path | None
     for key, entries in plugins.items() if key.split("@", 1)[0] == name
     for rec in (entries or []) if isinstance(rec, dict) and rec.get(_REG_INSTALL_PATH)
   ]
+
   # guard: the plugin was never installed on this machine
   if not records:
     return None
+
+  # the highest recorded version wins, and only while its install root is still on disk
   best = max(records, key = lambda rec: _version_sort_key(str(rec.get(_REG_VERSION, ""))))
   root = Path(str(best[_REG_INSTALL_PATH]))
   return root if root.is_dir() else None
@@ -290,8 +413,7 @@ def resolve_plugin_cli(name: str, *, dev_repo: Path | None = None) -> Path | Non
   # When both the plugin-dirs environment and the plugin registry carry a matching CLI,
   # the plugin-dirs environment's copy is returned.
 
-  raw = os.environ.get(_ENV_PLUGIN_DIRS, "")
-  for entry in raw.split(os.pathsep):
+  for entry in os.environ.get(_ENV_PLUGIN_DIRS, "").split(os.pathsep):
     # guard: empty path segment (trailing/double pathsep) — skip it
     if not entry:
       continue
@@ -384,6 +506,85 @@ def resolve_core_cli(repo: Path) -> Path:
     RuntimeError: When no lookup stage finds a binary, naming every stage searched.
   """
   return require_plugin_cli(_CORE_CLI_NAME, repo)
+
+
+def read_merged_sections(repo: Path, *sections: str) -> dict[str, dict]:
+  """
+  Read settings sections as the expert runtime sees them.
+
+  Each section is the tracked settings file with the local overlay file merged on top of it.
+
+  Guarantees:
+    - Every requested section is present in the result under its own name, holding the merged view of the tracked
+      file and the local overlay; a value that only the overlay carries is never dropped.
+    - Any failure to read a section raises `SettingsError` naming the settings file; the result is never empty
+      or partial in its place.
+
+  Notes:
+    - Runs one core CLI subprocess per requested section and waits on each up to a fixed timeout, so the call can
+      block.
+
+  Args:
+    repo: The repository root whose settings are read.
+    *sections: The names of the top-level settings sections to read.
+
+  Returns:
+    Each requested section name mapped to its merged section object.
+
+  Raises:
+    SettingsError: When no core CLI is resolvable, or core cannot read a section, does not answer in time, or
+      answers with anything but a JSON object; the message names the settings file.
+  """
+
+  # Contract:
+  # Every requested section is present in the result under its own name and holds the merged view of the
+  # tracked settings file and the local overlay file; a value that only the overlay carries is never dropped.
+
+  # Contract:
+  # Any failure to read a requested section raises `SettingsError` (a `ValueError`) whose message names
+  # the settings file; the function never returns an empty or partial result in its place.
+
+  settings_path = repo / _SETTINGS_REL
+
+  # guard: without the core CLI no merged view exists, and a partial one must not pass for the settings
+  try:
+    cli = resolve_core_cli(repo)
+  except RuntimeError as error:
+    raise SettingsError(f"{settings_path}: merged settings cannot be read: {error}") from error
+
+  # one core call per section, each printing that section's merged view as a JSON object
+  merged: dict[str, dict] = {}
+  for section in sections:
+    try:
+      proc = subprocess.run(
+          [ sys.executable, str(cli), _CORE_SETTINGS_GET, section, _SCOPE_FLAG, _MERGED_SCOPE,
+            _CWD_FLAG, str(repo) ],
+          capture_output = True, text = True, check = False, encoding = _ENCODING,
+          # waiver: stdlib decode-error mode, not a domain constant
+          errors = "replace", timeout = _CORE_TIMEOUT_S,
+      )
+    except (OSError, subprocess.TimeoutExpired) as error:
+      raise SettingsError(f"{settings_path}: {_CORE_SETTINGS_GET} {section} could not run: {error}") from error
+
+    # guard: a failed read, a broken layer included, must not pass for an empty section
+    if proc.returncode != 0:
+      lines = (proc.stderr.strip() or proc.stdout.strip()).splitlines()
+      raise SettingsError(f"{settings_path}: {_CORE_SETTINGS_GET} {section} failed: "
+                          f"{lines[-1] if lines else f'exit {proc.returncode}'}")
+
+    # guard: an answer that is not JSON is a broken wire, never an empty section
+    try:
+      value = json.loads(proc.stdout)
+    except json.JSONDecodeError as error:
+      raise SettingsError(f"{settings_path}: {_CORE_SETTINGS_GET} {section} printed no JSON") from error
+
+    # guard: a whole-section read always prints an object; anything else is a broken wire
+    if not isinstance(value, dict):
+      raise SettingsError(f"{settings_path}: {_CORE_SETTINGS_GET} {section} printed a non-object")
+
+    # the section's merged view joins the result under its own name
+    merged[section] = value
+  return merged
 
 
 def spec_roots(start: Path) -> tuple[Path, Path]:
@@ -505,8 +706,7 @@ def read_text(path: Path) -> str:
     OSError: If the file cannot be read.
   """
   with open(path, encoding = _ENCODING, newline = "") as handle:
-    raw = handle.read()
-  return raw.replace(_CRLF, _LF)
+    return handle.read().replace(_CRLF, _LF)
 
 
 def _disk_ending(target: Path) -> str:

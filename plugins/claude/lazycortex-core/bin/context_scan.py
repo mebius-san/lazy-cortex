@@ -224,7 +224,7 @@ def _read_authored_size(rule: Path) -> int | None:
   if rule.name != _SCAFFOLD_RULE:
     return None
 
-  # Domain(unfiled):
+  # Domain(audit.context-budget):
   # # Authored size of the scaffold rule
   # A rule that loads every turn has a size budget of its own, and the budget judges what an author wrote. The
   # scaffold rule is the exception among rules: install fills its registry with the templates of every enabled
@@ -256,7 +256,7 @@ def _scan_weight(cwd: Path, home: Path) -> dict:
     which is the rule's size with its registry block emptied.
   """
 
-  # Domain(unfiled):
+  # Domain(audit.context-budget):
   # # Always-loaded context and its budget
   # A session pays for some instructions on every turn and for the rest only when they are used. The operator and
   # project instruction files, the memory index and every rule that is not scoped to particular files are paid for
@@ -354,7 +354,7 @@ def _evaluate_description(text: str) -> dict:
     example block, and the severity level the description grades to.
   """
 
-  # Domain(unfiled):
+  # Domain(audit.context-budget):
   # # Description length budget
   # A session lists the name and description of every skill, agent and command on every turn, so a description
   # is paid for whether or not the artifact is ever used. A description states when to invoke the artifact and,
@@ -499,7 +499,7 @@ def _scan_expert_memory(cwd: Path, _home: Path) -> dict:
       if not listed:
         orphans.append({ "expert": expert, "path": str(path.relative_to(cwd)), "tags": tags })
 
-    # Domain(unfiled):
+    # Domain(audit.memory-duplicates):
     # # Near-duplicate memory notes
     # Two notes of one expert may record the same thing twice, and a duplicate pair is worth merging. Two notes are
     # suspected duplicates when they share at least one tag and their titles differ by at most three single-character
@@ -537,7 +537,7 @@ def _scan_skill_size(cwd: Path, home: Path) -> list[dict]:
     for name in sorted(os.listdir(plugins)):
       skills += _find_all_skill_files(plugins / name / _Layout.SKILLS)
 
-  # Domain(unfiled):
+  # Domain(audit.context-budget):
   # # Skill size limit
   # A skill is read in full whenever it is invoked, so a long body is a standing cost and a sign that the skill does
   # too much itself. A skill body of more than 120 lines or more than 5 KB is a candidate for delegating work to

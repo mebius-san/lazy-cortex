@@ -15,6 +15,8 @@ Request shape (matches the trimmed protocol contract in
       "context": [{"path": "context/<file>"}, ...],
       "result": [{"path": "result/<file>"}],
       "edit_marker_style": "simple | diff | criticmarkup | html",
+      "decisions": ["<repo-relative path>", ...],
+                  # writer modes only; the decisions registries, read from the working tree
       "owned_section": "<H1 title>"   # section-writer only
     }
 
@@ -25,7 +27,7 @@ Response shape:
 
     {
       "outcome":       "edited | empty | noop | error",
-      "result":        ["result/<document>", "result/<attachment>", ...],
+      "result":        [{"path": "result/<document>"}, {"path": "result/<attachment>"}, ...],
       "history_entry": "<one-sentence summary>",
       "error":         {"category": "...", "message": "..."}
     }
@@ -39,6 +41,8 @@ unified; `response.json` carries only metadata.
 """
 from __future__ import annotations
 
+import os
+import unicodedata
 from dataclasses import dataclass
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -50,6 +54,8 @@ from keys import JobKey, Outcome, Phase, Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
+  from typing import Final
+
   from collections.abc import Iterable, Mapping
 
 
@@ -162,20 +168,38 @@ def build_request(
 # An attachment entry's only legal prefix: the job's own result directory.
 _RESULT_PREFIX = "result/"
 
+# The code points that bound the control characters an attachment's file name may not carry: every one below
+# the first printable character, and the delete character.
+_FIRST_PRINTABLE = 32
+_DELETE = 127
+
+# The Unicode normalisation form an attachment's file name must already be in: the composed one.
+_COMPOSED: Final = "NFC"
+
 
 def attachment_basename(entry: object) -> str:
   """
   Resolve one attachment entry of a response's `result` array to its bare filename.
 
+  Guarantees:
+    - A returned name is a plain file name: it is never empty and carries no path separator, no parent hop and no
+      control character. It is always in composed (`NFC`) spelling, the spelling git reports paths in, so the name
+      checked against git and the name written are the same name; an entry whose name is in any other spelling
+      raises `PayloadError`. A name that cannot be encoded as a file name (a lone surrogate) raises `PayloadError`
+      too.
+
   Args:
-    entry: One `result` array member — `{"path": "result/<file>"}` or the bare path string.
+    entry: One `result` array member: an object `{"path": "result/<file>"}`; an entry that is not an object is
+      read as its path.
 
   Returns:
     The attachment's basename, the name it takes beside the landed document.
 
   Raises:
     PayloadError: If the entry names no path string, points outside the job's own `result/`,
-      or resolves to anything but a plain filename.
+      resolves to anything but a plain filename, carries a control character in the name, names a file
+      whose name is not in composed (`NFC`) spelling, or names a file whose name cannot be encoded as a file
+      name (a lone surrogate).
   """
 
   # Domain(review.dispatch):
@@ -185,6 +209,13 @@ def attachment_basename(entry: object) -> str:
   # entry that carries any location of its own — a directory, a parent hop, a path outside the
   # job's own output directory — is claiming a placement it has no standing to claim, so it is
   # read as a malformed response rather than honoured, and the whole landing is refused.
+
+  # Contract:
+  # A returned name is a plain file name: it is NEVER empty and carries no path separator, no parent hop and no
+  # control character (a code point below 32, or 127). It is always in composed (`NFC`) spelling, the spelling git
+  # reports paths in, so the name checked against git and the name written are the same name. It is always a name
+  # the file system can be handed: one that cannot be encoded as a file name (a lone surrogate) is refused. An entry
+  # that would yield anything else raises `PayloadError`.
 
   path = entry.get(JobKey.PATH) if isinstance(entry, dict) else entry
 
@@ -200,6 +231,22 @@ def attachment_basename(entry: object) -> str:
   # guard: the basename is a plain filename — no separator, no parent hop, never empty
   if not name or "/" in name or "\\" in name or name in {".", ".."}:
     raise PayloadError(f"attachment basename is not a plain filename: {path!r}")
+
+  # guard: a control character is never part of a file's name here — a NUL cannot be handed to any program
+  # at all, and the others corrupt every line that names the file
+  if any(ord(char) < _FIRST_PRINTABLE or ord(char) == _DELETE for char in name):
+    raise PayloadError(f"attachment basename carries a control character: {path!r}")
+
+  # guard: a name is taken only in its composed spelling — the one git reports paths in — so the name that is
+  # checked against git and the name that is written are the same name
+  if unicodedata.normalize(_COMPOSED, name) != name:
+    raise PayloadError(f"attachment basename is not in composed (NFC) spelling: {path!r}")
+
+  # guard: a name the file system cannot be handed (a lone surrogate) can neither be asked about nor written
+  try:
+    os.fsencode(name)
+  except UnicodeEncodeError as error:
+    raise PayloadError(f"attachment basename cannot be encoded as a file name: {path!r}") from error
   return name
 
 
@@ -210,7 +257,7 @@ def validate_response(response: Mapping, *, kind: str) -> None:
   """
   Raise `PayloadError` if `response` violates the per-kind contract.
 
-  `role` is no longer an input — every writer returns body content via `result: [path]` under
+  `role` is no longer an input — every writer returns body content via `result: [{"path": "result/<file>"}]` under
   the unified transport, so the validator does not need to know which role the response came from.
 
   Args:
@@ -253,7 +300,7 @@ def validate_response(response: Mapping, *, kind: str) -> None:
     )
   if outcome in _OUTCOMES_REQUIRING_RESULT:
     # Unified output transport: every writer (main / section /
-    # repair) returns `result: ["path"]`. Main writers write the
+    # repair) returns `result: [{"path": "result/<file>"}]`. Main writers write the
     # full document body; section writers write only the section
     # body (no H1 heading, no ownership tag — the dispatcher emits
     # both itself).

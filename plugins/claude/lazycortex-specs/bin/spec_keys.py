@@ -418,7 +418,7 @@ ASSET_GATES = frozenset(GATE_ORDER) | { Gate.SPEC_CANCELLED }
 # The four middle rungs of the ladder, which belong to a release alone: a design-only note does not carry them.
 # Turning one of them on is refused on every note whose `spec_asset_type` is not `release`, an untyped note
 # included; turning one off is never refused, so a note still carrying one can have it cleared.
-DESIGN_ONLY_GATES = frozenset({ Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.BUILT })
+RELEASE_ONLY_GATES = frozenset({ Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.BUILT })
 
 # Every gate name the flip primitive accepts at all. A name outside this set is a caller typo,
 # refused before the folder-note is touched — `Gate.DESIGN_DONE` is the one member both ladders
@@ -862,7 +862,7 @@ class GateCheckbox:
     REVISE_ARCHITECTURE: Label for the product note's checkbox that brings the product's `architecture.md` up
       to date with the approved designs.
     BUILD: Label for the release note's checkbox that starts the release's first build.
-    START_RESEARCH: Label for the `research` tool's launch checkbox.
+    START_RESEARCH: Label for the research asset's launch checkbox.
     START_RELEASE: Label for the product note's checkbox that creates a release from the current delta.
     REBUILD: Label for the release note's checkbox that pulls new approvals in and builds again.
     TEST: Label for the release note's checkbox that starts the tester job of the current build.
@@ -895,7 +895,7 @@ class GateCheckbox:
   REVISE_ARCHITECTURE = "Revise architecture"
   # Label for the release note's checkbox that starts the release's first build.
   BUILD = "Build"
-  # Launch label of the `research` tool, declared by its playbook and never parameterised.
+  # Launch label of the research asset, declared by its playbook and never parameterised.
   START_RESEARCH = "Start research"
   # Label for the product note's checkbox that creates a release from the current delta.
   START_RELEASE = "Start release"
@@ -1033,7 +1033,7 @@ class CoherenceJob:
 
 
 # The ladder order the `review-rows` verb sorts gate rows by inside a group: the reading chain of documents first,
-# then the tool launches, then publication. A row whose document or label is not listed keeps its place after the
+# then the launches, then publication. A row whose document or label is not listed keeps its place after the
 # listed ones.
 GATE_ROW_ORDER = [
     LevelDoc.VISION,
@@ -1147,9 +1147,12 @@ class JobMarker:
     KIND_COORDINATOR: The `mark-job` CLI token selecting `COORDINATOR_JOB`.
     KIND_ACTIVE: The `mark-job` CLI token selecting `ACTIVE_JOB`.
     KIND_WAKE: The `mark-job` CLI token selecting `PENDING_WAKE`.
-    COHERENCE_JOBS: The coherence checks in flight for the note's documents, one per checked document.
+    COHERENCE_JOBS: The coherence checks tracked for the note's documents: at most one unlanded check per document,
+      plus any landed check still owing its History line.
     DOC: The checked-document field of one coherence-job member.
     DROPPED: The optional field of one coherence-job member counting the neighbours dropped over the text budget.
+    HISTORY: The optional field of one coherence-job member holding the History line a landed check still owes
+      its note.
     LAST_JOB: The launch-checkbox job the poller last retired on the note, kept so the coordinator's `job-done` wake
       can find the finished job's response.
     OUTCOME: The field of the `LAST_JOB` dict naming how the job ended — the outcome the job's response reports,
@@ -1183,12 +1186,15 @@ class JobMarker:
   KIND_ACTIVE = "active"
   # The `mark-job` CLI token selecting `PENDING_WAKE`.
   KIND_WAKE = "wake"
-  # The coherence checks in flight for the note's documents, one per checked document.
+  # The coherence checks tracked for the note's documents: at most one unlanded check per document, plus any landed
+  # check still owing its History line.
   COHERENCE_JOBS = "coherence_jobs"
   # The checked-document field of one coherence-job member.
   DOC = "doc"
   # The optional field of one coherence-job member counting the neighbours dropped over the text budget.
   DROPPED = "dropped"
+  # The optional field of one coherence-job member holding the History line a landed check still owes its note.
+  HISTORY = "history"
   # The launch-checkbox job the poller last retired on the note, kept so the coordinator's `job-done` wake can find
   # the finished job's response.
   LAST_JOB = "last_job"
@@ -1214,6 +1220,11 @@ class PluginErrorCause:
       scaffold, refresh or publish commit had already landed.
     RELEASE_START_WAKE_FAILED: A best-effort wake of an open release raised after the approval of a document of
       one of its members had already landed.
+    UPSTREAM_SYNC_FAILED: The sync of one upstream unit's source reported an error; the unit was left as it was.
+    QUEUED_JOB_CANCEL_FAILED: A coordinator job queued by a tick whose note commit then failed could not be
+      cancelled; it stays queued.
+    RUNTIME_SIDECAR_CORRUPT: A runtime sidecar did not read as a JSON object store; it was moved aside and the
+      store started empty.
   """
 
   # A best-effort wake of a release owner's level note raised after the change that triggered it had already landed.
@@ -1228,6 +1239,12 @@ class PluginErrorCause:
   # A best-effort wake of an open release raised after the approval of a document of one of its members had already
   # landed.
   RELEASE_START_WAKE_FAILED = "release-start-wake-failed"
+  # The sync of one upstream unit's source reported an error; the unit was left as it was.
+  UPSTREAM_SYNC_FAILED = "upstream-sync-failed"
+  # A coordinator job queued by a tick whose note commit then failed could not be cancelled; it stays queued.
+  QUEUED_JOB_CANCEL_FAILED = "queued-job-cancel-failed"
+  # A runtime sidecar did not read as a JSON object store; it was moved aside and the store started empty.
+  RUNTIME_SIDECAR_CORRUPT = "runtime-sidecar-corrupt"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1249,17 +1266,15 @@ class CoordinatorTrigger:
       (`gate_tick.apply_job_marker`). Wakes the coordinator regardless of who authored the
       commit this tick carries: the bot-suppression rule exists to ignore the coordinator's own
       idle re-triggers, not to hide a real state transition the playbook's acceptance cycle
-      (Chapter 6) needs to react to — the exemption is per-transition, not per-author
-      (model-audit.md C3), and the raised flag rather than any commit's identity is what makes
-      the wake visible.
+      (Chapter 6) needs to react to — the exemption is per-transition, not per-author, and
+      the raised flag rather than any commit's identity is what makes the wake visible.
     DOC_TRANSITION: A sibling doc's `review_result` appeared or changed against the value
       previously recorded on the asset's status note (`SpecCoordinatorDocStateKey.STATE`).
       Wakes the coordinator REGARDLESS of the sibling doc's commit author — the exemption is
       per-transition like `JOB_DONE`, not per-author, and a non-review commit to the sibling
       (operator prose edit, a writer's draft) naturally carries no `review_result` change, so
-      it never fires this trigger without any author check needed (model-audit.md C3, the
-      deferred half — `lazy-spec.coordination-playbook.md` § 1 trigger 1's own scope only ever
-      covered the status folder-note itself).
+      it never fires this trigger without any author check needed (`lazy-spec.coordination-playbook.md`
+      § 1 trigger 1's own scope only ever covered the status folder-note itself).
     ASSET_APPROVED: An asset's start document reached `approved` (or was re-approved, or the
       asset was cancelled), dispatched one hop upward onto the level note of the product that
       owns releases, so it can rehang `Start release` and rewrite its brief. Carries
@@ -1290,15 +1305,15 @@ class CoordinatorTrigger:
   # a launch-checkbox job's terminal marker was just applied (`gate_tick.apply_job_marker`). Wakes the coordinator
   # regardless of who authored the commit this tick carries: the bot-suppression rule exists to ignore the
   # coordinator's own idle re-triggers, not to hide a real state transition the playbook's acceptance cycle (Chapter
-  # 6) needs to react to — the exemption is per-transition, not per-author (model-audit.md C3), and the raised flag
-  # rather than any commit's identity is what makes the wake visible.
+  # 6) needs to react to — the exemption is per-transition, not per-author, and the raised flag rather than any
+  # commit's identity is what makes the wake visible.
   JOB_DONE = "job-done"
   # A sibling doc's `review_result` appeared or changed against the value previously recorded on the asset's status
   # note (`SpecCoordinatorDocStateKey.STATE`). Wakes the coordinator REGARDLESS of the sibling doc's commit author —
   # the exemption is per-transition like `JOB_DONE`, not per-author, and a non-review commit to the sibling (operator
   # prose edit, a writer's draft) naturally carries no `review_result` change, so it never fires this trigger without
-  # any author check needed (model-audit.md C3, the deferred half — `lazy-spec.coordination-playbook.md` § 1 trigger
-  # 1's own scope only ever covered the status folder-note itself).
+  # any author check needed (`lazy-spec.coordination-playbook.md` § 1 trigger 1's own scope only ever covered the
+  # status folder-note itself).
   DOC_TRANSITION = "doc-transition"
   # An asset's start document reached `approved` (or was re-approved, or the asset was cancelled), dispatched one hop
   # upward onto the level note of the product that owns releases, so it can rehang `Start release` and rewrite its
@@ -1330,8 +1345,8 @@ class AnsweredQuestionKey:
 
   Worker-internal bookkeeping, not part of the coordinator persona's own writable schema — only
   `coordinator_dispatch.py`'s own direct write path ever sets it, so the persona can't clear or
-  game it through `note-set-key`. A content hash rather than a commit sha (`model-audit.md` I-A:
-  a sha-valued marker can name a commit the daemon later rewrites or destroys on push conflict)
+  game it through `note-set-key`. A content hash rather than a commit sha (a sha-valued marker can name a
+  commit the daemon later rewrites or destroys on push conflict)
   — the fingerprint survives a destroyed removal commit resurrecting the identical ticked block.
 
   Attributes:
@@ -1350,7 +1365,7 @@ class SpecCoordinatorDocStateKey:
 
   Worker-internal bookkeeping, same convention as `AnsweredQuestionKey` — only
   `coordinator_dispatch.py`'s own direct write path ever sets it, so the persona can't clear or
-  game it through `note-set-key`. Content-shaped rather than sha-keyed (`model-audit.md` I-A):
+  game it through `note-set-key`. Content-shaped rather than sha-keyed:
   the value is the sibling's own `review_result` string, not a commit reference, so it keeps
   meaning across a rewritten or destroyed commit exactly like `AnsweredQuestionKey`'s fingerprint.
 
@@ -1379,7 +1394,7 @@ class SpecCoordinatorReadyStateKey:
 
   Worker-internal bookkeeping, same convention as `SpecCoordinatorDocStateKey` — only
   `coordinator_dispatch.py`'s own direct write path ever sets it. Content-shaped rather than
-  sha-keyed (`model-audit.md` I-A): the value is the gates' own booleans, not a commit
+  sha-keyed: the value is the gates' own booleans, not a commit
   reference, so it keeps meaning across a rewritten or destroyed commit.
 
   Attributes:
@@ -1470,7 +1485,7 @@ class SpecCascadeKey:
 # ----------------------------------------------------------------------------------------
 class AssetTypeKey:
   """
-  Frontmatter keys naming what an asset is and what it is built with.
+  Frontmatter keys naming what an asset is.
 
   Attributes:
     TYPE: The `spec_asset_type` frontmatter key — the asset's kind, declared under
@@ -1480,10 +1495,6 @@ class AssetTypeKey:
     UNKNOWN: The `unknown` sentinel written when nobody has judged the asset's kind yet — a
       backfilled note whose folder matched no declaration, or a spawn whose router could not
       tell. The coordinator resolves it on its own wake rather than leaving it standing.
-    TOOLS: The `spec_tools` frontmatter key — the tools the asset is realised and checked
-      with, declared under `products[<key>].tool_types` or shipped by the plugin, and resolved
-      through `tool_types.py`. An absent key means the tools are not determined yet, which is
-      not the same as an empty list, which means determined to need none.
   """
 
   # The `spec_asset_type` frontmatter key — the asset's kind, declared under `products[<key>].asset_types` or shipped
@@ -1494,10 +1505,6 @@ class AssetTypeKey:
   # matched no declaration, or a spawn whose router could not tell. The coordinator resolves it on its own wake
   # rather than leaving it standing.
   UNKNOWN = "unknown"
-  # The `spec_tools` frontmatter key — the tools the asset is realised and checked with, declared under
-  # `products[<key>].tool_types` or shipped by the plugin, and resolved through `tool_types.py`. An absent key means
-  # the tools are not determined yet, which is not the same as an empty list, which means determined to need none.
-  TOOLS = "spec_tools"
 
 
 # The one shipped asset type that has no implementation at all: its report is the deliverable, so it never enters a
@@ -1584,6 +1591,7 @@ class ReleaseConfigKey:
   Attributes:
     SECTION: The section key on the product record.
     IMPLEMENTER: The expert key that drives a release build.
+    SPECIALISTS: The per-role overrides of the product's derived specialist list.
     MANIFEST: Repo-relative path of the file whose version field a published release writes.
     DEPLOY: The deploy-targets object.
     STAGING: The target a built release is deployed to before its tests run.
@@ -1596,6 +1604,8 @@ class ReleaseConfigKey:
   SECTION = "release"
   # The expert key that drives a release build.
   IMPLEMENTER = "implementer"
+  # The per-role overrides of the product's derived specialist list.
+  SPECIALISTS = "specialists"
   # Repo-relative path of the file whose version field a published release writes.
   MANIFEST = "manifest"
   # The deploy-targets object.
@@ -1670,13 +1680,13 @@ class UpstreamRole:
   """
   `spec_role` value for an upstream unit's own folder-note, declared into the closed
   `spec_role` vocabulary the same way `SpecValue.ROLE_REQUEST` and `coordinator_dispatch`'s
-  status-note role are (`docs/tasks/lazycortex-specs.upstream.md` appendix).
+  status-note role are.
 
   Attributes:
     UNIT: The `spec_role` value marking a file as an upstream unit's own note — distinct
       from any canon folder-note the mirrored `source/` tree may itself carry.
     SOURCE: The `spec_role` value marking a file as one configured source's own repo-level
-      folder-note (`upstream/<repo-key>/<repo-key>.md`, § 5) — fetch status plus a live
+      folder-note (`upstream/<repo-key>/<repo-key>.md`) — fetch status plus a live
       Dataview summary of its units, distinct from any one unit's own note.
   """
 
@@ -1684,7 +1694,7 @@ class UpstreamRole:
   # mirrored `source/` tree may itself carry.
   UNIT = "upstream-unit"
   # The `spec_role` value marking a file as one configured source's own repo-level folder-note (`upstream/<repo-
-  # key>/<repo-key>.md`, § 5) — fetch status plus a live Dataview summary of its units, distinct from any one unit's
+  # key>/<repo-key>.md`) — fetch status plus a live Dataview summary of its units, distinct from any one unit's
   # own note.
   SOURCE = "upstream-source"
 
@@ -1692,8 +1702,7 @@ class UpstreamRole:
 # ----------------------------------------------------------------------------------------
 class UpstreamStatus:
   """
-  Closed vocabulary of `spec_upstream_status` values an upstream unit's note carries
-  (`docs/tasks/lazycortex-specs.upstream.md` § 6).
+  Closed vocabulary of `spec_upstream_status` values an upstream unit's note carries.
 
   Attributes:
     NEW: Landed, never processed.
@@ -1742,7 +1751,7 @@ UPSTREAM_RECOMPUTABLE_STATUSES = frozenset({
     UpstreamStatus.ORPHANED, UpstreamStatus.INVALID, UpstreamStatus.EXCLUDED,
 })
 
-# Statuses frozen against the fetch/detect phase — `# History` intro, § 8: frozen while in-review.
+# Statuses frozen against the fetch/detect phase: a unit in review is never re-fetched or re-detected.
 UPSTREAM_FROZEN_STATUSES = frozenset({UpstreamStatus.IN_REVIEW})
 
 
@@ -1783,8 +1792,7 @@ class UpstreamKey:
 class UpstreamAction:
   """
   Operator action-checkbox labels the fetch/detect phase hangs under an upstream unit
-  note's `# Actions` section (`docs/tasks/lazycortex-specs.upstream.md` §§ 7, on merge
-  decisions). `NEW` and `DRIFTED` each carry a primary checkbox plus `POSTPONE` alongside it;
+  note's `# Actions` section. `NEW` and `DRIFTED` each carry a primary checkbox plus `POSTPONE` alongside it;
   a unit already `POSTPONED` carries only its own resume checkbox (the primary label its
   shadowed content status would use), never a second `POSTPONE` box — every other status
   renders an inert one-line note instead.
@@ -1794,7 +1802,7 @@ class UpstreamAction:
     PROCESS_UPDATE: The checkbox label hung on a `UpstreamStatus.DRIFTED` unit.
     POSTPONE: The checkbox label hung alongside the primary one on a `NEW` / `DRIFTED` unit —
       ticking it freezes the unit's exact current content state as `UpstreamStatus.POSTPONED`
-      (§ 7: set by the operator). Never rendered on an already-postponed unit, whose own resume
+      (a status only the operator sets). Never rendered on an already-postponed unit, whose own resume
       checkbox already cancels the postpone when ticked.
   """
 
@@ -1803,7 +1811,7 @@ class UpstreamAction:
   # The checkbox label hung on a `UpstreamStatus.DRIFTED` unit.
   PROCESS_UPDATE = "Process update"
   # The checkbox label hung alongside the primary one on a `NEW` / `DRIFTED` unit — ticking it freezes the unit's
-  # exact current content state as `UpstreamStatus.POSTPONED` (§ 7: set by the operator). Never rendered on an
+  # exact current content state as `UpstreamStatus.POSTPONED`, a status only the operator sets. Never rendered on an
   # already-postponed unit, whose own resume checkbox already cancels the postpone when ticked.
   POSTPONE = "Postpone"
 
@@ -1818,7 +1826,7 @@ UPSTREAM_ACTION_LABELS = frozenset({
 # ----------------------------------------------------------------------------------------
 class UpstreamSourceStatus:
   """
-  Closed vocabulary of `spec_upstream_fetch_status` values a source note carries (§ 5).
+  Closed vocabulary of `spec_upstream_fetch_status` values a source note carries.
 
   Attributes:
     OK: The source's most recent fetch attempt succeeded, or its consecutive failure streak
@@ -1839,7 +1847,7 @@ class UpstreamSourceStatus:
 class UpstreamSourceKey:
   """
   Frontmatter keys carried by one configured source's own repo-level folder-note
-  (`upstream/<repo-key>/<repo-key>.md`, § 5).
+  (`upstream/<repo-key>/<repo-key>.md`).
 
   Attributes:
     FETCH_STATUS: The `spec_upstream_fetch_status` key — one of `UpstreamSourceStatus`'s

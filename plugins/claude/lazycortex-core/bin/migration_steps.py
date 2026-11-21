@@ -768,7 +768,9 @@ def _run_verb(argv: list[str], repo: Path, home: Path) -> tuple[bool, str]:
   try:
     proc = subprocess.run(
       [ sys.executable, str(cli), verb, *args ], cwd = str(repo), stdin = subprocess.DEVNULL,
-      capture_output = True, text = True, check = False, timeout = _VERB_TIMEOUT_S,
+      capture_output = True, text = True,
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace", check = False, timeout = _VERB_TIMEOUT_S,
       env = { **os.environ, _ENV_REPO_ROOT: str(repo) },
     )
   except subprocess.TimeoutExpired as exc:

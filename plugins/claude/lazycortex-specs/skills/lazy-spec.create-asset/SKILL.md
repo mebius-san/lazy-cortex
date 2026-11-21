@@ -65,7 +65,7 @@ The verb prints one JSON line and exits 0 whether or not the key resolves:
 ```
 
 - `record` is `null`, or the call fails outright → the product is not registered. Refuse with a message naming `<product>` and suggesting `/lazy-spec.product-config` to register it. Do NOT proceed.
-- Otherwise `record` IS the effective record. Capture `spec_path` (required, vault-relative), `language` (default `en` when absent), and `asset_types` (default `{}` when absent — its declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`); `source` rides along when the product declares one. Each declared type has the shape `{icon, color?, playbook, alias_of?, default_path?, start_doc, default_tools?}`.
+- Otherwise `record` IS the effective record. Capture `spec_path` (required, vault-relative), `language` (default `en` when absent), and `asset_types` (default `{}` when absent — its declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`); `source` rides along when the product declares one. Each declared type has the shape `{icon, color?, playbook, alias_of?, default_path?, start_doc}`.
 
 Ask for `effective`, never `by-key`: products nest, a nested product declares only what it overrides, and the raw record would make it look unconfigured for every key its parent declares. What the inheritance merge does — `asset_types` key-by-key then field-by-field outermost first, `language` and every other scalar from the nearest declaration, `source` / `dependencies` / `icon` / `color` never inherited — is `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Effective record's contract, and this skill never re-derives it. Every later step reads the record this verb returned.
 
@@ -122,11 +122,11 @@ Scale the topics to the asset type:
 
   Selected ones join the doc set with their `spec_doc_type` values from the playbook; declined ones stay opt-in for later launch checkboxes, their absence never a defect.
 
-Every document not named by `start_doc`, the mandatory channel, or the operator's selection stays out — plan and report documents are authored later, by the tool the coordinator dispatches, once there is work to plan or journal.
+Every document not named by `start_doc`, the mandatory channel, or the operator's selection stays out — plan and report documents are authored later, by the expert the coordinator dispatches, once there is work to plan or journal — an asset's own `test-plan.md` behind its `Write test-plan` row, the build's plans and journals in the product's release.
 
 There is NO per-asset `tech.md` (removed — only the product carries `tech.md` at its root) and NO `layout` doc/role (removed).
 
-**Icon** — resolve the iconize icon to inject into the status folder-note frontmatter (Step 5) from the same declaration: `asset_types[<asset-type>].icon`, with `color` captured for `iconize_color` when the declaration carries one. An alias borrows only its base's playbook — its icon, colour, folder, start doc and tools stay its own — so never read paint through `alias_of`. A type whose merged declaration names no icon is a broken declaration: refuse, do not invent one.
+**Icon** — resolve the iconize icon to inject into the status folder-note frontmatter (Step 5) from the same declaration: `asset_types[<asset-type>].icon`, with `color` captured for `iconize_color` when the declaration carries one. An alias borrows only its base's playbook — its icon, colour, folder and start doc stay its own — so never read paint through `alias_of`. A type whose merged declaration names no icon is a broken declaration: refuse, do not invent one.
 
 The status template ships WITHOUT `iconize_icon` / `iconize_color` lines (a dev-vault hook strips placeholder icon values), so this skill INJECTS them.
 

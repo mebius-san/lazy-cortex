@@ -13,7 +13,8 @@ and the pending wake are given back and the reviews that lost a job to a stop ar
 or is refused after it killed the asset's running job does not give that job back: it stays retired as the last job
 with a wake raised. A cancel or an un-cancel that fails part-way, before its commit lands, puts every other file
 back the same way. An asset already cancelled that still holds documents its cancel did not take, or a job
-still tracked as running or a wake still pending, can have the same abandon applied to it, with its flag left as it is.
+still tracked as running or a wake still pending, can have the same abandon applied to it, with its flag left as
+it is.
 
 Clearing the cancellation returns only the documents marked as taken by the asset, each to the stage its mark
 records: an empty, deferred or rejected stage as it was, every other one, a legacy mark included, to `draft`. A
@@ -25,7 +26,8 @@ cancel cut short, or whose build or test job it let go before it landed, is mark
 its record carries the cancellation's stamp, is unlanded and names the release's build or test job. The stamp is
 dropped from the record of an un-cancelled asset's last job. The members of a release and the asset's own coordinator
 are woken once the flip has landed, so the asset can take its ordinary path again. A release is refused its
-un-cancel, with nothing written, when another release of its owner is open or when it sits in the releases archive. The documents move through the stage primitive, so each one's `spec/<stage>` tag follows, and the
+un-cancel, with nothing written, when another release of its owner is open or when it sits in the releases
+archive. The documents move through the stage primitive, so each one's `spec/<stage>` tag follows, and the
 flag and the moved documents land in one commit. Every other `flip-gate` call is handed to the gate-flip primitive
 unchanged.
 """
@@ -46,27 +48,38 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import release_delta  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import review_halt  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import set_stage  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
     FLIP_GATE_NAME, AssetState, AssetTypeKey, AttachmentKey, FlipResult, Gate, JobMarker, ReleaseKey, SiblingDoc,
@@ -924,10 +937,16 @@ def _sidecar_repo(folder: Path) -> Path:
   Returns:
     The git top level holding the folder; outside git, the folder holding `.claude/lazy.settings.json`, else the
     folder itself.
+
+  Raises:
+    subprocess.CalledProcessError: If git fails inside a repository; the settings root is not returned instead.
+    OSError: If git cannot be run inside a repository; the settings root is not returned instead.
   """
-  # guard: inside git the sidecar sits at the repository root
-  if flip_gate.git_field(folder, [ "rev-parse", "--show-toplevel" ], ""):
-    return flip_gate.repo_root(folder)
+  # inside git the sidecar sits at the repository root; a git failure there raises from the lookup, so the
+  # settings root is never taken in its place
+  top = flip_gate.find_repo_top(folder)
+  if top is not None:
+    return top
 
   # outside git the settings root stands in for the repository root
   try:
@@ -1129,6 +1148,10 @@ def uncancel(asset_dir: Path, *, auto: bool = False, reason: str = "", today: st
     `"resumed"` — the file names whose review was opened or re-opened, sorted — and `"refused"` — one
     `{"doc", "reason"}` entry per document left where it was or whose review could not be opened. A refused
     un-cancel carries the refused flip status with its reason and empty `drafted`, `restored` and `resumed` lists.
+
+  Raises:
+    ValueError: When the asset is a cancelled release and the merged settings cannot be read, or no core CLI
+      resolves (a `spec_paths.SettingsError` naming the settings file); nothing is written.
   """
 
   # Contract:
@@ -1541,6 +1564,10 @@ def _find_release_blocker(asset_dir: Path, note: Path, fm_values: dict) -> str |
   Returns:
     The reason when the note is a release that sits in the releases archive or whose owner already has another
     open release; None otherwise, and for every other asset type.
+
+  Raises:
+    ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
+      when no core CLI resolves.
   """
 
   # Domain(spec.lifecycle):
@@ -1560,8 +1587,9 @@ def _find_release_blocker(asset_dir: Path, note: Path, fm_values: dict) -> str |
   # the product the release sits under, and the release its owner holds open
   vault = spec_paths.find_settings_root(asset_dir)
   rel_note = note.resolve().relative_to(vault.resolve()).as_posix()
-  key, _record = resolve_product.effective_record_by_path(vault, rel_note)
-  open_note = release_delta.find_open_release(vault, key) if key is not None else None
+  registry = resolve_product.read_runtime_products(vault)
+  key, _record = resolve_product.effective_record_by_path(vault, rel_note, products = registry)
+  open_note = release_delta.find_open_release(vault, key, products = registry) if key is not None else None
   if open_note is not None and open_note.resolve() != note.resolve():
     return _OPEN_RELEASE
   return None

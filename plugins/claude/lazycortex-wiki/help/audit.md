@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-wiki.audit
-source_sha: 48d0c91bdebc3dc4278dddd0dcaea32e85d3b100
-surface_sha: b3c9e2d978b6b56ea6301191f61b80a02749a400da24b76c07e24bcbf226a6b9
+source_sha: cd5be25450dbd5c7ade3e7cc1ecf31d707a2f132
+surface_sha: bf168d0dc391aad441aa03093b5461c63665410b0020d00aa6195a0e95807a29
 ---
 # Wiki integrity audit
 
@@ -56,7 +56,7 @@ Applying a fix only touches the lines that need it — the rest of a node's See-
 
 - `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap` — the core scope checks the original audit shipped with.
 - `dangling-at-prefix` — a leftover pre-mirror cross-repo link (`@`-prefixed). Rewrite it to the mirrored node's local path if a mirror scope now covers the target, or drop the line.
-- `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit` — a mirrored scope's clone versus its configuration. Register or remove the `mirror` block via `/lazy-wiki.configure mirror`, run the mirror sync by hand or wait for the `lazy-wiki.mirror-sync` routine, or widen the scope's `paths` to cover the mirror directory. `mirror-local-edit` warns that the next sync overwrites local changes — salvage them first.
+- `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`, `mirror-unreadable` — a mirrored scope's clone versus its configuration. Register or remove the `mirror` block via `/lazy-wiki.configure mirror`, run the mirror sync by hand or wait for the `lazy-wiki.mirror-sync` routine, or widen the scope's `paths` to cover the mirror directory. `mirror-local-edit` warns that the next sync overwrites local changes — salvage them first. `mirror-unreadable` names a file the sync could not read: fix that file's encoding or permissions, or, when the finding says the source listing failed, re-fetch the clone. Until the file is readable again the sync skips it and deletes nothing.
 - `domain-dictionary-missing`, `domain-doc-unknown`, `domain-gloss-missing`, `domain-group-unknown`, `domain-hash-stale`, `domain-output-in-scope`, `domain-routine-mismatch`, `domain-tag-axis-unknown` — the domain-spec tree versus the code and dictionary that feed it. `domain-tag-axis-unknown` names a generated doc carrying a `wiki/<axis>/...` tag whose axis is not in `wiki.tag_axes` — register the axis or stop the writer minting it, since the doc is regenerated and hand-editing its tags never holds. `domain-output-in-scope` specifically means a wiki scope's `paths` glob reaches the domain-spec output tree, which is excluded from every scope structurally — no file is contested, the fix is narrowing the scope's `paths` via `/lazy-wiki.configure` so its coverage matches what it actually curates. Routes for the rest: `domain-group-unknown` — add the group to the dictionary by hand, or run `/lazy-python.knowledge-sweep`, which grows the dictionary with you and refiles the blocks (the better route when several groups are reported at once or blocks sit under `Domain(unfiled):`); `domain-dictionary-missing` — seed an empty skeleton via `/lazy-wiki.configure domains`, or run `/lazy-python.knowledge-sweep` to build a populated dictionary from the code's own vocabulary; `domain-doc-unknown` — a group renamed in the dictionary strands its old doc, and the next `/lazy-wiki.domain-sync` or domain routine drops a markdown doc whose group is no longer listed; `domain-gloss-missing` — add the group's one-line gloss under its heading in the dictionary; `domain-hash-stale` — run `/lazy-wiki.domain-sync` or wait for the routine; `domain-routine-mismatch` — re-run `/lazy-wiki.install`. See [domains](domains.md) for the tree itself; the audit here only reports drift.
 - `divergence`, `missing`, `duplicate`, `dead`, plus terms `format` / `config` / `legacy` findings — the terms dictionary versus the documents it serves. See [terms](terms.md) for how the dictionary is normally kept current. Routes by class:
   - `format` — rename the term file to the stem its title gives, keep one of two files that differ only in case, or rewrite the definition into one of at most three lines; a hand edit of the term file.

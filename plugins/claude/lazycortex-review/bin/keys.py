@@ -375,6 +375,7 @@ class JobKey:
     NEW_VALIDATION_ROUND: A validator-barrier summary new-validation-round field.
     HISTORY_PICKUP: A consume-pass summary history-pickup field.
     CONTEXT_FROM_FRONTMATTER: A class-config frontmatter-key-list field for job-context resolution.
+    CONTEXT_FROM_VERBS: A class-config CLI-verb-list field for computed job context.
     WARNINGS: A tick-summary non-fatal-warnings-list field.
   """
 
@@ -574,6 +575,8 @@ class JobKey:
   HISTORY_PICKUP = "history_pickup"
   # A class-config frontmatter-key-list field for job-context resolution.
   CONTEXT_FROM_FRONTMATTER = "context_from_frontmatter"
+  # A class-config CLI-verb-list field for computed job context.
+  CONTEXT_FROM_VERBS = "context_from_verbs"
   # A tick-summary non-fatal-warnings-list field.
   WARNINGS = "warnings"
 
@@ -616,6 +619,7 @@ class JobFile:
     DEAD: The job-dir terminal-failure marker filename.
     DONE: The job-dir completion marker filename.
     CANCELLED: The job-dir cancellation marker filename.
+    CONFIG: The core job manifest filename beside the request.
   """
 
   # The per-job request payload filename.
@@ -632,6 +636,27 @@ class JobFile:
   DONE = "DONE"
   # The job-dir cancellation marker filename.
   CANCELLED = "CANCELLED"
+  # The core job manifest filename beside the request.
+  CONFIG = "config.json"
+
+
+# ----------------------------------------------------------------------------------------
+class ReviewProtocol:
+  """
+  Protocol references the review plugin attaches to the jobs it dispatches.
+
+  Every review dispatch attaches one of these references to its job, and a finished bundle is recognised as the
+  review's by the reference it carries.
+
+  Attributes:
+    DOC_REVIEW: The writer's wire contract, attached to every writer job.
+    COORDINATION_PLAYBOOK: The coordinator's playbook, attached to every coordinator job.
+  """
+
+  # The writer's wire contract, attached to every writer job.
+  DOC_REVIEW = "lazycortex-review:lazy-review.doc-review-protocol"
+  # The coordinator's playbook, attached to every coordinator job.
+  COORDINATION_PLAYBOOK = "lazycortex-review:lazy-review.coordination-playbook"
 
 
 # ----------------------------------------------------------------------------------------

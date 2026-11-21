@@ -4,9 +4,10 @@ Logic behind the `lazycortex-specs coherence-apply <job-dir>`, `coherence-dismis
 
 The apply verb hangs the conflicts a coherence check found as callouts in the `# Gates` section of the folder-notes
 of the documents involved, replacing the checked document's earlier ones and ignoring reported conflicts the check
-could not have found. The dismiss verb takes down the callouts of a document whose `Not a conflict` box is ticked,
-together with the mirror callouts stating the same essence, and records each pair as no conflict on both notes, so
-the pair is not raised again until a document is re-approved; the pair's other callouts stay. The resolve verb takes down the callouts of a document
+could not have found, and, when asked, records the check's history line in the same commit. The dismiss verb takes
+down the callouts of a document whose `Not a conflict` box is ticked, together with the mirror callouts stating the
+same essence, and records each pair as no conflict on both notes, so the pair is not raised again until a document
+is re-approved; the pair's other callouts stay. The resolve verb takes down the callouts of a document
 whose `Resolve here` box is ticked, removes the document from the mirror callouts stating the same essence, and
 hands back what they said, recording nothing. Each verb commits all its notes together or leaves them untouched.
 """
@@ -30,21 +31,32 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import review_rows  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import ConflictCallout, ConflictKey, Gate, Section, SpecMomentKey  # noqa: E402
 
@@ -353,10 +365,10 @@ def _is_dismissed(repo: Path, state: _NoteState, inner: str, other: str) -> bool
 
   # Domain(spec.coherence):
   # # A dismissed pair stays quiet until either document is re-approved
-  # When the operator marks a pair of documents as "Not a conflict", the pair is not raised again by later checks. The
-  # dismissal holds only for the approvals both documents had at the moment of dismissal: a re-approval of either one
-  # revives the question, because the text that was judged compatible is no longer the text that stands. The pair is
-  # the same whichever of the two documents is the inner one.
+  # When the operator marks a pair of documents as "Not a conflict", the pair is not raised again by later checks.
+  # The dismissal holds only for the approvals both documents had at the moment of dismissal: a re-approval of either
+  # one revives the question, because the text that was judged compatible is no longer the text that stands. The pair
+  # is the same whichever of the two documents is the inner one.
 
   stamps = { inner: _approved_at(repo, inner), other: _approved_at(repo, other) }
   for entry in state.dismissed:
@@ -537,9 +549,9 @@ def _render_note(repo: Path, state: _NoteState) -> str:
 
   # Domain(spec.coherence):
   # # A conflicted folder-note is one that holds a conflict callout
-  # A folder-note is flagged as conflicted exactly while it holds at least one conflict callout, and the flag is taken
-  # down as soon as the last callout goes. A conflict only informs: it blocks nothing, neither the approval of the
-  # documents involved nor any step of the ladder.
+  # A folder-note is flagged as conflicted exactly while it holds at least one conflict callout, and the flag is
+  # taken down as soon as the last callout goes. A conflict only informs: it blocks nothing, neither the approval of
+  # the documents involved nor any step of the ladder.
 
   # the flag says whether the note holds a callout, the dismissals ride as one JSON line
   fm_text = state.text[:fm_end]
@@ -618,26 +630,26 @@ def _commit(repo: Path, touched: list[Path], subject: str) -> None:
 
 
 def _write_and_commit(repo: Path, states: dict[Path, _NoteState], originals: dict[Path, tuple],
-                      subject: str) -> list[Path]:
+                      subject: str, *, history: tuple[Path, str, str] | None = None) -> list[Path]:
   """
-  Sweep dead documents out of the notes, then write and commit every note that changed, all or nothing.
-
-  Guarantees:
-    - On any write or commit failure, every note this run wrote is unstaged and restored to its bytes from before
-      the write.
+  Sweep dead documents out of the notes, then write and commit every note that changed, with the check's History
+  line when one is given, all or nothing.
 
   Args:
     repo: The repository root.
     states: The notes in memory, keyed by path.
     originals: Each note's callout lines and dismissals as read, keyed by path.
     subject: The commit subject.
+    history: A note among `states`, a History line and the day it is recorded under; the line is appended to that
+      note's history and the note joins the commit whether or not its callouts changed. `None` records no line.
 
   Returns:
     The notes whose text changed on disk, in path order.
 
   Raises:
-    ValueError: If any write or the commit failed; every note this run wrote is then back to its bytes from before
-      the write and none of them is left staged.
+    ValueError: If any write, the History line or the commit failed; every note this run wrote is then back to its
+      bytes from before the write; the git index is left alone, so an entry the operator staged stays staged, and
+      the entries the commit primitive registered itself are taken back by that primitive.
   """
   for state in states.values():
     _sweep(repo, state)
@@ -646,13 +658,22 @@ def _write_and_commit(repo: Path, states: dict[Path, _NoteState], originals: dic
   before = { path: path.read_bytes() for path in states }
   try:
     touched = _write_all(repo, states, originals)
+
+    # the History line goes into its note after the callouts, so one commit carries both and the line alone is
+    # still a change to commit
+    if history is not None:
+      note, line, day = history
+      text = note.read_text(encoding = _ENCODING)
+      _fm_values, fm_end = spec_frontmatter.parse(text)
+      spec_paths.write_text_atomic(
+          note, text[:fm_end] + history_journal.append(text[fm_end:], line, day, repo = repo),
+      )
+      touched = sorted({ *touched, note })
     _commit(repo, touched, subject)
-  except (subprocess.CalledProcessError, OSError) as error:
-    # only the notes this run wrote come back out of the index, best-effort, then each gets its old bytes back
+  except (subprocess.CalledProcessError, OSError, RuntimeError) as error:
+    # only the notes this run wrote get their old bytes back; the index is left alone, so an entry the operator
+    # staged stays staged, and the commit primitive has already taken back the entries it registered itself
     written = [ path for path, data in before.items() if not path.is_file() or path.read_bytes() != data ]
-    if written:
-      subprocess.run([ "git", "reset", "-q", "--", *( str(path) for path in written ) ], cwd = str(repo),
-                     check = False, capture_output = True)
     for path in written:
       path.write_bytes(before[path])
     raise ValueError(f"write failed: {error}") from error
@@ -980,29 +1001,52 @@ def update_conflicted_flag(repo: Path, note: Path) -> bool:
   return True
 
 
-def apply_result(repo: Path, job_dir: Path) -> dict:
+def apply_result(repo: Path, job_dir: Path, *, history_note: Path | None = None, history_line: str | None = None,
+                 history_date: str | None = None) -> dict:
   """
   Hang the conflicts a coherence check found as callouts on the folder-notes, replacing the checked document's.
+
+  Guarantees:
+    - When a history note, line and day are given, the line, its count filled in, is appended to that note's
+      `# History` and lands in the same single commit as the callout changes; the note joins the commit even when
+      no callout changed, so the commit is never empty.
+    - When the write, the line or the commit fails, nothing is left written: every note is back to its bytes from
+      before the apply.
+    - When the note that takes the line cannot be loaded, the apply is refused before anything is written.
 
   Notes:
     - A malformed entry, and a conflict the check could not have found, is ignored while the rest of the result
       stands.
     - A folder-note that no longer exists is skipped, and a conflict whose inner document has no folder-note is not
       raised.
+    - A line is recorded only when the history note, line and day are all given.
 
   Args:
     repo: The repository root.
     job_dir: The coherence-checker job directory holding `request.json` and `result/conflicts.json`.
+    history_note: The folder-note whose `# History` takes the check's line; `None` records no line.
+    history_line: The line, holding `gate_tick.COHERENCE_COUNT_SLOT` where the number of conflicts hung goes.
+    history_date: The ISO day the line is recorded under.
 
   Returns:
-    `{"checked", "notes", "conflicts"}`: the checked document, the repo-relative notes rewritten in sorted order, and
-    the number of conflicts hung.
+    `{"checked", "notes", "conflicts"}`: the checked document, the repo-relative notes written in sorted order, the
+    history note among them when a line was recorded, and the number of conflicts hung.
 
   Raises:
     ValueError: If the job's request or result cannot be read, the result is not a list, the request names no
-      existing checked document, a folder-note it reaches has no `# Gates` section, or the commit failed; nothing
-      is left written then.
+      existing checked document, a folder-note it reaches has no `# Gates` section, the history note does not
+      exist or has none, or a write, the History line or the commit failed; nothing is left written then.
   """
+
+  # Contract:
+  # When a history note, line and day are given, the line, its count filled in, is appended to that note's
+  # `# History` and lands in the same single commit as the callout changes. The note joins the commit even when no
+  # callout changed, so the commit is never empty.
+  # When the write, the line or the commit fails, nothing is left written: every note is back to its bytes from
+  # before the apply. When the note that takes the line cannot be loaded, the apply is refused before anything is
+  # written.
+
+  # the job's request and result, less every conflict the check could not have found
   checked, neighbours, reported = _read_job(repo, job_dir)
   conflicts = [ conflict for conflict in reported if _is_admissible(repo, conflict, checked, neighbours) ]
 
@@ -1022,6 +1066,17 @@ def apply_result(repo: Path, job_dir: Path) -> dict:
       except ValueError:
         continue
   conflicts = [ conflict for conflict in conflicts if folder_note(repo / conflict.inner) in states ]
+
+  # the note the History line goes into is one of those already loaded when it is, however its path was spelled,
+  # and is loaded now when it is not, so one file is never held twice
+  if history_note is not None:
+    spelled = history_note.resolve()
+    history_note = next(( note for note in states if note.resolve() == spelled ), history_note)
+
+    # a note not loaded yet is loaded now; one that is missing or cannot hold callouts refuses the whole apply,
+    # so a check never lands without its line
+    if history_note not in states:
+      states[history_note] = _load_note(repo, history_note)
   originals = _snapshot(states)
 
   # Domain(spec.coherence):
@@ -1039,10 +1094,10 @@ def apply_result(repo: Path, job_dir: Path) -> dict:
 
   # Domain(spec.coherence):
   # # One conflict callout per inner document and essence
-  # A disagreement between approved documents is raised once for each inner document and each essence it concerns. The
-  # callout hangs in the folder-note of the folder the inner document lives in and lists every document the inner one
-  # disagrees with. Each listed document carries a mirror callout in the folder-note of its own folder, where it is
-  # the inner document and the original inner document is the one listed, so that either side finds the conflict
+  # A disagreement between approved documents is raised once for each inner document and each essence it concerns.
+  # The callout hangs in the folder-note of the folder the inner document lives in and lists every document the inner
+  # one disagrees with. Each listed document carries a mirror callout in the folder-note of its own folder, where it
+  # is the inner document and the original inner document is the one listed, so that either side finds the conflict
   # from its own note. An identical callout is never hung twice in the same note.
 
   # every reported conflict, less its dismissed pairs, hangs in the inner note and mirrors in the others'
@@ -1061,8 +1116,21 @@ def apply_result(repo: Path, job_dir: Path) -> dict:
       if mirror is not None:
         _add(repo, mirror, Conflict(inner = doc, with_docs = ( conflict.inner, ), essence = conflict.essence))
 
+  # Domain(spec.coherence):
+  # # A check's history line is recorded with its conflicts
+  # The line a finished check leaves in the asset's history is recorded together with the conflicts it hung, as one
+  # change: either both are recorded or neither is, so there is never a moment when the conflicts are hung and the
+  # line is missing. The line states how many conflicts were hung, which is known only once they are. When the check
+  # found nothing new, no callout changes and the line alone is recorded. The line is the proof that the check has
+  # landed, which is why it cannot lag behind its conflicts.
+
+  # the check's own History line, its count now known, rides the same commit as the callouts
+  history = None
+  if history_note is not None and history_line is not None and history_date is not None:
+    history = ( history_note, history_line.replace(gate_tick.COHERENCE_COUNT_SLOT, str(hung)), history_date )
+
   # every changed note on disk, then one commit for all of them
-  touched = _write_and_commit(repo, states, originals, f"{BOT_NAME}: conflicts of {checked}")
+  touched = _write_and_commit(repo, states, originals, f"{BOT_NAME}: conflicts of {checked}", history = history)
   return { _CHECKED: checked, _NOTES: sorted(_rel(repo, note) for note in touched), _CONFLICTS: hung }
 
 
@@ -1206,11 +1274,11 @@ def dismiss(repo: Path, note: Path, doc: str) -> dict:
 
   # Domain(spec.coherence):
   # # A dismissal is recorded on both documents' notes
-  # Dismissing a conflict takes down the callout that was ticked and, in the notes of the documents it listed, only the
-  # mirror callouts stating the same essence; other callouts between the same documents stay. Each pair is recorded
-  # as no conflict, on the notes of both documents, each from its own side, with the approvals of both documents as
-  # they stood at dismissal. The record concerns the pair, whatever the essence, so the pair stays dismissed whichever
-  # of the two is checked, until either one is approved again.
+  # Dismissing a conflict takes down the callout that was ticked and, in the notes of the documents it listed, only
+  # the mirror callouts stating the same essence; other callouts between the same documents stay. Each pair is
+  # recorded as no conflict, on the notes of both documents, each from its own side, with the approvals of both
+  # documents as they stood at dismissal. The record concerns the pair, whatever the essence, so the pair stays
+  # dismissed whichever of the two is checked, until either one is approved again.
 
   # each side records the pair from its own end, with both stamps as they stand now
   stamp = _approved_at(repo, doc)
@@ -1297,12 +1365,16 @@ def repo_root() -> Path:
 
 def main_apply(argv: list[str]) -> int:
   """
-  Hang a coherence check's conflicts on the folder-notes and commit them.
+  Hang a coherence check's conflicts on the folder-notes and commit them, with the check's history line when asked.
 
   Notes:
+    - The optional `--history-note`, `--history-line` and `--history-date` name the note whose `# History` takes the
+      line, the line holding the count slot, and the day; the line joins the commit when all three are given, and a
+      relative note path is read from the repository root.
     - Prints `{"checked", "notes", "conflicts"}` on stdout, or `{"status": "refused", "reason"}` when the job is
       unreadable, its result is not a list, its request names no existing checked document, a note it reaches has
-      no `# Gates` section or the commit failed, in which case nothing is written.
+      no `# Gates` section, the history note cannot be loaded, or the History line or the commit failed, in which
+      case nothing is written.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -1314,13 +1386,22 @@ def main_apply(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog = "lazycortex-specs coherence-apply")
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("job_dir")
+  parser.add_argument(gate_tick.COHERENCE_HISTORY_NOTE_FLAG, default = None)
+  parser.add_argument(gate_tick.COHERENCE_HISTORY_LINE_FLAG, default = None)
+  parser.add_argument(gate_tick.COHERENCE_HISTORY_DATE_FLAG, default = None)
   args = parser.parse_args(argv)
   repo = repo_root()
   job_dir = Path(args.job_dir) if Path(args.job_dir).is_absolute() else repo / args.job_dir
 
+  # the note the check's History line goes into, when the caller names one
+  history_note = None
+  if args.history_note is not None:
+    history_note = Path(args.history_note) if Path(args.history_note).is_absolute() else repo / args.history_note
+
   # the whole run, refused as one when the job or a note it reaches is unusable
   try:
-    summary = apply_result(repo, job_dir)
+    summary = apply_result(repo, job_dir, history_note = history_note, history_line = args.history_line,
+                           history_date = args.history_date)
   except ValueError as error:
     return _refuse(str(error))
   print(json.dumps(summary))

@@ -525,7 +525,9 @@ def run_streaming(real: str, argv: list[str]) -> int:
   # the frame inspection that runs after it.
 
   # stdin, stderr, and the exit code pass through untouched; only stdout is tapped
-  with subprocess.Popen([ real, *argv ], stdout = subprocess.PIPE, text = True, encoding = "utf-8") as proc:
+  with subprocess.Popen([ real, *argv ], stdout = subprocess.PIPE, text = True, encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace") as proc:
     # PIPE above guarantees a stream; the check narrows the Optional for the reader loop
     if proc.stdout is not None:
       # forward each line as it arrives, feeding the flag from the same bytes

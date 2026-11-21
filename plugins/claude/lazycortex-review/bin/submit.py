@@ -75,6 +75,10 @@ _REPO_ROOT_SEARCH_DEPTH = 20
 # The bare YAML boolean literal a set frontmatter flag carries, as `frontmatter.py` writes it.
 _YAML_TRUE = "true"
 
+# Git's per-path magic prefix that makes one path argument a literal name. A git call that can run a hook marks its
+# paths with it; the global `--literal-pathspecs` option would reach the hook's environment.
+_LITERAL_MAGIC = ":(literal)"
+
 
 def _load_settings(repo: Path) -> dict:
   """
@@ -331,11 +335,14 @@ def _atomic_commit(file_path: Path) -> None:
   Stage and commit the file under the caller's git identity with the initial-phase trailer.
 
   Args:
-    file_path: The submitted document; only this file is committed.
+    file_path: The submitted document; only this file is committed, and its file name is taken literally, never as
+      a pattern.
   """
+  # the document is staged under its literal name, never as a pattern; the name is marked per path, so the hooks
+  # these calls run see no global pathspec option in their environment
   subprocess.run(
-      ["git", "add", "--", str(file_path.name)],
-      cwd=file_path.parent, check=True, capture_output=True,
+      ["git", "add", "--", f"{_LITERAL_MAGIC}{file_path.name}"],
+      cwd = file_path.parent, check = True, capture_output = True,
   )
 
   # the pathspec keeps a concurrently staged foreign file out of the submit commit;
@@ -346,9 +353,9 @@ def _atomic_commit(file_path: Path) -> None:
           "git", "commit", "-q",
           "-m", f"review: submit {file_path.name}",
           "-m", f"{Trailer.PHASE}: {Phase.INITIAL}",
-          "--", str(file_path.name),
+          "--", f"{_LITERAL_MAGIC}{file_path.name}",
       ],
-      cwd=file_path.parent, check=True, capture_output=True,
+      cwd = file_path.parent, check = True, capture_output = True,
   )
 
 

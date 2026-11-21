@@ -35,6 +35,8 @@ SNAPSHOT_REL = ".runtime/errors.state.json"
 _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
 # Character budget an event's detail is cut to before it is written
 _DETAIL_MAX = 500
+# The shorter detail budget an event falls back to when its whole line is still over the line budget
+_DETAIL_SHED = 200
 # Byte ceiling of one journal line, kept so each append stays a single atomic write
 _LINE_MAX = 4096
 # Crockford base32 alphabet the event ids are encoded in
@@ -155,6 +157,24 @@ def new_id() -> str:
   return _ulid()
 
 
+def _encodable(line: str) -> str:
+  """
+  Make a journal line writable as UTF-8 text.
+
+  Characters with no UTF-8 form, such as those of a path read from the file system whose bytes are no text, are
+  replaced by a question mark instead of failing the write.
+
+  Args:
+    line: The serialised event.
+
+  Returns:
+    The line with every character that has no UTF-8 form replaced by a question mark.
+  """
+  # a path read from the file system can carry bytes that are no text, kept as characters with no UTF-8 form;
+  # an event naming such a path is still recorded, with those characters replaced
+  return line.encode(_UTF8, errors = _UTF8_ERRORS_REPLACE).decode(_UTF8)
+
+
 # waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
 def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
   """
@@ -170,7 +190,9 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
 
   Notes:
     - A missing `id` or `ts` is filled in before the event is written, and an overlong `detail` is
-      truncated to fit the line-length budget.
+      cut to fit the line-length budget, keeping the end of the text.
+    - An event whose text carries characters with no UTF-8 form, for example a path read from the file
+      system whose bytes are no text, is still recorded, with those characters replaced by a question mark.
 
   Args:
     repo: Repository root containing the `.runtime/` directory.
@@ -187,17 +209,23 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
     stamped.setdefault(_F_ID, _ulid())
     stamped.setdefault(_F_TS, time.strftime(_TS_FMT, time.gmtime()))
 
+    # Decision: an overlong detail keeps its end, not its beginning — a traceback names its cause
+    # on its last line, so the head is the part that carries the least.
+
     # an overlong detail is cut to its budget before the line is encoded
     detail = stamped.get(_F_DETAIL)
     if isinstance(detail, str) and len(detail) > _DETAIL_MAX:
-      stamped[_F_DETAIL] = detail[:_DETAIL_MAX]
-    line = json.dumps(stamped, ensure_ascii = False, separators = (",", ":"))
+      stamped[_F_DETAIL] = detail[-_DETAIL_MAX:]
+    line = _encodable(json.dumps(stamped, ensure_ascii = False, separators = (",", ":")))
 
     # guard: oversized event would break single-write atomicity — shed refs/detail to fit
     if len(line.encode(_UTF8)) > _LINE_MAX:
       stamped.pop(_F_REFS, None)
-      stamped[_F_DETAIL] = (stamped.get(_F_DETAIL) or "")[:200]
-      line = json.dumps(stamped, ensure_ascii = False, separators = (",", ":"))
+      stamped[_F_DETAIL] = (stamped.get(_F_DETAIL) or "")[-_DETAIL_SHED:]
+      line = _encodable(json.dumps(stamped, ensure_ascii = False, separators = (",", ":")))
+
+    # the event is compared below as the journal will hold it, replaced characters included
+    stamped = json.loads(line)
     path = Path(repo) / JOURNAL_REL
 
     # the last journal line is the baseline the dedupe window compares against
@@ -257,6 +285,8 @@ def _last_event(path: Path) -> dict | None:  # type: ignore[type-arg]
   """
   Return the journal's last parseable event, or `None` if there is none.
 
+  A last line that is valid JSON but not an object is treated like a corrupt line.
+
   Notes:
     - Cost is bounded and independent of journal size.
 
@@ -281,10 +311,13 @@ def _last_event(path: Path) -> dict | None:  # type: ignore[type-arg]
     if not line:
       continue
     try:
-      return json.loads(line)
+      event = json.loads(line)
     except (ValueError, json.JSONDecodeError):
       # guard: torn last line (crash mid-write) — no dedupe basis, let the write proceed
       return None
+
+    # a last line that is valid JSON but not an object is no event either
+    return event if isinstance(event, dict) else None
   return None
 
 
@@ -292,6 +325,8 @@ def _last_event(path: Path) -> dict | None:  # type: ignore[type-arg]
 def _iter_journal(repo: Path) -> Iterator[dict]:  # type: ignore[type-arg]
   """
   Yield parsed journal events, skipping torn or corrupt lines.
+
+  A line that is valid JSON but not an object is skipped like a corrupt one.
 
   Notes:
     - Memory usage stays bounded no matter how large the journal has grown.
@@ -315,10 +350,17 @@ def _iter_journal(repo: Path) -> Iterator[dict]:  # type: ignore[type-arg]
       if not line:
         continue
       try:
-        yield json.loads(line)
+        event = json.loads(line)
       except (ValueError, json.JSONDecodeError):
         # guard: corrupt line (e.g. crash mid-write) — skip, never break the read
         print(_MSG_CORRUPT_LINE, file = sys.stderr)
+        continue
+
+      # guard: a line that is valid JSON but not an object is no event — skipped like a corrupt one
+      if not isinstance(event, dict):
+        print(_MSG_CORRUPT_LINE, file = sys.stderr)
+        continue
+      yield event
 
 
 # waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil

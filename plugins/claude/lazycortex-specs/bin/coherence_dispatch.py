@@ -26,29 +26,41 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import coherence  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import AssetTypeKey, CoherenceJob, JobMarker, ReleaseKey, Stage, StageKey  # noqa: E402
 
 
 _ENCODING = "utf-8"
 _MD_SUFFIX = ".md"
+
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 # The wiki plugin's CLI, its verb listing a node's neighbours, and the verb's repo option
 _WIKI_CLI_NAME = "lazycortex-wiki"
@@ -112,7 +124,7 @@ def _wiki_neighbours(repo: Path, doc: str) -> list[str] | None:
   try:
     proc = subprocess.run(
         [ sys.executable, str(cli), _WIKI_NEIGHBOURS_VERB, doc, _WIKI_REPO_OPTION, str(repo) ],
-        capture_output = True, text = True, check = False, encoding = _ENCODING,
+        capture_output = True, text = True, check = False, encoding = _ENCODING, errors = _DECODE_ERRORS,
     )
     answer = json.loads(proc.stdout) if proc.returncode == 0 else None
   except (OSError, json.JSONDecodeError):
@@ -222,7 +234,8 @@ def _is_eligible(repo: Path, rel: str) -> bool:
 
   Returns:
     True for an existing approved document of a stage-bearing type that is not a build journal, a release's own
-    build plan or an attachment of another document.
+    build plan or an attachment of another document. False for a document that cannot be read as text, or whose
+    folder-note cannot be read.
   """
 
   # Domain(spec.coherence):
@@ -236,11 +249,19 @@ def _is_eligible(repo: Path, rel: str) -> bool:
   # guard: a path naming no markdown file is no document
   if path.suffix != _MD_SUFFIX or not path.is_file():
     return False
-  fm_values, _end = spec_frontmatter.parse(path.read_text(encoding = _ENCODING))
-  doc_type = str(fm_values.get(_DOC_TYPE_KEY, "")).strip()
+
+  # guard: a candidate that cannot be read as text — itself or the folder-note that tells whether it is
+  # a release's plan — is left out, so one unreadable neighbour never stops the check of the rest;
+  # `ValueError` covers bytes that are not UTF-8 text
+  try:
+    fm_values, _end = spec_frontmatter.parse(path.read_text(encoding = _ENCODING))
+    doc_type = str(fm_values.get(_DOC_TYPE_KEY, "")).strip()
+    is_release_plan = _is_release_plan(path, doc_type)
+  except (OSError, ValueError):
+    return False
 
   # guard: an untyped document, an attachment, a journal and a release plan are never compared
-  if not doc_type or fm_values.get(_OWNER_DOC_KEY) or doc_type in _JOURNAL_TYPES or _is_release_plan(path, doc_type):
+  if not doc_type or fm_values.get(_OWNER_DOC_KEY) or doc_type in _JOURNAL_TYPES or is_release_plan:
     return False
   key, _record = resolve_product.resolve_product_by_path(spec_paths.find_settings_root(repo), rel)
   declaration = spec_doc_types.resolve(repo, doc_type, key)
@@ -390,13 +411,29 @@ def _cancel_superseded(repo: Path, job: dict[str, str]) -> None:
   gate_dispatch.consume_stale_job(repo, expert, job_id)
 
 
+def _is_check_in_flight(job: dict, doc: str) -> bool:
+  """
+  Tell whether a listed entry is a document's check that has not landed yet.
+
+  Args:
+    job: One entry of the folder-note's coherence list.
+    doc: The repo-relative checked document.
+
+  Returns:
+    True when the entry names `doc` and owes no History line; an entry that landed and only waits for its
+    History line is no longer a check a new one can replace.
+  """
+  return job[JobMarker.DOC] == doc and JobMarker.HISTORY not in job
+
+
 def _retire_listed(repo: Path, note: Path, doc: str) -> None:
   """
   Retire the check listed for a document on its folder-note when no new check replaces it.
 
   The listed check is cancelled when it has not finished, as a replaced one is, and its entry is dropped from the
   folder-note's list; the entries of other documents are kept. A document with no listed check leaves the list
-  untouched.
+  untouched, and so does an entry that already landed and only owes its History line: it is neither cancelled nor
+  dropped.
 
   Args:
     repo: The repository root.
@@ -404,14 +441,14 @@ def _retire_listed(repo: Path, note: Path, doc: str) -> None:
     doc: The repo-relative checked document.
   """
   jobs = spec_job_markers.coherence_jobs(repo, note)
-  listed = [ job for job in jobs if job[JobMarker.DOC] == doc ]
+  listed = [ job for job in jobs if _is_check_in_flight(job, doc) ]
 
   # guard: nothing listed for the document, nothing to retire
   if not listed:
     return
   for job in listed:
     _cancel_superseded(repo, job)
-  kept = [ job for job in jobs if job[JobMarker.DOC] != doc ]
+  kept = [ job for job in jobs if not _is_check_in_flight(job, doc) ]
   spec_job_markers.update(repo, note, { JobMarker.COHERENCE_JOBS: kept })
 
 
@@ -431,7 +468,7 @@ def _queue(repo: Path, doc: str, kept: list[str]) -> str:
     The queued job's id.
 
   Raises:
-    RuntimeError: If the core CLI does not resolve or refuses the dispatch.
+    RuntimeError: If the core CLI does not resolve or refuses the dispatch, or answers naming no job.
   """
 
   # ref: dev.plugin-boundaries § 4 — neighbours travel only as repo-relative paths in the payload, read by the
@@ -441,19 +478,19 @@ def _queue(repo: Path, doc: str, kept: list[str]) -> str:
   bundle = {
       gate_dispatch.WireKey.EXPERT: CoherenceJob.EXPERT,
       gate_dispatch.WireKey.PAYLOAD: { _KIND: CoherenceJob.KIND, _CHECKED: doc, _NEIGHBOURS: sorted(kept) },
-      gate_dispatch.WireKey.SOURCE: [ doc ],
-      gate_dispatch.WireKey.RESULT: [ CoherenceJob.RESULT ],
+      gate_dispatch.WireKey.SOURCE: gate_dispatch.build_path_entries([ doc ]),
+      gate_dispatch.WireKey.RESULT: gate_dispatch.build_result_entries([ CoherenceJob.RESULT ]),
       gate_dispatch.WireKey.DEDUP_KEY: f"{doc}{CoherenceJob.DEDUP_SUFFIX}:{_fingerprint(repo / doc)}",
       gate_dispatch.WireKey.PROTOCOLS: [ CoherenceJob.PROTOCOL ],
   }
   response = gate_dispatch.core_dispatch_job(repo, bundle)
-  job_id = str(response.get(gate_dispatch.WireKey.JOB_ID))
+  job_id: str = response[gate_dispatch.WireKey.JOB_ID]
 
   # a dedup hit on a bundle that already finished is retired and the check queued afresh, once
   if response.get(gate_dispatch.WireKey.STATUS) == gate_dispatch.ALREADY_QUEUED_STATUS and \
       gate_tick.find_active_job_marker(repo, CoherenceJob.EXPERT, job_id) is not None:
     gate_dispatch.consume_stale_job(repo, CoherenceJob.EXPERT, job_id)
-    job_id = str(gate_dispatch.core_dispatch_job(repo, bundle).get(gate_dispatch.WireKey.JOB_ID))
+    job_id = gate_dispatch.core_dispatch_job(repo, bundle)[gate_dispatch.WireKey.JOB_ID]
   return job_id
 
 
@@ -467,12 +504,15 @@ def dispatch(repo: Path, doc: str) -> dict:
   cases the check already listed for the document is retired like a replaced one, since it read a text the new
   approval replaced: it is cancelled when it has not finished and its entry is dropped from the list, while the
   entries of other documents are kept. When a cancel fails, only a line is written to stderr and the entry is
-  still replaced or dropped. The folder-note's text is never written or committed here; the number of neighbours
+  still replaced or dropped. An entry that already landed and only owes its History line is neither replaced,
+  cancelled nor dropped. The folder-note's text is never written or committed here; the number of neighbours
   dropped over the budget is only reported to the caller and, for a queued check, kept with its entry.
 
   Guarantees:
-    - The folder-note lists at most one entry per document; a new job replaces the document's earlier entry in
-      place, and the entries of other documents are kept.
+    - The folder-note lists at most one entry of a check that has not landed per document; a new job replaces the
+      document's earlier entry of such a check in place, and the entries of other documents are kept. An entry
+      that already landed and only owes its History line is never replaced, cancelled or dropped, so it can stand
+      beside the new job's entry for the same document.
     - A failed cancel of a replaced job never prevents the replacement.
     - Whenever neighbours are dropped over the budget, their count is reported in the result, queued or not.
     - The neighbours a check names never total more than the text budget.
@@ -516,8 +556,10 @@ def dispatch(repo: Path, doc: str) -> dict:
   # a check listed earlier for the document is left as it was.
 
   # Contract:
-  # The folder-note lists at most one entry per document. A new job for a document replaces that document's earlier
-  # entry in place, and the entries of other documents are kept.
+  # The folder-note lists at most one entry of a check that has not landed per document. A new job for a document
+  # replaces that document's earlier entry of such a check in place, and the entries of other documents are kept.
+  # An entry whose check already landed and only owes its History line is never replaced, cancelled or dropped, so it
+  # can stand on the list beside the new job's entry for the same document.
 
   # Contract:
   # A failed cancel of a replaced job never prevents the replacement; the entry is replaced regardless.
@@ -566,11 +608,11 @@ def dispatch(repo: Path, doc: str) -> dict:
   if dropped:
     entry[JobMarker.DROPPED] = dropped
   jobs = spec_job_markers.coherence_jobs(repo, note)
-  listed = any(job[JobMarker.DOC] == doc for job in jobs)
+  listed = any(_is_check_in_flight(job, doc) for job in jobs)
   for job in jobs:
-    if job[JobMarker.DOC] == doc and job[JobMarker.JOB_ID] != job_id:
+    if _is_check_in_flight(job, doc) and job[JobMarker.JOB_ID] != job_id:
       _cancel_superseded(repo, job)
-  jobs = [ entry if job[JobMarker.DOC] == doc else job for job in jobs ] if listed else [ *jobs, entry ]
+  jobs = [ entry if _is_check_in_flight(job, doc) else job for job in jobs ] if listed else [ *jobs, entry ]
   spec_job_markers.update(repo, note, { JobMarker.COHERENCE_JOBS: jobs })
 
   # the neighbours left out over the budget are counted in the summary; the landing history line reports them

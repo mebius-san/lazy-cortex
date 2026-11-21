@@ -149,7 +149,8 @@ def read_response(jdir: Path) -> dict:
     return {}
   try:
     parsed = json.loads(resp_path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+  except (OSError, ValueError):
+    # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
     return {}
   return parsed if isinstance(parsed, dict) else {}
 

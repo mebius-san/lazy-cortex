@@ -292,6 +292,8 @@ def _find_claude_ancestor_pid() -> int | None:
       argv0 = subprocess.check_output(
         [ "ps", "-p", str(pid), "-o", "command=" ],
         text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
       ).strip().split()
 
       # the ancestor whose argv[0] resolves to a Claude Code binary is the one sought
@@ -300,6 +302,8 @@ def _find_claude_ancestor_pid() -> int | None:
       parent = subprocess.check_output(
         [ "ps", "-p", str(pid), "-o", "ppid=" ],
         text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
       ).strip()
       pid = int(parent)
     except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
@@ -437,6 +441,8 @@ def _current_branch(repo_root: Path) -> str:
     return subprocess.check_output(
       [ "git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD" ],
       text = True, stderr = subprocess.DEVNULL, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).strip()
   except subprocess.CalledProcessError:
     # waiver: git ref vocabulary, not a domain constant

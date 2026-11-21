@@ -10,7 +10,7 @@ flow for operator-invoked use; this primitive owns the deterministic
 scaffold + stage-stamp step it used to perform via Step 5.
 
 CLI: `scaffold-asset <product> <asset_type> <slug> [--doc <name>:<spec_doc_type>]
-[--doc ...] [--path <dir>]`. There is no built-in category map and no default
+[--doc ...] [--path <dir>] [--target <folder>/<slug>] [--target ...] [--cwd <repo>]`. There is no built-in category map and no default
 document layout — the `--doc` list is the produced document set in full, and
 a call naming none scaffolds the folder and its folder-note alone.
 
@@ -19,7 +19,7 @@ Inputs read:
 - `<repo>/.claude/lazy.settings.json[products][<key>]` — resolves `spec_path`
   and the type's own declaration at `asset_types.<name>`, carrying `icon`,
   optional `color`, `playbook`, optional `alias_of`, optional `default_path`,
-  `start_doc` as `<file>:<doc_type>`, and optional `default_tools`.
+  and `start_doc` as `<file>:<doc_type>`.
 - Each produced document's template is resolved by its own declared type,
   never by its filename.
 - Templates from one of (first hit wins): per-product override,
@@ -28,8 +28,7 @@ Inputs read:
 Outputs written:
 
 - `<spec_path>/<folder>/<slug>/<slug>.md` — folder-note, carrying
-  `spec_asset_type` and, when the type declares any, `spec_tools`. The
-  target folder is `--path` when given, otherwise the type's declared
+  `spec_asset_type`. The target folder is `--path` when given, otherwise the type's declared
   `default_path`; a path escaping the product's `spec_path` is refused.
 - `<spec_path>/<folder>/<slug>/<doc>.md` — one authored doc per `--doc` entry.
 - `<spec_path>/<folder>/<folder>.md` — group folder-note, seeded on the first
@@ -52,32 +51,47 @@ import re
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import asset_types  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import note_explainers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import note_ops  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import resolve_product as product_registry  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_doc_types  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_frontmatter  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_paths  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import summary_render  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from spec_keys import SpecTargetsKey  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from spec_markers import Markers  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NoReturn
 
   from collections.abc import Callable
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import resolve_product as product_registry  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import summary_render  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from spec_keys import SpecTargetsKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from spec_markers import Markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -91,7 +105,6 @@ class Keys:
     PRODUCT_TAG_PREFIX: Tag namespace every product tag sits under, ahead of the product's `spec_path`.
     ASSET_TYPES: Settings key holding a product's operator-defined asset-type declarations.
     ASSET_TYPE: Frontmatter key naming the asset's own type on its status folder-note.
-    SPEC_TOOLS: Frontmatter key listing the tools the asset is realised and checked with.
     ICON: Key naming an asset type's icon.
     SPEC_SOURCE_DOCS: Frontmatter key listing a folder-note's authored sibling docs.
     ICONIZE_ICON: Frontmatter key carrying the folder-note's icon.
@@ -143,7 +156,7 @@ class Keys:
     GIT_DIR: The `.git` entry checked to detect a repo checkout.
   """
 
-  # Settings + frontmatter keys
+  # Settings key holding the product registry.
   PRODUCTS = "products"
   # Settings key naming a product's spec directory.
   SPEC_PATH = "spec_path"
@@ -153,8 +166,6 @@ class Keys:
   ASSET_TYPES = "asset_types"
   # Frontmatter key naming the asset's own type on its status folder-note.
   ASSET_TYPE = "spec_asset_type"
-  # Frontmatter key listing the tools the asset is realised and checked with.
-  SPEC_TOOLS = "spec_tools"
   # Key naming an asset type's icon.
   ICON = "icon"
   # Frontmatter key listing a folder-note's authored sibling docs.
@@ -163,15 +174,15 @@ class Keys:
   ICONIZE_ICON = "iconize_icon"
   # Frontmatter key carrying the folder-note's optional icon color.
   ICONIZE_COLOR = "iconize_color"
-  # Filenames
+  # Filename of the folder-note template.
   FOLDER_NOTE_TMPL = "asset-note.md"
   # Filename of the group folder-note template.
   GROUP_NOTE_TMPL = "group-note.md"
-  # Doc stems (basename without extension) for sibling wikilinks
+  # Filename stem of the design doc.
   DESIGN_STEM = "design"
   # Filename stem of the tech doc.
   TECH_STEM = "tech"
-  # Path segments
+  # The `.claude` directory segment.
   CLAUDE_DIR = ".claude"
   # Filename of the settings file.
   SETTINGS_FILE = "lazy.settings.json"
@@ -181,7 +192,7 @@ class Keys:
   LINEAR_TMPL_DIR = "spec.docs"
   # The type-agnostic template directory serving a type with no directory of its own.
   SHARED_TMPL_DIR = "spec.asset"
-  # Template layer labels the `template resolve` verb prints
+  # Layer label — the consumer's per-product file in a context folder.
   LAYER_PRODUCT_OVERRIDE = "product-override"
   # Layer label — the consumer's file in a context folder.
   LAYER_CONSUMER_CONTEXT = "consumer-context"
@@ -199,23 +210,23 @@ class Keys:
   DOC_TYPE = "spec_doc_type"
   # Markdown file extension, stripped to derive a document's type from its filename.
   MD_SUFFIX = ".md"
-  # Body markers
+  # Opening HTML marker delimiting the folder-note's sibling-docs block.
   DOCS_MARKER_START = "<!-- auto:spec-docs:start -->"
   # Closing HTML marker delimiting the folder-note's sibling-docs block.
   DOCS_MARKER_END = "<!-- auto:spec-docs:end -->"
-  # Error categories + outcome strings
+  # The error category for invalid-input failures.
   CAT_LOGICAL = "logical"
   # Outcome token for a failed scaffold.
   OUTCOME_ERROR = "error"
   # Outcome token for a completed scaffold.
   OUTCOME_SUCCESS = "success"
-  # Stage values
+  # The doc-stage value for a doc awaiting approval.
   STAGE_DRAFT = "draft"
   # The doc-stage value for a scaffolded but unwritten doc.
   STAGE_EMPTY = "empty"
-  # Path segments the CLI validates against
+  # The path segment a `--path` value may never carry.
   PARENT_SEGMENT = ".."
-  # CLI argparse
+  # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs scaffold-asset"
   # CLI positional argument name for the product compound-key.
   ARG_PRODUCT = "product"
@@ -247,11 +258,11 @@ class Keys:
   HELP_CWD = "Override repo root"
   # CLI help text for the `--target` flag.
   HELP_TARGET = "Asset the change modifies, as <folder>/<slug> under spec_path; repeatable, kept in order"
-  # Output JSON keys
+  # Output JSON key naming a produced doc's repo-relative path.
   OUT_FILE = "file"
   # Output JSON key naming a produced doc's initial stage.
   OUT_STAGE = "stage"
-  # Repo discovery
+  # The `.git` entry checked to detect a repo checkout.
   GIT_DIR = ".git"
 
 
@@ -369,32 +380,35 @@ def refusal_exits(entry: Callable[[list[str]], int]) -> Callable[[list[str]], in
   return guarded
 
 
-def resolve_product(repo: Path, product: str) -> dict:
+def resolve_product(repo: Path,
+                    product: str,
+                    *,
+                    products: dict | None = None,
+                    catalog_guidelines: dict[str, list[str]] | None = None) -> dict:
   """
   Load the product's effective record — its own keys over its ancestors' (`resolve_product.effective_record`).
 
   Args:
     repo: Repository root.
     product: Product compound-key (e.g. `test`, `dashboards`).
+    products: An already-read products registry, such as the merged one the runtime dispatches from; None reads
+      the tracked settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the tracked settings
+      file.
 
   Returns:
     The merged record dict (with at least `spec_path`).
 
   Raises:
-    ScaffoldRefusal: When settings file is missing, malformed, the product key is
-      absent, or its `spec_path` is missing.
+    ScaffoldRefusal: When no registry is handed in and the settings file is missing, cannot be read, is not UTF-8
+      text, is not valid JSON or is not a JSON object; or when the product key is absent or its `spec_path` is
+      missing.
+    ValueError: When a registry is handed in without `catalog_guidelines` and the tracked settings file exists but
+      cannot be read, is not UTF-8 text, is not valid JSON or is not a JSON object; with `catalog_guidelines` handed
+      in, the tracked file is not read for the catalog-wide guidelines.
   """
-  settings_path = repo / Keys.CLAUDE_DIR / Keys.SETTINGS_FILE
-
-  # guard: no settings file, no product registry to resolve against
-  if not settings_path.exists():
-    fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
-  try:
-    data = json.loads(settings_path.read_text(encoding = "utf-8"))
-  except json.JSONDecodeError as error:
-    fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
-  products_section = data.get(Keys.PRODUCTS) or {}
-  record = products_section.get(product) if isinstance(products_section, dict) else None
+  registry = products if products is not None else _load_tracked_registry(repo)
+  record = registry.get(product)
 
   # guard: the product is not registered, or its record is not a mapping
   if not isinstance(record, dict):
@@ -405,7 +419,36 @@ def resolve_product(repo: Path, product: str) -> dict:
   # guard: a product without a spec directory has nowhere to scaffold into
   if Keys.SPEC_PATH not in record:
     fail(Keys.CAT_LOGICAL, f"product '{product}' has no {Keys.SPEC_PATH}")
-  return product_registry.effective_record(repo, product)
+  return product_registry.effective_record(repo, product, products = registry,
+                                           catalog_guidelines = catalog_guidelines)
+
+
+def _load_tracked_registry(repo: Path) -> dict:
+  """
+  Read the products registry from the tracked settings file.
+
+  Args:
+    repo: Repository root.
+
+  Returns:
+    Product key to record, as the tracked settings file declares them.
+
+  Raises:
+    ScaffoldRefusal: When the settings file is missing, cannot be read, is not UTF-8 text, is not valid JSON or is
+      not a JSON object.
+  """
+  settings_path = repo / Keys.CLAUDE_DIR / Keys.SETTINGS_FILE
+
+  # guard: no settings file, no product registry to resolve against
+  if not settings_path.exists():
+    fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
+
+  # guard: the product registry is refused outright when the settings cannot be read or do not parse;
+  # `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
+  try:
+    return product_registry.load_products(repo)
+  except (OSError, ValueError) as error:
+    fail(Keys.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
 
 
 def resolve_alias_base(asset_type: str, record: dict) -> str:
@@ -486,7 +529,7 @@ def template_doc_type(path: Path) -> str:
 
 
 def resolve_template(repo: Path, category: str, product: str, name: str, *,
-                      alias_base: str = "", expect_type: str = "") -> Path:
+                      alias_base: str = "", expect_type: str = "", products: dict | None = None) -> Path:
   """
   Pick the first existing template path across the layered override chain.
 
@@ -499,8 +542,9 @@ def resolve_template(repo: Path, category: str, product: str, name: str, *,
       layer matching its own.
     - With `expect_type` set, the returned file declares that `spec_doc_type` or none at all — a
       file declaring another type is refused, never substituted.
-    - A filename no layer carries resolves, with `expect_type` set, to the first template in the
-      same chain that declares that type, so a custom-named document still seeds from its type.
+    - With `expect_type` set, a filename no layer carries still resolves to a template of that type from the
+      same override chain, so a custom-named document seeds from its type; it is refused only when the chain
+      holds no template of that type.
 
   Args:
     repo: Repository root.
@@ -511,6 +555,7 @@ def resolve_template(repo: Path, category: str, product: str, name: str, *,
     alias_base: Base context when `category` is an alias or falls through to another; empty otherwise.
     expect_type: The `spec_doc_type` the chosen file must declare or leave undeclared; empty skips
       the check and the by-type fallback.
+    products: The products registry the product's ancestors are read from; None reads the tracked settings file.
 
   Returns:
     Absolute path to the chosen template file.
@@ -540,7 +585,12 @@ def resolve_template(repo: Path, category: str, product: str, name: str, *,
   # not only the layer matching its own. With `expect_type` set, the file returned declares
   # that type or none — a same-named file of another type is never substituted for it.
 
-  ancestors = product_registry.ancestor_chain(repo, product) if product else []
+  # Contract:
+  # With `expect_type` set, a filename that no layer carries still resolves to a template of that
+  # type from the same override chain, so a custom-named document seeds from its type. The lookup
+  # is refused only when the chain holds no template of that type either.
+
+  ancestors = product_registry.ancestor_chain(repo, product, products = products) if product else []
   candidates = template_layers(repo, category, product, name, alias_base = alias_base, ancestors = ancestors)
   for _label, candidate in candidates:
     # guard: a layer without the file is simply skipped
@@ -649,7 +699,7 @@ def parse_doc_token(token: str) -> tuple[str, str]:
   return name, doc_type
 
 
-def _initial_stage(repo: Path, doc_type: str, product: str) -> str:
+def _initial_stage(repo: Path, doc_type: str, product: str, *, products: dict | None = None) -> str:
   """
   Resolve the stage a freshly seeded document starts at.
 
@@ -657,35 +707,27 @@ def _initial_stage(repo: Path, doc_type: str, product: str) -> str:
     repo: Repository root the declarations are resolved against.
     doc_type: The document's own declared type.
     product: Product compound-key scoping the declaration lookup.
+    products: The products registry the declarations are read from; None reads the tracked settings file.
 
   Returns:
     `draft` for a type declared stage-bearing, `empty` for every other.
   """
-  declaration = spec_doc_types.resolve(repo, doc_type, product) or {}
+  declaration = spec_doc_types.resolve(repo, doc_type, product, products = products) or {}
   return Keys.STAGE_DRAFT if declaration.get(spec_doc_types.DocTypeFlag.STAGES) else Keys.STAGE_EMPTY
 
 
-def _inject_note_keys(text: str, asset_type: str, tools: list[str]) -> str:
+def _inject_type_key(text: str, asset_type: str) -> str:
   """
-  Write the asset's own type, and its declared default tools, into a folder-note's frontmatter.
-
-  A type declaring no default tools writes no `spec_tools` key at all — an absent key reads as
-  "not determined yet", which an empty list would wrongly claim to have settled.
+  Write the asset's own type into a folder-note's frontmatter.
 
   Args:
     text: Full folder-note text including the leading frontmatter block.
     asset_type: The asset type to stamp.
-    tools: The type's declared default tools, empty when it declares none.
 
   Returns:
-    Text carrying the type key, and the tools key when there were tools to write.
+    Text carrying the type key.
   """
-
-  # stamp the type unconditionally, the tools line only when there are tools to record
-  lines = [ f"{Keys.ASSET_TYPE}: {asset_type}" ]
-  if tools:
-    lines.append(f"{Keys.SPEC_TOOLS}: [ " + ", ".join(f'"{tool}"' for tool in tools) + " ]")
-  return spec_frontmatter.insert_before_close(text, "".join(f"{line}\n" for line in lines))
+  return spec_frontmatter.insert_before_close(text, f"{Keys.ASSET_TYPE}: {asset_type}\n")
 
 
 def product_leaf(record: dict) -> str:
@@ -724,7 +766,13 @@ def product_tag(record: dict) -> str:
   return f"{Keys.PRODUCT_TAG_PREFIX}{record[Keys.SPEC_PATH]}"
 
 
-def resolve_owning_product(repo: Path, folder: Path, *, product: str, record: dict) -> tuple[str, dict]:
+def resolve_owning_product(repo: Path,
+                           folder: Path,
+                           *,
+                           product: str,
+                           record: dict,
+                           products: dict | None = None,
+                           catalog_guidelines: dict[str, list[str]] | None = None) -> tuple[str, dict]:
   """
   Resolve the innermost registered product owning `folder`, the named product when none does.
 
@@ -733,10 +781,18 @@ def resolve_owning_product(repo: Path, folder: Path, *, product: str, record: di
     folder: Absolute asset folder; it need not exist yet.
     product: The product key the caller named.
     record: The named product's effective record.
+    products: The products registry the folder is attributed in; None reads the tracked settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the tracked settings
+      file.
 
   Returns:
     The `(key, effective_record)` pair of the owning product, or `(product, record)` when the
     folder sits outside the repository or no registered product covers it.
+
+  Raises:
+    ValueError: When the tracked settings file exists but cannot be read, is not UTF-8 text, is not valid JSON or is
+      not a JSON object; the file is read only for what the caller did not hand in (`products`, then
+      `catalog_guidelines`).
   """
 
   # Domain(spec.config):
@@ -751,7 +807,8 @@ def resolve_owning_product(repo: Path, folder: Path, *, product: str, record: di
   except ValueError:
     # guard: a folder outside the repository has no owner to resolve — keep the caller's product
     return product, record
-  key, owner = product_registry.effective_record_by_path(repo, rel)
+  key, owner = product_registry.effective_record_by_path(repo, rel, products = products,
+                                                         catalog_guidelines = catalog_guidelines)
   return (key, owner) if key is not None and owner is not None else (product, record)
 
 
@@ -883,17 +940,9 @@ def main(argv: list[str]) -> int:
   """
   Run the `scaffold-asset` subcommand: scaffold a new asset folder under a product.
 
-  Guarantees:
-    - An existing target asset folder is never merged into or overwritten; the scaffold refuses
-      the request and creates nothing under it.
-    - A type declaring no default tools yields a folder-note with no `spec_tools` key at all, never
-      an empty list.
-    - Every seeded document's `spec_source_docs` citations and `## Docs` projection come from the
-      scaffold alone; citations a template layer ships never survive into the seeded document.
-
   Args:
-    argv: Subcommand argv tail
-      (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>] [--target <folder>/<slug> ...]`).
+    argv: Subcommand argv tail (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]
+      [--target <folder>/<slug> ...] [--cwd <repo>]`).
 
   Returns:
     Process exit code: `0` on success, `1` on logical error, `2` on argparse failure.
@@ -930,7 +979,8 @@ def ensure_group_note(repo: Path,
                       owner_key: str,
                       owner_record: dict,
                       alias_base: str = "",
-                      tokens: dict | None = None) -> Path | None:
+                      tokens: dict | None = None,
+                      products: dict | None = None) -> Path | None:
   """
   Return a folder's same-named group note, writing it first when the folder has none.
 
@@ -952,6 +1002,8 @@ def ensure_group_note(repo: Path,
     owner_record: The owning product's effective record.
     alias_base: Base context when `asset_type` is an alias, or empty.
     tokens: Template tokens to substitute, or none.
+    products: The products registry the template chain's ancestors are read from; None reads the tracked settings
+      file.
 
   Returns:
     The group note's path, existing or newly written; None when the folder is the product's own root. A caller that
@@ -997,7 +1049,8 @@ def ensure_group_note(repo: Path,
     return group_note
 
   # the note comes from the landing type's template chain
-  group_template = resolve_template(repo, asset_type, owner_key, Keys.GROUP_NOTE_TMPL, alias_base = alias_base)
+  group_template = resolve_template(repo, asset_type, owner_key, Keys.GROUP_NOTE_TMPL, alias_base = alias_base,
+                                     products = products)
   group_text = substitute(group_template.read_text(encoding = "utf-8"), tokens or {})
 
   # the type that calls this folder its default home names the note's icon
@@ -1026,10 +1079,27 @@ def ensure_group_note(repo: Path,
   return group_note
 
 
-def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: list[tuple[str, str]] | None = None,
-             path: str = "", targets: list[str] | None = None) -> dict:
+def scaffold(repo: Path,
+             product: str,
+             asset_type: str,
+             slug: str,
+             *,
+             layout: list[tuple[str, str]] | None = None,
+             path: str = "",
+             targets: list[str] | None = None,
+             products: dict | None = None,
+             catalog_guidelines: dict[str, list[str]] | None = None) -> dict:
   """
   Scaffold a new asset folder under a product.
+
+  Guarantees:
+    - An existing target asset folder is never merged into or overwritten; the scaffold refuses
+      the request and creates nothing under it.
+    - Every seeded document's `spec_source_docs` citations and `## Docs` projection come from the
+      scaffold alone; citations a template layer ships never survive into the seeded document.
+    - With both `products` and `catalog_guidelines` handed in, every product lookup of the scaffold uses them and
+      the tracked settings file is not read for product records or catalog-wide guidelines; only the content
+      root's `spec.vault_root` is still read from it.
 
   Args:
     repo: Repository root.
@@ -1040,35 +1110,51 @@ def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: li
     path: Folder under the product root overriding the type's `default_path`, or empty.
     targets: Product-relative `<folder>/<slug>` tokens of the assets a change modifies, written as the
       folder-note's `spec_targets` in the given order; none or empty leaves the key absent.
+    products: The products registry the caller already read, such as the merged one the runtime dispatches from (an
+      overlay-only product, say); none reads the tracked registry. Every product lookup of the scaffold reads it.
+    catalog_guidelines: The catalog-wide `spec.guidelines` the caller already read; none reads them from the tracked
+      settings file.
 
   Returns:
     The result object: `outcome`, repo-relative `folder` and `folder_note`, the `docs` seeded with their
     stages, and the `group_note` seeded, if any.
 
   Raises:
-    ScaffoldRefusal: When the product, type, template or target folder refuses the scaffold, or a `targets`
-      token fails the shape rule of `note-set-key` (non-empty segments, no `.` or `..` step), before anything
-      is written.
+    ScaffoldRefusal: When the type, template or target folder refuses the scaffold, when the product is refused
+      (no `products` given and the settings file missing or unreadable, product not registered, no `spec_path`), or a
+      `targets` token fails the shape rule of `note-set-key` (non-empty segments, no `.` or `..` step), before
+      anything is written.
+    ValueError: When a registry is handed in without `catalog_guidelines` and the tracked settings file exists but
+      cannot be read, is not UTF-8 text, is not valid JSON or is not a JSON object; with `catalog_guidelines` handed
+      in, the tracked file is not read for the catalog-wide guidelines.
   """
+
+  # Contract:
+  # With both `products` and `catalog_guidelines` handed in, every product lookup of the scaffold is answered from
+  # them, and the tracked settings file is not read for product records or catalog-wide guidelines; only the
+  # content root's `spec.vault_root` is still read from it. A product known only to the caller's registry, such
+  # as one declared in the local overlay, therefore scaffolds exactly as declared.
+
   # guard: a malformed target token is refused before anything is written
   if (bad := [ token for token in targets or [] if not note_ops.is_asset_path_token(token) ]):
     fail(Keys.CAT_LOGICAL, f"invalid --target token: {', '.join(bad)}")
 
-  # the product record supplies every type-scaled decision the scaffold needs
-  record = resolve_product(repo, product)
+  # the product record supplies every type-scaled decision the scaffold needs; it is read from the registry the
+  # caller handed in, else from the tracked settings file
+  record = resolve_product(repo, product, products = products, catalog_guidelines = catalog_guidelines)
 
   # the asset folder the scaffold writes into, under the named product's tree
   folder = _type_folder(asset_type, record, path)
   target_folder = spec_paths.spec_content_root(repo) / record[Keys.SPEC_PATH] / folder / slug
 
   # a `--path` reaching into a nested product's tree lands the asset in that product: its tag,
-  # pins, templates, paint, tools and stages are the innermost owner's, never the caller's key's
-  owner_key, owner_record = resolve_owning_product(repo, target_folder, product = product, record = record)
+  # pins, templates, paint and stages are the innermost owner's, never the caller's key's
+  owner_key, owner_record = resolve_owning_product(repo, target_folder, product = product, record = record,
+                                                   products = products, catalog_guidelines = catalog_guidelines)
 
   # an alias type borrows the base's templates; folder and icon stay its own
   alias_base = resolve_alias_base(asset_type, owner_record)
   icon, color = _icon_color(asset_type, owner_record)
-  tools = asset_types.default_tools(asset_type, owner_record)
 
   # Contract:
   # An existing target asset folder is never merged into or overwritten; the scaffold refuses the
@@ -1079,22 +1165,17 @@ def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: li
     fail(Keys.CAT_LOGICAL, f"target folder already exists: {target_folder}")
   target_folder.mkdir(parents = True, exist_ok = False)
 
-  # Contract:
-  # A type declaring no default tools never gets a `spec_tools` key in its folder-note at all —
-  # the key is written only when there are tools to record, never as an empty list.
-
-  # the status folder-note carries the iconize block that paints the folder in the explorer, plus
-  # the asset's own type and — when the type declares any — the tools it is realised with. The
+  # the substitution tokens every seeded template is filled with: the owning product, its tag and the slug. The
   # `category` token keeps its name for template compatibility and carries the type verbatim.
   tokens = { "product": owner_key, "product_tag": product_tag(owner_record),
              "slug": slug, "category": asset_type }
 
   # the asset's own status folder-note, seeded from the type's template chain
   note_template = resolve_template(repo, asset_type, owner_key, Keys.FOLDER_NOTE_TMPL,
-                                    alias_base = alias_base)
+                                    alias_base = alias_base, products = products)
   note_text = substitute(note_template.read_text(encoding = "utf-8"), tokens)
   note_text = inject_iconize(note_text, icon, color)
-  note_text = _inject_note_keys(note_text, asset_type, tools)
+  note_text = _inject_type_key(note_text, asset_type)
 
   # the assets a change modifies, in the order given; no targets leaves the key absent
   if targets:
@@ -1112,29 +1193,29 @@ def scaffold(repo: Path, product: str, asset_type: str, slug: str, *, layout: li
   produced: list[dict] = []
   for doc, doc_type in layout or []:
     tmpl_path = resolve_template(repo, asset_type, owner_key, doc,
-                                  alias_base = alias_base, expect_type = doc_type)
+                                  alias_base = alias_base, expect_type = doc_type, products = products)
     doc_text = substitute(tmpl_path.read_text(encoding = "utf-8"), tokens)
     doc_text = ensure_doc_type(doc_text, doc_type)
 
     # the type's own paint: the icon names the kind of document, the registry's matchers own
     # the colour from the first `set-stage` onward. A journal never gets a stage and so keeps
     # this seed for life — which is why no matcher enumerates journals.
-    if (doc_paint := spec_doc_types.icon_color(repo, doc_type, owner_key)):
+    if (doc_paint := spec_doc_types.icon_color(repo, doc_type, owner_key, products = products)):
       doc_text = inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
     doc_text = _set_source_docs(doc_text, _default_source_docs())
     doc_path = target_folder / doc
     spec_paths.write_text_atomic(doc_path, doc_text)
     produced.append({ Keys.OUT_FILE: str(doc_path.relative_to(repo)),
-                      Keys.OUT_STAGE: _initial_stage(repo, doc_type, owner_key) })
+                      Keys.OUT_STAGE: _initial_stage(repo, doc_type, owner_key, products = products) })
 
   # the immediate parent group folder gets its note when this asset is its first arrival, last so a
   # refusal anywhere above leaves no stray note behind
-  # limit: only the immediate parent is seeded, a deeper fresh `--path a/b` chain leaves the
-  # intermediate levels note-less; seed them by landing an asset in each, or author notes by hand
+  # limit: only the immediate parent group is seeded; land an asset at each deeper level, or author its note by hand
   group_dir = target_folder.parent
   existed = ( group_dir / f"{group_dir.name}.md" ).exists()
   group_note = ensure_group_note(repo, group_dir, asset_type = asset_type, owner_key = owner_key,
-                                 owner_record = owner_record, alias_base = alias_base, tokens = tokens)
+                                 owner_record = owner_record, alias_base = alias_base, tokens = tokens,
+                                 products = products)
 
   # the result names the group note only when this scaffold wrote it
   seeded_group = str(group_note.relative_to(repo)) if group_note and not existed else ""

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Carry a vault's whole Obsidian configuration as one tracked, reviewable file that any checkout can rebuild from.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How capture and deploy fit together"
   request: "Flow diagram: on the source machine, lazy-obsidian.capture snapshots .obsidian/ into .obsidian.manifest.json and commits it; that commit reaches a second checkout via git; on the second machine (fresh clone, .obsidian/ absent), lazy-obsidian.deploy reads the manifest and rebuilds .obsidian/ — fetching each plugin at its latest release from GitHub, falling back to a vendored cache, or using a bundled copy — then the operator opens Obsidian once so plugins run their own settings migrations."
@@ -9,8 +9,8 @@ diagram_spec:
 source_skills:
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 6e0de3c48e0697705a6cda0753e960d8e647c0323064002acaa9d6ff47162d13
+source_sha: 5048c26182621a44f9d4ab628e900ce399ae12f0
+surface_sha: a0bba7d2ca0c15af597728af0fe0415e00660b4067338b33b593e081b69270a9
 ---
 # Vault manifest — carry your Obsidian config as one tracked file
 
@@ -30,7 +30,17 @@ You run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — 
 
 On any checkout that needs `.obsidian/` — a fresh clone, a machine that never opened this vault — you run `/lazy-obsidian.deploy`. It reads `.obsidian.manifest.json` and rebuilds the config directory: every plugin fetched at its latest GitHub release, the captured settings layered on top, snippets, and the top-level config files restored. The theme is fetched the way Obsidian fetches one: the manifest carries only the name, and deploy resolves that name through the community theme catalogue and reads the theme's two files off its repository's default branch. A copy already in the vault is replaced, on the same terms as the settings, snippets, and plugins around it. Each plugin lands from one of three sources, and deploy tells you which: `upstream` (fetched fresh from GitHub), `cache` (a vendored fallback used because GitHub was unreachable or the release lacked assets), or `bundled` (shipped inside this LazyCortex plugin, like `iconize-reloader`). Deploy never pins a plugin to the exact version it was captured under — a plugin migrates its own settings forward the first time Obsidian opens it, which is why deploy always ends with a reminder to open Obsidian once after it finishes. If `.obsidian/` already exists at the target — this checkout already has a configured vault — deploy asks before overwriting, since local changes made since the last capture would be lost.
 
-Neither skill touches `workspace*` files, caches, or obsidian-git authentication — those are genuinely local. Iconize's `data.json` is captured and deployed like any other plugin's settings, except that only its settings-like blocks (`settings`, `rules`, `recentlyUsedIcons`) travel: the per-path icon entries are rebuilt by `iconize-reloader` from your notes' frontmatter rather than by this block.
+Neither skill touches `workspace*` files, bookmarks, caches, or obsidian-git authentication — those are genuinely local. Iconize's `data.json` is captured and deployed like any other plugin's settings, except that only its settings-like blocks (`settings`, `rules`) travel: the per-path icon entries are rebuilt by `iconize-reloader` from your notes' frontmatter rather than by this block, and the recently used icons stay on each device.
+
+## Personal state stays on each device
+
+Two things in a vault belong to whoever is using a device, not to the vault itself: Obsidian's bookmarks (`bookmarks.json`) and Iconize's list of recently used icons (`recentlyUsedIcons`). Capture no longer records either one, deploy never lays them down, and the drift report never lists them. Each device keeps its own `.obsidian/bookmarks.json`, and nothing in this block reads or overwrites it — so bookmarking a note on your phone no longer leaves the manifest stale on your laptop, and one person's bookmarks no longer reach every clone that pulls the manifest.
+
+Deploy applies this even to a manifest written by an earlier release that still carries those entries: it ignores them and does not bring them back.
+
+### Cleaning an existing manifest
+
+A manifest captured before this change still holds both entries until they are removed. The migration step `001-manifest-personal-state` does it for you: when you run `/lazy-core.setup` after updating the plugin, it runs the manifest worker's `strip-personal` verb, which removes exactly those two entries and leaves every other key, its value, and its order as they were. It only edits `.obsidian.manifest.json`; it never reads or writes `.obsidian/`. Commit the resulting change to the manifest like any other. After that, a fresh `/lazy-obsidian.capture` stays free of both.
 
 ## Common adjustments
 
@@ -47,6 +57,12 @@ Neither skill touches `workspace*` files, caches, or obsidian-git authentication
 **Icons and folder colours are missing after deploy.** The per-path icon entries are expected to be absent right after a deploy — `iconize-reloader` rebuilds them from your notes' frontmatter once Obsidian opens, or you can run `/lazy-obsidian.iconize-sync reconcile` yourself. If they stay missing, check Iconize's settings in Obsidian: the option to read icons from frontmatter must be on, and the field names must be `iconize_icon` and `iconize_color`. A manifest captured before Iconize settings were recorded carries no Iconize data at all, so the deployed vault starts without them. Fix those settings in the live vault, then re-run `/lazy-obsidian.capture` so the manifest carries them from now on. While Obsidian is open, `iconize-reloader` also corrects those settings on its own whenever Iconize rewrites its file.
 
 **Deploying onto a checkout that already has `.obsidian/`.** Deploy asks before overwriting; default is to cancel. Say yes only when you're sure the manifest is more current than whatever local config is already there.
+
+**My bookmarks did not arrive on the new machine.** Expected. Bookmarks are per-device personal state and are neither captured nor deployed; set them up again on each device.
+
+## Where this fits
+
+`/lazy-obsidian.audit` is the read-only companion: it compares the live `.obsidian/` against the manifest and reports drift — settings that differ, plugins installed but not captured (or the reverse), a plugin enabled on one side only. Personal state is outside that comparison. When it reports drift you meant to keep, run `/lazy-obsidian.capture`; when the manifest is the side you trust, run `/lazy-obsidian.deploy`.
 
 ## How capture and deploy fit together
 

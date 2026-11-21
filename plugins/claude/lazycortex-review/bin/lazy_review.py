@@ -49,6 +49,9 @@ Subcommands:
 - `guidelines-context` — delegate to :mod:`guidelines_context` (print the `{paths, warnings}`
                  map of the product guidelines one expert carries on one document; the
                  coordinator names the paths in a main or barrier writer dispatch's `context`).
+- `dispatch-writer` — delegate to :mod:`writer_dispatch` (build the whole expert-job bundle for one
+                 document and one expert, write the writer job marker, and queue the job through
+                 core; prints `{job_id, status, warnings}`, or `{error}` on a refusal).
 - `core-cli` — print the absolute path of the `lazycortex-core` CLI this plugin resolves
                  (`$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling, then the install
                  registry); the coordinator agent holds it as `<core-cli>` for the wake.
@@ -89,6 +92,21 @@ _ARG_REPO = "--repo"
 _ARG_PAYLOAD = "--payload"
 _ARG_PAYLOAD_FILE = "--payload-file"
 _STORE_TRUE = "store_true"
+
+# Subcommand name, help line and argument spellings of the `dispatch-writer` verb
+_DISPATCH_VERB = "dispatch-writer"
+_DISPATCH_HELP = "build and queue one expert job for a review document"
+_ARG_EXPERT = "expert"
+_ARG_SECTION_ID = "--section-id"
+_ARG_SECTION = "--section"
+_ARG_POSITION = "--position"
+_ARG_CONTEXT = "--context"
+_ARG_REPAIR = "--repair"
+_APPEND = "append"
+_POSITIONS = ( "top", "bottom" )
+
+# The exit code of the `paint-banner` verb when the job markers cannot be read, so the job state is unknown.
+_EXIT_JOB_STATE_UNKNOWN = 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -222,7 +240,8 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
     args: Parsed namespace with `file` and `repo` attributes.
 
   Returns:
-    Exit code: 0 on success, 2 if the file does not exist (nothing written).
+    Exit code: 0 on success, 1 when the job markers cannot be read (the banner is left as it is and one stderr
+    line says the job state is unknown), 2 if the file does not exist (nothing written).
 
   Raises:
     ParseError: If the document has an opening frontmatter fence with no matching closing
@@ -247,7 +266,18 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
   # repaint and write back — no commit, per the verb's contract. Whether a job is out on the
   # document is runtime state now, so the banner's in-process state comes from the sidecar
   lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
-  in_flight = bool(job_markers.read(repo, file_path)[JobMarker.ACTIVE_JOB])
+
+  # guard: markers that cannot be read do not say "no job in flight"; the banner is left as it is
+  try:
+    in_flight = bool(job_markers.read_checked(repo, file_path)[JobMarker.ACTIVE_JOB])
+  except OSError as error:
+    sys.stderr.write(
+        f"paint-banner: job state unknown, banner left as it is: {job_markers.sidecar_path(repo)}: "
+        f"{type(error).__name__}: {error}\n"
+    )
+    return _EXIT_JOB_STATE_UNKNOWN
+
+  # the banner is repainted from the frontmatter state and the job state just read
   # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
   # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
   updated_text = note_ops.repaint_banner(  # type: ignore[attr-defined]
@@ -510,13 +540,7 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   """
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  import edit_markup  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
-  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  import finalize  # type: ignore  # pylint: disable=import-error
-  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
-  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
+  import writer_dispatch  # type: ignore  # pylint: disable=import-error
   file_path = Path(args.file).resolve()
 
   # guard: only an existing markdown file has a review body to resolve
@@ -524,10 +548,6 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   if not file_path.is_file() or file_path.suffix.lower() != ".md":
     sys.stderr.write(f"not a markdown file: {file_path}\n")
     return 2
-
-  # split the document once — only the body half reaches the writer
-  # waiver: explicit utf-8 for pylint W1514; the repo-wide file encoding, not a domain constant
-  _meta, body = _fm.parse(file_path.read_text(encoding = "utf-8"))
 
   # Domain(review.dispatch):
   # # Resolved text for judging, raw markup for revising
@@ -556,16 +576,9 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   # Writers take this output as their source, and a writer that sees frontmatter raises concerns no writer
   # round can close.
 
-  # resolve the body's edit markup per the document's pinned style; an unknown style must not
-  # kill the dispatch — `body` stays the raw document half and the verb degrades gracefully
-  style = finalize.read_document_edit_marker_style(file_path)
-  try:
-    body = edit_markup.strip_markers(body, style=style)
-  except ValueError:
-    pass
-
-  # the resolved body goes to stdout — the caller pipes it straight into a source file
-  sys.stdout.write(body)
+  # the resolved body goes to stdout — the same view a validation or terminal dispatch takes as its source;
+  # an unknown style does not kill the verb, the view degrades to the raw body half
+  sys.stdout.write(writer_dispatch.read_resolved_body_view(file_path))
   return 0
 
 
@@ -594,7 +607,7 @@ def cmd_strip_frontmatter(args: argparse.Namespace) -> int:
 
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
-  import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
+  import writer_dispatch  # type: ignore  # pylint: disable=import-error
   file_path = Path(args.file).resolve()
 
   # guard: only an existing markdown file has a review body to print
@@ -604,10 +617,38 @@ def cmd_strip_frontmatter(args: argparse.Namespace) -> int:
     return 2
 
   # the body goes to stdout with its edit markup intact — the main writer's working material
-  # waiver: explicit utf-8 for pylint W1514; the repo-wide file encoding, not a domain constant
-  _meta, body = _fm.parse(file_path.read_text(encoding = "utf-8"))
-  sys.stdout.write(body)
+  sys.stdout.write(writer_dispatch.read_body_view(file_path))
   return 0
+
+
+def cmd_dispatch_writer(args: argparse.Namespace) -> int:
+  """
+  Delegate the `dispatch-writer` subcommand to the writer_dispatch module.
+
+  Args:
+    args: Parsed namespace with `file`, `expert`, `repo`, `section_id`, `section`, `position`, `context` and
+      `repair` attributes.
+
+  Returns:
+    Exit code from the writer_dispatch module.
+  """
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import writer_dispatch  # type: ignore  # pylint: disable=import-error
+
+  # each given flag is replayed as itself; an absent one keeps the module's own default
+  forward: list[str] = [ args.file, args.expert, _ARG_REPO, args.repo ]
+  for flag, value in ( ( _ARG_SECTION_ID, args.section_id ), ( _ARG_SECTION, args.section ),
+                       ( _ARG_POSITION, args.position ) ):
+    if value is not None:
+      forward.extend([ flag, value ])
+
+  # each extra context file is replayed as its own flag, in the order given
+  for path in args.context or ():
+    forward.extend([ _ARG_CONTEXT, path ])
+  if args.repair:
+    forward.append(_ARG_REPAIR)
+  return writer_dispatch.main(forward)
 
 
 def cmd_fold_markup(args: argparse.Namespace) -> int:
@@ -783,7 +824,8 @@ def cmd_decisions_context(args: argparse.Namespace) -> int:
 
   Returns:
     Exit code: always 0. Prints the JSON `{filename: text}` decisions-registry context map to
-    stdout on every call; the target document need not exist on disk.
+    stdout on every call, and each warning on stderr as `warning: <text>`; the target document need not
+    exist on disk.
   """
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
@@ -792,9 +834,14 @@ def cmd_decisions_context(args: argparse.Namespace) -> int:
   # resolve the target file — the same absolute-path convention cmd_strip_markup uses
   file_path = Path(args.file).resolve()
 
-  # the verb's whole contract is this one JSON line, piped straight into the coordinator's dispatch build
+  # the registries go out as the one JSON line on stdout, piped straight into the coordinator's dispatch build
   # waiver: type: ignore — decisions_context is a deferred/late-bound sibling import; mypy cannot resolve it
-  print(json.dumps(decisions_context.collect(file_path)))  # type: ignore[attr-defined]
+  contexts, warnings = decisions_context.collect(file_path)  # type: ignore[attr-defined]
+  print(json.dumps(contexts))
+
+  # a refused content root is reported beside the map, one stderr line per warning, never dropped
+  for warning in warnings:
+    sys.stderr.write(f"warning: {warning}\n")
   return 0
 
 
@@ -1084,6 +1131,20 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   p_guidelines.add_argument("expert")
   p_guidelines.set_defaults(func=cmd_guidelines_context)
+
+  # `dispatch-writer` — the whole expert-job bundle built from the document, its class and a few flags
+  p_dispatch = sub.add_parser(_DISPATCH_VERB, help = _DISPATCH_HELP)
+  p_dispatch.add_argument(_ARG_FILE)
+  p_dispatch.add_argument(_ARG_EXPERT)
+  p_dispatch.add_argument(_ARG_SECTION_ID, default = None)
+  p_dispatch.add_argument(_ARG_SECTION, default = None)
+  p_dispatch.add_argument(_ARG_POSITION, default = None, choices = _POSITIONS)
+
+  # repeatable: one `--context <path>` per extra file the job should find in its context
+  p_dispatch.add_argument(_ARG_CONTEXT, action = _APPEND, default = None)
+  p_dispatch.add_argument(_ARG_REPAIR, action = _STORE_TRUE)
+  p_dispatch.add_argument(_ARG_REPO, default = ".")
+  p_dispatch.set_defaults(func = cmd_dispatch_writer)
 
   # `core-cli` — the resolved `lazycortex-core` CLI path for the coordinator agent's `<core-cli>`
   # waiver: argparse CLI signature, not a domain key

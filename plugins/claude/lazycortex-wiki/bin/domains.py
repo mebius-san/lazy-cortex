@@ -85,8 +85,14 @@ KIND_BLOCK_DOC   = "block-doc"
 # File encoding used throughout.
 _ENCODING = "utf-8"
 
+# Codec error handler that turns a byte that is not valid text into a replacement mark instead of failing.
+_DECODE_LOSSY = "replace"
+
 # Separator of a `git ls-files -z` listing, which prints every path as written, never quoted.
 _NUL = "\0"
+
+# Directory entry whose presence marks a git checkout.
+_GIT_DIR = ".git"
 
 # Frontmatter key carrying the generation-time content hash of a group doc.
 FM_DOMAIN_HASH = "domain_hash"
@@ -141,6 +147,8 @@ PLAN_INDEX_STALE = "index_needs_update"
 PLAN_LANGUAGE   = "language"
 PLAN_DICTIONARY = "dictionary"
 PLAN_OUTPUT     = "output"
+PLAN_UNREADABLE = "unreadable"
+PLAN_HELD       = "held_groups"
 PLAN_ANCHOR_FIXES = "anchor_fixes"
 PLAN_LINK_FIXES = "link_fixes"
 PLAN_CONTRACT_DROPS = "contract_drops"
@@ -225,6 +233,24 @@ _SENTENCE_RE = re.compile(r"(.+?[.!?])(?:\s|$)")
 _GLOSS_LIMIT = 220
 
 
+def _read_doc_text(doc_abs: Path) -> str | None:
+  """
+  Read a generated doc's text.
+
+  Args:
+    doc_abs: Absolute path of the doc.
+
+  Returns:
+    The doc's text, or None when the file cannot be read or is not UTF-8 text.
+  """
+  # one unreadable doc must not fail a pass over the whole tree — each caller decides what a doc it could not
+  # read stands for
+  try:
+    return doc_abs.read_text(encoding = _ENCODING)
+  except (OSError, UnicodeDecodeError):
+    return None
+
+
 # ────────────────────────────────────────────────────────────────────────────
 class DomainConfig:
   """
@@ -304,6 +330,16 @@ class DomainConfig:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+class DomainDictionaryError(Exception):
+  """
+  Failure to find or read the domain-groups dictionary.
+
+  Raised when the configured dictionary file is absent, cannot be read, or is not valid UTF-8; the message names
+  the file and the reason. It is never raised for a dictionary that simply lists no group.
+  """
+
+
+# ────────────────────────────────────────────────────────────────────────────
 class DomainDictionary:
   """
   Parser for the domain-groups dictionary markdown file.
@@ -337,6 +373,38 @@ class DomainDictionary:
     """
     return self._path.is_file()
 
+  def load_groups(self) -> dict[str, str]:
+    """
+    Parse the dictionary for a caller that acts on which groups are listed.
+
+    Guarantees:
+      - A dictionary that is absent, cannot be read, or is not valid UTF-8 raises `DomainDictionaryError`, never
+        an empty mapping; a dictionary that lists no group returns an empty mapping.
+
+    Returns:
+      Mapping of group key to one-line gloss, as `read_groups` returns it for a file that was read.
+
+    Raises:
+      DomainDictionaryError: When the file is absent, cannot be read, or is not valid UTF-8.
+    """
+
+    # Contract:
+    # A dictionary that is absent, cannot be read, or is not valid UTF-8 MUST raise `DomainDictionaryError`
+    # and NEVER yield an empty mapping, because a caller that acts on the listed groups would take it for a
+    # dictionary that lists none. A dictionary that was read and lists no group returns an empty mapping.
+
+    # guard: an absent file says nothing about which groups are listed
+    if not self._path.is_file():
+      raise DomainDictionaryError(f"domain dictionary '{self._path}' does not exist")
+
+    # a file that cannot be read or decoded says no more than an absent one
+    try:
+      return self.read_groups()
+    except (OSError, UnicodeDecodeError) as error:
+      raise DomainDictionaryError(
+        f"domain dictionary '{self._path}' could not be read: {type(error).__name__}: {error}"
+      ) from error
+
   def read_groups(self) -> dict[str, str]:
     """
     Parse the dictionary and return its group→gloss mapping.
@@ -344,6 +412,8 @@ class DomainDictionary:
     Guarantees:
       - The reserved `unfiled` group is never a key of the returned mapping,
         even when the dictionary file declares it.
+      - An absent dictionary file reads as an empty mapping and never raises for it; a caller that acts on which
+        groups are listed reads through `load_groups` instead.
 
     Returns:
       Mapping of group key to one-line gloss (empty string when a group has
@@ -353,6 +423,11 @@ class DomainDictionary:
     # Contract:
     # The reserved `unfiled` group is NEVER a key of the returned mapping,
     # even when the dictionary file declares it as an entry.
+
+    # Contract:
+    # An absent dictionary file reads as an empty mapping and NEVER raises for it, so a read-only
+    # inspection of the dictionary never fails on a missing one; a caller that acts on which groups are
+    # listed, such as the index and section renderers and the planner, reads through `load_groups` instead.
 
     # Domain(wiki.domains):
     # # How the dictionary declares a group
@@ -398,13 +473,62 @@ class DomainDictionary:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+class DomainScanError(Exception):
+  """
+  Failure to list the code files a domain scan sweeps.
+
+  Raised when git cannot list the repository's tracked files; the message carries git's own report. It is never
+  raised for a repository in which no tracked file matches the code globs.
+  """
+
+
+# ────────────────────────────────────────────────────────────────────────────
 class DomainScanner:
   """
   Extractor of `Domain(…)` blocks from the repo's code files.
 
   Only files tracked by the repository and matching the configured code globs are
   considered; the extracted blocks are returned grouped by their declared group key.
+
+  Guarantees:
+    - Every code file listed in `unreadable` has an entry in `unreadable_groups`: the groups its block headers
+      still name, or `None` when the file could not be opened at all. `None` is never replaced by an empty list,
+      so a caller can tell a file that names no group from one that may hold blocks of any group.
+    - A sweep (`scan` or `scan_contracts`) raises `DomainScanError` when git cannot list the tracked files of a
+      checkout (it exits non-zero or cannot be started), instead of returning an empty result; outside any git
+      checkout, or in a checkout with no tracked file matching the code globs, the result is empty.
+    - A tracked path name that is not UTF-8 never stops a sweep: a name matching no code glob is ignored, and a
+      name matching a code glob that cannot be represented as UTF-8 is reported on stderr and skipped, while
+      every other code file is swept as usual. Such a skipped code file is also recorded as unreadable: listed in
+      `unreadable` under a spelling that is valid UTF-8 text, the odd bytes shown as escapes, with its entry in
+      `unreadable_groups` naming the groups its block headers name when the file can be opened, or `None` when it
+      cannot, so the knowledge it holds is held back and never read as gone.
+
+  Attributes:
+    unreadable: Repo-relative paths of the code files a sweep could not read, or left out for a name that is not
+      valid UTF-8 (listed under an escaped spelling); their blocks are not taken for gone.
+    unreadable_groups: For each unreadable code file, the groups its block headers still name, or `None` when the
+      file could not be opened at all.
   """
+
+  # Contract:
+  # Every code file listed in `unreadable` has an entry in `unreadable_groups`: the groups its block
+  # headers still name, or `None` when the file could not be opened at all. `None` is NEVER replaced by an
+  # empty list, so a caller can tell a file that names no group from one that may hold blocks of any group.
+
+  # Contract:
+  # When git cannot list the tracked files of a checkout — it exits non-zero or cannot be started — a sweep
+  # (`scan` or `scan_contracts`) raises `DomainScanError`; it NEVER returns an empty result, which a caller
+  # would read as every block being gone. Outside any git checkout the sweep is still empty, and so is a
+  # checkout in which no tracked file matches the code globs.
+
+  # Contract:
+  # A tracked path name that is not UTF-8 NEVER stops a sweep. A name that matches no code glob is simply not a
+  # code file and is ignored. A name that matches a code glob but cannot be represented as UTF-8 is reported on
+  # stderr and skipped, and every other code file is swept as usual. Such a skipped code file is ALSO
+  # recorded as unreadable: listed in `unreadable` under a spelling that is valid UTF-8 text, the odd bytes
+  # shown as escapes, with its entry in `unreadable_groups` naming the groups its block headers name when the
+  # file can be opened, or `None` when it cannot, so the knowledge it holds is held back and NEVER read as gone.
 
   def __init__(self, *, repo: Path, code_globs: list[str]) -> None:
     """
@@ -423,6 +547,12 @@ class DomainScanner:
     # parsed once; correct because an index depends only on the text it was built from
     self._owners: dict[str, _owner.OwnerIndex] = {}
 
+    # the code files a sweep could not read — a caller must not take their blocks for gone
+    self.unreadable: list[str] = []
+
+    # per unreadable file, the groups its block headers still name; None when the file could not be opened at all
+    self.unreadable_groups: dict[str, list[str] | None] = {}
+
   def scan(self) -> dict[str, list[dict]]:
     """
     Return every `Domain(…)` block found in the repo's code files, grouped by group key.
@@ -435,6 +565,9 @@ class DomainScanner:
       Mapping of group key to its block dicts (`group`, `path`, `line`, `text`, `heading`,
       `owner_digest`), each list sorted by `(path, line)` for a stable order. `owner_digest` is the
       digest of the code that owns the block.
+
+    Raises:
+      DomainScanError: When git cannot list the tracked files of the checkout.
     """
 
     # Contract:
@@ -456,27 +589,96 @@ class DomainScanner:
     """
     Enumerate the repo-relative paths of code files matching the globs.
 
-    Returns:
-      Sorted list of repo-relative POSIX paths; empty when the repo is not a
-      git checkout or no file matches.
-    """
-    proc = subprocess.run(
-      [ "git", "ls-files", "-z" ],
-      cwd = str(self._repo),
-      capture_output = True,
-      text = True,
-      check = False, encoding = "utf-8",
-    )
+    Notes:
+      - A tracked path name that is not UTF-8 never fails the listing: a name matching no code glob is not a code
+        file, and a name matching a code glob is reported on stderr and left out of the result. Such a file is
+        also recorded as unreadable: listed in `unreadable` under a spelling that is valid UTF-8 text, with its
+        groups in `unreadable_groups` (the groups its block headers name when the file can be opened, `None` when
+        it cannot), so its knowledge is held back and never read as gone.
 
-    # guard: not a git repo — nothing to scan
-    if proc.returncode != 0:
+    Returns:
+      Sorted list of repo-relative POSIX paths, each valid UTF-8; empty when the repo lies outside any git checkout
+      or, inside one, no tracked file matches.
+
+    Raises:
+      DomainScanError: When git cannot list the tracked files of a checkout or cannot be started.
+    """
+    # the repository's tracked files, as git lists them, taken as bytes so the exit status alone tells whether
+    # the listing succeeded; a listing git cannot start is a listing that failed
+    try:
+      proc = subprocess.run(
+        [ "git", "ls-files", "-z" ],
+        cwd = str(self._repo),
+        capture_output = True,
+        check = False,
+      )
+    except OSError as error:
+      raise DomainScanError(f"git could not list the code files of '{self._repo}': {error}") from error
+
+    # guard: outside any git checkout there is no tracked file to scan
+    if proc.returncode != 0 and not any(
+      (folder / _GIT_DIR).exists() for folder in ( self._repo, *self._repo.parents )
+    ):
       return []
 
-    # keep only the files a configured code glob claims
-    return sorted(
-      rel for rel in proc.stdout.split(_NUL)
+    # guard: git could not list the files of a checkout — that is not the same as a repository with no code
+    # file, and a caller that took it for one would read every block as gone
+    if proc.returncode != 0:
+      raise DomainScanError(
+        f"git could not list the code files of '{self._repo}': "
+        f"{proc.stderr.decode(_ENCODING, errors = _DECODE_LOSSY).strip() or proc.returncode}"
+      )
+
+    # keep only the files a configured code glob claims; each name is decoded without loss, so a name that is not
+    # UTF-8 and matches no glob is simply not a code file
+    claimed = sorted(
+      rel for rel in os.fsdecode(proc.stdout).split(_NUL)
       if rel and any(self._matcher.match(rel, pat) for pat in self._globs)
     )
+
+    # a claimed file whose name is not UTF-8 cannot be named in a document; it is reported and left out, and the
+    # other files are scanned as usual
+    files: list[str] = []
+    for rel in claimed:
+      try:
+        rel.encode(_ENCODING)
+      except UnicodeEncodeError:
+        print(f"domain scan: skipped a code file whose name is not UTF-8: {rel!r}", file = sys.stderr)
+
+        # the knowledge the file holds is not gone: it is remembered as unreadable under a spelling that can be
+        # written, with the groups its headers name when it can be opened, so those groups are held back
+        # waiver: `backslashreplace` is the stdlib codec error-handler name that spells an unencodable byte out
+        spelled = rel.encode(_ENCODING, errors = "backslashreplace").decode(_ENCODING)
+        if spelled not in self.unreadable:
+          self.unreadable.append(spelled)
+          self.unreadable_groups[spelled] = self._probe_groups(self._repo / rel)
+        continue
+      files.append(rel)
+    return files
+
+  @staticmethod
+  def _probe_groups(abs_path: Path) -> list[str] | None:
+    """
+    Name the groups an unreadable code file still declares blocks for.
+
+    Args:
+      abs_path: Absolute path of a code file whose text could not be read as UTF-8.
+
+    Returns:
+      The sorted group keys of the block headers found by a read that tolerates undecodable bytes; `None` when
+      the file cannot be opened at all, so nothing is known about the groups it holds.
+    """
+    # the bytes as they stand, with every undecodable one replaced: a header line is plain ASCII and survives
+    try:
+      # waiver: `replace` is the stdlib codec error-handler name, which keeps the readable lines readable
+      text = abs_path.read_bytes().decode(_ENCODING, errors = "replace")
+    except OSError:
+      return None
+
+    # every header names its group, whatever the rest of the file holds
+    return sorted({
+      match.group(1) for match in ( _DOMAIN_HEADER_RE.match(line) for line in text.splitlines() ) if match
+    })
 
   def _extract_blocks(self, abs_path: Path, rel: str) -> list[dict]:
     """
@@ -488,12 +690,17 @@ class DomainScanner:
 
     Returns:
       List of block dicts in file order; empty when the file is unreadable
-      or carries no block.
+      or carries no block. An unreadable file is also recorded in `unreadable`, with the groups its block headers
+      still name in `unreadable_groups`.
     """
     try:
       text = abs_path.read_text(encoding = _ENCODING)
     except (OSError, UnicodeDecodeError):
-      # guard: unreadable or non-text file — nothing to extract
+      # guard: unreadable or non-text file — nothing to extract, and the file is remembered so
+      # its missing blocks are not read as removed ones
+      if rel not in self.unreadable:
+        self.unreadable.append(rel)
+        self.unreadable_groups[rel] = self._probe_groups(abs_path)
       return []
 
     # Domain(wiki.domains):
@@ -607,6 +814,9 @@ class DomainScanner:
       Mapping of group key to its contract block dicts (`group`, `path`, `line`, `text`, `symbol`,
       `owner_digest`), each list sorted by `(path, line)`. `owner_digest` is the digest of the code
       that owns the block.
+
+    Raises:
+      DomainScanError: When git cannot list the tracked files of the checkout.
     """
 
     # Contract:
@@ -811,6 +1021,9 @@ class _Survey:
     layout: Path mapper for the output directory.
     folded: The documents of every listed group with blocks, in slug order.
     untitled: The `{group, path, line}` of every listed block without a title.
+    unreadable: The code files the scan could not read, as repo-relative paths.
+    hidden: Per unreadable code file, the groups its block headers still name, or `None` when the file could not
+      be opened at all and may hold blocks of any group.
   """
 
   dictionary: dict[str, str]
@@ -819,6 +1032,8 @@ class _Survey:
   layout: DomainLayout
   folded: dict[str, list[dict]]
   untitled: list[dict]
+  unreadable: list[str]
+  hidden: dict[str, list[str] | None]
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -997,6 +1212,10 @@ class DomainIndex:
     - Preserves everything from the first `##` heading other than `## Discrepancies`
       onward verbatim across rebuilds.
     - Seeds a brand-new index with a `## Context map` stub.
+    - Renders the index and the section notes only from a dictionary that was read: an absent or unreadable
+      dictionary raises `DomainDictionaryError` and never yields an index that lists no group.
+    - Writes an index or section notes handed in as an already made render exactly as handed, without rendering or
+      reading the dictionary or the code again; with nothing handed in, it renders them itself.
   """
 
   # Contract:
@@ -1006,6 +1225,16 @@ class DomainIndex:
   # Contract:
   # An index rendered where none existed ALWAYS carries a `## Context map` stub,
   # so the operator half of the file is never missing.
+
+  # Contract:
+  # The index and the section notes are rendered, and so written, only from a dictionary that was read: an
+  # absent or unreadable dictionary MUST raise `DomainDictionaryError` and NEVER render an index that lists
+  # no group. A dictionary that was read and lists no group renders an index with an empty listing.
+
+  # Contract:
+  # Content handed to the index writer or the section-note writer as an already made render is written exactly
+  # as handed: the writer neither renders again nor reads the dictionary or the code again. With nothing handed
+  # in, the writer renders the content itself.
 
   # The headings and the hand-written stub the index renders
   _TITLE           = "# Domains"
@@ -1040,10 +1269,14 @@ class DomainIndex:
 
     Returns:
       The complete index file content, listing every dictionary group whose
-      folder note exists and every doc whose body has a `## Discrepancies` section, with
-      the preserved (or stub) tail sections appended.
+      folder note exists and every doc whose body has a `## Discrepancies` section (a doc that cannot be
+      read keeps the line its own Discrepancies section of the index already carries for it), with the preserved
+      (or stub) tail sections appended.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
     """
-    dictionary = DomainDictionary(path = self._cfg.repo / self._cfg.dictionary).read_groups()
+    dictionary = DomainDictionary(path = self._cfg.repo / self._cfg.dictionary).load_groups()
 
     # Domain(wiki.domains):
     # # Who owns which half of the domain index
@@ -1051,9 +1284,15 @@ class DomainIndex:
     # head: the title, the self-describing line in the language the documents are written in, one entry
     # per listed group whose folder note already exists, each carrying the gloss the dictionary gave it,
     # and the list of documents whose own Discrepancies section says they disagree with the code they
-    # describe. Everything from the
+    # describe. A document that cannot be read, because its bytes are not text or the read fails, says
+    # nothing about whether it still has that section, and a failed read is not evidence that the
+    # disagreement is gone: such a document keeps the entry the index already carries for it, and gains
+    # none it did not have, until it can be read again. Everything from the
     # first other section heading onward belongs to the operator: cross-domain relationships that no
-    # block states on its own are written there by hand and survive every rebuild.
+    # block states on its own are written there by hand and survive every rebuild. The head, like the
+    # section notes, is rendered only from a dictionary that was read: a dictionary that is missing or
+    # cannot be read says nothing about which groups are listed, so the work stops with an error instead
+    # of emptying the listing.
 
     # one line per dictionary group whose folder note exists on disk
     listing: list[str] = []
@@ -1091,13 +1330,35 @@ class DomainIndex:
     Returns:
       One `- [<title>](<path>)` line per doc with that section, sorted by path, the path
       relative to the output directory and the title taken from the doc's H1. The doc's
-      tags play no part in the selection.
+      tags play no part in the selection. A doc that cannot be read, being undecodable or unreadable, keeps only
+      the entry that the engine's own Discrepancies section of the current index carries for it (the first such
+      entry) and gains no entry it did not have there. That section is looked for only before the operator's
+      preserved tail, so a line elsewhere in the index, including a section the operator wrote in the tail under
+      the same heading, is never taken. A doc is listed at most once.
     """
     output_abs = self._cfg.repo / self._cfg.output
 
     # guard: no output tree yet — nothing can be marked
     if not output_abs.is_dir():
       return []
+
+    # the entries the engine's own section of the index carries now, one per doc: a doc that cannot be read is
+    # judged by the entry it already has there, never by a line the operator wrote elsewhere in the file
+    current: dict[str, str] = {}
+    is_engine_section = False
+    index_lines = (_read_doc_text(self._cfg.repo / self.index_rel()) or "").splitlines()
+
+    # only the engine's half of the index is read, cut where the operator's preserved tail begins: a section the
+    # operator wrote there under the same heading is the operator's
+    for line in index_lines[ : self._find_tail_start(index_lines) ]:
+      # the engine's own heading opens its section
+      if line.startswith(self._SECTION_PREFIX):
+        is_engine_section = True
+        continue
+
+      # an entry of the engine's section, kept under the doc it links to; the first one stands
+      if is_engine_section and line.startswith("- [") and line.endswith(")") and "](" in line:
+        current.setdefault(line[line.rfind("](") + 2 : -1], line)
 
     # every markdown doc of the tree with a section of its own listing disagreements, titled by its own H1
     lines: list[tuple[str, str]] = []
@@ -1111,14 +1372,23 @@ class DomainIndex:
           continue
 
         # the doc's own section, never its tag, decides whether it is listed
-        text = doc_abs.read_text(encoding = _ENCODING)
+        text = _read_doc_text(doc_abs)
+        link = rel[len(self._cfg.output) + 1:]
+
+        # a failed read is not evidence that the section is gone: the doc keeps the line the index already
+        # carries for it, and gains none it did not have, until it can be read again
+        if text is None:
+          if link in current:
+            lines.append(( link, current[link] ))
+          continue
+
+        # only a doc that carries disagreements is listed
         if not DomainPlanner.has_discrepancies(text):
           continue
 
         # the doc's own H1 names it, its file stem when it has none
         heads = [ line[2:].strip() for line in text.splitlines() if line.startswith("# ") ]
         title = heads[0] if heads else fname[:-len(_MD_EXT)]
-        link = rel[len(self._cfg.output) + 1:]
         lines.append((link, f"- [{title}]({link})"))
     return [ line for _link, line in sorted(lines) ]
 
@@ -1129,8 +1399,12 @@ class DomainIndex:
     Returns:
       Repo-relative note path to its full content, one per folder above the groups that
       is not a group itself; a section lists the groups and sections directly inside it.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
+      DomainScanError: When git cannot list the tracked code files of the checkout.
     """
-    dictionary = DomainDictionary(path = self._cfg.repo / self._cfg.dictionary).read_groups()
+    dictionary = DomainDictionary(path = self._cfg.repo / self._cfg.dictionary).load_groups()
     scanned = DomainScanner(repo = self._cfg.repo, code_globs = self._cfg.code).scan()
 
     # the groups whose folder note is written — the same ones the index lists — and the sections above them
@@ -1175,21 +1449,37 @@ class DomainIndex:
 
     Returns:
       True when a section note needs writing.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
+      DomainScanError: When git cannot list the tracked code files of the checkout.
     """
     return any(
       not (self._cfg.repo / rel).is_file() or (self._cfg.repo / rel).read_text(encoding = _ENCODING) != text
       for rel, text in self.render_sections().items()
     )
 
-  def apply_sections(self) -> list[str]:
+  def apply_sections(self, *, rendered: dict[str, str] | None = None) -> list[str]:
     """
     Write every section note that differs from its render.
 
+    Args:
+      rendered: The section notes a caller rendered already, by repo-relative path, written as given with no second
+        render; `None` renders them now.
+
     Returns:
       Sorted repo-relative paths of the notes written; empty when all were current.
+
+    Raises:
+      DomainDictionaryError: When `rendered` is `None` and the group dictionary is absent, cannot be read, or is
+        not valid UTF-8.
+      DomainScanError: When `rendered` is `None` and git cannot list the tracked code files of the checkout.
     """
     written: list[str] = []
-    for rel, text in sorted(self.render_sections().items()):
+
+    # a caller that rendered everything before writing anything hands its renders in; otherwise they are made now
+    notes = self.render_sections() if rendered is None else rendered
+    for rel, text in sorted(notes.items()):
       target = self._cfg.repo / rel
 
       # the note is current — nothing to write
@@ -1202,15 +1492,25 @@ class DomainIndex:
       written.append(rel)
     return written
 
-  def apply(self) -> bool:
+  def apply(self, *, rendered: str | None = None) -> bool:
     """
     Write the rendered index when it differs from the file on disk.
 
+    Args:
+      rendered: The index content a caller rendered already, written as given with no second render; `None`
+        renders it now.
+
     Returns:
       True when the file was (re)written, False when it was already current.
+
+    Raises:
+      DomainDictionaryError: When `rendered` is `None` and the group dictionary is absent, cannot be read, or is
+        not valid UTF-8.
     """
     index_abs = self._cfg.repo / self.index_rel()
-    rendered = self.render()
+
+    # a caller that rendered everything before writing anything hands its render in; otherwise it is made now
+    rendered = self.render() if rendered is None else rendered
     existing = index_abs.read_text(encoding = _ENCODING) if index_abs.is_file() else None
 
     # index already current — nothing to write
@@ -1226,7 +1526,7 @@ class DomainIndex:
 
     Returns:
       The preserved tail text, or an empty string when the index does not
-      exist or carries no `##` section.
+      exist or carries no `##` section other than the engine's own discrepancy list.
     """
     index_abs = self._cfg.repo / self.index_rel()
 
@@ -1234,12 +1534,29 @@ class DomainIndex:
     if not index_abs.is_file():
       return ""
     lines = index_abs.read_text(encoding = _ENCODING).splitlines()
+    start = self._find_tail_start(lines)
+
+    # everything from the operator's first heading onward, or nothing when the index has no such heading
+    return "\n".join(lines[start:]) + "\n" if start < len(lines) else ""
+
+  @classmethod
+  def _find_tail_start(cls, lines: list[str]) -> int:
+    """
+    Find where the operator's preserved tail begins in the index.
+
+    Args:
+      lines: The index content, line by line.
+
+    Returns:
+      The position of the first section heading that is not the engine's own discrepancy list, or the number of
+      lines when the index carries no such heading.
+    """
     for idx, line in enumerate(lines):
       # not a section heading, or the engine's own discrepancy list — keep looking
-      if not line.startswith(self._SECTION_PREFIX) or line.strip() == DISCREPANCIES_HEADING:
+      if not line.startswith(cls._SECTION_PREFIX) or line.strip() == DISCREPANCIES_HEADING:
         continue
-      return "\n".join(lines[idx:]) + "\n"
-    return ""
+      return idx
+    return len(lines)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1692,6 +2009,15 @@ class DomainPlanner:
       - A group filter narrows only the work lists (changed groups, anchor and link fixes,
         contract drops, orphans); the catalog, the unknown and untitled reports, and the
         index state always cover the whole tree.
+      - While the scan met a code file it could not read, no doc is reported for removal over blocks the scan did
+        not find, no link is reported as dead (`link_fixes` is empty) because the docs of that file's blocks are
+        missing from what the scan accounts for, and the unreadable file is named on stderr.
+      - A group with blocks in a code file the scan could not read is held back: no stale doc, anchor fix,
+        contract drop or folder-note rewrite is planned for it, and it is named under `held_groups`, a key
+        present only then; a file that could not be opened at all holds back every group.
+      - A group dictionary that is absent or cannot be read raises `DomainDictionaryError`, and a code listing git
+        cannot produce raises `DomainScanError`, instead of yielding a plan, so neither is planned as the
+        retirement of every doc; a dictionary that lists no group is still a valid plan.
 
     Args:
       group: Group key to restrict the work lists to; `None` plans every group.
@@ -1704,12 +2030,20 @@ class DomainPlanner:
       `stale_docs` names the slugs whose document must be rewritten),
       `anchor_fixes` (`{doc, old, new}` per stale contract anchor a current doc
       prints), `link_fixes` (`{doc, line}` per `## Related` line whose target
-      no longer exists), `contract_drops` (`{doc, line}` per `## Contracts` bullet of an existing
+      no longer exists; empty while the scan met a code file it could not read),
+      `contract_drops` (`{doc, line}` per `## Contracts` bullet of an existing
       doc citing a guarantee no attributed contract accounts for; such a citation never makes a doc
       stale), `orphaned_docs` with `orphan_reasons`, `unlisted_docs`
       (the orphans whose group left the dictionary), `unknown_groups`,
       `untitled_blocks`, `catalog` (`blocks` and `groups` of the whole tree),
       `index_path`, `index_needs_update`, `language`, `dictionary`, and `output`.
+      Also carries `unreadable` (the repo-relative paths of the code files the scan could
+      not read, sorted), present only when there are some, and `held_groups` (the groups held back because part
+      of their blocks sit in an unreadable code file, sorted), present only when there are some.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
+      DomainScanError: When git cannot list the tracked code files of the checkout.
     """
 
     # Contract:
@@ -1749,15 +2083,32 @@ class DomainPlanner:
     # rewritten too. The folder note carries the digest of the whole group, so any change to any block of
     # the group — a block added, edited or removed — rewrites the folder note, while the documents of the
     # blocks that did not change are left as they are.
+    # A code file that cannot be read cannot tell what knowledge it holds, so a group known to have blocks
+    # in it is held back whole: none of its documents is rewritten or repaired and its folder note is not
+    # regenerated, because regenerating from the readable files alone would silently drop the knowledge in
+    # the unreadable one. The groups of such a file are learnt from its block headers while the file can
+    # still be opened. A file that cannot be opened at all may hold blocks of any group, so every group is
+    # held back until it reads again.
 
     # per group: which docs are stale, which current docs only need an anchor repair, and which bullets
     # of any existing doc cite a guarantee nothing accounts for
     changed: list[dict] = []
     fixes: list[dict] = []
     drops: list[dict] = []
+    held: list[str] = []
+
+    # a group with blocks in a code file the scan could not read is known only in part: nothing is planned for
+    # it until the file reads again. A file that could not even be opened may hold blocks of any group
+    is_any_hidden = any(groups is None for groups in survey.hidden.values())
+    hidden = { name for groups in survey.hidden.values() for name in groups or [] }
     for key, docs in survey.folded.items():
       # a group filter is set and names another group
       if group is not None and key != group:
+        continue
+
+      # the group is held back, with every repair and rewrite of its docs
+      if is_any_hidden or key in hidden:
+        held.append(key)
         continue
 
       # the slugs of the docs whose stored digest no longer matches, or whose anchors cannot be repaired
@@ -1806,8 +2157,34 @@ class DomainPlanner:
     index_abs = self.cfg.repo / index.index_rel()
     current = index_abs.read_text(encoding = _ENCODING) if index_abs.is_file() else None
 
+    # Contract:
+    # A code file that cannot be read is NOT evidence that its blocks are gone: while the scan met
+    # one, no doc is reported for removal over blocks the scan did not find, no link is reported as
+    # dead (`link_fixes` is empty) because the docs of the unreadable file's blocks are missing from
+    # what the scan accounts for, and the unreadable file is named on stderr.
+
+    # Contract:
+    # A group that has blocks in a code file the scan could not read is held back: no stale doc, anchor
+    # fix, contract drop or folder-note rewrite is planned for it, and it is named under `held_groups`,
+    # a key present only then. A file that could not be opened at all holds back every group.
+
+    # Contract:
+    # A group dictionary that is absent or cannot be read raises `DomainDictionaryError`, and a code listing
+    # git cannot produce raises `DomainScanError`, instead of yielding a plan, so neither is ever planned as
+    # the retirement of every doc. A dictionary that exists and lists no group is still a valid plan.
+
+    # a paused retirement is said out loud, with the files that paused it
+    if survey.unreadable:
+      print(
+        f"domains: {len(survey.unreadable)} code file(s) could not be read, no doc is retired for "
+        f"missing blocks until they can: {', '.join(survey.unreadable)}",
+        file = sys.stderr,
+      )
+
     # docs the tree should no longer carry, and Related lines pointing at docs that will be gone
-    removals = self._removable_docs(survey.dictionary, survey.folded, survey.layout)
+    removals = self._removable_docs(
+      survey.dictionary, survey.folded, survey.layout, is_code_unreadable = bool(survey.unreadable),
+    )
     rewritten = {
       path
       for entry in changed
@@ -1815,7 +2192,10 @@ class DomainPlanner:
         doc[GROUP_DOC] for doc in entry[GROUP_DOCS] if doc[DOC_SLUG] in entry[GROUP_STALE]
       ) )
     }
-    link_fixes = self._find_all_link_fixes(survey.folded, rewritten, survey.layout)
+
+    # a link is judged dead against the docs the scan accounts for; while a code file cannot be read the docs of
+    # its blocks are missing from that account, so no link is dropped until the scan is whole again
+    link_fixes = [] if survey.unreadable else self._find_all_link_fixes(survey.folded, rewritten, survey.layout)
 
     # the filter narrows the work lists to the group's own folder — never a nested group's — and its
     # retired flat doc
@@ -1840,6 +2220,9 @@ class DomainPlanner:
       PLAN_LANGUAGE:      self.cfg.language,
       PLAN_DICTIONARY:    self.cfg.dictionary,
       PLAN_OUTPUT:        self.cfg.output,
+      # the key is additive: a plan over fully readable code is the plan it always was
+      **({ PLAN_UNREADABLE: sorted(survey.unreadable) } if survey.unreadable else {}),
+      **({ PLAN_HELD: sorted(held) } if held else {}),
     }
 
   @staticmethod
@@ -2010,21 +2393,36 @@ class DomainPlanner:
 
     Meant for a one-off run after the digest rule changes: every block doc and folder note
     whose group still has blocks in code is taken as current as written, re-anchored to
-    the new digest, and has its discrepancy tag brought in line with its own section.
+    the new digest, and has its discrepancy tag brought in line with its own section. A group
+    held back because part of its blocks sit in an unreadable code file is neither stamped
+    nor re-anchored.
 
     Guarantees:
       - No doc is created or regenerated; only the `domain_hash` frontmatter line, the
         `domains/discrepancy` tag and the stale contract anchors of existing docs are rewritten.
       - Afterwards a restamped doc carries the `domains/discrepancy` tag exactly when its body
         has a `## Discrepancies` section; every other tag is kept.
+      - A group with blocks in a code file the scan could not read is held back as `plan` holds it back: it is not
+        stamped or re-anchored at all. A file that could not be opened at all holds back every group. The result
+        names the held groups under `held_groups` and the unreadable files under `unreadable`, each present only
+        when non-empty.
+      - A group dictionary that is absent or cannot be read raises `DomainDictionaryError`, and a code listing git
+        cannot produce raises `DomainScanError`, before any doc is touched.
 
     Notes:
-      - Scans the configured code tree, reads every existing generated doc, and writes the
-        changed ones back to disk in place.
+      - Scans the configured code tree, reads the existing generated docs of every group that is not held back, and
+        writes the changed ones back to disk in place.
+      - A held group keeps its docs exactly as they are until the unreadable code file reads again.
 
     Returns:
       Dict with `docs` (sorted repo-relative paths of the docs that changed) and
-      `anchors_repaired` (count of anchors rewritten); JSON-serialisable as it stands.
+      `anchors_repaired` (count of anchors rewritten); JSON-serialisable as it stands. It also carries
+      `unreadable` (sorted code files the scan could not read) and `held_groups` (sorted groups held back
+      because part of their blocks sit in such a file), each present only when non-empty.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
+      DomainScanError: When git cannot list the tracked code files of the checkout.
     """
 
     # Contract:
@@ -2033,41 +2431,113 @@ class DomainPlanner:
     # that already exist change. A restamped doc carries the tag exactly when its body has a
     # `## Discrepancies` section; every other tag is kept.
 
+    # Contract:
+    # A restamp holds back the same groups a plan holds back: a group with blocks in a code file the scan
+    # could not read is NEVER stamped or re-anchored, because its digest would rest on the readable files
+    # alone. A file that could not be opened at all holds back every group. The result names such groups
+    # under `held_groups` and the unreadable files under `unreadable`, each present only when non-empty.
+
+    # Contract:
+    # A group dictionary that is absent or cannot be read raises `DomainDictionaryError`, and a code listing
+    # git cannot produce raises `DomainScanError`, before any doc is touched, so a restamp never runs over an
+    # unknown set of listed groups or of blocks in code.
+
     survey = self._read_survey()
+    stamps, held = self._plan_restamp(survey)
 
     # per existing file: repair what resolves, then overwrite the stored digest with the current one
     touched: set[str] = set()
     anchors = 0
+    for doc_rel, digest, contracts in stamps:
+      # the anchor repair runs first, so the stamped text below already carries the new anchors
+      fixes = (self._read_anchor_fixes(doc_rel, contracts) or []) if contracts else []
+      anchors += len(fixes)
+      touched.update(self.apply_anchor_fixes(fixes))
+
+      # the stamps: the doc as it stands, re-anchored to the current digest and tagged by its own section
+      doc_file = TextFile(path = self.cfg.repo / doc_rel)
+      text = doc_file.read()
+      stamped = self.stamp_discrepancy_tag(self.stamp_hash(text, digest))
+
+      # both stamps are already current — the anchors above were the whole change
+      if stamped == text:
+        continue
+      doc_file.write(stamped)
+      touched.add(doc_rel)
+
+    # the held groups and the files that held them are named only when there are some
+    return {
+      RESTAMP_DOCS:    sorted(touched),
+      RESTAMP_ANCHORS: anchors,
+      **({ PLAN_UNREADABLE: sorted(survey.unreadable) } if survey.unreadable else {}),
+      **({ PLAN_HELD: sorted(held) } if held else {}),
+    }
+
+  def find_all_restamp_docs(self) -> list[str]:
+    """
+    List the generated docs a restamp would read and may rewrite.
+
+    Lets a caller record exactly those docs before a restamp runs, without touching any of them.
+
+    Guarantees:
+      - A restamp rewrites no doc outside the returned list, so a caller may record exactly these docs before it
+        runs and rely on nothing else changing.
+      - Listing reads and writes no doc.
+
+    Returns:
+      Sorted repo-relative paths of the existing block docs and folder notes of every group that still has
+      blocks in code and is not held back.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
+      DomainScanError: When git cannot list the tracked code files of the checkout.
+    """
+
+    # Contract:
+    # A restamp rewrites no doc outside the returned list: a caller may record exactly these docs before it
+    # runs and rely on nothing else changing. Listing itself reads and writes no doc.
+
+    # the same choice of docs the restamp itself makes, with nothing read or written
+    stamps, _held = self._plan_restamp(self._read_survey())
+    return sorted(doc_rel for doc_rel, _digest, _contracts in stamps)
+
+  def _plan_restamp(self, survey: _Survey) -> tuple[list[tuple[str, str, list[dict]]], list[str]]:
+    """
+    Choose the existing docs a restamp stamps and the groups it holds back.
+
+    A group with blocks in a code file the scan could not read is held back whole, exactly as a plan holds it back.
+    Every other group contributes its existing block docs and its folder note.
+
+    Args:
+      survey: The scanned code and dictionary, folded into documents.
+
+    Returns:
+      Two lists: the docs to stamp, each as a tuple of its repo-relative path, its current digest and the contracts
+      attributed to it, and the keys of the groups held back.
+    """
+    stamps: list[tuple[str, str, list[dict]]] = []
+    held: list[str] = []
+
+    # a group with blocks in a code file the scan could not read is known only in part, exactly as for a plan:
+    # its digests would be computed from the readable files alone, so nothing of it is stamped until the file
+    # reads again. A file that could not even be opened may hold blocks of any group
+    is_any_hidden = any(groups is None for groups in survey.hidden.values())
+    hidden = { name for groups in survey.hidden.values() for name in groups or [] }
     for key, docs in survey.folded.items():
-      stamps = [ (doc[GROUP_DOC], doc[GROUP_HASH], doc[GROUP_CONTRACTS]) for doc in docs ]
-      stamps.append((
+      # the group is held back whole
+      if is_any_hidden or key in hidden:
+        held.append(key)
+        continue
+
+      # every block doc of the group, then its folder note; a doc with no file has nothing to stamp
+      candidates = [ (doc[GROUP_DOC], doc[GROUP_HASH], doc[GROUP_CONTRACTS]) for doc in docs ]
+      candidates.append((
         survey.layout.folder_note_rel(key),
         self.compute_group_hash(survey.scanned[key], survey.contracts.get(key) or []),
         [],
       ))
-      for doc_rel, digest, contracts in stamps:
-        doc_abs = self.cfg.repo / doc_rel
-
-        # guard: no file to stamp
-        if not doc_abs.is_file():
-          continue
-
-        # the anchor repair runs first, so the stamped text below already carries the new anchors
-        fixes = (self._read_anchor_fixes(doc_rel, contracts) or []) if contracts else []
-        anchors += len(fixes)
-        touched.update(self.apply_anchor_fixes(fixes))
-
-        # the stamps: the doc as it stands, re-anchored to the current digest and tagged by its own section
-        doc_file = TextFile(path = doc_abs)
-        text = doc_file.read()
-        stamped = self.stamp_discrepancy_tag(self.stamp_hash(text, digest))
-
-        # both stamps are already current — the anchors above were the whole change
-        if stamped == text:
-          continue
-        doc_file.write(stamped)
-        touched.add(doc_rel)
-    return { RESTAMP_DOCS: sorted(touched), RESTAMP_ANCHORS: anchors }
+      stamps.extend(entry for entry in candidates if (self.cfg.repo / entry[0]).is_file())
+    return stamps, held
 
   def _read_survey(self) -> _Survey:
     """
@@ -2075,9 +2545,14 @@ class DomainPlanner:
 
     Returns:
       The dictionary, the scanned blocks and contracts, the layout, the folded documents
-      of every listed group that has blocks, and the blocks that carry no title.
+      of every listed group that has blocks, the blocks that carry no title, and the unreadable code files with
+      the groups they still name.
+
+    Raises:
+      DomainDictionaryError: When the group dictionary is absent, cannot be read, or is not valid UTF-8.
+      DomainScanError: When git cannot list the tracked code files of the checkout.
     """
-    dictionary = DomainDictionary(path = self.cfg.repo / self.cfg.dictionary).read_groups()
+    dictionary = DomainDictionary(path = self.cfg.repo / self.cfg.dictionary).load_groups()
     scanner = DomainScanner(repo = self.cfg.repo, code_globs = self.cfg.code)
     scanned = scanner.scan()
     contracts = scanner.scan_contracts()
@@ -2104,6 +2579,8 @@ class DomainPlanner:
       layout     = layout,
       folded     = folded,
       untitled   = untitled,
+      unreadable = list(scanner.unreadable),
+      hidden     = dict(scanner.unreadable_groups),
     )
 
   def _fold_docs(self,
@@ -2265,6 +2742,8 @@ class DomainPlanner:
     # renamed — the link is dropped from the related list mechanically, without waking a writer; a link is
     # dead when its target is neither a document the tree will hold nor a file outside the tree. Pointing
     # it at the renamed document is left to the next regeneration of the linking group.
+    # While a code file cannot be read, the documents of its blocks are missing from the account the links are
+    # judged against, so no link is dropped as dead until the scan is whole again.
 
     # what the tree will hold once this round is applied, the engine's index included
     live = { doc[GROUP_DOC] for docs in folded.values() for doc in docs }
@@ -2286,7 +2765,7 @@ class DomainPlanner:
 
       # each Related line is dead as soon as one of its local targets is
       base = posixpath.dirname(rel)
-      for line in self._read_related_lines(doc_abs.read_text(encoding = _ENCODING)):
+      for line in self._read_related_lines(_read_doc_text(doc_abs) or ""):
         for target in _LINK_TARGET_RE.findall(line):
           # an external link is never judged
           if "://" in target:
@@ -2401,7 +2880,7 @@ class DomainPlanner:
       return []
 
     # what the doc prints against what the code carries
-    anchors = self.parse_doc_anchors(doc_abs.read_text(encoding = _ENCODING))
+    anchors = self.parse_doc_anchors(_read_doc_text(doc_abs) or "")
     current_paths = { contract[BLOCK_PATH] for contract in contracts }
     doc_paths = { path for _old, path, _symbol in anchors }
 
@@ -2464,7 +2943,7 @@ class DomainPlanner:
     # the bullet goes when nothing attributed to the doc accounts for its anchor
     return [
       { FIX_DOC: doc_rel, FIX_LINE: bullet }
-      for bullet, path, symbol in self.parse_contract_bullets(doc_abs.read_text(encoding = _ENCODING))
+      for bullet, path, symbol in self.parse_contract_bullets(_read_doc_text(doc_abs) or "")
       if self._is_unattributed(path, symbol, contracts)
     ]
 
@@ -2688,7 +3167,9 @@ class DomainPlanner:
   def _removable_docs(self,
                       dictionary: dict[str, str],
                       folded: dict[str, list[dict]],
-                      layout: DomainLayout) -> dict[str, str]:
+                      layout: DomainLayout,
+                      *,
+                      is_code_unreadable: bool) -> dict[str, str]:
     """
     Map every generated doc the tree should no longer carry to its removal reason.
 
@@ -2696,6 +3177,8 @@ class DomainPlanner:
       dictionary: Group→gloss mapping from the dictionary file.
       folded: The documents of every listed group with blocks.
       layout: Path mapper for the output directory.
+      is_code_unreadable: Whether the scan met a code file it could not read; while one stands, no
+        doc is retired for blocks the scan did not find.
 
     Returns:
       Mapping of repo-relative POSIX doc path to its removal reason (`legacy-layout`,
@@ -2716,6 +3199,14 @@ class DomainPlanner:
     # retitled as gone. The single document per group that the earlier layout wrote beside the group folder
     # is retired as legacy, so moving to the folder layout is an ordinary regeneration. Retirement always
     # carries its reason; a document is never dropped silently.
+    # Retirement rests on three lookups: which groups the dictionary lists, which blocks the code still
+    # holds, and which documents git tracks. A lookup that failed is never an empty answer. A dictionary
+    # that lists no group withdraws every group and its documents are retired, but a dictionary that is
+    # missing or cannot be read says nothing about which groups are listed. A code listing git cannot
+    # produce says nothing about which blocks are left, and an unanswered question about which documents
+    # git tracks says nothing about which removals are to be recorded. Any of the three stops the
+    # reconciliation with an error before anything is removed, and it resumes once the lookup can be
+    # answered. Outside any git checkout there is simply no code to scan.
 
     # what the tree is meant to hold, and where the retired layout put each listed group's doc
     expected = { doc[GROUP_DOC] for docs in folded.values() for doc in docs }
@@ -2739,6 +3230,9 @@ class DomainPlanner:
           removals[rel] = DOC_REASON_LEGACY
         elif ref.group not in dictionary:
           removals[rel] = DOC_REASON_UNLISTED
+        elif is_code_unreadable:
+          # the missing blocks may sit in the unreadable file — the doc stays until the scan is whole
+          continue
         elif ref.group not in folded:
           removals[rel] = DOC_REASON_NO_BLOCKS
         else:
@@ -2787,13 +3281,13 @@ class DomainPlanner:
       doc_abs: Absolute path of the doc.
 
     Returns:
-      The parsed frontmatter mapping; empty when the doc is absent, carries none, or its frontmatter is not a
-      mapping.
+      The parsed frontmatter mapping; empty when the doc is absent, cannot be read as UTF-8 text, carries none, or
+      its frontmatter is not a mapping.
     """
     # guard: doc not generated yet
     if not doc_abs.is_file():
       return {}
-    return cls.parse_frontmatter(doc_abs.read_text(encoding = _ENCODING))
+    return cls.parse_frontmatter(_read_doc_text(doc_abs) or "")
 
   @staticmethod
   def read_stored_hash(doc_abs: Path) -> str | None:

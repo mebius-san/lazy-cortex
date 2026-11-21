@@ -26,6 +26,8 @@ import error_ledger  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from runtime_daemon import check_working_tree  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
   HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
   IncidentResolution, JobArtifact, JobFile, JobIODir, JobMarker, RecoverMode,
@@ -81,85 +83,177 @@ def read_halt(repo: Path) -> dict | None:
   return runtime_state.get_halted(repo)
 
 
-def is_clean(repo: Path) -> bool:
-  """
-  Report whether the working tree of the given repository has no pending changes.
-
-  Guarantees:
-    - An ambiguous condition — no git repository at the path, git unavailable, or a failed
-      invocation — resolves to clean rather than raising; only an actual pending modification
-      reports as dirty.
-
-  Args:
-    repo: Absolute path to the repository root.
-
-  Returns:
-    True when there are no tracked or untracked modifications, or when the path
-    is not a git repository or git is unavailable. False when modifications are
-    present.
-  """
-
-  # Contract:
-  # An ambiguous condition — the path is not a git repository, git itself is unavailable, or
-  # the invocation fails — MUST resolve to clean, never raised as an exception; only an actual
-  # pending modification reports as dirty.
-
-  try:
-    proc = subprocess.run(
-      [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
-    )
-  except FileNotFoundError:
-    return True
-
-  # guard: git produced a non-zero exit — treat as clean to avoid wedging recovery on transient errors
-  if proc.returncode != 0:
-    return True
-  return proc.stdout.strip() == ""
-
-
 # A `git status --porcelain` line opens with the index and worktree status codes and the
 # space that separates them from the path, so its path starts at the fourth character.
 # Porcelain writes a rename or a copy as `ORIG -> PATH`, under one of these index codes.
 _PORCELAIN_PREFIX_WIDTH = 3
 _RENAME_ARROW = " -> "
 _RENAME_CODES = "RC"
-# `runtime_daemon.check_working_tree` caps a long dirty list with a sentinel line that names
-# no path at all. It reaches here whenever a caller hands the halt block straight over.
+# `runtime_daemon.check_working_tree` writes two kinds of line that name no path at all: the one
+# that caps a long dirty list, and the one that stands for a tree it could not read. Both open
+# with this prefix and reach here whenever a caller hands the halt block straight over; the
+# contract of `check_working_tree` relies on this prefix filtering both.
 _TRUNCATION_PREFIX = "..."
+# The per-path pathspec magic that makes git take one path as written. A git call that writes or can run
+# a hook marks each path with it, because the global `--literal-pathspecs` option reaches the hooks' environment.
+_LITERAL_MAGIC = ":(literal)"
+# The character that opens a path porcelain spelled quoted; a plain spelling never starts with it.
+_QUOTE = '"'
+# The exit code of `git ls-files --error-unmatch` for a path git does not track; any other failure is fatal.
+_UNMATCHED_EXIT = 1
 
 
-def _unquote(path: str) -> str:
+def _mark_literal(paths: list[str]) -> list[str]:
   """
-  Decode one C-style quoted porcelain path back to the name that is on disk.
+  Mark each path so git takes it as written and never as a pattern.
 
-  Git wraps a path in double quotes and escapes it whenever the name carries a quote, a
-  backslash, a control character, or — unless `core.quotePath` is off — a non-ASCII byte,
-  written as three octal digits per byte. The daemon now asks for raw names, but a halt block
-  recorded before it did still carries the escaped form, and a quote or backslash in a name is
-  escaped either way.
+  The marking is per path, so hooks that a git call runs inherit no literal-pathspec setting.
 
   Args:
-    path: One path as porcelain spelled it, quoted or plain.
+    paths: Paths relative to the directory git runs in.
 
   Returns:
-    The unescaped name; the argument unchanged when it was not a quoted path.
+    The paths in the order given, each marked as a literal path.
   """
-  # guard: only a quoted path carries escapes — anything else is already the name
-  if len(path) < 2 or not path.startswith('"') or not path.endswith('"'):
-    return path
-
-  # git escapes the name's bytes, so the escapes read back as latin-1 code points first and
-  # the name itself is their UTF-8 reading
-  # waiver: the latin-1 round trip is the standard way to read byte escapes out of a str
-  escaped = path[1:-1].encode("latin-1", "backslashreplace").decode("unicode_escape")
-  # waiver: stdlib codec and error-handler names of the same latin-1 round trip
-  return escaped.encode("latin-1", "backslashreplace").decode("utf-8", "replace")
+  return [ f"{_LITERAL_MAGIC}{path}" for path in paths ]
 
 
-def _pathspecs_from_dirty(lines: list[str], *, porcelain: bool) -> list[str]:
+def _read_status(repo: Path, *, is_nul_separated: bool) -> str:
   """
-  Derive committable pathspecs from a path list whose shape the caller declared.
+  Read the tree's dirty listing as exact paths or as the lines a halt block records.
+
+  Args:
+    repo: Absolute path to the repository root.
+    is_nul_separated: True for the NUL-separated listing that names every path exactly; False for the line
+      listing spelled the way the daemon records it in a halt block.
+
+  Returns:
+    The listing as git wrote it, with undecodable bytes kept as surrogate escapes.
+
+  Raises:
+    subprocess.CalledProcessError: If the underlying git command exits with a non-zero status.
+  """
+  # both listings match the one the daemon records in a halt block: an untracked folder is one entry
+  if is_nul_separated:
+    proc = subprocess.run(
+      [ "git", "--no-optional-locks", "-c", "color.status=never", "-c", "core.quotePath=false",
+        "status", "--porcelain", "--untracked-files=normal", "-z" ],
+      cwd = str(repo), capture_output = True, check = True,
+    )
+  else:
+    proc = subprocess.run(
+      [ "git", "--no-optional-locks", "-c", "color.status=never", "-c", "core.quotePath=false",
+        "status", "--porcelain", "--untracked-files=normal" ],
+      cwd = str(repo), capture_output = True, check = True,
+    )
+
+  # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+  return proc.stdout.decode(
+    "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+  )
+
+
+def _spell_escaped(spelling: str) -> str:
+  """
+  Give the spelling a line has for a path when every byte that is not ASCII is written as an escape.
+
+  This is the spelling an older daemon recorded in a halt block.
+
+  Args:
+    spelling: The path as a line spells it with such bytes left as they are.
+
+  Returns:
+    The path quoted, each byte that is not ASCII written as a backslash and three octal digits; the spelling
+    unchanged when it has no such byte.
+  """
+  # waiver: stdlib codec and decode-error mode names, not domain constants
+  raw = spelling.encode("utf-8", "surrogateescape")
+
+  # guard: a path of plain ASCII is spelled the same either way
+  if raw.isascii():
+    return spelling
+
+  # an already quoted spelling keeps its escapes; the quotes are put back around the result
+  body = raw[1:-1] if raw.startswith(b'"') and raw.endswith(b'"') else raw
+  # waiver: the top of the ASCII range and the octal escape format, not domain constants
+  escaped = "".join(chr(byte) if byte < 128 else f"\\{byte:03o}" for byte in body)
+  return f'"{escaped}"'
+
+
+def _parse_status_entries(listing: str) -> list[list[str]]:
+  """
+  Split a NUL-separated porcelain listing into the exact paths of each entry.
+
+  Args:
+    listing: Output of `git status --porcelain -z`.
+
+  Returns:
+    One list per entry, in listing order: the entry's path, followed by its source path when the entry is a
+    rename or a copy.
+  """
+  # each entry is `XY <path>`; a rename or copy entry is followed by its source path as a field of its own
+  fields = listing.split("\0")
+  entries: list[list[str]] = []
+  index = 0
+  while index < len(fields):
+    entry = fields[index]
+    index += 1
+
+    # guard: the listing ends with a NUL, and an entry shorter than its prefix names no path
+    if len(entry) <= _PORCELAIN_PREFIX_WIDTH:
+      continue
+    entries.append([ entry[_PORCELAIN_PREFIX_WIDTH:] ])
+
+    # the source path of a rename or copy carries no status prefix
+    if set(entry[:2]) & set(_RENAME_CODES) and index < len(fields):
+      entries[-1].append(fields[index])
+      index += 1
+  return entries
+
+
+def _read_dirty_spellings(repo: Path) -> dict[str, list[str]]:
+  """
+  Map each spelling a recorded line may give a dirty entry to the exact paths of that entry.
+
+  The spellings of an entry are the current one and the escaped one that a block of an older daemon recorded.
+
+  Args:
+    repo: Absolute path to the repository root.
+
+  Returns:
+    Each spelling of a dirty entry's path text, the current one and the escaped one, mapped to the entry's exact
+    paths as the NUL-separated listing names them.
+
+  Raises:
+    RecoverError: If the tree changed between the two listings, so their entries no longer pair up.
+    subprocess.CalledProcessError: If an invoked git command exits with a non-zero status.
+  """
+  # the NUL-separated listing names each dirty path exactly, never quoted
+  entries = _parse_status_entries(_read_status(repo, is_nul_separated = True))
+
+  # the line listing spells the same entries in the same order
+  lines = [ line for line in _read_status(repo, is_nul_separated = False).split("\n") if line ]
+
+  # guard: listings of different length were read off a tree that changed in between
+  if len(lines) != len(entries):
+    raise RecoverError("working tree changed while its dirty paths were read; run the cleanup again")
+
+  # the text after the status prefix is the key, since the status codes may have moved since the halt; a block
+  # recorded by an older daemon spells bytes that are not ASCII as escapes, so that spelling is a key as well
+  spellings: dict[str, list[str]] = {}
+  for line, names in zip(lines, entries, strict = True):
+    spelling = line[_PORCELAIN_PREFIX_WIDTH:]
+    spellings[spelling] = names
+    spellings[_RENAME_ARROW.join(_spell_escaped(side) for side in spelling.split(_RENAME_ARROW))] = names
+  return spellings
+
+
+def _pathspecs_from_dirty(lines: list[str], *, porcelain: bool,
+                          spellings: dict[str, list[str]] | None = None) -> list[str]:
+  """
+  Resolve a path list whose shape the caller declared into the repo-relative paths it names.
 
   A halt block records its dirty tree as `git status --porcelain` lines, so the doctor hands
   the block over as it stands and says so with `porcelain = True`; an operator naming paths
@@ -170,21 +264,24 @@ def _pathspecs_from_dirty(lines: list[str], *, porcelain: bool) -> list[str]:
   Args:
     lines: Porcelain status lines when `porcelain` is true, else bare repo-relative paths.
     porcelain: True when every line carries a `git status --porcelain` status prefix.
+    spellings: Exact paths of the tree's dirty entries, keyed by the text a porcelain line gives them; None
+      when the tree was not read.
 
   Returns:
-    The repo-relative paths named, in the order given, with lines naming no path dropped. A
-    porcelain rename or copy line yields both of its sides, and a C-style quoted path is
-    unescaped.
+    The repo-relative paths named, in the order given, with lines naming no path dropped. A line the tree still
+    lists yields the exact paths git names for that entry, both sides of a rename or copy included; a quoted
+    line the tree no longer lists is dropped.
   """
 
   # bare paths are already the pathspec — no prefix to strip, no escaping to undo
   if not porcelain:
     return [line for line in lines if line]
 
-  # every porcelain line, stripped of its status prefix and unescaped back to the name on disk
+  # every porcelain line, stripped of its status prefix and resolved to the name on disk
   out: list[str] = []
   for line in lines:
-    # guard: the truncation sentinel is prose about the list, not an entry in it
+    # guard: the truncation line and the unreadable-tree line are prose about the list, not entries in it;
+    # the contract of `check_working_tree` relies on both being passed over here
     if line.startswith(_TRUNCATION_PREFIX):
       continue
 
@@ -195,13 +292,18 @@ def _pathspecs_from_dirty(lines: list[str], *, porcelain: bool) -> list[str]:
     # the path follows the status prefix
     path = line[_PORCELAIN_PREFIX_WIDTH:]
 
+    # guard: a line the tree still spells this way names exactly the paths git itself lists for that entry
+    if spellings is not None and path in spellings:
+      out.extend(spellings[path])
+      continue
+
     # a rename names both sides and both belong in one commit: staging the pair records the
     # new path and the old one's removal together, so no half-applied move is left behind
     parts = path.rsplit(_RENAME_ARROW, 1) if line[0] in _RENAME_CODES else [path]
 
-    # each side is quoted on its own, so unquoting follows the split rather than preceding it
-    # a blank entry is dropped, since it would widen the pathspec to the whole directory
-    out.extend(_unquote(part) for part in parts if part)
+    # a blank entry is dropped, since it would widen the pathspec to the whole directory; a quoted
+    # spelling the tree no longer lists names nothing dirty and is never guessed back into a name
+    out.extend(part for part in parts if part and not part.startswith(_QUOTE))
   return out
 
 
@@ -232,6 +334,11 @@ def cleanup(repo: Path, mode: str, message: str | None = None, *,
   """
   Bring the working tree of the given repository into a clean state per the operator's choice.
 
+  Guarantees:
+    - With `porcelain` true, each path named by a recorded halt line acts on exactly the file that line named,
+      whatever characters its name holds. A quoted line the tree no longer lists is dropped, and if the tree
+      changes while it is being read, the call is refused with `RecoverError`.
+
   Args:
     repo: Absolute path to the repository root.
     mode: One of `commit`, `stash`, `discard`, `abort`, or `manual-fix`. `commit` stages the paths in `paths`
@@ -243,19 +350,27 @@ def cleanup(repo: Path, mode: str, message: str | None = None, *,
       block.
     message: Commit message to use when `mode` is `commit`. Required and must be non-empty
       in that mode; ignored otherwise.
-    paths: Paths the commit is limited to, in the shape `porcelain` declares. Empty or None
-      stages every change, the operator-hatch shape. Ignored outside `commit` mode.
+    paths: Paths the commit is limited to, in the shape `porcelain` declares, taken literally and never as
+      patterns. Empty or None stages every change, the operator-hatch shape. Ignored outside `commit` mode.
     porcelain: True when `paths` carries the `git status --porcelain` lines a halt block
       records — the doctor hands the block's `dirty_paths` over as it stands, so its commit
       never publishes dirt it did not classify, and a rename line contributes both of its
-      sides so the move lands whole. False, the default, takes `paths` as bare repo-relative
-      names, the shape an operator types.
+      sides so the move lands whole. The recorded lines are resolved against the tree's own listing, so each
+      names exactly its file; a quoted line the tree no longer lists is dropped. False, the default, takes
+      `paths` as bare repo-relative names, the shape an operator types.
 
   Raises:
     RecoverError: If `mode` is not recognised, if `mode` is `commit` and `message` is empty,
-      or if `paths` names entries from which no committable path could be derived.
+      if `paths` names entries from which no committable path could be derived, or if the working tree changes
+      while its dirty paths are being read.
     subprocess.CalledProcessError: If an invoked git command exits with a non-zero status.
   """
+
+  # Contract:
+  # With `porcelain` true, each path named by a recorded halt line acts on exactly the file that line named,
+  # whatever characters its name holds. A quoted line the tree no longer lists is dropped and NEVER guessed
+  # back into a name. If the tree changes while it is being read, the call is refused with `RecoverError`.
+
   # guard: reject unrecognised cleanup mode before invoking any git command
   if mode not in VALID_MODES:
     raise RecoverError(f"unknown cleanup mode: {mode!r}")
@@ -272,7 +387,11 @@ def cleanup(repo: Path, mode: str, message: str | None = None, *,
 
     # a named path set is the whole footprint; an unnamed one is the operator's capture-all
     named = list(paths or [])
-    pathspec = _pathspecs_from_dirty(named, porcelain = porcelain)
+
+    # porcelain lines may spell a name quoted, so the exact names are read off the tree itself and the
+    # lines only select among them
+    spellings = _read_dirty_spellings(repo) if porcelain and named else None
+    pathspec = _pathspecs_from_dirty(named, porcelain = porcelain, spellings = spellings)
 
     # guard: the caller named paths but none resolved — refuse rather than widen to capture-all
     if named and not pathspec:
@@ -285,13 +404,15 @@ def cleanup(repo: Path, mode: str, message: str | None = None, *,
       subprocess.run([ "git", "add", "-A" ],
                      cwd = str(repo), check = True, capture_output = True)
     elif to_stage:
-      subprocess.run([ "git", "add", "--", *to_stage ],
+      subprocess.run([ "git", "add", "--", *_mark_literal(to_stage) ],
                      cwd = str(repo), check = True, capture_output = True)
 
-    # the commit carries every named path, staged here or staged before it got here
+    # the commit carries every named path, staged here or staged before it got here; each is a
+    # name read off the tree, so git takes it literally and never as a pattern — marked per path,
+    # so the hooks the commit runs inherit no literal-pathspec setting
     commit_cmd = ["git", "commit", "-m", message]
     if pathspec:
-      commit_cmd += ["--", *pathspec]
+      commit_cmd += ["--", *_mark_literal(pathspec)]
     subprocess.run(commit_cmd, cwd = str(repo), check = True, capture_output = True)
     return
 
@@ -318,18 +439,22 @@ def resume(repo: Path) -> None:
   """
   Clear the active halt block for the given repository so the daemon can resume work.
 
-  Reason-aware: only `uncommitted_changes` requires a clean working tree (that is the
+  Reason-aware: only `uncommitted_changes` requires a working tree known to be clean (that is the
   halt's root cause and clearing without committing would re-halt immediately). Any
   other halt reason clears unconditionally — if the underlying cause still holds, the
   daemon will re-halt on the next iteration.
+
+  Guarantees:
+    - A halt over uncommitted changes is never lifted while the working tree is not known clean: a dirty tree and a
+      tree that could not be read both raise `RecoverError` and keep the halt.
 
   Args:
     repo: Absolute path to the repository root.
 
   Raises:
     RecoverError: If the active halt is `uncommitted_changes` and the working tree
-      still has pending changes; the error message lists the offending paths in
-      `git status --porcelain` form.
+      still has pending changes, or could not be read. For a dirty tree the error message lists the offending
+      lines in `git status --porcelain` form; for a tree that could not be read it carries the one line saying so.
   """
 
   # Domain(runtime.incidents):
@@ -342,6 +467,10 @@ def resume(repo: Path) -> None:
   # invalid routine configuration, a closed rate-limit window — so clearing any of those never
   # depends on the tree's state, whatever that state happens to be at the moment.
 
+  # Contract:
+  # A halt over uncommitted changes is NEVER lifted while the working tree is not known clean: a dirty tree and a
+  # tree that could not be read both raise `RecoverError` and keep the halt.
+
   halt = runtime_state.get_halted(repo)
 
   # guard: daemon is not halted — nothing to clear
@@ -349,17 +478,13 @@ def resume(repo: Path) -> None:
     return
   reason = halt.get(HaltKey.REASON)
 
-  # guard: dirty-tree halt specifically requires a clean tree before clearing
-  if reason == HaltReason.UNCOMMITTED_CHANGES and not is_clean(repo):
-    # re-query porcelain status so the error message names the offending paths
-    proc = subprocess.run(
-      [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
-    )
-    raise RecoverError(
-      "working tree still dirty; refusing to resume:\n"
-      f"{proc.stdout.strip()}"
-    )
+  # a dirty-tree halt specifically requires a clean tree before clearing; the tree is read once, and that
+  # one reading both decides and names the offending paths, or says that the tree could not be read
+  dirt = check_working_tree(repo) if reason == HaltReason.UNCOMMITTED_CHANGES else None
+
+  # guard: a tree that is dirty, or that could not be read, keeps the halt
+  if dirt is not None:
+    raise RecoverError("working tree still dirty; refusing to resume:\n" + "\n".join(dirt))
   runtime_state.clear_halted(repo)
   error_ledger.resolve(repo, f"halt:{repo.name}", resolution = IncidentResolution.RESUMED,
                        kind = IncidentKind.DAEMON_HALT, actor = IncidentActor.RECOVER)
@@ -397,7 +522,8 @@ def revert_files(repo: Path, paths: list[str]) -> None:
 
   Args:
     repo: Absolute path to the repository root.
-    paths: Repository-relative paths to restore. An empty list is a no-op.
+    paths: Repository-relative paths to restore, taken literally and never as patterns. An empty list is a
+      no-op.
 
   Raises:
     subprocess.CalledProcessError: If the underlying git command exits with a non-zero status.
@@ -406,7 +532,7 @@ def revert_files(repo: Path, paths: list[str]) -> None:
   if not paths:
     return
   subprocess.run(
-    [ "git", "checkout", "HEAD", "--", *paths ],
+    [ "git", "checkout", "HEAD", "--", *_mark_literal(paths) ],
     cwd = str(repo), check = True, capture_output = True,
   )
 
@@ -470,23 +596,34 @@ def _is_in_scope(path: str, scope: list[str]) -> bool:
   return any(norm == root or norm.startswith(root + os.sep) for root in scope)
 
 
-def _is_untracked(repo: Path, path: str) -> bool:
+def _is_untracked(repo: Path, path: str) -> bool | None:
   """
-  Check whether a path exists on disk but is unknown to git.
+  Tell whether a path is untracked, tracked, or unknown because git could not answer.
 
   Args:
     repo: Absolute path to the repository root.
     path: Repository-relative path to test.
 
   Returns:
-    True when the path exists in the working tree and git does not track it.
+    True when the path exists in the working tree and git does not track it, False when git tracks it or the path
+    is absent, and None when git could not answer.
   """
-  # a path present on disk that git has never recorded is untracked
+  # git answers through the exit code: tracked, not tracked, or a failure that answers nothing
   proc = subprocess.run(
-    [ "git", "ls-files", "--error-unmatch", "--", path ],
+    [ "git", "--literal-pathspecs", "ls-files", "--error-unmatch", "--", path ],
     cwd = str(repo), capture_output = True, check = False,
   )
-  return proc.returncode != 0 and (repo / path).exists()
+
+  # guard: git knows the path
+  if proc.returncode == 0:
+    return False
+
+  # guard: any failure other than "not tracked" leaves the question open
+  if proc.returncode != _UNMATCHED_EXIT:
+    return None
+
+  # a path present on disk that git has never recorded is untracked
+  return (repo / path).exists()
 
 
 def _find_all_dirty_paths(repo: Path, paths: list[str]) -> list[str]:
@@ -498,17 +635,29 @@ def _find_all_dirty_paths(repo: Path, paths: list[str]) -> list[str]:
     paths: Repository-relative paths to inspect.
 
   Returns:
-    The subset of the named paths that git reports as modified or untracked; empty when all are clean.
+    The subset of the named paths that git reports as modified or untracked, spelled unquoted with
+    undecodable bytes kept as surrogate escapes; a renamed or copied path is listed as its new path
+    followed by its old one. Empty when all are clean.
 
   Raises:
     subprocess.CalledProcessError: If the underlying git command exits with a non-zero status.
   """
-  # porcelain lists exactly the named paths that still differ from HEAD
+  # porcelain lists exactly the named paths that still differ from HEAD; the names are taken
+  # literally, and the NUL-separated listing spells each one as written, never quoted
   proc = subprocess.run(
-    [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain", "--", *paths ],
-    cwd = str(repo), capture_output = True, text = True, check = True, encoding = "utf-8",
+    [ "git", "--no-optional-locks", "--literal-pathspecs", "-c", "color.status=never",
+      "status", "--porcelain", "-z", "--", *paths ],
+    cwd = str(repo), capture_output = True, check = True,
   )
-  return _pathspecs_from_dirty(proc.stdout.splitlines(), porcelain = True)
+
+  # each entry is `XY <path>`; a rename or copy entry is followed by its source path as a field of
+  # its own, and both sides count as dirty; the listing is captured as bytes and decoded here
+  listing = proc.stdout.decode(
+    "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+  )
+  return [ path for entry in _parse_status_entries(listing) for path in entry ]
 
 
 def revert_and_retry(repo: Path, jdir: Path, paths: list[str], *, remove_untracked: bool = False) -> list[str]:
@@ -523,6 +672,9 @@ def revert_and_retry(repo: Path, jdir: Path, paths: list[str], *, remove_untrack
       and the still-dirty paths are returned.
     - An untracked path outside the job's own scope is never deleted; a call naming one is refused as a whole
       before any named path is touched.
+    - A path is removed as untracked only when git answered that it is untracked; when the lookup fails for any
+      other reason, the call is refused with `RecoverError` before anything is touched, and a failed lookup is
+      never read as "untracked".
 
   Args:
     repo: Absolute path to the repository root.
@@ -535,7 +687,8 @@ def revert_and_retry(repo: Path, jdir: Path, paths: list[str], *, remove_untrack
     was re-armed.
 
   Raises:
-    RecoverError: If `remove_untracked` is set and a named untracked path lies outside the job's scope.
+    RecoverError: If `remove_untracked` is set and a named untracked path lies outside the job's scope, or if git
+      cannot say whether a named path is untracked; nothing is touched in either case.
     subprocess.CalledProcessError: If an invoked git command exits with a non-zero status.
   """
 
@@ -547,8 +700,19 @@ def revert_and_retry(repo: Path, jdir: Path, paths: list[str], *, remove_untrack
   # An untracked path outside the job's own scope is NEVER deleted. A call naming one is refused as a whole
   # before any named path is touched.
 
+  # Contract:
+  # A path is removed as untracked only when git answered that it is untracked. When the lookup fails for any
+  # other reason, the call is refused with `RecoverError` before anything is touched; a failed lookup is
+  # NEVER read as "untracked".
+
   # with the flag, untracked paths are split off and must all sit inside the job's own scope
-  untracked = [ path for path in paths if _is_untracked(repo, path) ] if remove_untracked else []
+  verdicts = { path: _is_untracked(repo, path) for path in paths } if remove_untracked else {}
+  unknown = [ path for path, verdict in verdicts.items() if verdict is None ]
+
+  # guard: a path git could not answer for is neither removed nor restored — the whole call is refused
+  if unknown:
+    raise RecoverError(f"untracked-lookup-failed: {' '.join(unknown)}")
+  untracked = [ path for path in paths if verdicts.get(path) ]
   scope = _read_job_scope(repo, jdir)
   outside = [ path for path in untracked if not _is_in_scope(path, scope) ]
 
@@ -572,6 +736,129 @@ def revert_and_retry(repo: Path, jdir: Path, paths: list[str], *, remove_untrack
   # the tree is back to HEAD on every named path, so the job can run again
   clear_dead_job(jdir)
   return []
+
+
+def _query_untracked_results(repo: Path) -> list[str]:
+  """
+  List the untracked, non-ignored files under the repository's top-level `result/` directory.
+
+  Args:
+    repo: Absolute path to the repository root.
+
+  Returns:
+    Repository-relative posix paths of every such file, at any depth; empty when there are none.
+
+  Raises:
+    subprocess.CalledProcessError: If the underlying git command exits with a non-zero status.
+  """
+  # git names untracked files one by one, never collapsing a directory, and leaves tracked and ignored ones out
+  proc = subprocess.run(
+    [ "git", "ls-files", "--others", "--exclude-standard", "-z", "--", f"{JobIODir.RESULT}/" ],
+    cwd = str(repo), capture_output = True, check = True,
+  )
+
+  # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+  listing = proc.stdout.decode(
+    "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+  )
+  return [ path for path in listing.split("\0") if path ]
+
+
+def _is_identical_copy(copy: Path, original: Path) -> bool:
+  """
+  Check whether two paths are both regular files with byte-identical content.
+
+  An unreadable file is not a proven copy and yields False instead of raising.
+
+  Args:
+    copy: The candidate stray copy.
+    original: The file the copy is compared against.
+
+  Returns:
+    True when neither path is a symlink, both are regular files, and their bytes match; False otherwise,
+    including when either file cannot be read.
+  """
+  # guard: a link or anything other than a regular file on either side is never a copy
+  if copy.is_symlink() or original.is_symlink() or not copy.is_file() or not original.is_file():
+    return False
+
+  # the full content decides, never the size or a timestamp; a file that cannot be read is not a proven copy
+  try:
+    return copy.read_bytes() == original.read_bytes()
+  except OSError:
+    return False
+
+
+def _delete_emptied_dirs(repo: Path, removed: list[str]) -> None:
+  """
+  Remove the directories under the top-level `result/`, and `result/` itself, that the removed files left empty.
+
+  Args:
+    repo: Absolute path to the repository root.
+    removed: Repository-relative paths of the files just removed.
+
+  Raises:
+    OSError: If removing a directory fails.
+  """
+  # every directory between a removed file and the repository root, `result/` itself included
+  dirs: set[Path] = set()
+  for path in removed:
+    parent = (repo / path).parent
+    while parent != repo:
+      dirs.add(parent)
+      parent = parent.parent
+
+  # deepest first, so a parent is judged after its children went; only a directory holding nothing at all goes
+  for directory in sorted(dirs, key = lambda item: len(item.parts), reverse = True):
+    if directory.is_dir() and not any(directory.iterdir()):
+      directory.rmdir()
+
+
+def delete_stray_result_copies(repo: Path, jdir: Path) -> list[str]:
+  """
+  Remove the stray copies of a job's result files that the job left under the repository's top-level `result/`.
+
+  Guarantees:
+    - A file is never removed when it is tracked, lies outside the repository's top-level `result/`, is a symlink,
+      or differs in bytes from the job's own result file of the same relative path.
+    - A directory is removed only when the removals left it empty.
+
+  Notes:
+    - Runs git in the repository to list its untracked files.
+    - Deletes the matching files, and the directories they left empty, from the working tree.
+
+  Args:
+    repo: Absolute path to the repository root.
+    jdir: Absolute path to the job directory whose `result/` holds the originals.
+
+  Returns:
+    The removed repository-relative file paths, sorted; empty when nothing matched.
+
+  Raises:
+    subprocess.CalledProcessError: If the underlying git command exits with a non-zero status.
+    OSError: If deleting a copy or removing a directory fails, possibly after some copies were already removed.
+  """
+
+  # Contract:
+  # A file is NEVER removed when it is tracked, lies outside the repository's top-level `result/`, is a symlink,
+  # or differs in bytes from the job's own result file of the same relative path.
+
+  # Contract:
+  # A directory is removed only when the removals left it empty; a directory that still holds anything stays.
+
+  # each untracked file under `result/` is a copy only when the job's own result of the same name matches it
+  removed = sorted(
+    path for path in _query_untracked_results(repo)
+    if _is_identical_copy(repo / path, jdir / path)
+  )
+
+  # the copies go first, then the directories they alone were keeping alive
+  for path in removed:
+    (repo / path).unlink()
+  _delete_emptied_dirs(repo, removed)
+  return removed
 
 
 def clear_dead_job(jdir: Path) -> None:

@@ -184,6 +184,7 @@ class Check3ArtifactsPresent:
     ("agents/lazy-python.docstring-writer.md", "docstring-writer agent"),
     ("agents/lazy-python.test-writer.md", "test-writer agent"),
     ("agents/lazy-python.code-reviewer.md", "code-reviewer agent"),
+    ("agents/lazy-python.bug-hunter.md", "bug-hunter agent"),
     ("agents/lazy-python.contract-writer.md", "contract-writer agent"),
     ("agents/lazy-python.domain-writer.md", "domain-writer agent"),
     ("templates/pyproject-defaults.toml", "pyproject template"),

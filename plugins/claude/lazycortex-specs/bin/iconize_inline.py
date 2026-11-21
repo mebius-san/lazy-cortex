@@ -25,8 +25,13 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_paths import resolve_plugin_cli  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 
 class RepaintFailedError(RuntimeError):
@@ -121,17 +126,18 @@ def repaint_paths_checked(repo: Path, paths: list[str]) -> list[str]:
   if cli is None:
     return []
 
-  # run the repaint; a worker that cannot start, or whose output cannot be decoded, is a failed repaint
+  # run the repaint; a worker that cannot start, or whose arguments the system refuses, is a failed repaint;
+  # undecodable output bytes are replaced, so the output is judged by its shape below, never by a decode error
   try:
     proc = subprocess.run(
         # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
         [sys.executable, str(cli), "sync-paths", *paths],
-        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8",
+        cwd = repo, capture_output = True, text = True, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
   except OSError as error:
     raise RepaintFailedError(f"worker did not start: {error}") from error
   except ValueError as error:
-    raise RepaintFailedError(f"worker output is not UTF-8: {error}") from error
+    raise RepaintFailedError(f"worker could not be run: {error}") from error
 
   # guard: a worker that exits non-zero failed the repaint
   if proc.returncode != 0:

@@ -32,13 +32,17 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -190,53 +194,62 @@ def read_shipped_defaults() -> dict[str, dict]:
   return { name: { **_FLAG_DEFAULTS, **decl } for name, decl in raw.items() }
 
 
-def _product_types(repo: Path, product: str | None) -> dict[str, dict]:
+def _product_types(repo: Path, product: str | None, *, products: dict | None = None) -> dict[str, dict]:
   """
   Read one product's effective `doc_types` declarations from settings.
 
-  The record is taken through `resolve_product.effective_record`, so a product nested inside
-  another sees every type its ancestors declared alongside its own.
+  A product nested inside another sees every type its ancestors declared alongside its own.
 
   Args:
     repo: Repository root holding `.claude/lazy.settings.json`.
     product: Product settings key, or None when the caller has no product in scope.
+    products: An already-read products registry, such as the merged one the runtime dispatches from; None reads
+      the tracked settings file.
 
   Returns:
     Mapping of type name to its raw declaration dict; empty when neither the product nor any
     ancestor declares one.
+
+  Raises:
+    ValueError: If a settings file the declarations depend on cannot be read (unreadable, not UTF-8, invalid JSON,
+      or not a JSON object); a `spec_paths.SettingsError` naming the settings file.
   """
   # guard: no product in scope — only the shipped set applies
   if not product:
     return {}
-  path = repo / _K.SETTINGS_REL
 
-  # guard: no settings file — nothing a product could have declared
-  if not path.is_file():
+  # guard: no registry handed in and no settings file — nothing a product could have declared
+  if products is None and not (repo / _K.SETTINGS_REL).is_file():
     return {}
 
-  # guard: a malformed settings file declares nothing a product could have added
-  try:
-    record = resolve_product.effective_record(repo, product)
-  except json.JSONDecodeError:
-    return {}
-  declared = record.get(_K.DOC_TYPES)
+  # the product's effective record; a settings file that cannot be read is refused, never read as declaring nothing,
+  # and the catalog-wide guidelines are not read, since no type declaration depends on them
+  declared = resolve_product.effective_record(repo, product, products = products, catalog_guidelines = {}).get(
+      _K.DOC_TYPES)
   return declared if isinstance(declared, dict) else {}
 
 
-def declared_types(repo: Path, product: str | None = None) -> dict[str, dict]:
+def declared_types(repo: Path, product: str | None = None, *, products: dict | None = None) -> dict[str, dict]:
   """
   Return every document type visible in one product's scope.
 
   Guarantees:
     - The product's own declaration for a type is merged flag-by-flag over the shipped one,
       so flipping a single flag never requires restating the rest.
+    - A settings file that cannot be read raises `ValueError` naming the file; it is never read as the product
+      declaring nothing.
 
   Args:
     repo: Repository root holding `.claude/lazy.settings.json`.
     product: Product settings key, or None to see only the shipped set.
+    products: An already-read products registry; None reads the tracked settings file.
 
   Returns:
     Mapping of type name to its merged declaration dict, every flag key present.
+
+  Raises:
+    ValueError: If a settings file the declarations depend on cannot be read (unreadable, not UTF-8, invalid JSON,
+      or not a JSON object); a `spec_paths.SettingsError` naming the settings file.
   """
 
   # Domain(spec.declarations):
@@ -251,28 +264,49 @@ def declared_types(repo: Path, product: str | None = None) -> dict[str, dict]:
   # setting one flag never requires the product to restate any other flag, icon, or template
   # the shipped declaration already carries.
 
+  # Contract:
+  # A settings file the declarations depend on that cannot be read (unreadable, not UTF-8, invalid JSON, or not a
+  # JSON object) MUST raise `ValueError` naming the file. It is never read as the product declaring nothing:
+  # callers that set a stage or seed a document's initial stage rely on the raise to abort.
+
   merged = read_shipped_defaults()
-  for name, decl in _product_types(repo, product).items():
+  for name, decl in _product_types(repo, product, products = products).items():
     merged[name] = { **_FLAG_DEFAULTS, **merged.get(name, {}), **decl }
   return merged
 
 
-def resolve(repo: Path, doc_type: str, product: str | None = None) -> dict | None:
+def resolve(repo: Path, doc_type: str, product: str | None = None, *, products: dict | None = None) -> dict | None:
   """
   Resolve one document type's declaration in a product's scope.
+
+  Guarantees:
+    - A settings file that cannot be read raises `ValueError` naming the file; it is never read as the product
+      declaring nothing.
 
   Args:
     repo: Repository root holding `.claude/lazy.settings.json`.
     doc_type: The `spec_doc_type` value to look up.
     product: Product settings key, or None to consult only the shipped set.
+    products: An already-read products registry; None reads the tracked settings file.
 
   Returns:
     The merged declaration dict, or None when neither the plugin nor the product declares it.
+
+  Raises:
+    ValueError: If a settings file the declarations depend on cannot be read (unreadable, not UTF-8, invalid JSON,
+      or not a JSON object); a `spec_paths.SettingsError` naming the settings file.
   """
-  return declared_types(repo, product).get(doc_type)
+
+  # Contract:
+  # A settings file the declarations depend on that cannot be read (unreadable, not UTF-8, invalid JSON, or not a
+  # JSON object) MUST raise `ValueError` naming the file. It is never answered as an undeclared type: callers
+  # that set a stage or seed a document's initial stage rely on the raise to abort.
+
+  return declared_types(repo, product, products = products).get(doc_type)
 
 
-def icon_color(repo: Path, doc_type: str, product: str | None = None) -> tuple[str, str] | None:
+def icon_color(repo: Path, doc_type: str, product: str | None = None, *,
+               products: dict | None = None) -> tuple[str, str] | None:
   """
   Resolve the icon and colour a document of this type is seeded with at creation.
 
@@ -281,15 +315,29 @@ def icon_color(repo: Path, doc_type: str, product: str | None = None) -> tuple[s
   never carries `spec_stage`, keeps its seed for life; an authored document keeps it until
   its first `lazy-spec.set-stage`, after which the stage matchers claim it.
 
+  Guarantees:
+    - A settings file that cannot be read raises `ValueError` naming the file; it is never answered as an
+      undeclared type or one without an icon.
+
   Args:
     repo: Repository root holding `.claude/lazy.settings.json`.
     doc_type: The `spec_doc_type` value to look up.
     product: Product settings key, or None to consult only the shipped set.
+    products: An already-read products registry; None reads the tracked settings file.
 
   Returns:
     An `(icon, color)` pair with an empty colour when the declaration names none, or None
     when the type is undeclared or declares no icon.
+
+  Raises:
+    ValueError: If a settings file the declarations depend on cannot be read (unreadable, not UTF-8, invalid JSON,
+      or not a JSON object); a `spec_paths.SettingsError` naming the settings file.
   """
+
+  # Contract:
+  # A settings file the declarations depend on that cannot be read (unreadable, not UTF-8, invalid JSON, or not a
+  # JSON object) MUST raise `ValueError` naming the file. It is never answered as an undeclared type or one
+  # without an icon: a document is never seeded unpainted because its settings could not be read.
 
   # Domain(spec.declarations):
   # # A document's kind paint yields to its lifecycle paint once staged
@@ -299,7 +347,7 @@ def icon_color(repo: Path, doc_type: str, product: str | None = None) -> tuple[s
   # kind paint stops mattering: what the document is painted with from then on is decided by
   # which stage it is in, never by what kind it is.
 
-  declaration = resolve(repo, doc_type, product)
+  declaration = resolve(repo, doc_type, product, products = products)
 
   # guard: an undeclared type, or one naming no icon, has no seed to report
   if not declaration or not declaration.get(DocTypeFlag.ICON):
@@ -724,7 +772,8 @@ def _rename_classes(repo: Path, old: str, new: str) -> int:
     new: The type name replacing it.
 
   Returns:
-    The number of class entries renamed.
+    The number of class entries renamed; `0` also when the settings file is absent, cannot be read or does not
+    parse, a JSON document that is not an object included, or when the `review` section is absent or not an object.
   """
   path = repo / _K.SETTINGS_REL
 
@@ -732,12 +781,18 @@ def _rename_classes(repo: Path, old: str, new: str) -> int:
   if not path.is_file():
     return 0
 
-  # guard: a malformed settings file has no class registry to rewrite
+  # guard: settings that cannot be read or do not parse have no class registry to rewrite; `ValueError` covers a
+  # JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
   try:
-    data = json.loads(path.read_text(encoding = _K.ENCODING))
-  except json.JSONDecodeError:
+    data = spec_paths.read_settings(path)
+  except (OSError, ValueError):
     return 0
-  entries = (data.get(_K.REVIEW) or {}).get(_K.CLASSES)
+  review = data.get(_K.REVIEW)
+
+  # guard: a review section that is absent or not an object declares no class registry
+  if not isinstance(review, dict):
+    return 0
+  entries = review.get(_K.CLASSES)
 
   # guard: no class registry declared at all
   if not isinstance(entries, list):
@@ -859,7 +914,8 @@ def main(argv: list[str]) -> int:
       `rename <old> <new>`).
 
   Returns:
-    Exit code: `0` on success, `1` when `resolve` finds no declaration, `2` on argparse failure.
+    Exit code: `0` on success, `1` when `resolve` finds no declaration, `2` on argparse failure or when the
+    settings cannot be read (the message goes to stderr).
   """
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs doc-type")
@@ -901,12 +957,18 @@ def main(argv: list[str]) -> int:
   if args.verb == _VERB_RENAME:
     print(json.dumps(rename(repo, args.old, args.new)))
     return 0
-  if args.verb == _VERB_LIST:
-    print(json.dumps({ _OUT_TYPES: sorted(declared_types(repo, args.product)) }))
-    return 0
-  declaration = resolve(repo, args.doc_type, args.product)
 
-  # guard: no declaration anywhere — the caller's validation fails on this exit code
+  # the declaration readers refuse settings they cannot read; the refusal is the answer, never a shipped-only one
+  try:
+    if args.verb == _VERB_LIST:
+      print(json.dumps({ _OUT_TYPES: sorted(declared_types(repo, args.product)) }))
+      return 0
+    declaration = resolve(repo, args.doc_type, args.product)
+  except spec_paths.SettingsError as error:
+    sys.stderr.write(f"{error}\n")
+    return 2
+
+  # no declaration anywhere is the verb's not-declared answer, which the caller's validation reads off exit code 1
   if declaration is None:
     print(json.dumps({ _OUT_DECLARED: False, _K.DOC_TYPE: args.doc_type }))
     return 1

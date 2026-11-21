@@ -2,11 +2,8 @@
 Halt-recovery verbs for the `lazycortex-core` CLI.
 
 This module backs the `recover` subcommand family the `lazy-runtime.recover` skill and the
-`lazy-runtime.doctor` agent call instead of embedding Python: `recover halt` reads the halt
-block, `recover cleanup` applies an operator-chosen cleanup mode, `recover resume` clears the
-halt, `recover revert` restores tracked paths to `HEAD`, `recover revert-retry` restores a dead
-job's dirty paths and re-arms its bundle, `recover clear-dead` re-arms a dead job bundle, and
-`recover permanent-fail` records a doctor diagnosis beside one.
+`lazy-runtime.doctor` agent call instead of embedding Python: the verbs read and clear the
+halt, clean the working tree, and triage job bundles.
 
 Every verb prints a one-word outcome or JSON to stdout and never raises a recovery error at
 the caller: a `RecoverError` or a failed git command becomes an `error: ...` line (or the
@@ -44,6 +41,7 @@ class Verb:
     CLEAR_DEAD: Re-arm a dead job bundle for retry.
     PERMANENT_FAIL: Record a doctor diagnosis on a dead job bundle.
     REVERT_RETRY: Restore a dead job's dirty paths to `HEAD`, then re-arm the bundle for retry.
+    DROP_STRAY_COPIES: Remove a job's byte-identical stray result copies from the repository's top-level `result/`.
   """
 
   # Print the halt block.
@@ -60,6 +58,8 @@ class Verb:
   PERMANENT_FAIL = "permanent-fail"
   # Restore a dead job's dirty paths to `HEAD`, then re-arm the bundle for retry.
   REVERT_RETRY = "revert-retry"
+  # Remove a job's byte-identical stray result copies from the repository's top-level `result/`.
+  DROP_STRAY_COPIES = "drop-stray-copies"
 
 
 
@@ -124,6 +124,20 @@ def _resolve_jdir(repo: Path, jdir: str) -> Path | None:
   return path.resolve()
 
 
+def _render_printable(text: str) -> str:
+  """
+  Render a text so that printing it can never fail on a character the output cannot encode.
+
+  Args:
+    text: The text to print, which may carry surrogate escapes of bytes that are not UTF-8.
+
+  Returns:
+    The text with every character UTF-8 cannot encode written as a backslash escape.
+  """
+  # waiver: stdlib codec and encode-error mode names, not domain constants
+  return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
 def _report_git_failure(error: subprocess.CalledProcessError) -> int:
   """
   Print a failed git command as one `error: ...` line carrying git's own message.
@@ -138,7 +152,9 @@ def _report_git_failure(error: subprocess.CalledProcessError) -> int:
   raw = error.stderr or ""
   # waiver: the standard bytes-decoding error policy name, not a domain key
   stderr = (raw.decode(errors = "replace") if isinstance(raw, bytes) else str(raw)).strip()
-  print(f"{Outcome.ERROR_PREFIX}{' '.join(error.cmd)} exited {error.returncode}: {stderr}")
+
+  # the command line may name a path whose bytes are not UTF-8, so the line is printed with escapes
+  print(_render_printable(f"{Outcome.ERROR_PREFIX}{' '.join(error.cmd)} exited {error.returncode}: {stderr}"))
   return 1
 
 
@@ -192,6 +208,13 @@ def _build_parser() -> argparse.ArgumentParser:
   revert_retry.add_argument("jdir")
   # waiver: argparse CLI signature, not a domain key
   revert_retry.add_argument("path", nargs = "+")
+
+  # drop-stray-copies takes only the bundle whose result files the copies are compared against
+  # waiver: argparse CLI signature and help strings, not domain keys
+  drop_stray = verbs.add_parser(Verb.DROP_STRAY_COPIES,
+                                help = "remove byte-identical copies of a job's result files from top-level result/")
+  # waiver: argparse CLI signature, not a domain key
+  drop_stray.add_argument("jdir")
 
   # the job-bundle verbs take the bundle directory, permanent-fail also the diagnosis
   # waiver: argparse CLI signature and help strings, not domain keys
@@ -273,18 +296,50 @@ def _run_revert_retry(repo: Path, args: argparse.Namespace) -> int:
   try:
     dirty = recover.revert_and_retry(repo, jdir, args.path, remove_untracked = args.remove_untracked)
   except recover.RecoverError as error:
-    print(f"{Outcome.ERROR_PREFIX}{error}")
+    print(_render_printable(f"{Outcome.ERROR_PREFIX}{error}"))
     return 1
   except subprocess.CalledProcessError as error:
     return _report_git_failure(error)
 
-  # a path the revert did not settle keeps the job dead
+  # a path the revert did not settle keeps the job dead; the names are only shown here, so a byte
+  # that is not UTF-8 is rendered as a replacement character instead of failing the print
   if dirty:
-    print(f"{Outcome.ERROR_PREFIX}{Outcome.STILL_DIRTY_PREFIX}{' '.join(dirty)}")
+    # waiver: stdlib codec and decode-error mode names, not domain constants
+    shown = " ".join(dirty).encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    print(f"{Outcome.ERROR_PREFIX}{Outcome.STILL_DIRTY_PREFIX}{shown}")
     return 1
 
   # the paths are back at HEAD and the bundle is armed again
   print(Outcome.RETRIED)
+  return 0
+
+
+def _run_drop_stray_copies(repo: Path, args: argparse.Namespace) -> int:
+  """
+  Run `drop-stray-copies` against one job bundle and print the removed paths as a JSON array.
+
+  Args:
+    repo: Absolute repository root.
+    args: Parsed arguments carrying `jdir`.
+
+  Returns:
+    Process exit code: 0 when the comparison ran, whether or not anything was removed; 1 on a missing bundle, a
+    git failure, or a filesystem failure.
+  """
+  # guard: no bundle at the path — there are no originals to compare the copies against
+  if (jdir := _resolve_jdir(repo, args.jdir)) is None:
+    print(f"{Outcome.ERROR_PREFIX}no job directory at {args.jdir!r}")
+    return 1
+
+  # the removed list is the whole answer, empty included; a git or filesystem failure becomes output that
+  # starts with an `error:` line, never a traceback
+  try:
+    print(json.dumps(recover.delete_stray_result_copies(repo, jdir)))
+  except subprocess.CalledProcessError as error:
+    return _report_git_failure(error)
+  except OSError as error:
+    print(f"{Outcome.ERROR_PREFIX}{error}")
+    return 1
   return 0
 
 
@@ -318,8 +373,13 @@ def _run_tree_verb(repo: Path, args: argparse.Namespace) -> int:
       recover.resume(repo)
       print(Outcome.RESUMED)
   except recover.RecoverError as error:
+    # the refusal may list dirty paths, which are only shown here, so a byte that is not UTF-8 is
+    # rendered as a replacement character instead of failing the print
+    # waiver: stdlib codec and decode-error mode names, not domain constants
+    shown = str(error).encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
     # resume keeps its documented `still-dirty:` prefix so the skill's branch stays readable
-    print(f"{Outcome.STILL_DIRTY_PREFIX if args.verb == Verb.RESUME else Outcome.ERROR_PREFIX}{error}")
+    print(f"{Outcome.STILL_DIRTY_PREFIX if args.verb == Verb.RESUME else Outcome.ERROR_PREFIX}{shown}")
     return 1
   except subprocess.CalledProcessError as error:
     return _report_git_failure(error)
@@ -332,23 +392,26 @@ def cmd_recover(argv: list[str]) -> int:
   """
   Run one `recover` verb and print its outcome.
 
-  Printed outcomes: `halt` prints the halt block as indented JSON or `not_halted`;
-  `cleanup` prints `cleaned`; `resume` prints `resumed` or `still-dirty: <reason>`;
-  `revert` prints `reverted`; `revert-retry` prints `retried`, or `error: still-dirty: <paths>` /
-  `error: outside-job-scope: <paths>`; `clear-dead` prints `cleared`; `permanent-fail` prints
-  `marked`. A recovery or git failure prints `error: <reason>`.
+  Each verb prints a one-word outcome or JSON; a recovery or git failure prints `error: <reason>`. A git failure
+  and a `revert-retry` refusal carry a backslash escape for every character that cannot be encoded; a refusal of
+  `cleanup`, `revert` or `resume`, and the still-dirty paths of `revert-retry`, show a byte that is not UTF-8 as
+  a replacement character.
 
   Guarantees:
     - For the `cleanup`, `revert`, and `resume` verbs, a recovery or git failure never escapes as an
       exception: it becomes one printed `error: ...` line (`still-dirty: ...` for `resume`) and a non-zero
       exit code.
+    - On success the `drop-stray-copies` verb prints exactly one JSON array of the removed repository-relative
+      paths, an empty array when nothing matched, and exits 0; on failure the output starts with an `error: `
+      line and the exit code is 1.
 
   Args:
     argv: Argument vector after the `recover` subcommand name.
 
   Returns:
     Process exit code: 0 on success, 1 on a recovery / git failure, a missing job directory,
-    or a `permanent-fail` diagnosis that does not parse as a JSON object.
+    a `permanent-fail` diagnosis that does not parse as a JSON object, or a `drop-stray-copies` failure to
+    remove a copy or a directory, which prints one `error: <reason>` line.
 
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser.
@@ -358,6 +421,11 @@ def cmd_recover(argv: list[str]) -> int:
   # For the `cleanup`, `revert`, and `resume` verbs, a recovery or git failure MUST NEVER escape as an
   # exception: it becomes one printed `error: ...` line (`still-dirty: ...` for `resume`) and a non-zero
   # exit code, which the recover skill and the doctor agent branch on.
+
+  # Contract:
+  # On success the `drop-stray-copies` verb prints exactly one JSON array of the removed repository-relative
+  # paths, an empty array when nothing matched, and exits 0; the doctor agent parses that array and branches
+  # on empty versus non-empty. On failure the output starts with an `error: ` line and the exit code is 1.
 
   args = _build_parser().parse_args(argv)
   repo = resolve_repo_root(args.cwd).resolve()
@@ -373,4 +441,6 @@ def cmd_recover(argv: list[str]) -> int:
     return _run_job_verb(repo, args)
   if args.verb == Verb.REVERT_RETRY:
     return _run_revert_retry(repo, args)
+  if args.verb == Verb.DROP_STRAY_COPIES:
+    return _run_drop_stray_copies(repo, args)
   return _run_tree_verb(repo, args)

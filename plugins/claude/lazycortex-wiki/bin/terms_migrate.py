@@ -858,6 +858,8 @@ class TermsMigration:
 
     Notes:
       - A document changed on disk between its reading and its write is not written.
+      - A document that cannot be read at all is set aside and named like one that is not valid UTF-8, and the pass
+        goes on with the next document.
 
     Args:
       cfg: Settings of the scope.
@@ -883,7 +885,14 @@ class TermsMigration:
     for rel in list_documents(self._repo, _filter_strings(cfg, _KEY_PATHS)):
       # the document is read once; those bytes are rendered, searched for links it cannot move and compared before
       # the write
-      data = (self._repo / rel).read_bytes()
+      # a document that cannot be read is set aside and named like one that is not valid UTF-8, and the pass
+      # goes on to the next
+      try:
+        data = (self._repo / rel).read_bytes()
+      except OSError as error:
+        print(f"terms: {rel} could not be read, set aside: {error}", file = sys.stderr)
+        undecodable.append(rel)
+        continue
       document_plan = dropping if self._is_source_excluded(cfg, rel) else plan
       try:
         result = _term_links.render_document(
@@ -1064,12 +1073,12 @@ class TermsSweep:
       rel: Repo-relative path of the document.
 
     Returns:
-      `True` when the document can be read as text.
+      `True` when the document can be read as text; `False` when it is not valid UTF-8 or cannot be read at all.
     """
-    # a document the curator could read is valid UTF-8
+    # a document the curator could read is valid UTF-8, and one that cannot be read at all is no more use to it
     try:
       TextFile(path = self._repo / rel).read()
-    except UnicodeDecodeError:
+    except (OSError, UnicodeDecodeError):
       return False
     return True
 
@@ -1470,6 +1479,10 @@ def list_documents(repo: Path, globs: list[str]) -> list[str]:
     - Each tracked document is listed once, in git's order, and a path missing from the working tree is never
       listed.
 
+  Notes:
+    - A path whose name is not valid UTF-8 never fails the listing; it is reported on stderr and left out of the
+      result, so it never reaches a write or a print, and every other path is returned as usual.
+
   Args:
     repo: Absolute repository root.
     globs: Repo-relative glob patterns.
@@ -1486,12 +1499,24 @@ def list_documents(repo: Path, globs: list[str]) -> list[str]:
 
   found: list[str] = []
 
-  # each glob is listed by git; -z keeps non-ASCII paths unquoted
+  # each glob is listed by git; -z keeps non-ASCII paths unquoted, and the listing is taken as bytes and decoded
+  # without loss, so a name that is not UTF-8 cannot fail it
   for glob in globs:
-    raw = subprocess.check_output(
-      [ "git", "ls-files", "-z", "--", f":(glob){glob}" ], cwd = str(repo), text = True, encoding = _ENCODING,
-    )
-    found.extend(rel for rel in raw.split(_NUL) if rel)
+    raw = os.fsdecode(subprocess.check_output(
+      [ "git", "ls-files", "-z", "--", f":(glob){glob}" ], cwd = str(repo),
+    ))
+    for rel in raw.split(_NUL):
+      # guard: the trailing separator leaves an empty name
+      if not rel:
+        continue
+
+      # a name that is not UTF-8 cannot be written or printed; it is reported and left out
+      try:
+        rel.encode(_ENCODING)
+      except UnicodeEncodeError:
+        print(f"terms: skipped a document whose name is not UTF-8: {rel!r}", file = sys.stderr)
+        continue
+      found.append(rel)
 
   # each document once, in git's order; a tracked path deleted from the working tree is no document
   return [ rel for rel in dict.fromkeys(found) if (repo / rel).is_file() ]

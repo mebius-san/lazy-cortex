@@ -68,6 +68,9 @@ _CORE_RUNTIME_NAMES = frozenset({
   )),
   _GITIGNORE,
 })
+# The error kind recorded for a bundle whose own check raised. It is kept apart from `RuntimeGcKind`,
+# which names kinds of garbage the sweep removes: a failed check removed nothing.
+_KIND_JOB_CHECK = "job_check"
 # Markers whose presence means a queued job was claimed or has already ended.
 _PAST_QUEUE_MARKERS = ( JobMarker.DONE, JobMarker.DEAD, JobMarker.CANCELLED, JobMarker.PID )
 
@@ -85,7 +88,8 @@ class _Sweep:
     dead_after: Retention window in seconds for jobs that were marked dead.
     removed: Repository-relative paths removed, grouped by garbage kind.
     stuck: Queued jobs nobody claimed, as `<expert>/<job id>`.
-    errors: Deletions that failed and journal records that were lost, each with its kind, path, and error text.
+    errors: Deletions that failed, journal records that were lost, and job bundles or queue-root entries that could
+      not be checked or listed, each with its kind, path, and error text.
   """
 
   def __init__(self, repo: Path, *, dry_run: bool) -> None:
@@ -137,6 +141,9 @@ class _Sweep:
   def _sweep_jobs(self) -> None:
     """
     Sweep the job queue for misplaced bundles, expired bundles, and queued jobs nobody claimed.
+
+    One bundle whose check raises, or one queue-root entry that cannot be judged or listed, is collected in the
+    sweep's errors and the sweep goes on with the rest.
     """
     jobs_root = self.repo / JOBS_BASE
 
@@ -157,30 +164,54 @@ class _Sweep:
       # no expert, so nothing owns it. It is removed once nothing in it has changed for the failed window; the
       # newest change among its entries counts, not the date of the folder itself.
 
-      # a bundle directly in the queue root belongs to no expert; it goes once nothing touched it for long
-      if is_job_bundle(entry):
-        if now - _newest_entry_mtime(entry) >= self.fail_after:
-          self._remove(entry, RuntimeGcKind.MISPLACED_JOB, _delete_tree)
+      # a bundle directly in the queue root belongs to no expert; it goes once nothing touched it for
+      # long. A queue-root entry that cannot be judged or listed is collected as this sweep's error and
+      # the walk goes on, so one unreadable folder never keeps the expired bundles behind it on disk
+      try:
+        if is_job_bundle(entry):
+          if now - _newest_entry_mtime(entry) >= self.fail_after:
+            self._remove(entry, RuntimeGcKind.MISPLACED_JOB, _delete_tree)
+          continue
+        bundles = sorted(entry.iterdir())
+      # waiver: the same per-item boundary as the bundle check below — a narrower list would let the
+      # fault it misses stop the whole sweep, tick after tick
+      except Exception as error:  # pylint: disable=broad-exception-caught
+        self.errors.append({
+          RuntimeGcKey.KIND: _KIND_JOB_CHECK,
+          RuntimeGcKey.PATH: entry.relative_to(self.repo).as_posix(),
+          RuntimeGcKey.ERROR: f"{type(error).__name__}: {error}",
+        })
         continue
 
       # every bundle of an expert folder is either stuck in the queue, expired, or left alone
-      for jdir in sorted(entry.iterdir()):
-        # guard: only real bundles are queue entries
-        if not is_job_bundle(jdir):
-          continue
-
-        # a bundle nobody claimed is reported as stuck; one past its retention window goes
-        if _is_stuck_queued(jdir, self.fail_after, now):
-          self._report_stuck(entry.name, jdir.name)
-        elif _is_expired(jdir, self.done_after, self.fail_after, self.dead_after):
-          self._remove(jdir, RuntimeGcKind.EXPIRED_JOB, self._cleanup_bundle)
+      for jdir in bundles:
+        # a bundle nobody claimed is reported as stuck; one past its retention window goes. One
+        # bundle whose check raises is collected as this sweep's error and the walk goes on, so a
+        # bad bundle never keeps the expired ones behind it on disk
+        try:
+          # guard: only real bundles are queue entries
+          if not is_job_bundle(jdir):
+            continue
+          if _is_stuck_queued(jdir, self.fail_after, now):
+            self._report_stuck(entry.name, jdir.name)
+          elif _is_expired(jdir, self.done_after, self.fail_after, self.dead_after):
+            self._remove(jdir, RuntimeGcKind.EXPIRED_JOB, self._cleanup_bundle)
+        # waiver: the bundle's checks read files other processes write and reach the error ledger; a
+        # narrower list would let whichever fault it misses leave every expired bundle behind this
+        # one on disk, tick after tick
+        except Exception as error:  # pylint: disable=broad-exception-caught
+          self.errors.append({
+            RuntimeGcKey.KIND: _KIND_JOB_CHECK,
+            RuntimeGcKey.PATH: jdir.relative_to(self.repo).as_posix(),
+            RuntimeGcKey.ERROR: f"{type(error).__name__}: {error}",
+          })
 
   def _sweep_runtime_files(self) -> None:
     """
     Remove the stale files in the runtime directory that neither core nor a plugin owns.
     """
 
-    # Domain(unfiled):
+    # Domain(runtime.gc):
     # # Ownership of runtime directory files
     # The per-machine runtime directory holds files that someone owns and files that nobody does. Core's own
     # runtime files, their temporary siblings (the same name followed by a dot and a suffix, whether or not it is
@@ -253,25 +284,28 @@ class _Sweep:
 
   def _journal(self, kind: str, rel: str) -> None:
     """
-    Append one deletion to the sweep's journal, or list the lost record in the errors when the write fails.
+    Append one deletion to the sweep's journal as an ASCII JSON entry.
+
+    A path whose bytes are not text is still recorded. A failure to serialise or write the entry is swallowed: it
+    is listed in the sweep's errors and never stops the sweep.
 
     Args:
       kind: The garbage kind removed.
       rel: The repository-relative path removed.
     """
-    line = json.dumps({
-      RuntimeGcKey.TS: time.strftime(_TS_FMT, time.gmtime()), RuntimeGcKey.KIND: kind, RuntimeGcKey.PATH: rel,
-    }, ensure_ascii = False)
-
     # a journal that cannot be written loses the record, never the deletion already done; the lost record lands in
-    # the summary's errors so the verb fails and the daemon records it
+    # the summary's errors so the verb fails and the daemon records it; the record is serialised as ASCII, so a
+    # path whose bytes are not UTF-8 is journalled as escapes, and a record that cannot be serialised is lost alike
     journal = self.repo / JOURNAL_REL
     try:
+      line = json.dumps({
+        RuntimeGcKey.TS: time.strftime(_TS_FMT, time.gmtime()), RuntimeGcKey.KIND: kind, RuntimeGcKey.PATH: rel,
+      }, ensure_ascii = True)
       journal.parent.mkdir(parents = True, exist_ok = True)
       # waiver: stdlib append file-mode idiom
       with journal.open("a", encoding = "utf-8") as handle:
         handle.write(line + "\n")
-    except OSError as error:
+    except (OSError, ValueError) as error:
       self.errors.append({ RuntimeGcKey.KIND: kind, RuntimeGcKey.PATH: JOURNAL_REL, RuntimeGcKey.ERROR: str(error) })
 
   def _report_stuck(self, expert: str, job_id: str) -> None:
@@ -332,6 +366,9 @@ def sweep(repo: Path, *, dry_run: bool = False) -> SweepSummary:
     - A queued job that nobody has claimed is never deleted, however long it has waited.
     - A dry run deletes nothing and writes neither the deletion journal nor the error ledger.
     - A deletion that fails is listed in the summary's errors and never stops the sweep.
+    - A job bundle whose check raises, and a queue-root entry that cannot be judged or listed, are each listed in
+      the summary's errors with the kind `job_check` and the repository-relative path of the bundle or entry, and
+      never stop the sweep of the other entries.
     - A deletion whose journal record cannot be written still stands and is listed as removed; the lost record is
       listed in the summary's errors.
 
@@ -348,6 +385,11 @@ def sweep(repo: Path, *, dry_run: bool = False) -> SweepSummary:
   # nothing in the journal or the error ledger. One failed deletion lands in the summary's errors and never stops
   # the rest of the sweep. A deletion whose journal record cannot be written is still done and listed as removed,
   # and the lost record lands in the summary's errors, on which the verb's non-zero exit rests.
+
+  # Contract:
+  # A job bundle whose check raises, and a queue-root entry that cannot be judged or listed, are each listed in
+  # the summary's errors with the kind `job_check` and the repository-relative path of the bundle or entry, and
+  # never stop the sweep of the other entries.
 
   return _Sweep(Path(repo), dry_run = dry_run).run()
 

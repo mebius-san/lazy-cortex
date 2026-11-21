@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -119,13 +120,18 @@ def _read_done_outcome(jdir: Path) -> str:
     jdir: The job bundle directory.
 
   Returns:
-    The `response.json` outcome value, or an empty string when the response is absent,
-    unreadable, or malformed — a shape the postman will never collect either.
+    The `response.json` outcome value, or an empty string when the response is absent, unreadable, not UTF-8
+    text, not JSON, not a JSON object, or carries an outcome that is not a string — a shape the postman will
+    never collect either.
   """
+  # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
   try:
-    outcome = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8")).get(JobKey.OUTCOME)
-  except (OSError, json.JSONDecodeError):
+    response = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
     return ""
+
+  # a response that is no object carries no outcome
+  outcome = response.get(JobKey.OUTCOME) if isinstance(response, dict) else None
   return outcome if isinstance(outcome, str) else ""
 
 
@@ -247,15 +253,20 @@ def _find_all_review_active_docs(repo: Path) -> list[Path]:
     has no git index to enumerate (a bare fixture directory).
   """
   proc = subprocess.run(
-      ["git", "ls-files", "--", "*.md"],
-      cwd = str(repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+      # `-z` keeps every path verbatim: without it git quotes and octal-escapes a non-ASCII name
+      ["git", "ls-files", "-z", "--", "*.md"],
+      # the listing is captured as bytes: text mode would turn a carriage return inside a name into a line feed
+      cwd = str(repo), capture_output = True, check = False,
   )
 
   # guard: not a git repository — nothing to enumerate
   if proc.returncode != 0:
     return []
   active: list[Path] = []
-  for rel in proc.stdout.splitlines():
+  for rel in os.fsdecode(proc.stdout).split("\0"):
+    # guard: the NUL-terminated listing ends in an empty field
+    if not rel:
+      continue
     path = repo / rel
 
     # guard: the index can name a file deleted from the worktree — nothing to read there

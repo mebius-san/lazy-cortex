@@ -60,14 +60,16 @@ class RepoWalk:
     blob = self._NUL.join(rels) + self._NUL
     proc = subprocess.run(
       cmd, cwd = str(self._repo),
-      input = blob, capture_output = True, text = True, check = False, encoding = "utf-8",
+      input = os.fsencode(blob), capture_output = True, check = False,
     )
 
     # git check-ignore: rc 0 = some ignored, 1 = none ignored, >1 = real error
     # guard: not a git repo / git failure — exclude nothing rather than crash the tick
     if proc.returncode not in ( 0, 1 ):
       return set()
-    return { p for p in proc.stdout.split(self._NUL) if p }
+
+    # the answer is captured as bytes and decoded here, so each name compares equal to the one sent
+    return { p for p in os.fsdecode(proc.stdout).split(self._NUL) if p }
 
   def _git_list(self) -> list[str] | None:
     """
@@ -88,15 +90,16 @@ class RepoWalk:
     cmd += [ "ls-files", "-co", "--exclude-standard", "-z" ]
     proc = subprocess.run(
       cmd, cwd = str(self._repo),
-      capture_output = True, text = True, check = False, encoding = "utf-8",
+      capture_output = True, check = False,
     )
 
     # guard: not a git repo / git failure — signal the caller to fall back
     if proc.returncode != 0:
       return None
 
-    # dedupe while keeping order: `ls-files -c` repeats a path once per merge stage
-    return list(dict.fromkeys( p for p in proc.stdout.split(self._NUL) if p ))
+    # dedupe while keeping order: `ls-files -c` repeats a path once per merge stage; the listing is
+    # captured as bytes and decoded here, so no byte of a name is rewritten on the way
+    return list(dict.fromkeys( p for p in os.fsdecode(proc.stdout).split(self._NUL) if p ))
 
   def iter_files(self) -> Iterator[Path]:
     """

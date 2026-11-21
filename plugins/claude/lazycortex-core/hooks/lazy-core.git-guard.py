@@ -90,6 +90,13 @@ _DIAGNOSTIC_ONLY_VERBS = { "commit" }
 # PostToolUse: maybe release.
 _RELEASE_VERBS = { "commit", "reset" }
 
+# --- Path decoding ------------------------------------------------------------
+
+# Decode-error mode of every git call that reads path names: an undecodable byte survives as a
+# surrogate escape, so the name still round-trips to the file system and back to git.
+# waiver: stdlib decode-error mode, not a domain constant
+_PATH_ERRORS = "surrogateescape"
+
 # --- Lifecycle phases ---------------------------------------------------------
 
 # Claude Code event names that select the tool-call phase; a call that started and failed fires
@@ -211,14 +218,16 @@ def _repo_root() -> Path | None:
   Return the absolute root of the current git repository, or None when unavailable.
 
   Returns:
-    The repository root as a `Path`, or None when the current directory is not inside a git
+    The repository root as a `Path`, with undecodable bytes of the checkout path kept as surrogate
+    escapes, or None when the current directory is not inside a git
     repository or the `git` binary is missing.
   """
+  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
   try:
-    out = subprocess.check_output(
+    out = os.fsdecode(subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, text = True, encoding = "utf-8",
-    ).strip()
+      stderr = subprocess.DEVNULL,
+    )).strip()
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None
   return Path(out) if out else None
@@ -566,7 +575,7 @@ def _is_this_repo_target(repo: Path, repo_dir: str) -> bool:
   """
   # waiver: git CLI vocabulary, not domain constants
   probe = _git_at(Path(repo_dir) if Path(repo_dir).is_absolute() else Path.cwd() / repo_dir,
-                  "rev-parse", "--show-toplevel")
+                  "rev-parse", "--show-toplevel", errors = _PATH_ERRORS)
 
   # guard: cannot resolve the target — treat as a foreign repository
   if probe.returncode != 0:
@@ -661,13 +670,16 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   return _DENY_COMMIT
 
 
-def _git_at(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+# waiver: stdlib decode-error mode, not a domain constant
+def _git_at(cwd: Path, *args: str, errors: str = "replace") -> subprocess.CompletedProcess:
   """
   Run `git <args>` in `cwd`, capturing stdout/stderr and never raising.
 
   Args:
     cwd: Working directory to invoke `git` from. Must be inside the repo of interest.
     *args: Arguments passed to `git` verbatim (e.g. `"rev-parse"`, `"--git-dir"`).
+    errors: How undecodable output bytes are decoded — replaced by default, so the call never raises on them;
+      a call that reads path names keeps them as surrogate escapes.
 
   Returns:
     The completed-process record with `returncode`, `stdout`, and `stderr` populated. On any
@@ -675,19 +687,26 @@ def _git_at(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     `returncode=128` (git's generic failure code) and empty output is returned, so callers can
     rely on the `returncode != 0` guard without `try/except`.
   """
+  # the output is taken as bytes and decoded below: text mode would turn a carriage return inside a listed
+  # name into a line feed, and a name has to come back exactly as git wrote it
   try:
-    return subprocess.run(
+    done = subprocess.run(
       [ "git", *args ],
       cwd = str(cwd),
       capture_output = True,
-      text = True,
       check = False,
       # waiver: inline numeric literal (subprocess timeout seconds), not a domain constant
-      timeout = 3, encoding = "utf-8",
+      timeout = 3,
     )
   except (OSError, subprocess.SubprocessError):
     # waiver: inline numeric literal (git generic-failure exit code), not a domain constant
     return subprocess.CompletedProcess(args = [ "git", *args ], returncode = 128, stdout = "", stderr = "")
+
+  # the same record, with both streams decoded under the caller's policy
+  return subprocess.CompletedProcess(
+    done.args, done.returncode,
+    done.stdout.decode("utf-8", errors = errors), done.stderr.decode("utf-8", errors = errors),
+  )
 
 
 def _in_linked_worktree(cwd: Path) -> bool:
@@ -708,9 +727,9 @@ def _in_linked_worktree(cwd: Path) -> bool:
   # `--path-format=absolute` would need git >= 2.31 (the marketplace-wide git floor is 2.10), so both
   # possibly-relative results are resolved against cwd before comparison instead
   # waiver: git CLI vocabulary, not domain constants
-  own = _git_at(cwd, "rev-parse", "--git-dir")
+  own = _git_at(cwd, "rev-parse", "--git-dir", errors = _PATH_ERRORS)
   # waiver: git CLI vocabulary, not domain constants
-  common = _git_at(cwd, "rev-parse", "--git-common-dir")
+  common = _git_at(cwd, "rev-parse", "--git-common-dir", errors = _PATH_ERRORS)
 
   # guard: resolution failed — treat as the primary checkout so the guard stays in force
   if own.returncode != 0 or common.returncode != 0:
@@ -739,7 +758,7 @@ def _git_dir(cwd: Path) -> Path | None:
     when `cwd` is not inside a git repository.
   """
   # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "rev-parse", "--git-dir")
+  r = _git_at(cwd, "rev-parse", "--git-dir", errors = _PATH_ERRORS)
 
   # guard: cwd is not inside a git repository
   if r.returncode != 0:
@@ -767,14 +786,15 @@ def _is_conflict_resolution_only(repo: Path, segment: git_cmdline.GitSegment) ->
   if git_dir is None or not _is_mid_operation(git_dir) or not segment.pathspecs:
     return False
   # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(repo, "ls-files", "--unmerged")
+  r = _git_at(repo, "ls-files", "--unmerged", "-z", errors = _PATH_ERRORS)
 
   # guard: git could not list the index — nothing is proven unmerged, so nothing passes
   if r.returncode != 0:
     return False
 
-  # `ls-files --unmerged` prints one `<mode> <sha> <stage>\t<path>` line per conflict stage
-  unmerged = { line.split("\t", 1)[1] for line in r.stdout.splitlines() if "\t" in line }
+  # `ls-files --unmerged -z` prints one NUL-ended `<mode> <sha> <stage>\t<path>` entry per conflict
+  # stage, the path as written; the first tab ends the fixed columns, so a tab in a name survives
+  unmerged = { entry.split("\t", 1)[1] for entry in r.stdout.split("\0") if "\t" in entry }
   return all(os.path.normpath(p) in unmerged for p in segment.pathspecs)
 
 
@@ -826,13 +846,13 @@ def _content_staged_paths(cwd: Path) -> list[str]:
   # modern git omits intent-to-add entries from `diff --cached` by itself; the flag pins that
   # behaviour on the 2.11..2.27 range where they would otherwise appear
   # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "diff", "--cached", "--name-only", "--ita-invisible-in-index")
+  r = _git_at(cwd, "diff", "--cached", "--name-only", "-z", "--ita-invisible-in-index", errors = _PATH_ERRORS)
 
   # guard: the flag postdates the 2.10 git floor — on the one minor below it, retry without the
   # flag (stricter: intent-to-add entries then count as content) rather than fail
   if r.returncode != 0:
     return _staged_paths(cwd)
-  return [ line for line in r.stdout.splitlines() if line.strip() ]
+  return [ path for path in r.stdout.split("\0") if path ]
 
 
 def _is_worktree_at_head(cwd: Path, paths: list[str]) -> bool:
@@ -858,7 +878,7 @@ def _is_worktree_at_head(cwd: Path, paths: list[str]) -> bool:
   # file on disk is identical to the committed state.
 
   # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "diff", "--quiet", "HEAD", "--", *paths)
+  r = _git_at(cwd, "--literal-pathspecs", "diff", "--quiet", "HEAD", "--", *paths)
   return r.returncode == 0
 
 
@@ -924,16 +944,17 @@ def _staged_paths(cwd: Path) -> list[str]:
       working directory reported by Claude Code at Stop event time.
 
   Returns:
-    List of staged paths in the order reported by `git diff --cached --name-only`. Empty list
-    when the index is clean or when the `git` invocation failed.
+    The staged paths as git lists them unquoted, undecodable bytes kept as surrogate escapes, in
+    the order git reports them. Empty list when the index is clean or when the `git` invocation
+    failed.
   """
   # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "diff", "--cached", "--name-only")
+  r = _git_at(cwd, "diff", "--cached", "--name-only", "-z", errors = _PATH_ERRORS)
 
   # guard: git invocation failed — treat as clean to avoid false positives
   if r.returncode != 0:
     return []
-  return [ line for line in r.stdout.splitlines() if line.strip() ]
+  return [ path for path in r.stdout.split("\0") if path ]
 
 
 def _handle_stop(payload: dict) -> int:
@@ -972,7 +993,7 @@ def _handle_stop(payload: dict) -> int:
 
   # resolve the repository root whose config holds the per-repo kill-switch
   # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "rev-parse", "--show-toplevel")
+  r = _git_at(cwd, "rev-parse", "--show-toplevel", errors = _PATH_ERRORS)
 
   # guard: cannot resolve repo root — fail open
   if r.returncode != 0:
@@ -1009,10 +1030,12 @@ def _handle_stop(payload: dict) -> int:
   if lock is None or lock.session_id != staging_lock.resolve_session_id(payload.get(HookKey.SESSION_ID)):
     return 0
 
-  # bounded preview so a large index doesn't flood the operator-facing message
+  # bounded preview so a large index doesn't flood the operator-facing message; a name is only shown
+  # here, so a byte that is not UTF-8 is rendered as a replacement character rather than an escape
   preview = staged[: 10]
   more = len(staged) - len(preview)
-  file_list = "\n".join(f"  {p}" for p in preview)
+  # waiver: stdlib codec and decode-error mode names, not domain constants
+  file_list = "\n".join(f"  {p.encode('utf-8', _PATH_ERRORS).decode('utf-8', 'replace')}" for p in preview)
   if more > 0:
     file_list += f"\n  ... and {more} more"
 

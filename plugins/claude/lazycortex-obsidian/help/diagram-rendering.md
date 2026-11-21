@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Install click-to-zoom for mermaid diagram fences in Obsidian; fit-CSS lives in the shared install step, not here.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-obsidian.diagram-install
@@ -37,6 +37,12 @@ Finally, it checks for a legacy `mermaid-no-bg.css` snippet left behind by an ea
 **Installing or refreshing the popup plugin independently.** Use `/lazy-obsidian.update-plugin mermaid-popup` directly — this is also the route the skill's report points you to when its install step failed. It is version-aware and no-ops when the vault already has the current release.
 
 **Legacy `mermaid-no-bg.css`.** Vaults that previously used an earlier diagram skill may have a `mermaid-no-bg.css` snippet in `.obsidian/snippets/`. The engine's built-in transparent-background directive makes it redundant. The skill detects it, leaves it in place, and notes it in the run report so you can remove it manually if you want a clean snippets directory.
+
+## When something goes wrong
+
+**"No Obsidian vault found" abort.** The repo root has no `.obsidian/` folder. Open the repo in Obsidian once so it creates the folder, then re-run `/lazy-obsidian.diagram-install`.
+
+**The run report shows `failed:<reason>` for `mermaid-popup`.** The community registry was unreachable or the plugin was not found in it. Click-to-zoom is unavailable until the plugin is installed, but diagram fit and theme color keep working through the CSS snippets once `/lazy-obsidian.install` has enabled them. Re-run `/lazy-obsidian.update-plugin mermaid-popup` when the network is back, or install the plugin from Obsidian's Community Plugins UI.
 
 ## See also
 

@@ -48,6 +48,8 @@ _CORE_CLI_NAME = "lazycortex-core"
 _SUB_RESOLVE_LANGUAGE = "resolve-language"
 _ARG_SECTION = "--section"
 _ARG_CWD = "--cwd"
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -131,7 +133,7 @@ def resolve_repo_language(vault: Path) -> str:
   # ask core for the section → repo-wide → floor answer
   proc = subprocess.run(
       [ sys.executable, str(cli), _SUB_RESOLVE_LANGUAGE, _ARG_SECTION, _SPEC_SECTION, _ARG_CWD, str(vault) ],
-      capture_output = True, text = True, check = False, encoding = "utf-8",
+      capture_output = True, text = True, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
   )
 
   # guard: a non-zero exit or an empty answer — surface stdout+stderr instead of inventing a language

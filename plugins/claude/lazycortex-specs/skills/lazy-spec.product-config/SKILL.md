@@ -13,7 +13,7 @@ A product's code lives in this same repository; its `source` names only the repo
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 12 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mode detection + resolve registry`
@@ -25,8 +25,9 @@ This skill has 12 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 7 — Guidelines (optional per-role context)`
    - `Step 9 — Asset types (delegate)`
    - `Step 10 — Workflow mode (full vs spec-only)`
-   - `Step 10b — Release (implementer, manifest, deploy targets)`
+   - `Step 10b — Release (implementer, specialists, manifest, deploy targets)`
    - `Step 11 — Write product record + scaffold folders + folder-notes`
+   - `Step 12 — Specialists (after the record is written)`
    - `Step 13 — Verify`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`unchanged`, `skipped-per-user-choice`, `design-only`, `taken-from-arg`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
@@ -55,7 +56,7 @@ Read the products section once:
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get products
 ```
 
-The first prints the `products` object — each key is a compound-key, each value a record (`spec_path`, optional `language`, `icon`, `source`, `dependencies`, `asset_types`, `tool_types`). Ignore the section's `_version` key.
+The first prints the `products` object — each key is a compound-key, each value a record (`spec_path`, optional `language`, `icon`, `source`, `dependencies`, `asset_types`). Ignore the section's `_version` key.
 
 Resolve the user's input to a mode:
 
@@ -108,7 +109,7 @@ Outcome: `create`, `edit`, or `aborted:no-vault-spec`.
 
    A `spec_path` under another product's makes this a nested product: the wizard resolves its ancestor chain and, for every step below whose key the effective record already carries (`lazy-spec.config-protocol.md` § Effective record), records outcome `inherited` instead of asking.
 
-**Edit mode.** Confirm this is the correct product. The key and `spec_path` are FIXED in edit mode — this skill does not rename or move products. Capture the existing record fields (`spec_path`, `language`, `icon`, `source`, `dependencies`, `asset_types`, `tool_types`, `guidelines`, `mode`) to merge into; never drop a field the user does not touch.
+**Edit mode.** Confirm this is the correct product. The key and `spec_path` are FIXED in edit mode — this skill does not rename or move products. Capture the existing record fields (`spec_path`, `language`, `icon`, `source`, `dependencies`, `asset_types`, `guidelines`, `mode`, `release`) to merge into; never drop a field the user does not touch.
 
 ```
 Context (print before asking):
@@ -281,7 +282,7 @@ Outcome: `guidelines-set`, `no-guidelines`, or (edit mode) `unchanged`.
 
 **Nested product:** when the effective record already carries this step's key from an ancestor, outcome `inherited`, no question; edit mode still lets the operator declare an own value, which wins.
 
-Whether to declare any asset types of the product's own (beyond the shipped feature / change / bug / content / research / release set) now. An asset type is a declared kind of asset (characters / scenes / chapters / …) written into `products[<key>].asset_types.<name>`, carrying its icon, its primary document (the type's `start_doc` — the attach target; a fresh asset spawns with no documents), its default tools, the folder its assets land in by default, and the playbook the coordinator works them under.
+Whether to declare any asset types of the product's own (beyond the shipped feature / change / bug / content / research / release set) now. An asset type is a declared kind of asset (characters / scenes / chapters / …) written into `products[<key>].asset_types.<name>`, carrying its icon, its primary document (the type's `start_doc` — the attach target; a fresh asset spawns with no documents), the folder its assets land in by default, and the playbook the coordinator works them under.
 
 ```
 Context (print before asking):
@@ -308,7 +309,7 @@ Context (print before asking):
 - Where: Step 10 — Workflow mode; target `products[<key>].mode`
 - Found: `mode` on record: <"spec-only", or absent → full>
 - Why asking: a per-product commitment, not a per-asset toggle — every asset under the product follows the chosen ladder, and only the operator knows whether specs are the whole deliverable
-- Answers: `full (default — design through implementation and testing)` — no key written; every asset's ladder is design-only (start document → review → approve → `spec_design_done`) and the product's releases carry the implementation (`lazy-spec.release-playbook.md`); `spec-only (design and review only; released by operator word)` — `mode: "spec-only"` written in Step 11; the product owns no releases, `Start release` never hangs, and `spec_released` flips only on an explicit operator word — for a product whose specs are the whole deliverable (a design-only reference other repos consume, not code this repo will itself implement)
+- Answers: `full (default — design through implementation and testing)` — no key written; every asset's ladder is design-only (start document → review → approve → `spec_design_done`) and the product's releases carry the implementation (`lazy-spec.release-type.md`); `spec-only (design and review only; released by operator word)` — `mode: "spec-only"` written in Step 11; the product owns no releases, `Start release` never hangs, and `spec_released` flips only on an explicit operator word — for a product whose specs are the whole deliverable (a design-only reference other repos consume, not code this repo will itself implement)
 AskUserQuestion: header "Workflow mode", question "How far does the coordinator's ladder run for every asset of product `<key>` — full, or spec-only? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `full (default — design through implementation and testing)` / `spec-only (design and review only; released by operator word)` with the descriptions above.
 ```
 
@@ -316,24 +317,48 @@ Capture `<mode>` only when `spec-only` is chosen; absent/`full` writes no key (m
 
 Outcome: `spec-only` or `full` (no key written).
 
-## Step 10b — Release (implementer, manifest, deploy targets)
+## Step 10b — Release (implementer, specialists, manifest, deploy targets)
 
 Only for a product that owns releases: Step 4 produced a `source` block, no enclosing product declares a `source`, and Step 10 kept `full`. Otherwise outcome `no-releases`, no question. In edit mode default every menu to the record's current `release` values.
 
-1. **Implementer.** The expert key that leads every release build. Resolve `<default>` first with `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product release-implementer <key>`: it prints `{"key": "<key>", "implementer": <expert-or-null>}` — the record's explicit `release.implementer` when set, else the first registered expert of the product's `release.implementer_chain`, else of the repository's `spec.release.implementer_chain` (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). A key not yet registered (create mode) resolves through the repository chain alone.
+1. **Implementer.** The expert key that leads every release build. Resolve `<default>` first with `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product release-implementer <key>`: it prints `{"key": "<key>", "implementer": <expert-or-null>}` — the record's explicit `release.implementer` when set, else the first registered expert of the product's `release.implementer_chain`, else of the repository's `spec.release.implementer_chain` (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`). A key not yet registered (create mode) resolves through the repository chain alone. A non-zero exit is an error, never an empty default: the verb then prints `{"key": "<key>", "implementer": null, "error": "<reason>"}` (the settings cannot be read). Show the `error` to the operator, ask nothing more in Step 10b and write no `release` key, with Step 10b outcome `error`.
 
    ```
    Context (print before asking):
    - Where: Step 10b — Release implementer; target `products[<key>].release.implementer` / `.implementer_chain`
    - Found: `release.implementer` on record: <key, or absent>; `release.implementer_chain` on record: <list, or absent>; `spec.release.implementer_chain`: <list, or absent>; resolved now: <implementer, or none>; registered experts: <keys>
-   - Why asking: one implementer answers for the whole product inside a release and delegates every foreign tool; the repository chain may not fit what this product is made of, and a null resolution leaves the release with no one to build it
+   - Why asking: one implementer answers for the whole product inside a release and orders every material its own role does not make from the product's specialists; the repository chain may not fit what this product is made of, and a null resolution leaves the release with no one to build it
    - Answers: `<default> (inherited)` — no `implementer` and no `implementer_chain` written in create mode (edit mode keeps whichever the record holds); the implementer follows the chain whenever it or the expert registry changes; `explicit expert` — a registered expert key via "other", written as `release.implementer`, which wins over every chain; `product chain` — an ordered list of registered expert keys via "other", comma-separated, written as `release.implementer_chain` and replacing the repository chain for this product entirely
-   AskUserQuestion: header "Implementer", question "Which expert leads every release build of product `<key>` — the inherited `<default>`, an explicit expert, or a chain of the product's own? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.release-playbook.md", options `<default> (inherited)` / `explicit expert` / `product chain`.
+   AskUserQuestion: header "Implementer", question "Which expert leads every release build of product `<key>` — the inherited `<default>`, an explicit expert, or a chain of the product's own? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.release-type.md", options `<default> (inherited)` / `explicit expert` / `product chain`.
    ```
 
    When `<default>` resolves to none, the `<default> (inherited)` option reads `none (inherited)` and its description says that no build can run until an expert is named or registered.
 
-2. **Manifest.** The repo-relative file whose version field a published release reads and writes.
+2. **Specialists.** The experts the implementer orders material from, one per role, derived on every call from the registered experts and overridden per role (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` § Specialists). The list is computed from the record on disk, so it is asked here only when that record already carries this run's implementer: in create mode, or when item 1 changed `implementer` / `implementer_chain` in this run, ask nothing here — Step 12 asks the same question once Step 11 has written the record (sub-outcome `specialists-after-write`). Otherwise run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product specialists <key>`: exit 0 prints `{"key", "specialists": [{"role", "expert", "agent", "aspects", "material", "guidelines", "origin"}, …]}`, each declared guideline path with no file named on stderr; exit 1 prints `{"key", "specialists": null, "error"}` — a malformed override, an override naming an unregistered expert, one role held by two experts the implementer's domain does not separate, or a listed expert whose `aspects` is not a list of keys.
+
+   ```
+   Context (print before asking):
+   - Where: Step 10b (or Step 12) — Release specialists; target `products[<key>].release.specialists`
+   - Found: <one line per entry: `<role>` — `<expert>` makes "<material>" (<origin>)>, or "no specialists"; or the verb's `error`, quoted
+   - Why asking: the list is derived from the registered experts; only the operator knows whether this product orders some material from another expert, needs a role switched off, or a kind of material the plugin does not ship
+   - Answers: `keep the derived list` — nothing written, the list keeps following the expert registry and the repository's `spec.release.specialists` (after an error, every build of the product refuses until it is fixed); `change a role` — the role follow-up below, one role at a time until the operator is done; only the roles changed there are written — by Step 11 when asked here, by Step 12 itself when asked there — under `products[<key>].release.specialists.<role>`
+   AskUserQuestion: header "Specialists", question "Product `<key>` builds with these specialists: <role → expert list, or the error>. Keep the derived list, or change a role? See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md", options `keep the derived list` / `change a role` with the descriptions above.
+   ```
+
+   Role follow-up (repeat until the operator is done):
+
+   ```
+   Context (print before asking):
+   - Where: Step 10b (or Step 12) — Specialist role; target `products[<key>].release.specialists.<role>`
+   - Found: the list above, with the roles changed so far in this run: <role → change, or "none">; registered experts: <keys>; roles the plugin ships: `developer` / `data-writer` / `docs-writer` / `ui-designer` / `fiction-writer`
+   - Why asking: an override replaces one role's entry and leaves every other role derived, so each change names its role
+   - Answers: `<role>` — a role from the list; `add a kind` — a new role token via "other". Then for an existing role: `another expert` — a registered expert key via "other", written as `{ "expert": <key> }` (a shipped role keeps the shipped material; a role the plugin does not ship keeps the current material, written beside it); `another material` — free text via "other", written as `{ "expert": <current expert>, "material": <text> }`; `switch off` — written as `false`; `back to derived` — offered only on a role whose origin is `product`, removes the product's entry. For `add a kind`: a registered expert key, then the material text — both written, since a role the plugin does not ship needs both
+   AskUserQuestion: header "Specialist role", question "Which specialist role of product `<key>` changes (changed so far: <roles>)?", options one per listed role plus `add a kind`, each with a description; then header "Change", question "What changes for role `<role>` of product `<key>`?", options per the answers above; then, as the answer needs it, header "Expert" (registered expert keys) and header "Material" (free text via "other").
+   ```
+
+   Capture `<specialists>` = `{ <role>: <entry> | false | delete }` for the changed roles only.
+
+3. **Manifest.** The repo-relative file whose version field a published release reads and writes.
 
    ```
    Context (print before asking):
@@ -344,7 +369,7 @@ Only for a product that owns releases: Step 4 produced a `source` block, no encl
    AskUserQuestion: header "Manifest", question "Which file carries product `<key>`'s version?", one option per candidate plus `none`.
    ```
 
-3. **Deploy targets.** Up to two, `staging` and `production`, each `{ "command": [<argv>], "url": "<address>" }`.
+4. **Deploy targets.** Up to two, `staging` and `production`, each `{ "command": [<argv>], "url": "<address>" }`.
 
    ```
    Context (print before asking):
@@ -355,9 +380,9 @@ Only for a product that owns releases: Step 4 produced a `source` block, no encl
    AskUserQuestion: header "Deploy targets", question "Does product `<key>` deploy anywhere — a staging instance to test against, a production target to publish to, both, or neither?", options `none` / `staging only` / `production only` / `both`.
    ```
 
-Capture `<release>` = `{ implementer?, implementer_chain?, manifest?, deploy? }`; only the keys the operator settled are written — the inherited answer settles neither implementer key.
+Capture `<release>` = `{ implementer?, implementer_chain?, manifest?, deploy? }` and `<specialists>`; only the keys the operator settled are written — the inherited answer settles neither implementer key, and `keep the derived list` settles no specialist.
 
-Outcome: `release-configured`, `unchanged`, or `no-releases`.
+Outcome: `release-configured`, `unchanged`, `no-releases`, or `error` (the implementer could not be resolved), with the specialists sub-outcome `specialists-derived`, `specialists-changed:<N>`, or `specialists-after-write` beside the first two.
 
 ## Step 11 — Write product record + scaffold folders + folder-notes
 
@@ -371,6 +396,7 @@ Each settings mutation is one keyed write: `settings-set products --key <a>/<b>/
 - `dependencies` — only when Step 5 accepted at least one entry.
 - `mode` — only when Step 10 captured `spec-only`; absent/`full` writes no key.
 - `release` — only when Step 10b settled at least one key: `implementer` or `implementer_chain` when the operator named one, `manifest` and `deploy` when settled; an empty `release` is never written.
+- `release.specialists.<role>` — one keyed write per role Step 10b changed (only when Step 10b asked the question, after any `release` write; Step 12 writes its own), never the whole list: `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/release/specialists/<role> --value '<entry-json or false>'`, or `--delete` for `back to derived`. Roles the operator did not change are never written.
 
 **Create mode**: write the whole record at its own key:
 
@@ -378,7 +404,7 @@ Each settings mutation is one keyed write: `settings-set products --key <a>/<b>/
 "${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key> --value '<record-json>'
 ```
 
-**Edit mode**: start from the existing record captured in Step 2 and write one call per field that changed — add `source` to a design-only product, extend `dependencies`, switch `language` / `icon` / `guidelines` / `mode` / `release` — each as `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/<field> --value '<field-json>'` (`<field>` one of `source`, `dependencies`, `language`, `icon`, `guidelines`, `mode`, `release`). `asset_types` / `tool_types` and every untouched field are never written, so they stay as they are. Never emit empty `dependencies: []` or an empty `source`; likewise, a Step 7 outcome of `no-guidelines` or an `unchanged`/`remove a role's paths` edit that empties every role means an absent `guidelines` key, never an empty `guidelines: {}` — a field that must go away is removed with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/<field> --delete`.
+**Edit mode**: start from the existing record captured in Step 2 and write one call per field that changed — add `source` to a design-only product, extend `dependencies`, switch `language` / `icon` / `guidelines` / `mode` / `release` — each as `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/<field> --value '<field-json>'` (`<field>` one of `source`, `dependencies`, `language`, `icon`, `guidelines`, `mode`, `release`). A `release` value written here is the record's `release` with the Step 10b keys applied, so its `specialists` entries survive the write; the specialist roles are then written one by one as listed above. `asset_types` and every untouched field are never written, so they stay as they are. Never emit empty `dependencies: []` or an empty `source`; likewise, a Step 7 outcome of `no-guidelines` or an `unchanged`/`remove a role's paths` edit that empties every role means an absent `guidelines` key, never an empty `guidelines: {}` — a field that must go away is removed with `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set products --key <compound-key>/<field> --delete`.
 
 Initialize the on-disk structure (create mode, or any missing piece in edit mode). Use two separate calls for each folder-note — `Bash(mkdir -p <dir>)` then the `Write` tool (never chain):
 
@@ -419,6 +445,14 @@ Real icon values are fine — the iconize hook only strips unresolvable placehol
 Outcome: `written`.
 
 Product-specific reviewers are added as `<kind>@<key>` classes through `/lazy-review.configure`.
+
+## Step 12 — Specialists (after the record is written)
+
+Runs only when Step 10b's specialists sub-outcome is `specialists-after-write` — create mode, or an edit that changed the implementer in this run. Any other Step 10b sub-outcome, or `no-releases`, → outcome `asked-in-10b` / `no-releases`, nothing asked.
+
+Now that Step 11 has written the record, run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" resolve-product specialists <key>` and ask the same question, with the same context block and the same role follow-up, as Step 10b item 2 — the `Where` line naming Step 12. Write each changed role with one keyed write, exactly as Step 11's `release.specialists.<role>` entry describes; roles the operator did not change are never written.
+
+Outcome: `specialists-derived`, `specialists-changed:<N>`, `asked-in-10b`, or `no-releases`.
 
 ## Step 13 — Verify
 

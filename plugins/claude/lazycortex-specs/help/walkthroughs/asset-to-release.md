@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through its approved design to its publication in a product release.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved, lazy-spec.flip-gate closes spec_design_done, the operator ticks Start release and a release builds and tests the product, lazy-spec.sync-with-code reconciles code reality and proposes the release's spec_develop_done, and the operator's Publish tick sets the asset's spec_released."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
-source_sha: 22b60f591c6dadaac3ba59e66718ced42828a208
-surface_sha: ee09824d977a0d78e87f89e41cc515c829a9727316da8eaf8571bb2799baf9a1
+source_sha: 2f7cbc6131378ad2fb07b51fdc460840760d310a
+surface_sha: 300ebf16c37d9f5c89cf2d7d69cbe3a2f099cf0d5358f99ca68d8a6f41450522
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -42,7 +42,7 @@ Run `/lazy-spec.create-asset <product> <asset-type> <slug> [--path <dir>]`, wher
 
 **Verification gate:** confirm the asset folder exists, the doc Step 1 actually seeded carries `spec_stage: draft` — `vision.md` for a type that declares a mandatory vision (`design.md` doesn't exist yet; Step 2 below is what creates it), or the type's own start doc otherwise, which for the shipped `feature`, `change` and `bug` types is `design.md` or `bug.md` — the folder-note's `# Summary` précis is filled in (not a placeholder), and the folder-note lists its gates as `false`.
 
-If the skill refuses naming an unknown product, run `/lazy-spec.product-config` to register it, then re-invoke. If it refuses naming an unknown category, run `/lazy-spec.add-asset-type` to declare it, then re-invoke.
+If the skill refuses naming an unknown product, run `/lazy-spec.product-config` to register it, then re-invoke. If it refuses naming an unknown category, run `/lazy-spec.add-asset-type` to declare it, then re-invoke. A refusal saying the type has no playbook, or declares no start document, means the type's declaration is incomplete: complete it with `/lazy-spec.add-asset-type`, then re-invoke. A refusal saying the target folder already exists means an asset with that slug is already there: pick another slug, or work the existing asset. A refusal naming an invalid `--target` token means a named target was empty or stepped through `.` or `..`: pass each target as `<folder>/<slug>` from the product root.
 
 ### Step 2 — Review and approve the design doc
 

@@ -1,10 +1,10 @@
 ---
-name: lazy-spec.change-playbook
+name: lazy-spec.change-type
 description: Type playbook for change assets — the feature-shaped design-only definition flow plus the two-phase cascade that folds the delta into every declared target's design and test cases; the change itself ships in the product's release once the cascade has converged.
 ---
 # Change playbook — the `change` asset type
 
-This document is the coordinator's law on any asset whose status folder-note carries `spec_asset_type: change`. It covers the definition flow — the documents, tool determination, the two gates and their launch checkboxes — plus the cascade, which is what makes a change different from every other type. Implementation and verification belong to the product's release (`lazy-spec.release-playbook.md`): a change enters the release delta once its design is approved and its cascade has converged.
+This document is the coordinator's law on any asset whose status folder-note carries `spec_asset_type: change`. It covers the definition flow — the documents, the two gates and their launch checkboxes — plus the cascade, which is what makes a change different from every other type. Implementation and verification belong to the product's release (`lazy-spec.release-type.md`): a change enters the release delta once its design is approved and its cascade has converged.
 
 ## What this type is
 
@@ -35,16 +35,6 @@ The change's `design.md` launches through its own `Write design` checkbox like t
 **Late edits.** An edit to `vision.md`, `use-cases.md`, or `ui-design.md` after `design.md` has already reached `approved` gets no auto-cascade — the coordinator drops a `[!attention]` callout into `design.md` and names the edit in `# Status brief`, rather than reopening anything on its own.
 
 **Declaring it mandatory.** The `vision` contract comes from the type declaration (`asset_types.<name>.vision`); for `use-cases.md` / `ui-design.md`, a product, the change's group folder, or this change may declare either document mandatory in its `# Coordinator rules` section, in which case the coordinator runs the same seed-then-start enactment directly, without a tick — the same rule-driven verb calls behind every other "runs automatically" clause (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
-
-## Tool determination
-
-**When.** Tools are determined on design approval, on the same wake that closes `spec_design_done`. Until then the note carries no `spec_tools`, and that state means "not determined" — the release implementer stops on an included asset whose tool set is still open, so the determination is this coordinator's to make before the asset reaches a release.
-
-**From what.** The direct statements of the design document about what is actually being made — code, data, documentation, tests.
-
-**Written how.** The coordinator writes the list through `note-set-key`. An unobvious choice is never guessed — the coordinator raises a `[!question]` listing the candidates, names in `# Status brief` that the change is not ready for a release, and waits for the operator's tick.
-
-A tool that lands in `spec_tools` with no declaration in `tool_types` is a finding, not a guess: the coordinator raises the question rather than inventing behaviour for a playbook that does not exist.
 
 ## The gates
 

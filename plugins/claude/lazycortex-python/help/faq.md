@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-11-15
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -11,6 +11,7 @@ source_skills:
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
+  - lazy-python.bug-hunter
   - lazy-python.domain-writer
   - lazy-python.contract-writer
   - chk
@@ -21,8 +22,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 063ee4111faa2e09a77bc9adc8436336d8e4a565
-surface_sha: e73575bff4e1d86ffc9568f2f5f8a1bc06bb3840800b4fc54c0d714850092466
+source_sha: 702f588ca1c39d4fcd68482e154c1dcc3eda50ee
+surface_sha: 381d2c7905f4b626d3e40df5508dd07ab5e1fe51d0d3826ff754be2d40592a32
 ---
 # Frequently asked questions
 
@@ -77,6 +78,12 @@ If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly wi
 ## When should I use `/lazy-python.check-style` versus the PostToolUse hook?
 
 The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surfaces violations inline in the next turn — it is your fast inner loop. `/lazy-python.check-style` is the deeper seven-step review you invoke before committing: it adds a manual pass over semantic issues the automated checkers cannot see (docstring quality, contract consistency, guard-clause coverage, special-comment preservation), then dispatches the full `chk-py all` sweep (which itself ends with the `review` phase) plus `tst-py` to gate the change. Use the hook continuously and `/lazy-python.check-style` at the end of a meaningful edit batch.
+
+---
+
+## Which checks and tests should run when? The whole suite takes too long after every edit.
+
+The always-loaded style rule's Verification Order scopes each run by the moment of the work. After every task or fix, run the local check (`chk-py all <file>.py -q`) and then the local tests (`tst-py <module> -q`), and only once the check is clean. The whole-project check (`chk-py all -q`) runs when the implementation is complete, after each cycle of review and fixes, and before any commit — not after a single task. The guideline review (`chk-py review`) runs on its own cadence, batched over the whole change. The whole test suite (`tst-py -q` with no module) runs once, at the final gate, together with the whole-project check, and only when nothing is left open: implementation complete, last review without an open finding, every fix done. It is never a per-task, per-fix or pre-commit step, because a fix that follows an open finding invalidates the run. Read the full output of both final-gate commands; a filtered view hides failures in code the change reaches indirectly. If your project declares its own runner through `python.check_cmd` / `python.test_cmd`, that command replaces `chk-py` / `tst-py`, and the order stays the same.
 
 ---
 
@@ -167,6 +174,20 @@ LaTeX markup (`$...$`, `\frac{}{}`, and similar) is forbidden in every code comm
 ## Does `lazy-python.code-reviewer` duplicate what `pcf` / `mypy` / `ruff` / `pylint` already check?
 
 No — by design it refuses to. The agent's whole job is guideline clauses no deterministic checker can prove: whether a comment explains the right thing, whether a `# guard:` marker is on an actual defensive early-exit rather than an ordinary branch, whether a docstring's `Args:`/`Returns:`/`Raises:` still match the real signature, whether a suppression comment (`# type: ignore`, `# noqa`, `# pylint: disable`) carries a real `# waiver:` reason. If a finding duplicates something `pcf` or `ruff` would already have flagged, that is a bug in the agent's output, not an expected overlap.
+
+---
+
+## Does the reviewer hunt for bugs?
+
+Only in a narrow way. The review checklist has one real-bug item: it reads the regions of each changed file that the diff touched and reports a defect (a wrong result, a crash, lost or corrupted data, a broken caller contract) as a `bug` finding with severity `FAIL`. A finding is raised only when the lines are touched by the change, the finding names the concrete input or state that triggers it, and that input or state really reaches the code through a caller, a config value, or a file the program reads. An input no caller produces, a state the program already refuses, a race in sequential code, or a platform the project does not run on is not reported. For an open-ended hunt — inventing inputs and trying to break the code — use the `lazy-python.bug-hunter` agent instead (next question).
+
+---
+
+## How do I ask for a free bug hunt, and why can't I steer the reviewer into one?
+
+Dispatch the `lazy-python.bug-hunter` agent with the files or directories to hunt in, and optionally directions: defect classes to try, inputs to probe, earlier findings to skip. It invents scenarios, writes one test per scenario, and treats a suspicion as a bug only when its test fails against the unchanged code for the cause it predicted. It then fixes each proven bug minimally, with the test run red before the fix and green after. It never changes, weakens, skips, or deletes a test it did not write in that run, and a fix that turns such a test red is undone and reported as `UNRESOLVED`. A bug whose cause lies outside the scope is also reported rather than fixed. The report ends with `Status: done`, or `Status: blocked` when any bug is unresolved. Without a named scope the agent stops with an error. The hunt is a task of its own, never part of `chk-py review`.
+
+The reviewer, by contrast, reads only two things from its dispatch prompt: the manifest path (or the file list when there is no manifest) and your approvals of test changes, each naming the test it approves. A request to hunt for bugs, a list of defect classes, a focus or extra task, a subset of the files, earlier findings called closed, or instructions on what to skip is ignored and changes no finding. Each run judges the current state of the whole manifest scope from scratch.
 
 ---
 

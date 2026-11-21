@@ -409,7 +409,9 @@ def _find_all_new_rungs(root: Path, since: str) -> list[dict[str, str | int]]:
   # the revision must name a commit, else every file would look absent there
   probe = subprocess.run(
     [ "git", "-C", str(directory), "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}" ],
-    stdin = subprocess.DEVNULL, capture_output = True, text = True, encoding = _ENCODING, check = False,
+    stdin = subprocess.DEVNULL, capture_output = True, text = True, encoding = _ENCODING,
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace", check = False,
   )
   # guard: an unknown revision is a failure, never an empty window
   if probe.returncode != 0:
@@ -446,7 +448,9 @@ def _read_ladder_keys_at(path: Path, revision: str) -> set[int]:
   # the committed copy, read relative to the file's own directory
   proc = subprocess.run(
     [ "git", "-C", str(path.parent), "show", f"{revision}:./{path.name}" ],
-    stdin = subprocess.DEVNULL, capture_output = True, text = True, encoding = _ENCODING, check = False,
+    stdin = subprocess.DEVNULL, capture_output = True, text = True, encoding = _ENCODING,
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace", check = False,
   )
 
   # guard: no committed copy, so the section had no rung then
@@ -514,7 +518,9 @@ def _read_unreleased_at_head(path: Path) -> bool:
   # the committed copy, read relative to the file's own directory
   proc = subprocess.run(
     [ "git", "-C", str(path.parent), "show", f"{_HEAD}:./{path.name}" ],
-    stdin = subprocess.DEVNULL, capture_output = True, text = True, encoding = _ENCODING, check = False,
+    stdin = subprocess.DEVNULL, capture_output = True, text = True, encoding = _ENCODING,
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace", check = False,
   )
 
   # guard: no committed copy, so the step was never released

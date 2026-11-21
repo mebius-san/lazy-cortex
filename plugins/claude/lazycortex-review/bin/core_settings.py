@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -38,6 +38,66 @@ _SCOPE_FLAG = "--scope"
 _MERGED_SCOPE = "merged"
 # The core `settings-get` flag that names the repository whose settings are read.
 _CWD_FLAG = "--cwd"
+# The `spec` section key naming the content root folder, and the folder used when it names none.
+_VAULT_ROOT_KEY = "vault_root"
+_DEFAULT_VAULT_ROOT = "specs"
+# The path segment that climbs to the parent directory.
+_PARENT_SEGMENT = ".."
+
+
+# waiver: `spec_cfg` is the raw `spec` value of operator-edited JSON and may be any JSON value; the body narrows it
+def spec_content_root(settings_root: Path, spec_cfg: object) -> Path:
+  """
+  Name the spec content root of a repository.
+
+  Guarantees:
+    - A `vault_root` that is absolute, climbs out of the repository through a `..` segment, or names the repository
+      root itself always raises `SettingsReadError` and is never replaced by the default content root.
+    - Only an absent, blank or non-string `vault_root` yields the default content root.
+
+  Args:
+    settings_root: The repository root that holds `.claude/lazy.settings.json`.
+    spec_cfg: The merged `spec` settings section; anything that is not a mapping reads as an empty section.
+
+  Returns:
+    The content root: the section's `vault_root` under the repository root, or `specs` when it is absent, blank or
+    not a string.
+
+  Raises:
+    SettingsReadError: When `vault_root` is an absolute path, climbs out through a `..` segment, or names the
+      repository root itself.
+  """
+
+  # Contract:
+  # A `vault_root` that is absolute, climbs out of the repository through a `..` segment, or names the repository
+  # root itself MUST raise `SettingsReadError`; it is NEVER replaced by the default content root. Only an absent,
+  # blank or non-string value yields the default content root.
+
+  # Domain(spec.config):
+  # # The spec catalog root is refused, never defaulted, when it leaves its sub-directory
+  # The spec catalog occupies a named sub-directory of the repository, never the repository root itself and never
+  # a place outside it. A configured location that points at the repository root, at an absolute location, or
+  # climbs out of the repository is refused; it is never silently replaced by the default location, because
+  # every automatic step would then act on a tree the operator did not set up as the catalog. Only a location
+  # that is absent, blank or not text names no choice at all, and the default location is used.
+
+  # the configured `vault_root`, none when the section is not a mapping
+  vault_root = spec_cfg.get(_VAULT_ROOT_KEY) if isinstance(spec_cfg, dict) else None
+
+  # guard: no usable value names the default folder
+  if not isinstance(vault_root, str) or not vault_root:
+    return settings_root / _DEFAULT_VAULT_ROOT
+
+  # the configured value read as a relative POSIX path
+  rel = PurePosixPath(vault_root)
+
+  # guard: a root at an absolute place, above the repository, or at the repository root itself is refused, never
+  # replaced by the default folder
+  if rel.is_absolute() or _PARENT_SEGMENT in rel.parts or not rel.parts:
+    raise SettingsReadError(
+        f"spec.{_VAULT_ROOT_KEY} {vault_root!r} must name a sub-directory of {settings_root}"
+    )
+  return settings_root / rel.as_posix()
 
 
 def read_merged_sections(repo: Path, *sections: str) -> dict[str, dict]:
@@ -75,6 +135,8 @@ def read_merged_sections(repo: Path, *sections: str) -> dict[str, dict]:
         [ sys.executable, str(cli), CoreCommand.SETTINGS_GET, section, _SCOPE_FLAG, _MERGED_SCOPE, _CWD_FLAG,
           str(repo) ],
         capture_output = True, text = True, check = False, encoding = "utf-8",
+        # waiver: stdlib decode-error mode, not a domain constant
+        errors = "replace",
     )
 
     # guard: the verb failed — a broken settings layer must not pass for an empty one

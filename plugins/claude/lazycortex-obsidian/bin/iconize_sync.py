@@ -88,6 +88,9 @@ BOT_NAME = "lazy-obsidian.repaint"
 BOT_EMAIL = "lazy-obsidian.repaint@bot.invalid"
 ICON_COMMIT_TRAILER = "Lazy-Bot: lazy-obsidian.repaint"
 
+# The git pathspec magic that makes one path match itself only, never as a glob.
+_LITERAL_PATHSPEC = ":(literal)"
+
 # opt: vault memoized — valid while every note resolution re-pins it to the vault it resolved before a callback runs
 # waiver: a module function's memo shared by every caller; moving it onto an instance would change every call site
 _CALLBACK_VAULT_CACHE = None
@@ -260,14 +263,16 @@ def find_vault_git_root(start: Path) -> Path | None:
   try:
     proc = subprocess.run(
       ["git", "-C", os.path.abspath(start), "rev-parse", "--show-toplevel"],
-      check = False, capture_output = True, text = True, encoding = "utf-8"
+      check = False, capture_output = True,
     )
   except OSError:
     # guard: git binary unavailable — no repository can be resolved
     return None
 
   # guard: not a git repository — there is no vault to resolve
-  if proc.returncode != 0 or not (top := proc.stdout.strip()):
+  # the toplevel is read as bytes and decoded as a file-system name, so no byte of the path is rewritten
+  # waiver: line terminator of the git answer, not a domain constant
+  if proc.returncode != 0 or not (top := os.fsdecode(proc.stdout.rstrip(b"\n"))):
     return None
   return Path(top)
 
@@ -903,7 +908,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     print(json.dumps({
       ResultKey.OP: "sync", ResultKey.DRY_RUN: True, ResultKey.PATH: rel,
       ResultKey.ICON: icon, ResultKey.COLOR: color,
-    }, ensure_ascii = False))
+    }, ensure_ascii = True))
     return EXIT_OK
 
   # no rule claims this note — keep whatever icon keys another manager wrote
@@ -911,7 +916,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     print(json.dumps({
       ResultKey.OP: "sync", ResultKey.PATH: rel, ResultKey.CHANGED: False,
       ResultKey.ICON: None, ResultKey.COLOR: None,
-    }, ensure_ascii = False))
+    }, ensure_ascii = True))
     return EXIT_OK
 
   # a real run rewrites the note's icon keys and reports whether its text changed
@@ -919,7 +924,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
   print(json.dumps({
     ResultKey.OP: "sync", ResultKey.PATH: rel, ResultKey.CHANGED: changed,
     ResultKey.ICON: icon, ResultKey.COLOR: color,
-  }, ensure_ascii = False))
+  }, ensure_ascii = True))
   return EXIT_OK
 
 
@@ -971,11 +976,11 @@ def _sync_rel_paths(vault: Path, icon_map: dict, rels: list[str], *, dry_run: bo
   # a dry run reports the plan and leaves the worktree untouched
   if dry_run:
     print(json.dumps({ ResultKey.OP: op, ResultKey.DRY_RUN: True, ResultKey.PLANNED: planned },
-                     ensure_ascii = False))
+                     ensure_ascii = True))
     return EXIT_OK
 
   # emit the machine-readable result record for the caller
-  print(json.dumps({ ResultKey.OP: op, ResultKey.TOUCHED: touched }, ensure_ascii = False))
+  print(json.dumps({ ResultKey.OP: op, ResultKey.TOUCHED: touched }, ensure_ascii = True))
   return EXIT_OK
 
 
@@ -1177,12 +1182,12 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
   # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile", ResultKey.DRY_RUN: True, ResultKey.PREFIX: prefix,
-                       ResultKey.PLANNED: planned }, ensure_ascii = False))
+                       ResultKey.PLANNED: planned }, ensure_ascii = True))
     return EXIT_OK
 
   # emit the machine-readable result record for the caller
   print(json.dumps({ ResultKey.OP: "reconcile", ResultKey.PREFIX: prefix,
-                     ResultKey.TOUCHED_COUNT: len(touched) }, ensure_ascii = False))
+                     ResultKey.TOUCHED_COUNT: len(touched) }, ensure_ascii = True))
   return EXIT_OK
 
 
@@ -1268,7 +1273,7 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
   # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile-plugin", ResultKey.PLUGIN: args.plugin, ResultKey.DRY_RUN: True,
-                       ResultKey.PLANNED: planned }, ensure_ascii = False))
+                       ResultKey.PLANNED: planned }, ensure_ascii = True))
     return EXIT_OK
 
   # Contract:
@@ -1278,7 +1283,7 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
 
   # emit the machine-readable result record for the pre-commit pipeline
   print(json.dumps({ ResultKey.OP: "reconcile-plugin", ResultKey.PLUGIN: args.plugin,
-                     ResultKey.TOUCHED: touched }, ensure_ascii = False))
+                     ResultKey.TOUCHED: touched }, ensure_ascii = True))
   return EXIT_OK
 
 
@@ -1304,7 +1309,7 @@ def _dirty_md_files(vault: Path) -> list[str]:
   status = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault),
       "status", "-z", "--porcelain=v1" ],
-    capture_output = True, text = False, check = False)
+    capture_output = True, check = False)
 
   # guard: git failure → empty list (reconcile-dirty stays a safety net)
   if status.returncode != 0:
@@ -1443,12 +1448,12 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile-dirty", ResultKey.DRY_RUN: True,
                        ResultKey.PREFIXES: prefixes, ResultKey.PLANNED: planned },
-                     ensure_ascii = False))
+                     ensure_ascii = True))
     return EXIT_OK
 
   # emit the machine-readable result record for the caller
   print(json.dumps({ ResultKey.OP: "reconcile-dirty", ResultKey.PREFIXES: prefixes,
-                     ResultKey.TOUCHED_COUNT: len(touched) }, ensure_ascii = False))
+                     ResultKey.TOUCHED_COUNT: len(touched) }, ensure_ascii = True))
   return EXIT_OK
 
 
@@ -1495,7 +1500,7 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
 
   Args:
     vault: Resolved vault root.
-    rels: Vault-relative POSIX paths to commit.
+    rels: Vault-relative POSIX paths to commit, each taken literally and never as a glob.
 
   Returns:
     None when the notes are committed or the list was empty; a one-line reason when git
@@ -1514,11 +1519,15 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
   if not rels:
     return None
 
-  # an explicit pathspec keeps whatever else the operator has in flight out of this commit;
+  # an explicit pathspec keeps whatever else the operator has in flight out of this commit; each path is
+  # taken literally, so a name carrying glob characters never pulls a sibling into the bot commit;
   # `core.hooksPath=/dev/null` keeps the consumer's own git hooks from re-entering this worker
+  literal = [ f"{_LITERAL_PATHSPEC}{rel}" for rel in rels ]
   added = subprocess.run(
-    [ "git", "-C", str(vault), "-c", "core.hooksPath=/dev/null", "add", "--", *rels ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
+    [ "git", "-C", str(vault), "-c", "core.hooksPath=/dev/null", "add", "--", *literal ],
+    capture_output = True, text = True, check = False, encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace")
 
   # guard: nothing reached the index — committing now would produce an empty or partial commit
   if added.returncode != 0:
@@ -1530,8 +1539,10 @@ def _commit_notes(vault: Path, rels: list[str]) -> str | None:
   committed = subprocess.run(
     [ "git", "-C", str(vault), "-c", "core.hooksPath=/dev/null",
       "-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}",
-      "commit", "-m", f"{ICON_COMMIT_SUBJECT}\n\n{ICON_COMMIT_TRAILER}", "--", *rels ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
+      "commit", "-m", f"{ICON_COMMIT_SUBJECT}\n\n{ICON_COMMIT_TRAILER}", "--", *literal ],
+    capture_output = True, text = True, check = False, encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace")
 
   # guard: the repaint stayed uncommitted, which is exactly the dirty tree this run exists to avoid
   if committed.returncode != 0:
@@ -1548,18 +1559,20 @@ def _commit_range_paths(vault: Path, sha: str) -> list[str]:
     sha: The commit whose changed paths are returned.
 
   Returns:
-    Sorted vault-relative POSIX paths. Empty on any git failure — the routine is a repaint
+    Sorted vault-relative POSIX paths, each spelled exactly as the file system spells it (undecodable
+    bytes as surrogate escapes), never quoted. Empty on any git failure — the routine is a repaint
     pass, never a blocker.
   """
+  # NUL-separated raw names, captured as bytes: a quoted or re-encoded name would point at no folder
   proc = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault),
-      "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root", sha ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
+      "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "-m", "--root", sha ],
+    capture_output = True, check = False)
 
   # guard: git failure — nothing to repaint from
   if proc.returncode != 0:
     return []
-  return sorted({ line.strip() for line in proc.stdout.splitlines() if line.strip() })
+  return sorted({ os.fsdecode(name) for name in proc.stdout.split(b"\0") if name })
 
 
 def _has_diverged_from_head(vault: Path, rel: str) -> bool:
@@ -1574,14 +1587,16 @@ def _has_diverged_from_head(vault: Path, rel: str) -> bool:
     True when the working copy carries content HEAD does not, including a note git does
     not track yet. False on any git failure, so a broken probe never triggers a commit.
   """
+  # the note is asked about literally, and its listing is read as bytes: only its emptiness matters
   proc = subprocess.run(
-    [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "--", rel ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
+    [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "-z", "--",
+      f"{_LITERAL_PATHSPEC}{rel}" ],
+    capture_output = True, check = False)
 
   # guard: git failure — treat as unchanged so a broken probe never commits blind
   if proc.returncode != 0:
     return False
-  return bool(proc.stdout.strip())
+  return bool(proc.stdout.strip(b"\0"))
 
 
 def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
@@ -1593,34 +1608,41 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
     rel: Vault-relative POSIX path of the note.
 
   Returns:
-    True when the note is untracked, when git fails, or when any changed line of the note's
-    whole diff against HEAD (staged plus unstaged) is not an `iconize_icon:` / `iconize_color:`
-    frontmatter line; False when every changed line is an icon line.
+    True when the note is untracked, when git fails, when the note's diff against HEAD or its HEAD
+    revision is not UTF-8 text (it cannot be judged, so it counts as foreign), or when any changed
+    line of the note's whole diff against HEAD (staged plus unstaged) is not an `iconize_icon:` /
+    `iconize_color:` frontmatter line; False when every changed line is an icon line.
   """
+  # the note is asked about literally, never as a pattern that could match a sibling
+  pathspec = f"{_LITERAL_PATHSPEC}{rel}"
   status = subprocess.run(
-    [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "--", rel ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
+    [ "git", "--no-optional-locks", "-C", str(vault), "status", "--porcelain=v1", "-z", "--", pathspec ],
+    capture_output = True, check = False)
 
   # guard: git failure, or an untracked note — someone else's in-flight file, never swept
-  if status.returncode != 0 or status.stdout.startswith("??"):
+  if status.returncode != 0 or status.stdout.startswith(b"??"):
     return True
 
   # the whole worktree-vs-HEAD diff (staged plus unstaged) is what the repaint commit would carry
   diff = subprocess.run(
-    [ "git", "--no-optional-locks", "-C", str(vault), "diff", "HEAD", "--", rel ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
-
-  # guard: git failure — assume foreign content so a broken probe never sweeps blind
-  if diff.returncode != 0:
-    return True
+    [ "git", "--no-optional-locks", "-C", str(vault), "diff", "HEAD", "--", pathspec ],
+    capture_output = True, check = False)
 
   # the HEAD revision's text locates the frontmatter a removed line may belong to
   head = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(vault), "show", f"HEAD:./{rel}" ],
-    capture_output = True, text = True, check = False, encoding = "utf-8")
+    capture_output = True, check = False)
 
   # guard: git failure — assume foreign content so a broken probe never sweeps blind
-  if head.returncode != 0:
+  if diff.returncode != 0 or head.returncode != 0:
+    return True
+
+  # a diff or a HEAD revision that is not UTF-8 text cannot be judged line by line: it counts as
+  # foreign content, so this one note stays out of the commit and the walk goes on
+  try:
+    diff_text = diff.stdout.decode("utf-8")
+    head_text = head.stdout.decode("utf-8")
+  except UnicodeDecodeError:
     return True
 
   # the working copy's text locates the frontmatter an added line may belong to; a deleted note has none
@@ -1633,12 +1655,12 @@ def _has_non_icon_divergence(vault: Path, rel: str) -> bool:
   # each side's frontmatter interior as 1-based line numbers: the lines between the two fences
   old_fm, new_fm = (
     range(2, 2 + fm.group(1).count("\n")) if fm else range(0)
-    for fm in ( FM_BLOCK_RE.match(head.stdout), FM_BLOCK_RE.match(work) ))
+    for fm in ( FM_BLOCK_RE.match(head_text), FM_BLOCK_RE.match(work) ))
 
   # any changed line that is not an icon line inside its side's frontmatter is foreign work in flight
   old_no = new_no = 0
   in_hunk = False
-  for line in diff.stdout.splitlines():
+  for line in diff_text.splitlines():
     # a hunk header resets both sides' line counters
     if hunk := _HUNK_RE.match(line):
       old_no, new_no, in_hunk = int(hunk[1]), int(hunk[2]), True
@@ -1692,6 +1714,9 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
       stripped or rewritten.
     - A scaffolding template is never painted.
     - A note outside the declared paint roots is never rewritten, and no icon rule is matched against it.
+    - One note that cannot be repainted never stops the walk: every other claimed note is still repainted and
+      committed in the same run, and the note is named in the run's `error` with a non-zero exit; in `--dry-run`
+      the note that could not be judged is named in the printed plan's `error`.
 
   Args:
     args: Parsed CLI arguments carrying the driving `item` (a commit sha, or the JSON item a
@@ -1699,7 +1724,9 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
 
   Returns:
     Process exit code: `EXIT_OK` on a clean run, `EXIT_COMMIT_FAILED` when the repaint commit
-    did not land.
+    did not land (the notes that could not be repainted are then named in `error` beside the commit failure),
+    `EXIT_VALIDATION` when a note could not be repainted. With `--dry-run` a note that could not be
+    judged is named in the printed plan's `error` and the code is `EXIT_VALIDATION`; otherwise `EXIT_OK`.
   """
   vault = find_vault(args.vault)
   icon_map = _load_icon_map_or_inert(vault, args.icon_map)
@@ -1740,32 +1767,53 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
   seen: list[str] = []
   rewritten: list[str] = []
   planned: list[dict] = []
+  unpainted: list[str] = []
+
+  # Contract:
+  # One note that cannot be repainted never stops the walk: every other claimed note is still
+  # repainted and committed in the same run, and the note is named in the run's `error` with a
+  # non-zero exit. A dry run holds the same promise for its plan: a note that could not be judged
+  # is named in the plan's `error`, and the exit is non-zero.
 
   # recompute the icon for every note in each affected directory and rewrite its frontmatter
   for prefix in prefixes:
     for rel in walk_md_files(vault, prefix or None):
-      resolved = _resolve_icon_pair(icon_map, vault, rel)
-      note_path = vault / rel
-      if args.dry_run:
-        # only a claimed note reaches the plan — unclaimed ones will not be rewritten
-        if resolved is not None and _is_repaint_needed(note_path, resolved[0], resolved[1]):
-          planned.append({ ResultKey.PATH: rel, ResultKey.ICON: resolved[0], ResultKey.COLOR: resolved[1] })
-        continue
+      # the per-note boundary — a note that raises is reported and the walk goes on, so the
+      # notes repainted before it still reach the commit below instead of staying dirty
+      try:
+        resolved = _resolve_icon_pair(icon_map, vault, rel)
+        note_path = vault / rel
+        if args.dry_run:
+          # only a claimed note reaches the plan — unclaimed ones will not be rewritten
+          if resolved is not None and _is_repaint_needed(note_path, resolved[0], resolved[1]):
+            planned.append({ ResultKey.PATH: rel, ResultKey.ICON: resolved[0], ResultKey.COLOR: resolved[1] })
+          continue
 
-      # an unclaimed note is not rewritten but stays in the commit sweep — divergence
-      # from HEAD, not this run's rewrites, decides the commit set
-      if resolved is not None:
-        icon, color = resolved
-        if rewrite_file(note_path, icon = icon, color = color):
-          rewritten.append(rel)
+        # an unclaimed note is not rewritten but stays in the commit sweep — divergence
+        # from HEAD, not this run's rewrites, decides the commit set
+        if resolved is not None:
+          icon, color = resolved
+          if rewrite_file(note_path, icon = icon, color = color):
+            rewritten.append(rel)
+      # waiver: the per-note boundary catches every failure type on purpose — a note that is not
+      # UTF-8 text raises from the rewriter, and no single note may strand the others uncommitted
+      except Exception as error:  # pylint: disable=broad-exception-caught
+        sys.stderr.write(f"iconize_sync: {rel}: {type(error).__name__}: {error}\n")
+        unpainted.append(rel)
+        continue
       seen.append(rel)
 
   # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
-    print(json.dumps({ ResultKey.OP: "reconcile-commit", ResultKey.DRY_RUN: True,
-                       ResultKey.PREFIXES: prefixes, ResultKey.PLANNED: planned },
-                     ensure_ascii = False))
-    return EXIT_OK
+    plan = { ResultKey.OP: "reconcile-commit", ResultKey.DRY_RUN: True,
+             ResultKey.PREFIXES: prefixes, ResultKey.PLANNED: planned }
+
+    # a note that could not be judged makes the plan incomplete — it says so and the run fails
+    if unpainted:
+      plan[ResultKey.ERROR] = f"{len(unpainted)} note(s) could not be judged: {', '.join(unpainted)}"
+    # escaped to ASCII: a walked name holding an undecodable byte must not make the print itself raise
+    print(json.dumps(plan, ensure_ascii = True))
+    return EXIT_VALIDATION if unpainted else EXIT_OK
 
   # Contract:
   # A diverged note enters this commit only when its whole diff against HEAD (staged plus
@@ -1818,14 +1866,25 @@ def cmd_reconcile_commit(args: argparse.Namespace) -> int:
   record = { ResultKey.OP: "reconcile-commit", ResultKey.PREFIXES: prefixes,
              ResultKey.TOUCHED_COUNT: len(rewritten), ResultKey.COMMITTED: 0 if failure else len(pending) }
 
+  # the notes that could not be repainted, worded once for whichever branch reports them
+  unpainted_note = f"{len(unpainted)} note(s) could not be repainted: {', '.join(unpainted)}" if unpainted else ""
+
   # guard: an uncommitted repaint leaves the dirty tree this run exists to clear
   if failure:
-    record[ResultKey.ERROR] = failure
-    print(json.dumps(record, ensure_ascii = False))
+    # the commit failure leads, and a note that could not be repainted is still named beside it
+    record[ResultKey.ERROR] = f"{failure}; {unpainted_note}" if unpainted_note else failure
+    print(json.dumps(record, ensure_ascii = True))
     return EXIT_COMMIT_FAILED
 
-  # the caller reads the record; a clean run says so with the standard OK code
-  print(json.dumps(record, ensure_ascii = False))
+  # the commit landed, but some note could not be repainted — the run still failed for it
+  if unpainted_note:
+    record[ResultKey.ERROR] = unpainted_note
+    print(json.dumps(record, ensure_ascii = True))
+    return EXIT_VALIDATION
+
+  # the caller reads the record, escaped to ASCII like every record above; a clean run says so with the
+  # standard OK code
+  print(json.dumps(record, ensure_ascii = True))
   return EXIT_OK
 
 
@@ -1978,7 +2037,7 @@ def cmd_check_versions(args: argparse.Namespace) -> int:
     "SUPPORTED_SCHEMA": sorted(SUPPORTED_SCHEMA),
     "icon_map_schema": schema_block,
   }
-  print(json.dumps(report, ensure_ascii = False))
+  print(json.dumps(report, ensure_ascii = True))
   return EXIT_VERSION_DRIFT if drift else EXIT_OK
 
 
@@ -2831,7 +2890,8 @@ def _invoke_callback(callback_id: str, payload: dict) -> dict | None:
     # waiver: inline numeric literal
     completed = subprocess.run(argv, input = json.dumps(payload), cwd = _CALLBACK_VAULT_CACHE,
                                capture_output = True, text = True, timeout = 10, check = False,
-                               encoding = "utf-8")
+                               # waiver: stdlib decode-error mode, not a domain constant
+                               encoding = "utf-8", errors = "replace")
   except subprocess.TimeoutExpired as error:
     out = "".join(
       # waiver: stdlib encoding-mode idiom

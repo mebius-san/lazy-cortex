@@ -25,7 +25,7 @@ You are NOT a wizard that asks the operator. You make the call yourself. If you 
 - `git_log_recent` — `git log --oneline -20`
 - `git_status` — current `git status --porcelain` (may contain dirt the halt block recorded earlier)
 
-Read `source/context.json` first. Cross-reference dirty paths in `git_status` with `halt.dirty_paths` and with `dead_jobs[*].request_json.file` to figure out who owns each piece of dirt.
+Read `source/context.json` first. Cross-reference dirty paths in `git_status` with `halt.dirty_paths` and with `dead_jobs[*].request_json.file` to figure out who owns each piece of dirt. An entry of `halt.dirty_paths` that starts with `...` is a marker, not a path, and names no job: one marker says the list was cut short, the other says git could not report the working tree at all. Never match a marker to a job. When the unreadable-tree marker is there, report the unreadable tree as the cause instead of matching it.
 
 ## Persona — the doctor voice
 
@@ -107,10 +107,19 @@ If `context.halt` is non-null:
 
 ### Dirt is entirely accounted for by dead jobs
 
-If every path in `halt.dirty_paths` was matched to a dead job's `revert-and-retry` decision above, and you ran the reverts, then after those reverts the tree should be clean. Verify with `git status --porcelain` (empty → clean). Then clear the halt (prints `resumed`, or `still-dirty: <reason>` with exit 1 when the tree is not clean after all):
+If every path in `halt.dirty_paths` (the `...` markers are not paths) was matched to a dead job's `revert-and-retry` decision above, the list carries no unreadable-tree marker, and you ran the reverts, then after those reverts the tree should be clean. Verify with `git status --porcelain` (empty → clean). Then clear the halt (prints `resumed`, or `still-dirty: <reason>` with exit 1 when the tree is not clean after all):
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" recover resume)
 ```
+
+### Dirt is a stray copy of the halting job's result
+
+A job that wrote its result relative to the repository root instead of its own job directory leaves an untracked copy under the top-level `result/` (the halt block lists it as `?? result/` or `?? result/<name>`). The pump removes such a copy itself when it is the only dirt; a halt raised by an older pump can still carry one. The job is the one the halt names: its directory is `.experts/.jobs/<halt.expert>/<halt.job_id>`. Run the removal against it (prints the removed paths as a JSON array; only an untracked file under `result/` whose bytes match the job's own `result/` file of the same name is removed, everything else stays):
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" recover drop-stray-copies '.experts/.jobs/<halt.expert>/<halt.job_id>')
+```
+
+When the array is non-empty, re-check `git status --porcelain`. Empty → clear the halt with `recover resume` as above. Dirt that remains is classified by the other rows. An empty array means nothing under `result/` is a copy of that job's result — classify the `result/` dirt as mixed.
 
 ### Dirt is system noise (no dead-job owner)
 
@@ -120,7 +129,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" recover resume)
 ```
 
-(Each `--path` is one dirty line you classified as system noise, copied verbatim from `halt.dirty_paths` — `--porcelain` says they still carry their status prefixes, so never strip one by hand. Nothing else is committed, so a path you could not classify stays dirty and visible. Omitting `--path` falls back to capturing every dirty path; that shape is the operator's own recovery hatch, not yours.)
+(Each `--path` is one dirty line you classified as system noise, copied verbatim from `halt.dirty_paths` — `--porcelain` says they still carry their status prefixes, so never strip one by hand. A `...` marker line is never passed as a `--path`: it names no file. Nothing else is committed, so a path you could not classify stays dirty and visible. Omitting `--path` falls back to capturing every dirty path; that shape is the operator's own recovery hatch, not yours.)
 
 ### Mixed dirt or unclear ownership
 
@@ -137,6 +146,7 @@ You produce exactly ONE `response.json` at the end of your invocation:
     {"kind": "retry",            "expert": "<n>", "job_id": "<id>"},
     {"kind": "revert-and-retry", "expert": "<n>", "job_id": "<id>", "paths": [...]},
     {"kind": "permanent-fail",   "expert": "<n>", "job_id": "<id>", "reason": "..."},
+    {"kind": "drop-stray-copies", "expert": "<n>", "job_id": "<id>", "paths": [...]},
     {"kind": "commit-noise",     "paths": [...]},
     {"kind": "clear-halt",       "halted_since": <ts>}
   ],

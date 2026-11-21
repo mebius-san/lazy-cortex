@@ -58,6 +58,11 @@ K_SYNCED    = "synced"
 K_UPDATED   = "updated"
 K_REMOVED   = "removed"
 K_UNCHANGED = "unchanged"
+K_ERRORS    = "errors"
+
+# Keys of one `errors` entry: the repo-relative mirror path of the file left out, and why.
+K_ERROR_PATH   = "path"
+K_ERROR_REASON = "reason"
 
 # Runtime directory (repo-relative) holding one clone per mirror scope.
 RUNTIME_MIRRORS_REL = ".runtime/lazy-wiki/mirrors"
@@ -67,6 +72,9 @@ _MD_SUFFIX = ".md"
 
 # File encoding used for every read/write in this module.
 _ENCODING = "utf-8"
+
+# Codec error handler that turns a byte that is not valid text into a replacement mark instead of failing.
+_DECODE_LOSSY = "replace"
 
 # Consumer-owned scalar frontmatter keys that survive a sync.
 _PRESERVED_SCALAR_KEYS = ( "wiki_summary", "wiki_src_hash" )
@@ -120,12 +128,24 @@ def _run_remote_mirror(payload: dict) -> dict:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved.
     OSError: When the resolved binary cannot be executed.
     json.JSONDecodeError: When the CLI's stdout is not valid JSON (an unexpected crash).
+    UnicodeDecodeError: When the CLI's stdout is not valid UTF-8 text.
   """
   # the CLI always prints a JSON body — {"error": ...} on failure, the response shape otherwise
   return json.loads(subprocess.run(
-    [ sys.executable, str(_axes.resolve_core_cli()), "remote-mirror" ], input = json.dumps(payload),
-    capture_output = True, text = True, check = False, encoding = "utf-8",
+    [ sys.executable, str(_axes.resolve_core_cli()), "remote-mirror" ],
+    input = json.dumps(payload).encode(_ENCODING), capture_output = True, check = False,
   ).stdout)
+
+
+# ----------------------------------------------------------------------------------------
+class MirrorSourceError(Exception):
+  """
+  Failure to list the files of a mirror scope's source clone.
+
+  Raised when the clone is absent or git cannot list its tracked files; the message names the scope and the
+  reason. It is never raised for a source that simply holds no matching document, nor for a source document whose
+  name is not valid UTF-8, which the plan reports among its errors instead.
+  """
 
 
 # ----------------------------------------------------------------------------------------
@@ -143,6 +163,8 @@ class MirrorSync:
     - Running `sync` twice against an unchanged source produces zero writes
       on the second run (every file classifies as unchanged).
     - A fetch failure never touches the mirror tree.
+    - A source that cannot be listed is reported as `MirrorSourceError`, never read as a source that holds no
+      documents.
   """
 
   def __init__(self, *, repo: Path | str, scope_id: str, cfg: dict) -> None:
@@ -158,6 +180,9 @@ class MirrorSync:
     self._scope_id = scope_id
     self._mirror_cfg: dict = cfg.get(CFG_MIRROR) or {}
     self._matcher = _scope.GlobMatcher()
+
+    # the source documents the last listing left out for a name that is not UTF-8, as the file system spells them
+    self._skipped_sources: list[str] = []
 
   @property
   def is_configured(self) -> bool:
@@ -239,7 +264,7 @@ class MirrorSync:
     try:
       result = _run_remote_mirror(payload)
     # guard: the CLI couldn't be resolved, run, or crashed without emitting JSON — same string contract
-    except (RuntimeError, OSError, json.JSONDecodeError) as error:
+    except (RuntimeError, OSError, ValueError) as error:
       return f"mirror fetch failed for scope '{self._scope_id}': {error}"
 
     # guard: the request failed — fetch, an invalid field, or an underlying git/filesystem error
@@ -256,11 +281,23 @@ class MirrorSync:
     Guarantees:
       - Classification leaves the mirror tree, the clone, and the rest of the
         repository untouched.
+      - A file that cannot be read or decoded, on the source side or on the mirror side, is left out of every
+        bucket and recorded under `errors`; it is never listed as `removed`.
+      - A source document whose name is not valid UTF-8 is treated the same way: it is left out of every bucket, its
+        mirror twin is never listed as `removed` because the source still offers the document, and it is recorded
+        under `errors` with a path spelled so that it can be written, the odd bytes shown as escapes, and a reason.
+      - A source that cannot be listed raises `MirrorSourceError`, so a failed listing is never read as every
+        document having been removed upstream.
 
     Returns:
       Dict shaped `{"scope": <id>, "synced": [<rel>...], "updated": [<rel>...],
-      "removed": [<rel>...], "unchanged": [<rel>...]}` — each list holds
-      repo-relative POSIX paths under the scope's `mirror_path`, sorted.
+      "removed": [<rel>...], "unchanged": [<rel>...], "errors": [{"path", "reason"}...]}` — each of the four
+      path lists holds repo-relative POSIX paths under the scope's `mirror_path`, sorted. `errors` lists the files
+      that could not be read or decoded on either side or whose source name is not valid UTF-8, sorted by path, each
+      with its `path` and `reason`.
+
+    Raises:
+      MirrorSourceError: When the source clone is absent or its files cannot be listed.
     """
 
     # Contract:
@@ -268,10 +305,24 @@ class MirrorSync:
     # other part of the repository. Callers rely on classifying an already-fetched clone
     # without mutating the vault; sync() is the sole writer.
 
+    # Contract:
+    # A file that cannot be read or decoded, on either the source side or the mirror side, is
+    # left out of the synced, updated, removed and unchanged buckets and recorded under the
+    # `errors` key as an entry with its `path` and its `reason`, sorted by path. Such a file is
+    # NEVER listed as removed. A source document whose name is not valid UTF-8 is treated the same way:
+    # it is left out of the four buckets, its mirror twin is NEVER listed as removed because the source
+    # still offers the document, and it is recorded under `errors` with a path spelled so that it can be
+    # written, the odd bytes shown as escapes, and a reason.
+
+    # Contract:
+    # When the source cannot be listed, plan() MUST raise `MirrorSourceError`; callers never
+    # receive a plan that reads a failed listing as every document having been removed upstream.
+
     # the four classification buckets, plus the mirror paths the source still provides
     synced: list[str] = []
     updated: list[str] = []
     unchanged: list[str] = []
+    errors: list[dict[str, str]] = []
     expected: set[str] = set()
 
     # Domain(wiki.surfaces):
@@ -279,9 +330,14 @@ class MirrorSync:
     # A mirror is a projection of the source at one moment, not a place where documents are authored.
     # Every refresh compares the two sides and sorts each document into one of four outcomes: newly
     # appeared, changed, unchanged, or gone. A document the source no longer offers leaves the mirror
-    # as well, and links that pointed at it are cleaned up by the ordinary link upkeep. A refresh
-    # against an unchanged source writes nothing at all, so the mirror can be refreshed as often as
-    # wanted without churning the vault.
+    # as well, and links that pointed at it are cleaned up by the ordinary link upkeep. A document that
+    # cannot be read or decoded, on the source side or the mirror side, belongs to none of the four: it
+    # is set aside, neither refreshed nor removed, and reported, while the rest of the mirror is
+    # refreshed as usual. Absence counts as evidence only when the source could be listed at all: a
+    # source that cannot be listed says nothing about which documents it still offers, so such a
+    # refresh does not happen and nothing is removed on its account. A refresh against an unchanged
+    # source writes nothing at all, so the mirror can be refreshed as often as wanted without churning
+    # the vault.
 
     # classify every current source file against its mirror twin
     for source_rel in self.find_all_source_files():
@@ -289,26 +345,46 @@ class MirrorSync:
       expected.add(mirror_rel)
       mirror_abs = self._repo / mirror_rel
 
-      # no mirror twin yet — the file is new to the mirror and lands in the synced bucket
-      if not mirror_abs.is_file():
-        synced.append(mirror_rel)
+      # one file that cannot be read or decoded, on either side, is left out of every bucket and recorded;
+      # it stays among the expected paths above, so it is never taken for a document the source dropped
+      try:
+        source_text = (self.clone_dir / source_rel).read_text(encoding = _ENCODING)
+        existing = mirror_abs.read_text(encoding = _ENCODING) if mirror_abs.is_file() else None
+      except (OSError, UnicodeError) as error:
+        errors.append({ K_ERROR_PATH: mirror_rel, K_ERROR_REASON: f"{type(error).__name__}: {error}" })
         continue
-      existing = mirror_abs.read_text(encoding = _ENCODING)
-      if self.merge((self.clone_dir / source_rel).read_text(encoding = _ENCODING), existing) == existing:
+
+      # no mirror twin yet — the file is new to the mirror and lands in the synced bucket
+      if existing is None:
+        synced.append(mirror_rel)
+      elif self.merge(source_text, existing) == existing:
         unchanged.append(mirror_rel)
       else:
         updated.append(mirror_rel)
 
+    # a source document left out for its name is still offered by the source: its mirror twin stays among the
+    # expected paths, so it is never removed, and the document is recorded as one that could not be mirrored,
+    # under a spelling that can be written
+    for source_rel in self._skipped_sources:
+      mirror_rel = f"{self.mirror_path}/{source_rel}"
+      expected.add(mirror_rel)
+      # waiver: `backslashreplace` is the stdlib codec error-handler name that spells an unencodable byte out
+      errors.append({
+        K_ERROR_PATH:   mirror_rel.encode(_ENCODING, errors = "backslashreplace").decode(_ENCODING),
+        K_ERROR_REASON: "the source name is not valid UTF-8",
+      })
+
     # anything in the mirror tree the source no longer provides is removed
     removed = sorted(set(self._mirror_files()) - expected)
 
-    # the four lists are the whole plan — sync applies them verbatim
+    # the four lists and the files left out are the whole plan — sync applies the lists verbatim
     return {
       K_SCOPE:     self._scope_id,
       K_SYNCED:    sorted(synced),
       K_UPDATED:   sorted(updated),
       K_REMOVED:   removed,
       K_UNCHANGED: sorted(unchanged),
+      K_ERRORS:    sorted(errors, key = lambda entry: entry[K_ERROR_PATH]),
     }
 
   def sync(self) -> dict:
@@ -321,15 +397,28 @@ class MirrorSync:
     Guarantees:
       - A sync against a source unchanged since the previous one writes nothing
         at all, so repeated syncs never churn the vault.
+      - A source that cannot be listed raises `MirrorSourceError` before anything is written or deleted.
+      - A file listed under `errors` is neither written nor deleted, and the other files still sync.
 
     Returns:
-      The applied plan dict (same shape as `plan`).
+      The applied plan dict (same shape as `plan`, including its `errors` list of files left untouched).
+
+    Raises:
+      MirrorSourceError: When the source clone is absent or its files cannot be listed.
     """
 
     # Contract:
     # A sync against a source that has not changed since the previous sync MUST write
     # nothing: every file classifies as unchanged, so a mirror can be refreshed as often
     # as wanted without producing a single modified file.
+
+    # Contract:
+    # When the source cannot be listed, sync() MUST raise `MirrorSourceError` before it writes or
+    # deletes anything in the mirror tree.
+
+    # Contract:
+    # A file the plan lists under `errors` is NEVER written and NEVER deleted by sync(); the other
+    # files still sync.
 
     # the plan is recomputed here so the applied lists match the tree as it stands now
     report = self.plan()
@@ -449,10 +538,19 @@ class MirrorSync:
 
     Guarantees:
       - Only markdown the source repository itself tracks is ever enumerated.
+      - A clone that is absent, or that git cannot list, raises `MirrorSourceError`; an empty result means only
+        that the source holds no matching document.
+      - A source path name that is not valid UTF-8 never fails the listing: a document that would be mirrored but
+        whose name cannot be written as UTF-8 text is reported on stderr and left out, and every other document
+        is listed as usual. The names left out are remembered for the plan, which records them under `errors`, so
+        the skip reaches the caller's exit code and the error ledger.
 
     Returns:
-      Sorted list of clone-relative POSIX path strings; empty when the clone
-      is absent or the lookup fails.
+      Sorted list of clone-relative POSIX path strings; empty only when the source holds no matching document.
+
+    Raises:
+      MirrorSourceError: When the clone is absent, or git cannot be started or exits non-zero when listing its
+        tracked files.
     """
 
     # Contract:
@@ -460,17 +558,39 @@ class MirrorSync:
     # Untracked or ignored content in the clone NEVER reaches the mirror, whatever the
     # scope's include patterns say.
 
-    # guard: no clone on disk — nothing to enumerate
-    if not (self.clone_dir / _GIT_DIR).is_dir():
-      return []
-    proc = subprocess.run(
-      [ "git", "ls-files", "-z" ],
-      cwd = str(self.clone_dir), capture_output = True, text = True, check = False, encoding = "utf-8",
-    )
+    # Contract:
+    # A clone that is absent, or that git cannot list (git cannot be started or exits non-zero), MUST
+    # raise `MirrorSourceError`. An empty list means only that the source holds no matching document,
+    # so callers never read a failed listing as every document having been removed upstream.
 
-    # guard: listing failed — treat as an empty source
+    # Contract:
+    # A source path name that is not valid UTF-8 NEVER fails the listing. A document that would be
+    # mirrored but whose name cannot be written as UTF-8 text is reported on stderr and left out, and
+    # every other document is listed, and so mirrored, as usual. The names left out are remembered for
+    # the plan, which records them under `errors`, so the skip reaches the caller's exit code and the
+    # error ledger.
+
+    # guard: no clone on disk — the source cannot be listed, which is not the same as a source with no files
+    if not (self.clone_dir / _GIT_DIR).is_dir():
+      raise MirrorSourceError(f"scope '{self._scope_id}': no source clone at '{self.clone_dir}'")
+
+    # the clone's tracked files, as git lists them, taken as bytes so the exit status alone tells whether the
+    # listing succeeded
+    try:
+      proc = subprocess.run(
+        [ "git", "ls-files", "-z" ], cwd = str(self.clone_dir), capture_output = True, check = False,
+      )
+    # a listing git cannot produce is a source that cannot be listed
+    except OSError as error:
+      raise MirrorSourceError(f"scope '{self._scope_id}': git could not list the source clone: {error}") from error
+
+    # guard: listing failed — an unlisted source says nothing about which documents it still holds
     if proc.returncode != 0:
-      return []
+      raise MirrorSourceError(
+        f"scope '{self._scope_id}': git could not list the source clone: "
+        f"{proc.stderr.decode(_ENCODING, errors = _DECODE_LOSSY).strip() or proc.returncode}"
+      )
+
 
     # Domain(wiki.scope):
     # # What a mirror takes from a foreign repository
@@ -485,7 +605,8 @@ class MirrorSync:
     include = list(self._mirror_cfg.get(CFG_SOURCE_PATHS) or [])
     exclude = list(self._mirror_cfg.get(CFG_EXCLUDE) or [])
     result: list[str] = []
-    for rel in proc.stdout.split(_NUL):
+    self._skipped_sources = []
+    for rel in os.fsdecode(proc.stdout).split(_NUL):
       # only markdown is mirrored
       if not rel.endswith(_MD_SUFFIX):
         continue
@@ -496,6 +617,18 @@ class MirrorSync:
 
       # a document named by an exclude glob is not mirrored
       if any(self._matcher.match(rel, pat) for pat in exclude):
+        continue
+
+      # a document whose name is not UTF-8 cannot be written into the vault; it is reported and left out, and
+      # the other documents are mirrored as usual
+      try:
+        rel.encode(_ENCODING)
+      except UnicodeEncodeError:
+        print(
+          f"scope '{self._scope_id}': skipped a source document whose name is not UTF-8: {rel!r}",
+          file = sys.stderr,
+        )
+        self._skipped_sources.append(rel)
         continue
       result.append(rel)
     return sorted(result)

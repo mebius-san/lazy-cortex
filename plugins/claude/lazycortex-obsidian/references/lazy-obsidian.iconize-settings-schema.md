@@ -42,7 +42,7 @@ The `plugin-install` verb is the applier — it merges that override block onto 
 
 ## Vault manifest and the reloader safeguard
 
-`/lazy-obsidian.capture` records Iconize's `data.json` like any other plugin's settings, minus secrets, but keeps only the settings-like top-level keys — `settings`, `rules`, `recentlyUsedIcons` (the reloader's `RESERVED_KEYS`). Every other top-level key is a per-path icon entry that `iconize-reloader` rebuilds from note frontmatter, so it is dropped. `/lazy-obsidian.deploy` writes the captured payload back as Iconize's `data.json`, and `/lazy-obsidian.audit` compares it against the live file's settings-like keys.
+`/lazy-obsidian.capture` records Iconize's `data.json` like any other plugin's settings, minus secrets, but keeps only the top-level keys `settings` and `rules`. `recentlyUsedIcons`, the third of the reloader's `RESERVED_KEYS`, is the operator's personal state on each device and is dropped. Every other top-level key is a per-path icon entry that `iconize-reloader` rebuilds from note frontmatter, so it is dropped too. `/lazy-obsidian.deploy` writes the captured `settings` and `rules` back as Iconize's `data.json`, even from an older manifest that still carries `recentlyUsedIcons`, and `/lazy-obsidian.audit` compares them against the live file's same keys.
 
 `iconize-reloader` corrects the three keys above whenever Iconize's `data.json` exists and disagrees with the reloader's configured field names: on load, and on desktop whenever the file is rewritten. It also updates Iconize's in-memory settings so Iconize's next save does not bring the old values back. It never creates the file when Iconize has not written one yet.
 

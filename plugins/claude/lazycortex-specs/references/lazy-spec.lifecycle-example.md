@@ -19,9 +19,9 @@ design.md approved in lazy-review (review_result: approved)
     compares design.md's `review_result` against the value it last recorded there
   → the value transitioned (nothing recorded yet → `approved`) → spec.coordinator wakes
     (playbook § 1, trigger 6 doc-transition, `CoordinatorTrigger.DOC_TRANSITION`)
-  → FIRST act of the wake: the coordinator reads `spec_asset_type` and `spec_tools` off the
-    status note and loads the playbooks they resolve to — the type playbook, plus one tool
-    playbook per named tool. Those files, and no others, are the law of this wake
+  → FIRST act of the wake: the coordinator reads `spec_asset_type` off the status note and
+    loads the type playbook it resolves to. That playbook and the common one, and no
+    others, are the law of this wake
   → Stage promotion (playbook Ch.4): coordinator calls `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> promote-approved <asset>`
        (the verb promotes design.md to approved — the set-stage write; its touched_paths ride the wake commit)
   → the TYPE playbook's own condition for spec_design_done holds on the promoted state

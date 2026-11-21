@@ -434,7 +434,7 @@ def verb_of(label: str) -> str:
   return words[0] if words else ""
 
 
-def _callout_footer(verb: str, rows: list[GateRow], lang: str) -> list[str]:
+def _build_callout_footer(verb: str, rows: list[GateRow], lang: str) -> list[str]:
   """
   Compose the text lines closing the gate callout of one verb.
 
@@ -477,7 +477,7 @@ def render_gate_callout(verb: str, rows: list[GateRow], lang: str) -> list[str]:
   boxes =[ f"{_TICKED_BOX if row.ticked else _UNTICKED_BOX} {row.label}" for row in rows ]
 
   # the footer sits behind its own bare quoted line, so Obsidian's task renderer keeps it visible
-  footer = _callout_footer(verb, rows, lang)
+  footer = _build_callout_footer(verb, rows, lang)
   tail = [ _QUOTE, *(f"{_QUOTE} {text}" if text else _QUOTE for text in footer) ] if footer else []
 
   # the title is the verb as the rows write it, in every note language; only the footer follows the language
@@ -532,7 +532,10 @@ def read_review_stages(repo: Path, note: Path) -> dict[str, str]:
   Raises:
     ValueError: If the note lies outside the repository.
   """
+  # a note outside the repository is refused: the relative path is computed only for the `ValueError` it raises
   note.resolve().relative_to(repo.resolve())
+
+  # the note's own frontmatter names its role, which decides the scope documents
   note_fm, _fm_end = spec_frontmatter.parse(note.read_text(encoding = _ENCODING))
 
   # every scope document with a stage, keyed by its name
@@ -552,7 +555,7 @@ def _row_document(label: str) -> str | None:
     label: The row's label.
 
   Returns:
-    The document a `Review`, `Write` or `Revise` row names, or `None` for a tool launch or publication row.
+    The document a `Review`, `Write` or `Revise` row names, or `None` for a launch or publication row.
   """
   # a review row names its document outright
   if label.startswith(GateCheckbox.REVIEW_PREFIX):
@@ -783,7 +786,7 @@ def _drop_rows(section: list[str], doomed: set[int], tail: list[str]) -> None:
     rows = _parse_callout_rows(section, start, end)
     gone = [ row.line for row in rows if row.line in doomed ]
 
-    # guard: a callout losing none of its rows stays as it is
+    # a callout losing none of its rows stays as it is
     if not gone:
       continue
 
@@ -970,7 +973,8 @@ def main(argv: list[str]) -> int:
 
   # the rows the note owes, reconciled against the rows it already carries; only the reconciler's missing
   # `# Gates` refusal marks a non-note -- every other failure propagates as itself
-  # waiver: `wanted` and `lang` stay out of the `try` so a candidate failure is never reported as a missing `# Gates`
+  # waiver: `wanted`, `stages` and `lang` stay out of the `try` so a failure reading them is never reported as a
+  # missing `# Gates`
   wanted = read_review_candidates(repo, note)
   stages = read_review_stages(repo, note)
   lang = note_explainers.lang_for_note(note)

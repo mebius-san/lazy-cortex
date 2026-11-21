@@ -5,7 +5,7 @@
       "color": "#64748b",
       "default_path": ".",
       "start_doc": "design.md:design",
-      "playbook": "lazycortex-specs:lazy-spec.feature-playbook",
+      "playbook": "lazycortex-specs:lazy-spec.feature-type",
       "vision": "opt-in"
     },
     "change": {
@@ -13,7 +13,7 @@
       "color": "#64748b",
       "default_path": "changes",
       "start_doc": "design.md:design",
-      "playbook": "lazycortex-specs:lazy-spec.change-playbook",
+      "playbook": "lazycortex-specs:lazy-spec.change-type",
       "vision": "opt-in"
     },
     "bug": {
@@ -21,7 +21,7 @@
       "color": "#64748b",
       "default_path": "bugs",
       "start_doc": "bug.md:bug",
-      "playbook": "lazycortex-specs:lazy-spec.bug-playbook",
+      "playbook": "lazycortex-specs:lazy-spec.bug-type",
       "vision": "none"
     },
     "content": {
@@ -29,10 +29,7 @@
       "color": "#64748b",
       "default_path": ".",
       "start_doc": "design.md:content-design",
-      "default_tools": [
-        "data"
-      ],
-      "playbook": "lazycortex-specs:lazy-spec.content-playbook",
+      "playbook": "lazycortex-specs:lazy-spec.content-type",
       "vision": "opt-in"
     },
     "research": {
@@ -40,10 +37,7 @@
       "color": "#64748b",
       "default_path": ".",
       "start_doc": "design.md:research-design",
-      "default_tools": [
-        "research"
-      ],
-      "playbook": "lazycortex-specs:lazy-spec.research-playbook",
+      "playbook": "lazycortex-specs:lazy-spec.research-type",
       "vision": "none"
     },
     "release": {
@@ -51,11 +45,7 @@
       "color": "#64748b",
       "default_path": "releases",
       "start_doc": "code-plan.md:code-plan",
-      "default_tools": [
-        "code",
-        "test"
-      ],
-      "playbook": "lazycortex-specs:lazy-spec.release-playbook",
+      "playbook": "lazycortex-specs:lazy-spec.release-type",
       "vision": "none"
     },
     "catalog": {

@@ -34,6 +34,7 @@ class VaultPath:
     THEME_CSS: Per-theme stylesheet, the whole theme.
     COMMUNITY_PLUGINS: List of enabled plugin ids, rebuilt by deploy.
     APPEARANCE: Theme, accent, and enabled-snippet settings.
+    BOOKMARKS: The operator's bookmarks, personal state of each device.
     TMP_SUFFIX: Suffix of the scratch file every atomic write renames from.
     CSS_GLOB: Glob matching snippet files.
     JSON_GLOB: Glob matching top-level config files.
@@ -65,6 +66,8 @@ class VaultPath:
   COMMUNITY_PLUGINS = "community-plugins.json"
   # Theme, accent, and enabled-snippet settings.
   APPEARANCE = "appearance.json"
+  # The operator's bookmarks, personal state of each device.
+  BOOKMARKS = "bookmarks.json"
   # Suffix of the scratch file every atomic write renames from.
   TMP_SUFFIX = ".tmp"
   # Glob matching snippet files.
@@ -307,6 +310,8 @@ class ReportKey:
     DRIFT: Differences between the live config and what the manifest records.
     WARNINGS: Conditions worth the operator's attention that are not drift.
     ERRORS: Conditions the operator must resolve; a non-empty list fails the run.
+    STRIPPED: Dotted manifest paths of personal state removed from the manifest.
+    PERSONAL_STATE: Dotted manifest paths of personal state the manifest still carries.
   """
 
   # Domain(obsidian.vault-capture):
@@ -337,6 +342,10 @@ class ReportKey:
   WARNINGS = "warnings"
   # Conditions the operator must resolve; a non-empty list fails the run.
   ERRORS = "errors"
+  # Dotted manifest paths of personal state removed from the manifest.
+  STRIPPED = "stripped"
+  # Dotted manifest paths of personal state the manifest still carries.
+  PERSONAL_STATE = "personal_state"
 
 
 # ----------------------------------------------------------------------------------------
@@ -374,6 +383,7 @@ class CommandKind(StrEnum):
     DEPLOY: Rebuild the vault config from the manifest.
     DRIFT: Report how the live vault config differs from the manifest, writing nothing.
     LOOKUP: Resolve one community plugin's GitHub repo from the catalog, touching no vault.
+    STRIP_PERSONAL: Remove personal per-device state an older capture left in the manifest.
   """
 
   # Snapshot the vault config into the manifest.
@@ -384,6 +394,30 @@ class CommandKind(StrEnum):
   DRIFT = "drift"
   # Resolve one community plugin's GitHub repo from the catalog, touching no vault.
   LOOKUP = "lookup"
+  # Remove personal per-device state an older capture left in the manifest.
+  STRIP_PERSONAL = "strip-personal"
+
+
+# ----------------------------------------------------------------------------------------
+class IconizeKey:
+  """
+  Names the manifest worker uses to address the Iconize plugin and the blocks of its settings payload.
+
+  Attributes:
+    PLUGIN_ID: Iconize's plugin id, its directory name under the plugins directory.
+    SETTINGS: The block of Iconize's own settings.
+    RULES: The block of Iconize's path-matching icon rules.
+    RECENT_ICONS: The icons the operator picked lately, personal state of each device.
+  """
+
+  # Iconize's plugin id, its directory name under the plugins directory.
+  PLUGIN_ID = "obsidian-icon-folder"
+  # The block of Iconize's own settings.
+  SETTINGS = "settings"
+  # The block of Iconize's path-matching icon rules.
+  RULES = "rules"
+  # The icons the operator picked lately, personal state of each device.
+  RECENT_ICONS = "recentlyUsedIcons"
 
 
 # ----------------------------------------------------------------------------------------

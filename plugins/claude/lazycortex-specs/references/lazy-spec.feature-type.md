@@ -1,10 +1,10 @@
 ---
-name: lazy-spec.feature-playbook
-description: Type playbook for feature assets — the design-only definition flow, the opt-in vision, use-cases, ui-design and test cases, how and when the tool set is determined, and what closes the two gates a feature carries; implementation belongs to the product's release.
+name: lazy-spec.feature-type
+description: Type playbook for feature assets — the design-only definition flow, the opt-in vision, use-cases, ui-design and test cases, and what closes the two gates a feature carries; implementation belongs to the product's release.
 ---
 # Feature type playbook — definition, then the release
 
-This document is the coordinator's law for any asset whose status folder-note carries `spec_asset_type: feature`. It covers the whole of a feature's own life: its definition documents, the tool set written down for the implementer, and the two gates a feature carries. Everything that turns the approved design into working product — plan, code, data, documentation, tests, deploy — happens in the product's release and belongs to `lazy-spec.release-playbook.md`; this playbook neither hangs those rows nor knows their conditions.
+This document is the coordinator's law for any asset whose status folder-note carries `spec_asset_type: feature`. It covers the whole of a feature's own life: its definition documents and the two gates a feature carries. Everything that turns the approved design into working product — plan, code, data, documentation, tests, deploy — happens in the product's release and belongs to `lazy-spec.release-type.md`; this playbook neither hangs those rows nor knows their conditions.
 
 ## What this type is
 
@@ -33,18 +33,6 @@ The primary document is declared by the type record as `start_doc: "design.md:de
 **Late edits.** An edit landing on `use-cases.md` or `ui-design.md` after `design.md` has already reached `approved` triggers no auto-cascade — the coordinator does not reopen the design on its own. It drops a `[!attention]` callout into `design.md` instead and names the edit in `# Status brief`, so the operator sees the drift and decides whether it is worth folding in.
 
 **Declaring it mandatory.** The `vision` contract comes from the type declaration (`asset_types.<name>.vision`); for `use-cases.md` / `ui-design.md`, a product, the asset's group folder, or this asset may declare either document mandatory in its `# Coordinator rules` section. Once declared, the coordinator runs the same seed-then-start enactment directly, without waiting for a tick — the same rule-driven verb calls every other "automatic" behaviour in this system already uses (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
-
-## Determining the tool set
-
-An absent `spec_tools` key on the status folder-note means "tools are not determined" — not "there are no tools". The release implementer reads this key on every included asset: the work of its own tool it does itself, and for every other tool it delegates to that tool's expert (`lazy-spec.release-playbook.md`, "The build"). An asset carried into a release with the key still absent stops the implementer on it, so the determination belongs to this coordinator, on the design's approval.
-
-**When.** Tools are determined on the design's approval, on the same wake that closes `spec_design_done` — the moment the design's statements about the nature of the work are fact.
-
-**From what.** The design's own direct statements about the nature of the work: whether code is edited, whether data files are written, whether documentation is needed, whether an executed check is needed.
-
-**Writing it down.** The coordinator writes the resulting list through `note-set-key` on the asset's status folder-note — through a primitive, like every other frontmatter mutation, never by hand. Every name in the list must be a declared tool (`tool_types.<name>`): a tool in `spec_tools` with no declaration behind it is a finding, not a guess at what was meant.
-
-**Ambiguity is a question, not a bet.** When the design gives no unambiguous answer (the border between `data` and `code`, whether `docs` is needed at all), the coordinator raises a `[!question]` listing the candidates, names in `# Status brief` that the asset is not ready for a release until it is answered, and waits for the operator. Writing an empty key "for now" is forbidden: it hands the implementer an asset while having determined nothing.
 
 ## The gates
 
@@ -75,7 +63,7 @@ No `Publish` row hangs on a feature: publication is the release's tick, and it c
 
 ## After approval — the release
 
-An approved feature does nothing further on its own. It stands in the delta of the product that owns releases, and the operator's `Start release` on that product's note, or `Rebuild` on an open release, carries it into a build (`lazy-spec.release-playbook.md`). What the implementer reads from this folder is the approved `design.md`, the `ui-design.md` and `use-cases.md` when they exist, `spec_tools` and `decisions.md`; what the release's tester reads is `test-plan.md`. The order of work inside the release is the implementer's.
+An approved feature does nothing further on its own. It stands in the delta of the product that owns releases, and the operator's `Start release` on that product's note, or `Rebuild` on an open release, carries it into a build (`lazy-spec.release-type.md`). What the implementer reads from this folder is the approved `design.md`, the `ui-design.md` and `use-cases.md` when they exist, and `decisions.md`; who builds what is the release's business, never this asset's (`lazy-spec.release-type.md`, "The build"); what the release's tester reads is `test-plan.md`. The order of work inside the release is the implementer's.
 
 When the delta needs an asset that does not exist yet, the architect proposes it with an `[!asset-proposal] create` callout in the product's `architecture.md`, at the start of a build, and the coordinator materializes it through the scaffold verb once the revised `architecture.md` is approved (`lazy-spec.asset-creation-playbook.md`). The new asset goes through its own ladder and ships in a later release; the feature that prompted it is released by the release that carries the feature itself.
 

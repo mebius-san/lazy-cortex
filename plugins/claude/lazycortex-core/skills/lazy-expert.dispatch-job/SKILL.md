@@ -26,16 +26,16 @@ Required inputs from the caller:
 - `expert_name` (string) — the key in `lazy.settings.json[experts]`.
 - `payload` (dict) — the request body.
 - `protocols` (list of strings, optional, default `[]`) — protocol refs for this job. May be empty if the caller knows the expert ships without protocols.
-- `source` / `context` (lists of strings, optional) — repo-relative **path manifests**, never file content. They are recorded into the job's `config.json`; nothing is copied at dispatch. The pump copies each entry into `<job_dir>/source/` or `<job_dir>/context/` when it claims the job — a directory under `<parent-directory-name>-<directory-name>`, a file under its basename — so the expert reads the tree as it stands at claim, not at dispatch. An entry that escapes the work tree, or that no longer exists at claim, fails the job with a `logical` error.
+- `source` / `context` (lists of `{"path": "<repo-relative path>"}` objects, optional) — **path manifests**, never file content. An entry may carry a `description` beside `path`; nothing else names the path. They are recorded into the job's `config.json`; nothing is copied at dispatch. The pump copies each entry into `<job_dir>/source/` or `<job_dir>/context/` when it claims the job — a directory under `<parent-directory-name>-<directory-name>`, a file under its basename — so the expert reads the tree as it stands at claim, not at dispatch. An entry that escapes the work tree, or that no longer exists at claim, fails the job with a `logical` error.
 - `source_inline` / `context_inline` (dicts of filename → text, optional) — content that exists in no file, written into the same two buckets at dispatch time.
-- `result` (list of strings, optional) — filenames created as empty placeholders under `<job_dir>/result/` for the expert to fill.
+- `result` (list of `{"path": "result/<filename>"}` objects, optional) — each names one file created as an empty placeholder under `<job_dir>/result/` for the expert to fill.
 
 Pre-flight checks:
 1. `expert_name` must be a non-empty string. If absent → abort: "`expert_name` is required."
 2. `payload` must be a dict containing all three standard fields: `kind`, `role`, `request`. If any field is missing → abort with: "payload missing required field(s): <list>. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.expert-protocols-contract.md` for the protocol contract."
-3. Every entry of `source` / `context` must be a repo-relative path string. A caller holding text that no file carries passes it as `source_inline` / `context_inline` instead — those are written at dispatch, not copied at claim.
+3. Every entry of `source` / `context` / `result` must be a `{"path": "<string>"}` object — the same shape a path entry has in `request.json` and `response.json`. A bare string is refused by `dispatch-job`. A caller holding text that no file carries passes it as `source_inline` / `context_inline` instead — those are written at dispatch, not copied at claim.
 
-Optional payload fields: the `source` / `context` / `result` file-list arrays of `{path, description}` entries, which tell the expert what it will find under the job dir, plus protocol-specific extras. These are `request.json` prose — not the path manifests above.
+Optional payload fields: the `source` / `context` / `result` file-list arrays of `{path, description}` entries, which tell the expert what it will find under the job dir, plus protocol-specific extras. They have the same entry shape as the manifests above and a different meaning: a manifest entry names a file in the repository, a payload entry names where the expert finds it inside the job dir (`source/<file>`, `context/<file>`, `result/<file>`).
 
 Outcome: `validated` or `aborted`.
 
@@ -93,5 +93,6 @@ queue_path: <queue_path>
 - **"`.experts/` not initialised"** — the experts directory has not been bootstrapped in this repo → run `/lazy-core.install` to create the required directory layout.
 - **Python `FileNotFoundError` or `ModuleNotFoundError`** — `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core` is absent or its sibling modules are missing → verify the plugin is installed (`/lazy-core.install`) and `${CLAUDE_PLUGIN_ROOT}` resolves correctly.
 - **"`<expert_name>` is not registered in `lazy.settings.json[experts]`"** — the expert was never added or the name is a typo → register via `/lazy-core.install` expert wizard, or correct the name and re-run.
-- **`{"error": "bundle parse: …"}`** — the stdin bundle is not one JSON object: `protocols` given as something other than a JSON array, an io key as something other than a JSON list / object → write `[]` / `{}` for the empty cases, or a JSON literal like `["plug:proto"]` / `{"source": ["docs/spec.md"]}`.
+- **`{"error": "bundle parse: …"}`** — the stdin bundle is not one JSON object: `protocols` given as something other than a JSON array, an io key as something other than a JSON list / object → write `[]` / `{}` for the empty cases, or a JSON literal like `["plug:proto"]` / `{"source": [{"path": "docs/spec.md"}]}`.
+- **`{"error": "… entries must be {\"path\": \"<string>\"} objects …"}`** — a `source` / `context` / `result` entry is a bare string or an object without a string `path` → write each entry as `{"path": "<repo-relative path>"}`, and each `result` entry as `{"path": "result/<filename>"}`.
 - **Job fails with `logical` — "declared path … does not exist at claim time"** — a `source` / `context` entry was deleted or renamed between dispatch and the pump's claim → re-dispatch with the path the file lives at now, or pass the content as `source_inline` / `context_inline` when no file holds it.

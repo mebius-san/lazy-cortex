@@ -184,6 +184,8 @@ def _clear_probe_recoverable_halt(repo: Path) -> bool:
       [ "git", "ls-remote", "--heads", REMOTE_NAME ],
       cwd = str(repo), capture_output = True, text = True,
       timeout = REMOTE_PROBE_TIMEOUT_SEC, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     )
   except (subprocess.TimeoutExpired, OSError):
     return False
@@ -273,7 +275,7 @@ def _source_state(repo: Path, config_json: dict | None) -> list[dict]:
   # retrying the job would only recreate work the operator already moved past.
 
   # the job's recorded source paths are what gets described
-  paths = (config_json or {}).get(JobConfigKey.SOURCE_PATHS)
+  paths = config_json.get(JobConfigKey.SOURCE_PATHS) if isinstance(config_json, dict) else None
 
   # guard: an unreadable config leaves nothing to describe, and a missing key is not an error
   if not isinstance(paths, list):
@@ -310,7 +312,8 @@ def _read_frontmatter(path: Path) -> dict | None:
   """
   try:
     parsed = parse_frontmatter(path.read_text(encoding = "utf-8"))
-  except OSError:
+  except (OSError, UnicodeDecodeError):
+    # bytes that are not UTF-8 text are as unreadable as a missing file
     return None
   return parsed or None
 
@@ -349,7 +352,8 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     ):
       try:
         job_ctx[key] = json.loads((jdir / fname).read_text(encoding = "utf-8"))
-      except (OSError, json.JSONDecodeError):
+      except (OSError, ValueError):
+        # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
         job_ctx[key] = None
     try:
       # waiver: one-off doctor-context-schema field name, not a reusable domain key
@@ -370,17 +374,24 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     context["git_log_recent"] = subprocess.run(
       [ "git", "log", "--oneline", "-20" ],
       cwd = str(repo), capture_output = True, text = True, check = True, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).stdout
   except subprocess.CalledProcessError:
     pass
 
-  # capture current working-tree status so the doctor can see what the operator left behind
+  # capture current working-tree status so the doctor can see what the operator left behind; names
+  # come unquoted, and the listing is read as bytes so that no byte of a name can fail the call
   try:
-    # waiver: one-off doctor-context-schema field name, not a reusable domain key
-    context["git_status"] = subprocess.run(
-      [ "git", "--no-optional-locks", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True, check = True, encoding = "utf-8",
+    status = subprocess.run(
+      [ "git", "--no-optional-locks", "-c", "core.quotePath=false", "status", "--porcelain" ],
+      cwd = str(repo), capture_output = True, check = True,
     ).stdout
+
+    # the listing is captured as bytes and only shown to the doctor, so a byte that is not UTF-8 is rendered
+    # as a replacement character
+    # waiver: one-off doctor-context-schema field name and stdlib codec names, not reusable domain keys
+    context["git_status"] = status.decode("utf-8", "replace")
   except subprocess.CalledProcessError:
     pass
   return context

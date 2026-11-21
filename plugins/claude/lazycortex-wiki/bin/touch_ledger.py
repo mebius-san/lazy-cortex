@@ -16,6 +16,9 @@ _NEWLINE = "\n"
 # Append mode — a record never rewrites what earlier records wrote.
 _APPEND = "a"
 
+# Codec error handler that carries the bytes of a name that is not valid UTF-8 through a read and a write unchanged.
+_LOSSLESS = "surrogateescape"
+
 
 # ----------------------------------------------------------------------------------------
 class TouchLedger:
@@ -53,6 +56,8 @@ class TouchLedger:
 
     Notes:
       - Earlier records are never rewritten; an empty batch leaves the file untouched.
+      - Any path can be recorded, including one whose name is not valid UTF-8; it is written back as the bytes it
+        came from.
 
     Args:
       repo: Repository root the paths are made relative to.
@@ -69,9 +74,10 @@ class TouchLedger:
     if not lines:
       return
 
-    # append the batch, creating the file and its directory on the first record
+    # append the batch, creating the file and its directory on the first record; a path whose name is not valid
+    # UTF-8 is written back as the bytes it came from, so any node path can be recorded
     self._path.parent.mkdir(parents = True, exist_ok = True)
-    with self._path.open(_APPEND, encoding = _ENCODING) as handle:
+    with self._path.open(_APPEND, encoding = _ENCODING, errors = _LOSSLESS) as handle:
       handle.write("".join(f"{line}{_NEWLINE}" for line in lines))
 
   def read(self) -> list[str]:
@@ -79,16 +85,17 @@ class TouchLedger:
     Return the recorded paths.
 
     Returns:
-      Repo-relative paths in first-recorded order without duplicates; empty when nothing was recorded.
+      Repo-relative paths in first-recorded order without duplicates; empty when nothing was recorded. A path whose
+      name is not valid UTF-8 comes back exactly as it was recorded.
     """
     # guard: no ledger file yet — nothing was recorded
     if not self._path.is_file():
       return []
 
-    # first occurrence wins; blank lines are not paths
-    return list(dict.fromkeys(
-      line.strip() for line in self._path.read_text(encoding = _ENCODING).split(_NEWLINE) if line.strip()
-    ))
+    # first occurrence wins; blank lines are not paths; the bytes of a name that is not valid UTF-8 come back as
+    # they were recorded
+    recorded = self._path.read_text(encoding = _ENCODING, errors = _LOSSLESS)
+    return list(dict.fromkeys(line.strip() for line in recorded.split(_NEWLINE) if line.strip()))
 
   @staticmethod
   def to_repo_rel(root: Path, path: Path | str) -> str:

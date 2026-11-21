@@ -223,6 +223,31 @@ def _deep_merge_claude(base: object, overlay: object) -> object:
   return overlay
 
 
+def _parse_layer(path: Path) -> dict:
+  """
+  Parse one settings layer from disk as a JSON object.
+
+  An empty file reads as an empty object.
+
+  Args:
+    path: Path to the settings layer, tracked file or local overlay, known to exist.
+
+  Returns:
+    The layer's top-level object.
+
+  Raises:
+    ValueError: If the layer is not valid JSON (a `json.JSONDecodeError`) or its top level is not a JSON object;
+      the message of the latter names the file.
+  """
+  # waiver: stdlib encoding idiom
+  raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
+
+  # guard: a layer whose top level is not an object is unreadable, like one that does not parse
+  if not isinstance(raw, dict):
+    raise ValueError(f"{path}: settings layer is not a JSON object")
+  return raw
+
+
 def load_tracked_section(path: Path | str, section_key: str) -> dict:
   """
   Load one section from the tracked settings file only, without applying the local overlay.
@@ -239,6 +264,8 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
   Guarantees:
     - Never writes to disk and never runs a migration ladder; this is a pure read of
       whatever is already on disk.
+    - A tracked file that is not valid JSON, or whose top level is not a JSON object, raises `ValueError`;
+      it is never read as an empty or section-less file.
 
   Args:
     path: Path to the tracked settings file. May be a string or `Path`.
@@ -248,12 +275,18 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
     The section dict, freshly initialised to the current version when missing from the file.
 
   Raises:
-    json.JSONDecodeError: If the tracked file is not valid JSON.
+    ValueError: If the tracked file is not valid JSON (a `json.JSONDecodeError`) or its top level is not a JSON
+      object; the message of the latter names the file.
   """
 
   # Contract:
   # Never writes to disk and never runs a migration ladder; this function is a pure
   # read of whatever is already on disk.
+
+  # Contract:
+  # A tracked file that is not valid JSON, or whose top level is not a JSON object, MUST raise `ValueError`.
+  # It is never read as an empty or section-less file: callers, such as the memory writer, treat the raise as
+  # "unreadable" and must not mistake it for a file that declares nothing.
 
   path = Path(path)
 
@@ -262,9 +295,7 @@ def load_tracked_section(path: Path | str, section_key: str) -> dict:
     return { SettingsKey.VERSION: CURRENT_VERSIONS.get(section_key, 1) }
 
   # the section as the tracked file stores it
-  # waiver: stdlib encoding idiom
-  raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
-  section = raw.get(section_key, {})
+  section = _parse_layer(path).get(section_key, {})
 
   # guard: section missing from on-disk file — caller sees a fresh current-version stub
   if not section:
@@ -282,6 +313,8 @@ def load_verbatim_tracked_section(path: Path | str, section_key: str) -> dict | 
   Guarantees:
     - Never writes to disk and never runs a migration ladder; this is a pure read of
       whatever is already on disk.
+    - A tracked file that is not valid JSON, or whose top level is not a JSON object, raises `ValueError`;
+      it is never read as an empty or section-less file.
 
   Args:
     path: Path to the tracked settings file. May be a string or `Path`.
@@ -291,12 +324,18 @@ def load_verbatim_tracked_section(path: Path | str, section_key: str) -> dict | 
     The section dict as stored, or `None` when the file does not exist or does not carry the key.
 
   Raises:
-    json.JSONDecodeError: If the tracked file is not valid JSON.
+    ValueError: If the tracked file is not valid JSON (a `json.JSONDecodeError`) or its top level is not a JSON
+      object; the message of the latter names the file.
   """
 
   # Contract:
   # Never writes to disk and never runs a migration ladder; this function is a pure
   # read of whatever is already on disk.
+
+  # Contract:
+  # A tracked file that is not valid JSON, or whose top level is not a JSON object, MUST raise `ValueError`.
+  # It is never reported as an absent section: callers, such as the memory writer, treat the raise as
+  # "unreadable" and must not mistake it for a file that does not carry the section.
 
   path = Path(path)
 
@@ -305,9 +344,7 @@ def load_verbatim_tracked_section(path: Path | str, section_key: str) -> dict | 
     return None
 
   # the section exactly as stored, `None` when the file does not carry it
-  # waiver: stdlib encoding idiom
-  raw = json.loads(path.read_text(encoding = "utf-8") or "{}")
-  return raw.get(section_key)
+  return _parse_layer(path).get(section_key)
 
 
 def load_local_only_section(path: Path | str, section_key: str) -> dict:
@@ -321,6 +358,8 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
   Guarantees:
     - Never writes to disk and never runs a migration ladder; this is a pure read of
       whatever is already on disk.
+    - An overlay file that is not valid JSON, or whose top level is not a JSON object, raises `ValueError`;
+      it is never read as an empty overlay.
 
   Args:
     path: Path to the tracked settings file; the sibling `.local.json` is consulted.
@@ -331,12 +370,18 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
     or does not declare that section.
 
   Raises:
-    json.JSONDecodeError: If the local overlay file is not valid JSON.
+    ValueError: If the local overlay file is not valid JSON (a `json.JSONDecodeError`) or its top level is not a JSON
+      object; the message of the latter names the file.
   """
 
   # Contract:
   # Never writes to disk and never runs a migration ladder; this function is a pure
   # read of whatever is already on disk.
+
+  # Contract:
+  # An overlay file that is not valid JSON, or whose top level is not a JSON object, MUST raise `ValueError`.
+  # It is never read as an empty overlay: callers, such as the memory writer, treat the raise as "unreadable"
+  # and must not mistake it for an overlay that declares nothing.
 
   local_path = _local_overlay_path(Path(path))
 
@@ -345,9 +390,7 @@ def load_local_only_section(path: Path | str, section_key: str) -> dict:
     return {}
 
   # the overlay's own view of the section, empty when it does not carry it
-  # waiver: stdlib encoding idiom
-  raw = json.loads(local_path.read_text(encoding = "utf-8") or "{}")
-  return raw.get(section_key, {}) or {}
+  return _parse_layer(local_path).get(section_key, {}) or {}
 
 
 def load_section(path: Path | str, section_key: str) -> dict:
@@ -365,6 +408,8 @@ def load_section(path: Path | str, section_key: str) -> dict:
   Guarantees:
     - Never writes to disk and never runs a migration ladder; this is a pure read of
       whatever is already on disk.
+    - A tracked or overlay file that is not valid JSON, or whose top level is not a JSON object, raises
+      `ValueError`; neither layer is ever read as empty.
 
   Args:
     path: Path to the tracked settings file.
@@ -374,12 +419,18 @@ def load_section(path: Path | str, section_key: str) -> dict:
     The effective section dict (tracked content with local overlay applied when present).
 
   Raises:
-    json.JSONDecodeError: If either the tracked or overlay file is not valid JSON.
+    ValueError: If the tracked or the overlay file is not valid JSON (a `json.JSONDecodeError`) or its top level is
+      not a JSON object; the message of the latter names the file.
   """
 
   # Contract:
   # Never writes to disk and never runs a migration ladder; this function is a pure
   # read of whatever is already on disk.
+
+  # Contract:
+  # A tracked or overlay file that is not valid JSON, or whose top level is not a JSON object, MUST raise
+  # `ValueError`. Neither layer is ever read as empty: callers, such as the memory writer, treat the raise as
+  # "unreadable" and must not mistake it for a layer that declares nothing.
 
   path = Path(path)
   tracked = load_tracked_section(path, section_key)

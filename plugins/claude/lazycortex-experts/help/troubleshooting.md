@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -12,7 +12,7 @@ source_skills:
   - lazy-experts.planner
   - lazy-experts.use-case-writer
   - lazy-experts.ui-designer
-  - lazy-experts.implementer
+  - lazy-experts.developer
   - lazy-experts.data-implementer
   - lazy-experts.docs-writer
   - lazy-experts.debugger
@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.editor
   - lazy-experts.fiction-writer
   - lazy-experts.fiction-editor
-source_sha: dc2dac36bc4cd31d54f43af49b62cda9c9332112
-surface_sha: 26d29c13df93ef9f51de7851b93eacc416c29f58ed6be591e48c74bb8a19f4ae
+source_sha: ee0506c1a426ca4c3a67e7b5bde087fe46041726
+surface_sha: 82210ae3ced17617f70ba54581001fca85821bb9124b42fb2e9633711dbdf3ce
 ---
 # Troubleshooting
 
@@ -137,13 +137,23 @@ surface_sha: 26d29c13df93ef9f51de7851b93eacc416c29f58ed6be591e48c74bb8a19f4ae
 
 ---
 
-## Why does `<domain>.system-designer` (or `.developer`, `.data-writer`) point at a different agent name?
+## Why does `<domain>.system-designer` (or `.data-writer`) point at a different agent name?
 
-**Symptom**: A seeded entry's role suffix doesn't match its `agent` field — e.g. `claude-plugin.system-designer` carries `"agent": "lazycortex-experts:lazy-experts.designer"`, `game.developer` carries `"agent": "lazycortex-experts:lazy-experts.implementer"`, or `game.data-writer` carries `"agent": "lazycortex-experts:lazy-experts.data-implementer"`.
+**Symptom**: A seeded entry's role suffix doesn't match its `agent` field — e.g. `claude-plugin.system-designer` carries `"agent": "lazycortex-experts:lazy-experts.designer"`, or `game.data-writer` carries `"agent": "lazycortex-experts:lazy-experts.data-implementer"`.
 
-**Likely cause**: This is intended, not a mismatch to fix. Three roles in the class map name the job an expert does rather than reusing its agent's file name: `system-designer` and `developer` are two distinct jobs the `designer` and `implementer` agents perform depending on which stage of the class map dispatches them, and `data-writer` is the job name for the `data-implementer` agent's role across every technical class. Every other role's `agent` field matches its own name verbatim (`interpreter` → `lazy-experts.interpreter`, `architect` → `lazy-experts.architect`, `use-case-writer` → `lazy-experts.use-case-writer`, `ui-designer` → `lazy-experts.ui-designer`, `researcher` → `lazy-experts.researcher`, `editor` → `lazy-experts.editor`, `fiction-editor` → `lazy-experts.fiction-editor`, and so on).
+**Likely cause**: This is intended, not a mismatch to fix. Two roles in the class map name the job an expert does rather than reusing its agent's file name: `system-designer` is a second job the `designer` agent performs depending on which stage of the class map dispatches it, and `data-writer` is the job name for the `data-implementer` agent's role across every technical class. Every other role's `agent` field matches its own name verbatim (`interpreter` → `lazy-experts.interpreter`, `developer` → `lazy-experts.developer`, `architect` → `lazy-experts.architect`, `use-case-writer` → `lazy-experts.use-case-writer`, `ui-designer` → `lazy-experts.ui-designer`, `researcher` → `lazy-experts.researcher`, `editor` → `lazy-experts.editor`, `fiction-editor` → `lazy-experts.fiction-editor`, and so on).
 
-**Fix**: Nothing to fix. Before assuming a seeded entry is broken, check whether its role is one of the three that intentionally maps to a differently-named agent (`system-designer` → designer, `developer` → implementer, `data-writer` → data-implementer).
+**Fix**: Nothing to fix. Before assuming a seeded entry is broken, check whether its role is one of the two that intentionally map to a differently-named agent (`system-designer` → designer, `data-writer` → data-implementer).
+
+---
+
+## A `developer` expert's `agent` still names `lazy-experts.implementer`
+
+**Symptom**: `/lazy-experts.audit` reports `FAIL agent-ref-unresolved` for an entry such as `game.developer`, pointing at `lazycortex-experts:lazy-experts.implementer`, or a dispatch to that expert finds no agent. A model tier you set for the old agent no longer applies either.
+
+**Likely cause**: The agent `lazy-experts.implementer` was renamed to `lazy-experts.developer`, so the agent name matches the `developer` role it registers under. An entry or an `agent_models` tier written before the rename still carries the old name, which the plugin no longer ships. The word "implementer" keeps its other meaning, the release-build position of a product; that is not renamed.
+
+**Fix**: Run `/lazy-core.setup`. It runs the plugin's migration step, which rewrites every expert whose `agent` is exactly the old agent to the new one and moves tiers keyed by the old name to the new key, in the project settings, the local overlay, and your user-scope settings. An expert you deliberately pointed at another agent is left alone. Then re-run `/lazy-experts.audit`.
 
 ---
 
@@ -189,7 +199,7 @@ surface_sha: 26d29c13df93ef9f51de7851b93eacc416c29f58ed6be591e48c74bb8a19f4ae
 
 ## `/lazy-experts.audit` reports `FAIL agent-missing` or `FAIL aspect-missing`
 
-**Symptom**: The report includes a line like `FAIL agent-missing: developer → lazy-experts.implementer.md` or `FAIL aspect-missing: lazy-experts.terms-aspect.md`.
+**Symptom**: The report includes a line like `FAIL agent-missing: developer → lazy-experts.developer.md` or `FAIL aspect-missing: lazy-experts.terms-aspect.md`.
 
 **Likely cause**: These two checks run against the plugin's own shipped tree, not your settings — a role the class map assigns has no matching agent file, or an aspect the map assigns has no matching reference file. The shipped plugin cache itself is incomplete, usually from an interrupted `/plugin install` or `/plugin update`.
 
@@ -203,4 +213,44 @@ surface_sha: 26d29c13df93ef9f51de7851b93eacc416c29f58ed6be591e48c74bb8a19f4ae
 
 **Likely cause**: This is the read-only counterpart to the `verify-failed: agent-ref-unresolved` abort `/lazy-experts.install` reports at its own verify step (above) — the entry's `agent` ref names a basename this plugin no longer ships under `agents/`, most often a hand-edited `agent` field in `lazy.settings.json`.
 
-**Fix**: Correct the ref by hand in `lazy.settings.json`, or delete the entry and re-run `/lazy-experts.install` to reseed it from the class map.
+**Fix**: Correct the ref by hand in `lazy.settings.json`, or delete the entry and re-run `/lazy-experts.install` to reseed it from the class map. If the ref names `lazy-experts.implementer`, see the rename entry above — `/lazy-core.setup` migrates it for you.
+
+---
+
+## `/lazy-experts.audit` reports `FAIL aspect-ref-unresolved`
+
+**Symptom**: The report includes a line like `FAIL aspect-ref-unresolved: claude-plugin.designer → lazycortex-experts:lazy-experts.terms-aspect`.
+
+**Likely cause**: A composed entry lists a `lazycortex-experts:` aspect that has no matching file under the plugin's `references/`. Aspects that belong to another plugin are not checked here.
+
+**Fix**: Re-run `/lazy-experts.install`, as the finding itself names, then re-run the audit.
+
+---
+
+## `/lazy-experts.audit` reports `WARN aspects-incomplete`
+
+**Symptom**: The report includes `WARN aspects-incomplete: <expert-key> (missing: <names>)` for a technical-class entry.
+
+**Likely cause**: A technical entry must carry `discipline`, `research`, `tech-writing`, `terms`, and `structure`. The entry was seeded before one of them shipped, so it is incomplete rather than customized.
+
+**Fix**: Run `/lazy-experts.install`; it appends the missing mandatory aspects and touches nothing else on the entry.
+
+---
+
+## `/lazy-experts.audit` reports `WARN aspect-not-for-fiction`
+
+**Symptom**: The report includes `WARN aspect-not-for-fiction: <expert-key> (<names>)` for a `sci-fi` or `fantasy` entry.
+
+**Likely cause**: A fiction entry carries `tech-writing`, `terms`, or `structure`. Those three never compose onto fiction: the technical writing bans contradict literary craft, the term-registry obligation replaces pronouns and descriptive phrases in a scene, and a repository map has nothing to say inside a scene.
+
+**Fix**: Drop the named aspects from that entry; the fiction class keeps `discipline` and `research`. `/lazy-experts.install` never adds the three to a fiction entry.
+
+---
+
+## `/lazy-experts.audit` reports `WARN key-absent`
+
+**Symptom**: The report includes `WARN key-absent: <expert-key> (<key>)`, where the key is `can_commit_in_repo` or `workspace`.
+
+**Likely cause**: The entry predates the install-managed key its role needs. Only a total absence is reported; an explicit `false` or `"main"` you set is your choice and never a finding.
+
+**Fix**: Run `/lazy-experts.install`; it backfills the absent key.

@@ -1,17 +1,17 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the spec tree: classify, find candidates, attach, spawn, or link via a deterministic worker.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How the block flows"
-  request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
+  request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, kind, slug, product/path/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step whose \"different routing\" answer re-opens the review and loops back to the routing coordinator for a new round, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
 source_skills:
   - lazy-spec.coordinator
   - lazy-spec.catalog-coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: 4ec5f482431aeb70bacd871dc822b45e6987d7ea
-surface_sha: e90b34b9516c51429fe3f64de722e5832ca3f6379cc4a89859e706af6c57f553
+source_sha: 2f7cbc6131378ad2fb07b51fdc460840760d310a
+surface_sha: 0cacb367675e001add4bdc0a212ee71a02813a0cacdc2dd54d335b499216b5fb
 ---
 # Requests
 
@@ -42,9 +42,11 @@ Once the review cycle on the request file closes, the request reaches the termin
 
 **No per-target description.** A routing line carries only its verb, target, and structural fields — never prose describing what the target is or what changes. Nothing is seeded from a description at apply time, on any of spawn, spawn-product, or attach: every downstream writer resolves the originating request(s) itself, through the target's `spec_source_requests` frontmatter and the review dispatcher's `context_from_frontmatter`, and reads the real request body from its own job context — never a re-telling the routing coordinator wrote in its place. A `reference` line is the one exception that still carries prose — not a target description, but the coordinator's own rationale for the call, written loud in the routing section's plain text: which existing asset covers the request and what evidence backs that call. It is written loud on purpose: a wrong `reference` is invisible — nobody notices a request that quietly got marked "already done" while nothing gets built — where a wrong new-asset spawn is at least visible and easy to merge away.
 
-**Surface for confirmation.** The routing coordinator writes its proposal into the request file's `# Routing` section. The section carries three things on every round: a short plain-language summary of the routing decision; a `[!question] Confirm the routing?` callout with two checkboxes — "Apply the routing-decision block as written" or "I want a different routing — re-open the review so I can describe it" — plus, for every existing asset the request would modify, a choice between attaching to it and spawning a change that names it (see "Attach or change: your choice" below); and a machine-readable `<!-- routing-decision ... -->` comment block at the end, listing one decision per line under one of four verbs — `spawn <asset-type> <slug> [product=<key>] [path=<dir>] [tools=<tool>[,...]] [targets=<path>,...]`, `spawn-product key=<key> path=<spec_path> [experts=<role>:<name>,...] :: <description>`, `attach <repo-relative-path> [drop=<file>[,...]]`, or `reference <repo-relative-path>`. A spawn line names no documents. `product=` names which registered product a spawn lands in, stated explicitly whenever the vault holds more than one; `path=` and `tools=` are optional overrides; `targets=` only applies to a `change`-kind spawn, feeding its design cascade — each token is a product-relative path of any depth: a bare slug for an asset at the product root, or `<folder>/<slug>` for one nested under a group folder; `drop=` on an attach line names which of the target's existing documents the attach removes — leaving it out means dropping nothing at all. An `attach` line can also name a system document loose at a product root or at the content root — `vision.md`, `design.md`, `ui-design.md`, or `tech.md` — instead of an asset's folder-note; see "Attach a request to a system document" below. `spawn-product` is the odd one out: its `:: <description>` IS read rather than ignored, because no target document exists yet to carry the intent; it has no precondition, so a request may register a new product at any time, whatever state the root's own ladder is in. `key=`, `path=` and the description are all required, and the line carries no other field — any extra field is refused and the apply run persists nothing (the retired `experts=` field is one such; `/lazy-spec.product-config` and `/lazy-review.configure` are where a product's experts and review classes are settled afterwards). The apply worker reads only the comment block; the prose and callout are for you. You tick one checkbox to confirm. Until you do, the request stays at action-needed. You can also edit the `routing-decision` block in place before ticking — the routing coordinator reads back whatever you typed on the next round, including every named field. (A `docs=` field or a trailing `:: <description>` on a `spawn` / `attach` / `reference` line, left over from an older request, is tolerated at parse time and simply ignored — nothing seeds from either.)
+**Surface for confirmation.** The routing coordinator writes its proposal into the request file's `# Routing` section. The section carries three things on every round: a short plain-language summary of the routing decision; a `[!question] Confirm the routing?` callout with two checkboxes — "Apply the routing-decision block as written" or "I want a different routing — re-open the review so I can describe it" — plus, for every existing asset the request would modify, a choice between attaching to it and spawning a change that names it (see "Attach or change: your choice" below); and a machine-readable `<!-- routing-decision ... -->` comment block at the end, listing one decision per line under one of four verbs — `spawn <asset-type> <slug> [product=<key>] [path=<dir>] [targets=<path>,...]`, `spawn-product key=<key> path=<spec_path> :: <description>`, `attach <repo-relative-path> [drop=<file>[,...]]`, or `reference <repo-relative-path>`. A spawn line names no documents. `product=` names which registered product a spawn lands in, stated explicitly whenever the vault holds more than one; `path=` is an optional override, and a routing decision names no tools (a leftover `tools=` field on an old request is tolerated at parse time and ignored); `targets=` only applies to a `change`-kind spawn, feeding its design cascade — each token is a product-relative path of any depth: a bare slug for an asset at the product root, or `<folder>/<slug>` for one nested under a group folder; `drop=` on an attach line names which of the target's existing documents the attach removes — leaving it out means dropping nothing at all. An `attach` line can also name a system document loose at a product root or at the content root — `vision.md`, `design.md`, `ui-design.md`, or `tech.md` — instead of an asset's folder-note; see "Attach a request to a system document" below. `spawn-product` is the odd one out: its `:: <description>` IS read rather than ignored, because no target document exists yet to carry the intent; it has no precondition, so a request may register a new product at any time, whatever state the root's own ladder is in. `key=`, `path=` and the description are all required, and the line carries no other field — any extra field is refused and the apply run persists nothing (the retired `experts=` field is one such; `/lazy-spec.product-config` and `/lazy-review.configure` are where a product's experts and review classes are settled afterwards). The apply worker reads only the comment block; the prose and callout are for you. You tick one checkbox to confirm. Until you do, the request stays at action-needed. You can also edit the `routing-decision` block in place before ticking — the routing coordinator reads back whatever you typed on the next round, including every named field. (A `docs=` field or a trailing `:: <description>` on a `spawn` / `attach` / `reference` line, left over from an older request, is tolerated at parse time and simply ignored — nothing seeds from either.)
 
 The routing coordinator never enacts the routing itself. That is `lazy-spec.request-apply`'s job once the review closes.
+
+**Without the daemon.** When no daemon is running, `/lazy-spec.drive` runs the same coordinators synchronously inside your own session instead of waiting for a wake. They read the same rules and decide the same way; ticking a confirmation or a launch checkbox is still your decision, and `/lazy-spec.drive` only translates your spoken word into the tick on your behalf, never on its own initiative.
 
 **Enact the decision.** Once you confirm, `lazy-spec.request-apply` — a deterministic Python worker, not an LLM-dispatched skill — reads the resolved `# Routing` section and enacts every spawn, spawn-product, attach, and reference line in it:
 
@@ -73,7 +75,7 @@ No document's prose is ever assembled from the routing decision itself. What act
 
 **Correct a wrong class.** There's no pre-set frontmatter shortcut — `request_class` stays `unknown` in the file until the apply worker stamps it post-finalize, and the routing coordinator always calls the classifier itself. If the proposed class is wrong, edit the routing prose in place before ticking the confirm callout's "Apply" option, or tick "I want a different routing" to re-open review and describe the correct class in prose for the next round.
 
-**Override the spawn slug or any of the named fields.** The routing coordinator derives a slug from the request title. If you want it — or `path=`, `tools=`, `product=`, `targets=`, or `drop=` — different, edit the `routing-decision` block before confirming; the apply worker reads back whatever you left there.
+**Override the spawn slug or any of the named fields.** The routing coordinator derives a slug from the request title. If you want it — or `path=`, `product=`, `targets=`, or `drop=` — different, edit the `routing-decision` block before confirming; the apply worker reads back whatever you left there.
 
 **Disagree with a proposed link.** If the routing coordinator proposes `reference` and you think the request genuinely needs new work, tick "I want a different routing" to re-open review rather than confirming the link — the same mechanism that corrects a wrong class or a wrong target.
 
@@ -84,40 +86,45 @@ No document's prose is ever assembled from the routing decision itself. What act
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  routingCoordinatorOrchestrates["Catalog-root routing coordinator orchestrates"]
-  callRequestClassify["Calls lazy-spec.request-classify"]
-  callFindCandidates["Calls lazy-spec.request-find-candidates"]
-  writeRoutingFields["Writes structural routing fields - verb, target, product/path/tools/targets/drop"]
-  operatorConfirmsRouting["Operator confirms routing decision"]
-  requestApply{"lazy-spec.request-apply"}
-  attachEntity["Attach - fold request onto existing entity's primary doc"]
-  spawnEntity["Spawn - scaffold new entity's folder and status note only (docs seeded later per launch checkbox)"]
-  reviewJobBuildsDoc["Doc's own writer builds from source in its review job"]
+  catalogRootCoordinator["Catalog-root routing coordinator"]
+  requestClassify["lazy-spec.request-classify"]
+  requestFindCandidates["lazy-spec.request-find-candidates"]
+  writeRoutingDecision["Write structural routing fields into the routing decision: verb, kind, slug, product/path/targets/drop - no per-target prose"]
+  operatorConfirm{"Operator confirms?"}
+  reopenReview["Review re-opened: operator describes a different routing"]
+  requestApply["lazy-spec.request-apply"]
+  attachPath["attach: fold the request onto an existing entity's primary doc"]
+  spawnPath["spawn: scaffold a new entity's folder and status note only, documents seeded later per launch checkbox"]
+  docWriterBuilds["doc's own writer builds from source in its review job"]
 
-  routingCoordinatorOrchestrates -->|calls| callRequestClassify
-  callRequestClassify -->|returns class token| callFindCandidates
-  callFindCandidates -->|returns ranked candidates| writeRoutingFields
-  writeRoutingFields -->|routing decision drafted| operatorConfirmsRouting
-  operatorConfirmsRouting -->|confirmed| requestApply
-  requestApply -->|attach| attachEntity
-  requestApply -->|spawn| spawnEntity
-  attachEntity -->|converges| reviewJobBuildsDoc
-  spawnEntity -->|converges| reviewJobBuildsDoc
+  catalogRootCoordinator -->|calls| requestClassify
+  requestClassify -->|returns class token| requestFindCandidates
+  requestFindCandidates -->|returns ranked candidate list| writeRoutingDecision
+  writeRoutingDecision -->|asks| operatorConfirm
+  operatorConfirm -->|different routing| reopenReview
+  reopenReview -->|next round| catalogRootCoordinator
+  operatorConfirm -->|confirmed| requestApply
+  requestApply -->|attach| attachPath
+  requestApply -->|spawn| spawnPath
+  attachPath -->|hands off| docWriterBuilds
+  spawnPath -->|hands off| docWriterBuilds
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-
-  class routingCoordinatorOrchestrates entry
-  class callRequestClassify action
-  class callFindCandidates action
-  class writeRoutingFields action
-  class operatorConfirmsRouting guard
-  class requestApply guard
-  class attachEntity action
-  class spawnEntity action
-  class reviewJobBuildsDoc success
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  class catalogRootCoordinator entry
+  class requestClassify sub
+  class requestFindCandidates sub
+  class writeRoutingDecision action
+  class operatorConfirm guard
+  class reopenReview guard
+  class requestApply action
+  class attachPath action
+  class spawnPath action
+  class docWriterBuilds success
 ```
 
 ## See also

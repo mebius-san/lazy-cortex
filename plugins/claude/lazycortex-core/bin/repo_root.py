@@ -51,12 +51,16 @@ def resolve_git_toplevel(cwd: Path | str | None) -> Path:
   # the starting directory follows the dispatcher convention: explicit --cwd, then LAZY_REPO_ROOT, then cwd
   start = resolve_repo_root(cwd)
 
-  # git names the toplevel; a git binary that cannot be spawned leaves the starting directory in charge
+  # git names the toplevel; a git binary that cannot be spawned leaves the starting directory in charge. The
+  # output is taken as bytes: text mode would turn a carriage return inside the path into a line feed
   try:
     done = subprocess.run([ "git", "rev-parse", "--show-toplevel" ], cwd = start,
-                          capture_output = True, text = True, check = False, encoding = "utf-8")
+                          capture_output = True, check = False)
   except OSError:
     return start
 
+  # the path is decoded here, undecodable bytes kept as the filesystem spells them
+  toplevel = os.fsdecode(done.stdout).strip()
+
   # a start outside any checkout also falls back to itself
-  return Path(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else start
+  return Path(toplevel) if done.returncode == 0 and toplevel else start

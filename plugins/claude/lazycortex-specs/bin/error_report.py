@@ -8,12 +8,13 @@ nothing about them beyond the wire contract. Every call is best-effort: a report
 be delivered is dropped, and the flow that reports never fails because of it.
 
 The module also remembers the incidents it opened as open, through marker files under the
-repository's `.runtime/lazy-spec/open-incidents/` directory. A later success closes such an
-incident through `error-record --incident <key> --resolve`, and a success with nothing remembered
-spawns no core call at all.
+repository's `.runtime/lazy-spec/open-incidents/` directory, and lists the remembered ones under a key prefix. A
+later success closes such an incident through `error-record --incident <key> --resolve`, and a success with
+nothing remembered spawns no core call at all.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,7 +28,8 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -56,6 +58,9 @@ class _Wire:
   # The severity of a failure that left the landed change intact.
   WARN = "warn"
 
+
+# How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
+_DECODE_ERRORS = "replace"
 
 # Repo-relative directory of the markers this plugin keeps for the ledger incidents it opened and has not closed,
 # so a success learns whether it has anything to close without spawning core.
@@ -86,7 +91,7 @@ def _run_core(repo: Path, *tail: str) -> subprocess.CompletedProcess[str] | None
     cli = spec_paths.resolve_core_cli(repo)
     # waiver: stdlib subprocess idiom, the arguments are the wire contract
     return subprocess.run([ sys.executable, str(cli), *tail ], cwd = repo, capture_output = True, text = True,
-                          check = False)
+                          check = False, errors = _DECODE_ERRORS)
   # waiver: best-effort boundary — a report that cannot be delivered is dropped, never raised into the caller
   except (RuntimeError, OSError, ValueError):
     return None
@@ -148,6 +153,41 @@ def _incident_marker(repo: Path, incident: str) -> Path:
   return repo / _OPEN_INCIDENTS_REL / incident.replace(_KEY_SEPARATOR, _MARKER_SEPARATOR)
 
 
+def find_all_open_incidents(repo: Path, prefix: str) -> list[str]:
+  """
+  List the incidents this plugin remembers as open whose key starts with a prefix.
+
+  Guarantees:
+    - Never raises; a runtime directory that is absent or cannot be read lists nothing.
+
+  Args:
+    repo: The repository root.
+    prefix: The leading part of the incident keys to list, its separator included (`<family>:`). The rest of
+      such a key must carry no separator of its own, or it does not read back as written.
+
+  Returns:
+    The remembered incident keys under the prefix, sorted; empty when none is remembered.
+  """
+
+  # Contract:
+  # The call MUST NEVER raise to its caller, whatever becomes of the runtime directory.
+  # A runtime directory that is absent or cannot be read lists nothing, so a flow that sweeps for open incidents
+  # never fails because of it.
+
+  # the directory that holds one marker per incident this plugin remembers as open
+  root = repo / _OPEN_INCIDENTS_REL
+  marker_prefix = prefix.replace(_KEY_SEPARATOR, _MARKER_SEPARATOR)
+  found: list[str] = []
+
+  # every marker file under the directory names one incident by its path; an unreadable directory lists nothing
+  for folder, _dirs, files in os.walk(root):
+    for name in files:
+      marker = (Path(folder) / name).relative_to(root).as_posix()
+      if marker.startswith(marker_prefix):
+        found.append(prefix + marker[len(marker_prefix):])
+  return sorted(found)
+
+
 def report_marked_warning(repo: Path, *, cause: str, incident: str, detail: str) -> None:
   """
   Open, or add to, a `plugin_error` incident at warning severity and remember it as open.
@@ -171,7 +211,8 @@ def report_marked_warning(repo: Path, *, cause: str, incident: str, detail: str)
 
   # Contract:
   # The call MUST NEVER raise to its caller, whatever becomes of the core CLI or the marker directory.
-  # A report or a marker that cannot be delivered is dropped, so a flow that reports a failure never fails because of it.
+  # A report or a marker that cannot be delivered is dropped, so a flow that reports a failure never fails
+  # because of it.
 
   # Contract:
   # The marker is written ONLY after core has accepted the report (`error-record` exited 0).

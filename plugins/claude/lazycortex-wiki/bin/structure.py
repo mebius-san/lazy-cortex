@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import subprocess
 import sys
@@ -416,8 +417,12 @@ class StructureProfiles:
     """
     List the repository's tracked files.
 
+    Notes:
+      - A tracked file whose name is not valid UTF-8 never fails the listing; it is reported on stderr and left out
+        of the result, and every other tracked file is returned as usual.
+
     Returns:
-      Repo-relative POSIX paths of every tracked file.
+      Repo-relative POSIX paths of the tracked files whose names are valid UTF-8.
 
     Raises:
       StructureResolveError: When git cannot list them.
@@ -434,4 +439,18 @@ class StructureProfiles:
     # guard: git answered with an error — the tracked tree is unknown
     if listed.returncode != 0:
       raise StructureResolveError(f"git ls-files failed: {listed.stderr.decode(errors = 'replace').strip()}")
-    return [ rel for rel in listed.stdout.decode().split("\0") if rel ]
+
+    # a name that is not UTF-8 cannot be written into the map or printed; it is reported and left out, and the
+    # other files are listed as usual
+    files: list[str] = []
+    for rel in os.fsdecode(listed.stdout).split("\0"):
+      # guard: the trailing separator leaves an empty name
+      if not rel:
+        continue
+      try:
+        rel.encode()
+      except UnicodeEncodeError:
+        print(f"structure: skipped a tracked file whose name is not UTF-8: {rel!r}", file = sys.stderr)
+        continue
+      files.append(rel)
+    return files

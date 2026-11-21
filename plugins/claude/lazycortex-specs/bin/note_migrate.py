@@ -25,11 +25,14 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
     LEVEL_ROLES, RESEARCH_ASSET_TYPE, AssetState, AssetTypeKey, Gate, GateCheckbox, ReleaseKey, Section, SpecKey,
@@ -103,6 +106,7 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
 
   Raises:
     FileNotFoundError: When no settings file lies at or above `repo`.
+    ValueError: When the settings file cannot be read, is not UTF-8 text, not valid JSON or not a JSON object.
     VaultRootError: When `spec.vault_root` names no sub-directory of the settings root.
   """
 
@@ -111,7 +115,10 @@ def migrate(repo: Path, *, dry_run: bool = False) -> dict:
   # MUST keep its bytes and order. A dry run MUST write no file, and running the verb again over its own output MUST
   # change nothing.
 
+  # settings that cannot be read as a JSON object stop the migration here: the content root they would name is
+  # unknown, and the default one must never be migrated in its place
   settings_root = spec_paths.require_settings_root(repo)
+  spec_paths.require_valid_settings(settings_root)
   result: dict = { _CHANGED_KEY: [], _SKIPPED_KEY: [] }
 
   # every markdown file under the content root, in a stable order

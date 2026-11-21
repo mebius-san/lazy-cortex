@@ -418,9 +418,9 @@ Outcome: `derived` (new mode) / `kept` (edit mode) + `dictionary-<created|alread
 
 `source_exclude` names the documents the dictionary still **serves** but never **takes terms from**. It is deliberately not the wiki's `exclude_paths`: an excluded document may still consult the dictionary, which is what a test report writer needs.
 
-Seed the array with every tool-report glob, and show them as the default — the dictionary directory needs no entry, since a term file is never a term source:
+Seed the array with every build-journal glob, and show them as the default — the dictionary directory needs no entry, since a term file is never a term source:
 
-- `**/code-report.md`, `**/data-report.md`, `**/docs-report.md`, `**/test-report.md` — the tool-type build journals, appended dozens of times per implementation, setting no terminology. An operator-declared tool type brings its own `report_doc`; when the repo declares one beyond the shipped journals, offer its glob in the same seed only if that report type is declared `append_only: true` — a stage-bearing report such as the `research` tool's `research-report` is content and is never offered for exclusion.
+- `**/code-report.md`, `**/test-report.md` — the release build journals, appended dozens of times per implementation, setting no terminology. When a product declares its own reviewed document type `append_only: true` under `products[<key>].doc_types`, offer its glob in the same seed; a stage-bearing report such as the `research` type's `research-report` is content and is never offered for exclusion.
 
 Add `<upstream-mirror-glob>/**` to the seed when the repo carries an upstream mirror tree whose files fall under the collected `paths` — mirrored foreign markdown would otherwise fill the dictionary with another studio's vocabulary, and the audit would then report term repairs against mirrors that must not be edited.
 
@@ -428,8 +428,8 @@ Context (print before asking):
 - Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`
 - Found: seed so far `<report globs>`, `<upstream mirror glob when present>`; edit mode — current `source_exclude`: `<current source_exclude joined>`; plan docs under `paths`: `<count>`
 - Why asking: whether plan documents set terminology is an editorial choice
-- Answers: `yes, take terms from them` — plan docs stay term sources, the seed is written as is; `no, exclude them` — `**/code-plan.md`, `**/test-plan.md`, and every declared `plan_doc` glob are appended before the write in Terms 5; re-asked only on the next edit run
-AskUserQuestion: header "Plan docs as sources", question "Are plan documents (`code-plan.md`, `test-plan.md`) sources of terminology for dictionary `<dir>` of terms scope `<id>`?", options `yes, take terms from them` / `no, exclude them` with the descriptions above. On `no`, add `**/code-plan.md` and `**/test-plan.md` to the array, plus the `plan_doc` glob of any operator-declared tool type that names one.
+- Answers: `yes, take terms from them` — plan docs stay term sources, the seed is written as is; `no, exclude them` — `**/code-plan.md` and `**/test-plan.md` are appended before the write in Terms 5; re-asked only on the next edit run
+AskUserQuestion: header "Plan docs as sources", question "Are plan documents (`code-plan.md`, `test-plan.md`) sources of terminology for dictionary `<dir>` of terms scope `<id>`?", options `yes, take terms from them` / `no, exclude them` with the descriptions above. On `no`, add `**/code-plan.md` and `**/test-plan.md` to the array.
 
 Context (print before asking):
 - Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`

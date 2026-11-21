@@ -40,7 +40,7 @@ Outcome: `resolved (root=<path>, settings=<path>)` / `FAIL plugin-root-unresolve
 
 The class map lives in `/lazy-experts.install` Step 5 and is this phase's reference — read it there rather than restating it, so the audit cannot drift from the seeder it verifies. Two checks over the plugin root resolved in Phase 1.
 
-**S1 — every class-map role resolves to an agent file.** For each role the map assigns to either class kind, resolve it through the map's role→agent table (three roles do not share their agent's basename) and confirm `<root>/agents/lazy-experts.<agent>.md` exists.
+**S1 — every class-map role resolves to an agent file.** For each role the map assigns to either class kind, resolve it through the map's role→agent table (two roles do not share their agent's basename) and confirm `<root>/agents/lazy-experts.<agent>.md` exists.
 
 - Missing file → `FAIL agent-missing: <role> → lazy-experts.<agent>.md — fix: /plugin update lazycortex-experts@lazycortex`. Every expert the map would seed for that role dispatches to nothing, and the shipped tree, not the settings, is what is incomplete.
 - All present → `PASS <N> roles resolve`.

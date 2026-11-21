@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from lazy_settings import load_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from reference_resolver import resolve, ReferenceError  # pylint: disable=import-error,redefined-builtin
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from runtime_daemon import check_working_tree, record_halt  # pylint: disable=import-error
+from runtime_daemon import UNREADABLE_TREE_LINE, check_working_tree, record_halt  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from plugin_dirs import is_cache_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -45,12 +46,14 @@ from routine_types import build_protocols_env  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import rate_limit_flag  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import recover  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import sandbox_scope  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
   ClaudeSettingsFile, ClaudeSettingsKey,
   DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
-  JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobIODir, JobLogOutcome, JobMarker,
+  IncidentSeverity, JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobIODir, JobLogOutcome, JobMarker,
   JobOutcome, JobRequestKey, JobResponseKey, JobStatus, RateLimitGuardKey, RateLimitRecordKey, RuntimeFile,
   SettingsFile, SettingsKey, WorkspaceMode,
 )
@@ -59,10 +62,22 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import IO
 
+  from collections.abc import Mapping
+
 
 JOBS_BASE = ".experts/.jobs"
 # The pump's own routine name, recorded as the trigger of every halt the pump raises.
 _PUMP_ROUTINE = "lazy-expert.pump"
+# The cause of the warning recorded when the pump removed a job's stray result copies instead of halting.
+_STRAY_COPY_CAUSE = "stray_result_copy"
+# The stable cause of the incident a job gets when a call could neither close nor reconcile it and
+# could not raise for it either.
+_UNCLOSABLE_CAUSE = "job_unclosable"
+# The text an isolated job's work-tree check returns when the tree itself could not be read, so its state is
+# unknown; the per-job run tells it from a broken commit obligation by this exact text.
+_TREE_CHECK_FAILED = "the worktree could not be read after the run: `git status` exited non-zero"
+# The temp file a claim's copy record is written into before it is renamed over the record itself.
+_CLAIM_COPIES_TMP = f"{JobArtifact.CLAIM_COPIES}.tmp"
 
 # Idle-watchdog defaults. A `claude -p` stream whose stdout is silent longer than
 # _STREAM_IDLE_TIMEOUT_DEFAULT seconds is treated as a transient freeze; the spawn's
@@ -105,7 +120,7 @@ RATE_LIMIT_BLIND_TEMPLATE = (
 # Runtime bookkeeping files the dead-job record leaves out of the expert's partial output.
 _DEAD_JSON_INTERNAL_FILES = {
   JobMarker.READY, JobMarker.PID, JobFile.REQUEST, JobMarker.DEAD, JobMarker.DEAD_CANDIDATE,
-  JobArtifact.DEAD_JSON,
+  JobArtifact.DEAD_JSON, JobArtifact.CLAIM_COPIES, _CLAIM_COPIES_TMP,
 }
 # Job-liveness classification thresholds (seconds): a job that died faster than
 # _STARTUP_CRASH_SEC with no output likely crashed at startup; one alive longer
@@ -138,7 +153,7 @@ def _pid_alive(pid: int) -> bool:
 
   Returns:
     True if a process with that PID exists (or the caller lacks permission to signal it),
-    False if the PID is invalid or the process is gone.
+    False if the PID is invalid (non-positive or too large for the OS) or the process is gone.
   """
   # guard: non-positive PID is never a real process
   if pid <= 0:
@@ -149,7 +164,8 @@ def _pid_alive(pid: int) -> bool:
     return False
   except PermissionError:
     return True
-  except OSError:
+  except (OSError, OverflowError):
+    # a number no process table can hold is as invalid as a non-positive one
     return False
   return True
 
@@ -244,6 +260,10 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
   """
   Compose the forensic payload describing a job that was marked dead.
 
+  Notes:
+    - The dedup key is `None` whenever the bundle's `request.json` cannot be read, is not UTF-8 text, is not
+      valid JSON, or is not a JSON object; such a request never makes the call raise.
+
   Args:
     jdir: Path to the job directory whose state is being captured.
     expert: Name of the expert that owned the job.
@@ -267,13 +287,17 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
   except (OSError, ValueError):
     original_pid = -1
 
-  # carry the dedup key forward so a re-dispatch can be matched against this death
+  # carry the dedup key forward so a re-dispatch can be matched against this death; the key is
+  # optional forensic data, so a request that cannot be read as an object yields none and the
+  # job is buried all the same
   dedup_key = None
   try:
     request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
+  except (OSError, ValueError):
+    # `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
+    request = None
+  if isinstance(request, dict):
     dedup_key = request.get(JobRequestKey.DEDUP_KEY)
-  except (OSError, json.JSONDecodeError, KeyError):
-    pass
 
   # collect names of files the expert produced before dying — excludes runtime bookkeeping files
   partial_output = sorted(
@@ -351,7 +375,7 @@ def _finalize_orphaned_job(jdir: Path) -> None:
   )
 
 
-def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
+def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0, failures: list[str] | None = None) -> int:
   """
   Reconcile claimed jobs across the queue whose claimant process is no longer alive.
 
@@ -360,6 +384,10 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
   response has time to land.
 
   Notes:
+    - A bundle whose reconciliation raises — any exception, not only `OSError` — is named on stderr and appended
+      to `failures`, and the scan goes on to the next bundle.
+    - An expert queue folder that cannot be listed is named on stderr, appended to `failures`, and stepped over,
+      so it never stops the scan of the other experts' queues.
     - Records a `job_dead` incident in the error ledger for each job newly marked dead.
     - Tears down (signals) any process still naming a job directory before marking that job dead, and may
       block for up to two kill grace windows per such process.
@@ -368,6 +396,9 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
     repo: Repository root containing the expert job tree.
     grace_sec: Minimum flagged time before a stuck job is declared dead; zero applies
       the dead verdict on first sighting.
+    failures: List that receives one `<expert>/<job>: <error>` entry for each bundle that could not be
+      reconciled and one `<expert>: <error>` entry for each queue folder that could not be listed; `None` when
+      the caller does not collect them.
 
   Returns:
     The number of jobs newly marked dead in this scan.
@@ -385,105 +416,144 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
     # guard: skip stray files mixed in beside expert directories
     if not edir.is_dir():
       continue
-    for jdir in edir.iterdir():
-      # guard: only real bundles are queue entries
-      if not is_job_bundle(jdir):
-        continue
 
-      # a bundle carrying no marker at all is an abandoned dispatch rather than one still being
-      # assembled: nothing will ever arm it, so it is buried once it outlives the same grace a
-      # stuck claim gets, which puts it in front of the doctor and inside the collector's reach
-      if _is_abandoned_bundle(jdir):
-        if time.time() - jdir.stat().st_mtime >= grace_sec:
-          marked += _mark_dead(repo, edir.name, jdir, _build_dead_json(jdir, edir.name, jdir.name, time.time()))
-        continue
-
-      # guard: job never reached READY — still being assembled
-      if not (jdir / JobMarker.READY).exists():
-        continue
-
-      # guard: job already DONE — terminal state reached
-      if (jdir / JobMarker.DONE).exists():
-        continue
-
-      # guard: job already DEAD — skip to keep idempotent
-      if (jdir / JobMarker.DEAD).exists():
-        continue
-
-      # guard: job CANCELLED — the operator killed its executor deliberately; not a death
-      if (jdir / JobMarker.CANCELLED).exists():
-        continue
-
-      # guard: no PID file — job is queued, not claimed
-      if not (jdir / JobMarker.PID).exists():
-        continue
-
-      # an unreadable or garbled PID marker reads the same as a claimant that is gone
+    # an expert folder that cannot be listed is named for the caller and stepped over, so it
+    # never keeps the scan from the other experts' queues
+    try:
+      bundles = list(edir.iterdir())
+    except OSError as error:
+      sys.stderr.write(f"dead-scan: cannot list {edir.name}: {type(error).__name__}: {error}\n")
+      if failures is not None:
+        failures.append(f"{edir.name}: {type(error).__name__}: {error}")
+      continue
+    for jdir in bundles:
+      # one bundle that cannot be reconciled — its markers cannot be read or written, or its check
+      # raises anything else — is named for the caller and stepped over, so it never keeps the
+      # scan from the bundles after it nor the tick from the READY job it is about to serve
       try:
-        alive = _pid_alive(int((jdir / JobMarker.PID).read_text(encoding = "utf-8").strip()))
-      except (OSError, ValueError):
-        alive = False
-
-      # Domain(runtime.job-execution):
-      # # Grace window before a claimed job is declared dead
-      # A job whose claimant process is gone is not immediately buried: the first sighting
-      # opens a grace window instead of a verdict, since the process that recorded the claim
-      # is the pump itself, and a pump killed by its own routine timeout can look dead while
-      # the expert subprocess it spawned is still seconds away from writing its result. Only
-      # a job still unclaimed once that window elapses is declared dead; a claimant seen alive
-      # again before then cancels the window rather than shortening it on a later scan.
-
-      # the candidate marker records when this job was first seen unclaimed
-      candidate = jdir / JobMarker.DEAD_CANDIDATE
-
-      # a claimant process still running leaves the job alone
-      if alive:
-        # a live claimant means the job was re-claimed after the earlier sighting;
-        # a stale marker must not shortcut the grace window on a later scan.
-        candidate.unlink(missing_ok = True)
-        continue
-
-      # claimant died after the expert finished — finalize instead of marking dead
-      if (jdir / JobFile.RESPONSE).exists():
-        _finalize_orphaned_job(jdir)
-        _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
-        continue
-
-      # first sighting — open the grace window instead of marking dead
-      if grace_sec > 0 and not candidate.exists():
-        candidate.touch()
-        continue
-
-      # an open grace window gives a surviving subprocess time to respond
-      if grace_sec > 0 and time.time() - candidate.stat().st_mtime < grace_sec:
-        continue
-
-      # the dead record is composed before the last-moment response check below
-      blob = _build_dead_json(jdir, edir.name, jdir.name, time.time())
-
-      # response landed during this scan — finalize instead of marking dead
-      if (jdir / JobFile.RESPONSE).exists():
-        _finalize_orphaned_job(jdir)
-        _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
-        continue
-
-      # Domain(runtime.job-execution):
-      # # A dead job leaves no live session behind
-      # An expert spawn runs in its own process session, apart from the pump that started it. A supervised
-      # daemon restart or a routine-timeout kill of the pump therefore takes down only the pump's group,
-      # while the spawn keeps running on its own, for days if nothing stops it. So a job declared dead after
-      # its grace window first has every process still naming its job directory torn down, and only then is
-      # it buried. Burying a job never leaves a live session working on it behind.
-
-      # a spawn that outlived its pump (a daemon restart, a routine-timeout kill) sits in its
-      # own session and would run on for days; it is torn down before the job is buried
-      if _kill_orphaned_spawns(jdir):
-        sys.stderr.write(f"dead-scan: killed orphaned spawn of {edir.name}/{jdir.name}\n")
-      marked += _mark_dead(repo, edir.name, jdir, blob)
+        marked += _reconcile_claimed_job(repo, edir.name, jdir, grace_sec)
+      # waiver: the broad catch is the per-bundle isolation boundary — a narrower list would let
+      # whichever fault it misses stop every tick before any job was served
+      except Exception as error:  # pylint: disable=broad-exception-caught
+        sys.stderr.write(f"dead-scan: cannot reconcile {edir.name}/{jdir.name}: {type(error).__name__}: {error}\n")
+        if failures is not None:
+          failures.append(f"{edir.name}/{jdir.name}: {type(error).__name__}: {error}")
 
   # the tick summary carries this count so a checkout burying jobs every tick is visible in
   # the daemon log without reading the job tree
   return marked
+
+
+def _reconcile_claimed_job(repo: Path, expert: str, jdir: Path, grace_sec: float) -> int:
+  """
+  Reconcile one job bundle against its claimant, burying it when the claimant is gone for good.
+
+  Args:
+    repo: Repository root containing the expert job tree.
+    expert: Name of the expert whose queue holds the bundle.
+    jdir: The bundle directory to judge.
+    grace_sec: Minimum flagged time before a stuck job is declared dead.
+
+  Returns:
+    1 when the bundle was newly marked dead, otherwise 0.
+
+  Raises:
+    OSError: When a marker of the bundle cannot be read or written.
+  """
+  # guard: only real bundles are queue entries
+  if not is_job_bundle(jdir):
+    return 0
+
+  # a bundle carrying no marker at all is an abandoned dispatch rather than one still being
+  # assembled: nothing will ever arm it, so it is buried once it outlives the same grace a
+  # stuck claim gets, which puts it in front of the doctor and inside the collector's reach
+  if _is_abandoned_bundle(jdir):
+    if time.time() - jdir.stat().st_mtime >= grace_sec:
+      return _mark_dead(repo, expert, jdir, _build_dead_json(jdir, expert, jdir.name, time.time()))
+    return 0
+
+  # guard: job never reached READY — still being assembled
+  if not (jdir / JobMarker.READY).exists():
+    return 0
+
+  # guard: job already DONE — terminal state reached
+  if (jdir / JobMarker.DONE).exists():
+    return 0
+
+  # guard: job already DEAD — skip to keep idempotent
+  if (jdir / JobMarker.DEAD).exists():
+    return 0
+
+  # guard: job CANCELLED — the operator killed its executor deliberately; not a death
+  if (jdir / JobMarker.CANCELLED).exists():
+    return 0
+
+  # guard: no PID file — job is queued, not claimed
+  if not (jdir / JobMarker.PID).exists():
+    return 0
+
+  # an unreadable or garbled PID marker reads the same as a claimant that is gone
+  try:
+    alive = _pid_alive(int((jdir / JobMarker.PID).read_text(encoding = "utf-8").strip()))
+  except (OSError, ValueError):
+    alive = False
+
+  # Domain(runtime.job-execution):
+  # # Grace window before a claimed job is declared dead
+  # A job whose claimant process is gone is not immediately buried: the first sighting
+  # opens a grace window instead of a verdict, since the process that recorded the claim
+  # is the pump itself, and a pump killed by its own routine timeout can look dead while
+  # the expert subprocess it spawned is still seconds away from writing its result. Only
+  # a job still unclaimed once that window elapses is declared dead; a claimant seen alive
+  # again before then cancels the window rather than shortening it on a later scan.
+
+  # the candidate marker records when this job was first seen unclaimed
+  candidate = jdir / JobMarker.DEAD_CANDIDATE
+
+  # a claimant process still running leaves the job alone
+  if alive:
+    # a live claimant means the job was re-claimed after the earlier sighting;
+    # a stale marker must not shortcut the grace window on a later scan.
+    candidate.unlink(missing_ok = True)
+    return 0
+
+  # claimant died after the expert finished — finalize instead of marking dead
+  if (jdir / JobFile.RESPONSE).exists():
+    _finalize_orphaned_job(jdir)
+    _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
+    return 0
+
+  # first sighting — open the grace window instead of marking dead
+  if grace_sec > 0 and not candidate.exists():
+    candidate.touch()
+    return 0
+
+  # an open grace window gives a surviving subprocess time to respond
+  if grace_sec > 0 and time.time() - candidate.stat().st_mtime < grace_sec:
+    return 0
+
+  # the dead record is composed before the last-moment response check below
+  blob = _build_dead_json(jdir, expert, jdir.name, time.time())
+
+  # response landed during this scan — finalize instead of marking dead
+  if (jdir / JobFile.RESPONSE).exists():
+    _finalize_orphaned_job(jdir)
+    _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
+    return 0
+
+  # Domain(runtime.job-execution):
+  # # A dead job leaves no live session behind
+  # An expert spawn runs in its own process session, apart from the pump that started it. A supervised
+  # daemon restart or a routine-timeout kill of the pump therefore takes down only the pump's group,
+  # while the spawn keeps running on its own, for days if nothing stops it. So a job declared dead after
+  # its grace window first has every process still naming its job directory torn down, and only then is
+  # it buried. Burying a job never leaves a live session working on it behind.
+
+  # a spawn that outlived its pump (a daemon restart, a routine-timeout kill) sits in its
+  # own session and would run on for days; it is torn down before the job is buried
+  if _kill_orphaned_spawns(jdir):
+    sys.stderr.write(f"dead-scan: killed orphaned spawn of {expert}/{jdir.name}\n")
+  return _mark_dead(repo, expert, jdir, blob)
 
 
 class _ExpertDirtyTreeError(Exception):
@@ -513,6 +583,30 @@ class _ExpertDirtyTreeError(Exception):
     self.expert = expert
     self.job_id = job_id
     self.dirty_paths = dirty_paths
+
+
+class _PumpEnvironmentError(Exception):
+  """
+  Failure of the checkout itself rather than of the job being processed.
+
+  Marks a fault such as an unusable daemon setting, a settings file that cannot be prepared, an expert binary
+  missing from PATH, a work-tree check that fails after a finished run, or a job that cannot be closed. The pump
+  raises it instead of closing the job, so the job is left as it stands.
+
+  Attributes:
+    unclosable: The jobs and queue folders the call could neither close nor reconcile, one entry each.
+  """
+
+  def __init__(self, message: str, *, unclosable: list[str] | None = None):
+    """
+    Initialize the exception with its message and the jobs the call could not close or reconcile.
+
+    Args:
+      message: The one-line account of the fault.
+      unclosable: The call's entries, each `<expert>/<job>: <reason>` or `<expert>: <reason>`; none when omitted.
+    """
+    super().__init__(message)
+    self.unclosable: list[str] = list(unclosable or [])
 
 
 # Decision: kept, not retired, even though `Agent` being a mandatory `tools:` member on every
@@ -605,27 +699,87 @@ def _is_system_stuck(repo: Path) -> bool:
   Report whether the runtime is in the state that narrows the pump's queue.
 
   Mirrors the daemon loop's own `system_stuck` reading — a standing halt block, or a working
-  tree already dirty — so the pump and the loop never disagree about which condition holds.
+  tree already dirty or unreadable — so the pump and the loop never disagree about which condition holds.
 
   Args:
     repo: Repository root being checked.
 
   Returns:
-    True when a halt stands or the working tree carries uncommitted changes.
+    True when a halt stands, the working tree carries uncommitted changes, or the tree could not be read inside a
+    git checkout.
   """
   return runtime_state.get_halted(repo) is not None or check_working_tree(repo) is not None
 
 
-def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
+def _record_stray_copy_warning(repo: Path, expert_name: str, jdir: Path, detail: str) -> None:
   """
-  Verify that the working tree is clean after a successful expert run.
+  Record a warning incident about a job's stray result copies, whether they were removed or their removal failed.
 
-  When the working tree is dirty a daemon-wide halt block is written to runtime state with
-  the dirty paths and the job that ran last — counted in the halt metric and opened as the
-  `halt:<repo>` incident like every daemon halt — and the job is marked DONE with its own
-  `response.json` untouched — the expert's answer survives the halt and is collected when
-  the halt lifts. A halt block already standing is never overwritten, and a halt-exempt job
-  raises no halt at all: its dirt is the triage it was dispatched to perform.
+  Notes:
+    - Writes a `job_error` incident with severity `warn` and cause `stray_result_copy` to the repository's error
+      ledger, keyed on the job.
+
+  Args:
+    repo: Repository root whose error ledger receives the incident.
+    expert_name: Name of the expert whose job left the copies.
+    jdir: Path to the job directory the incident is keyed on.
+    detail: One-line description of what the removal did.
+  """
+  error_ledger.record(repo, {
+    IncidentKey.INCIDENT: f"job:{expert_name}/{jdir.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.JOB_ERROR, IncidentKey.CAUSE: _STRAY_COPY_CAUSE,
+    IncidentKey.SEVERITY: IncidentSeverity.WARN, IncidentKey.ACTOR: IncidentActor.PUMP,
+    IncidentKey.EXPERT: expert_name, IncidentKey.JOB_ID: jdir.name,
+    IncidentKey.DETAIL: detail, IncidentKey.REFS: { "jdir": str(jdir) },
+  })
+
+
+def _record_unclosable(repo: Path, unclosable: list[str]) -> None:
+  """
+  Record in the error ledger every job or expert queue folder a call could neither close, reconcile nor list.
+
+  Notes:
+    - Writes one opened `job_error` incident with cause `job_unclosable` per entry, keyed on the job, or on the
+      expert for a queue folder that could not be listed.
+
+  Args:
+    repo: Repository root whose error ledger receives the incidents.
+    unclosable: The call's entries, each `<expert>/<job>: <reason>` or `<expert>: <reason>`.
+  """
+  # one incident per entry: the name before the first colon keys it, the rest is the reason
+  for entry in unclosable:
+    name, _colon, reason = entry.partition(": ")
+    expert_name, _slash, job_id = name.partition("/")
+    error_ledger.record(repo, {
+      IncidentKey.INCIDENT: f"job:{name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+      IncidentKey.KIND: IncidentKind.JOB_ERROR, IncidentKey.CAUSE: _UNCLOSABLE_CAUSE,
+      IncidentKey.ACTOR: IncidentActor.PUMP,
+      IncidentKey.EXPERT: expert_name, IncidentKey.JOB_ID: job_id,
+      IncidentKey.DETAIL: reason,
+    })
+
+
+def _update_halt_after_run(repo: Path, expert_name: str, jdir: Path) -> bool:
+  """
+  Settle the daemon's halt state after a successful expert run on the shared working tree.
+
+  A tree left clean by the run leaves the queue running. Uncommitted dirt that remains once the job's own stray
+  result copies are discarded halts the queue, with the job that ran last named as the trigger. A tree that could
+  not be read inside a git checkout halts the queue the same way.
+
+  Notes:
+    - May delete the job's byte-identical stray result copies under the repository's top-level `result/`. When the
+      tree could not be read, no copies are looked for or removed and no stray-copy warning is recorded; the halt
+      alone names the condition.
+    - May record a `job_error` incident of severity `warn` and cause `stray_result_copy` in the error ledger. A
+      removal that failed always records it, with the failure named in the detail, whether the tree is then
+      clean or still dirty (the halt is raised as well). A successful removal records it only when the removed
+      copies were the only dirt.
+    - Touches the job's DONE marker when dirt remains; the job's `response.json` stays as the expert wrote it,
+      so the answer is collected once the halt lifts.
+    - Writes the daemon-wide halt block with the dirty paths and opens the `halt:<repo>` incident when dirt
+      remains; a halt block already standing is never overwritten.
+    - A halt-exempt job raises no halt, since its dirt is the triage it was dispatched to perform.
 
   Args:
     repo: Repository root in which the expert ran.
@@ -633,8 +787,8 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
     jdir: Path to the job directory whose state is being finalised.
 
   Returns:
-    True when the working tree was dirty (caller is expected to raise the halt exception),
-    False when the tree was clean or the job is halt-exempt.
+    True when a halt stands for the remaining dirt (the caller raises the halt exception), False when the tree
+    was clean, the job is halt-exempt, or only stray result copies were dirty and are gone.
   """
 
   # Domain(runtime.job-execution):
@@ -644,7 +798,23 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
   # job will run against next, so it stops the whole queue rather than just failing the one
   # job that caused it. This is the reason the shared checkout gets a daemon-wide halt where
   # an isolated worktree only fails its own job — the blast radius of the same mistake is
-  # different depending on whose tree it landed in.
+  # different depending on whose tree it landed in. A tree that cannot be read after the job is
+  # never taken for a clean one: it stops the queue exactly like leftover dirt. No copies are
+  # looked for or removed then, since the tool that would tell which files are stray cannot be
+  # asked, so the job is not blamed for a stray copy and the stop alone names the condition.
+  # The same holds for the queue before a job starts — while the tree is not known clean, only
+  # jobs marked as triage of the stuck condition are served.
+  # One kind of dirt is not held against the queue: a copy of the job's own result files left
+  # under the repository's top-level result directory, because the job wrote its result
+  # relative to the clone root instead of its own job directory. Such a copy carries no work
+  # of its own, and stopping every queued job for hours over a duplicate would be out of
+  # proportion to the slip. Before the tree is judged, copies whose content is byte-identical
+  # to the result of the job that just finished are removed; the identical content is the
+  # proof that the copy is that job's and nobody else's. If that alone leaves the tree clean,
+  # the queue is not stopped, and the slip is kept as a warning naming the expert and the
+  # job. Any other dirt — another path, differing content, a tracked file — gets no such
+  # leniency: the queue stops as above, and the halt describes the dirt that remains after
+  # the copies are gone, not the copies.
   # The dirt is attributed to the job that ran last rather than proven to belong to it: the
   # tree is shared, so the job that finished most recently is the best available signal and
   # nothing more. That is exactly why the job's own answer is not touched — a job blamed by
@@ -653,14 +823,37 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
   # first and keeps its own account of it, while the job dispatched to clear that very
   # condition is judged by whether it cleared it, never by the dirt it worked through.
 
-  dirty = check_working_tree(repo)
-
   # a clean working tree leaves nothing to judge
-  if dirty is None:
+  if (dirty := check_working_tree(repo)) is None:
     return False
 
   # guard: a halt-exempt job's dirt is the triage it was sent to do, never a contract breach
   if _is_job_halt_exempt(jdir):
+    return False
+
+  # the job's byte-identical result copies go first; a removal that fails midway may already have deleted some.
+  # A tree that could not be read gives nothing to look for copies in: git cannot be asked, so none is
+  # removed, the job is not blamed for one, and the halt alone names the condition
+  removed: list[str] = []
+  failure: str | None = None
+  try:
+    if dirty != [ UNREADABLE_TREE_LINE ]:
+      removed = recover.delete_stray_result_copies(repo, jdir)
+  except (OSError, subprocess.CalledProcessError) as error:
+    failure = str(error)
+
+  # once anything was removed or the removal failed, the tree is read afresh
+  dirty = check_working_tree(repo) if removed or failure is not None else dirty
+
+  # a failed removal is never dropped: it is kept as the warning whether or not the queue stops over what is left
+  if failure is not None:
+    _record_stray_copy_warning(repo, expert_name, jdir, f"stray-copy removal failed: {failure}")
+  # removed copies that were the only dirt are kept as the warning in place of a halt
+  elif removed and dirty is None:
+    _record_stray_copy_warning(repo, expert_name, jdir, f"removed stray result copies: {', '.join(removed)}")
+
+  # nothing is left on the tree, so the queue goes on without a halt
+  if dirty is None:
     return False
 
   # the job's own answer is not the dirt's verdict: the response stays exactly as the expert
@@ -718,6 +911,8 @@ def _worktree_head(worktree: Path) -> str | None:
     # waiver: git CLI vocabulary, not a domain constant
     [ "git", "rev-parse", "HEAD" ], cwd = str(worktree), capture_output = True, text = True, check = False,
     encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace",
   )
 
   # guard: an unresolvable HEAD carries no comparable tip
@@ -761,12 +956,51 @@ def _record_claim_head(jdir: Path, work_root: Path) -> str | None:
   return head
 
 
+def _isolation_git_env(worktree: Path, base: Mapping[str, str]) -> dict[str, str]:
+  """
+  Return a copy of an environment under which git in an isolated job's worktree ignores the bootstrap byproducts.
+
+  Guarantees:
+    - When the worktree's bootstrap wrote a private excludes file, the copy carries one more environment config
+      slot naming it as `core.excludesFile`, appended after every slot `base` already carries, `core.hooksPath`
+      included; otherwise the copy equals `base`. `base` itself is never changed.
+
+  Args:
+    worktree: Path to the job's worktree directory.
+    base: Environment the copy starts from.
+
+  Returns:
+    The environment for the agent spawn and for the pump's own git calls in that worktree.
+  """
+
+  # Contract:
+  # The excludes slot is APPENDED after every slot the base environment carries, so the daemon's
+  # `core.hooksPath` pin survives; without a bootstrap excludes file the copy equals the base.
+
+  env = dict(base)
+  exclude = WorktreeTaskManager.exclude_file(worktree)
+
+  # guard: the bootstrap created nothing untracked — git needs no override
+  if exclude is None:
+    return env
+
+  # the slot joins after whatever the environment already carries
+  slot = int(env.get(EnvVar.GIT_CONFIG_COUNT) or 0)
+  env[f"{EnvVar.GIT_CONFIG_KEY}{slot}"] = EnvVar.GIT_EXCLUDES_FILE
+  env[f"{EnvVar.GIT_CONFIG_VALUE}{slot}"] = str(exclude)
+  env[EnvVar.GIT_CONFIG_COUNT] = str(slot + 1)
+  return env
+
+
 def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | None:
   """
-  Check an isolated job's worktree after a clean spawn: dirty tree or an unmoved branch fails it.
+  Check an isolated job's worktree after a clean spawn: a dirty tree, an unmoved branch or a check that fails it.
 
   A job failure, never a daemon halt — the primary checkout was untouched throughout, so the
-  daemon-wide dirty-tree halt's rationale does not apply here. The unmoved-branch check compares
+  daemon-wide dirty-tree halt's rationale does not apply here. A `git status` that fails is reported as a
+  failed check, distinct from a dirty tree. An untracked path the worktree's bootstrap recorded as its own
+  byproduct is not dirt, whether git already ignores it through the bootstrap's excludes file or lists it anyway;
+  any other untracked path and every tracked change is. The unmoved-branch check compares
   against the tip captured before the spawn, so a continuation round that produced nothing is
   caught even though the branch already carried earlier rounds' commits.
 
@@ -775,7 +1009,8 @@ def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | No
     pre_spawn_tip: The branch tip captured before the spawn, or None when it was unresolvable.
 
   Returns:
-    None when the worktree is clean and the branch moved, else a one-line failure text.
+    None when the worktree is clean and the branch moved, else a one-line failure text that names a failed
+    work-tree check, a dirty tree or a branch that did not move.
   """
 
   # Domain(runtime.job-execution):
@@ -790,13 +1025,51 @@ def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | No
 
   status = subprocess.run(
     # waiver: git CLI vocabulary, not a domain constant
-    [ "git", "status", "--porcelain" ], cwd = str(worktree), capture_output = True, text = True, check = False,
-    encoding = "utf-8",
+    [ "git", "status", "--porcelain", "-z", "--untracked-files=normal" ],
+    cwd = str(worktree), capture_output = True, check = False, env = _isolation_git_env(worktree, os.environ),
   )
 
-  # uncommitted changes left in the worktree break the commit obligation
-  if status.stdout.strip():
-    return f"isolated job left the worktree dirty: {status.stdout.strip()[:300]}"
+  # guard: a status that exits non-zero listed nothing — the tree's state is unknown, never clean
+  if status.returncode != 0:
+    return _TREE_CHECK_FAILED
+
+  # the listing is captured as bytes and decoded here, so no byte of a name is rewritten on the way
+  entries = iter(status.stdout.decode(
+    "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "surrogateescape",
+  ).split("\0"))
+  byproducts = WorktreeTaskManager.bootstrap_paths(worktree)
+
+  # every entry counts as dirt except an untracked path the bootstrap recorded as its own byproduct — a second line
+  # of defence behind the excludes file, for a byproduct git still lists
+  kept: list[str] = []
+  for entry in entries:
+    # guard: the empty piece after the last separator
+    if not entry:
+      continue
+    # a rename or copy entry is followed by its origin path as a separate record — shown together
+    # waiver: git porcelain status letters and column width, not domain constants
+    if "R" in entry[:2] or "C" in entry[:2]:
+      kept.append(f"{entry} <- {next(entries, '')}")
+    # waiver: git porcelain prefix and prefix width, not domain constants
+    elif entry[:3] != "?? " or entry[3:] not in byproducts:
+      kept.append(entry)
+  dirty = "\n".join(kept)
+
+  # uncommitted changes left in the worktree break the commit obligation; the listing is quoted with every
+  # undecodable path byte replaced, so the message is storable as UTF-8
+  if dirty:
+    listing = dirty[:300].encode(
+      encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "surrogateescape",
+    ).decode(
+      encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
+    )
+    return f"isolated job left the worktree dirty: {listing}"
 
   # a clean tree with the tip exactly where the spawn found it means nothing durable landed
   if pre_spawn_tip is not None and _worktree_head(worktree) == pre_spawn_tip:
@@ -857,6 +1130,23 @@ def pump(repo: Path) -> dict:
       claim's `PID` marker are removed and `READY` is untouched. Past the limit the job is closed for good.
     - A transiently-errored job with retry budget left is released (its `PID` marker unlinked, no `DONE`), so it
       is queued again and dead-claimant reconciliation cannot finalize it while a retry is due.
+    - An exception raised while one job is processed does not escape: the job is closed as a logical failure whose
+      message names the exception, and the call returns its normal summary.
+    - A fault of the checkout or the host — an unusable daemon setting, a settings file that cannot be prepared, an
+      expert binary missing from PATH — is raised as the pump's environment error, and the job is left as it stands:
+      queued and unclaimed. A work-tree check that could not be made after a finished run, a `git status` that exits
+      non-zero included, is raised the same way, and the job's finished `response.json` is never overwritten.
+    - A job the call could neither close nor reconcile — a closing record that cannot be written into its own
+      bundle, or a bundle the dead scan cannot reconcile — and an expert queue folder that cannot be listed never
+      stop the READY job behind them from being served; the call then raises the pump's environment error naming
+      every such job or folder. A job that fails to close after it was claimed ends the call instead.
+    - When a fault of the checkout or the host is re-raised while the call holds jobs it could neither close nor
+      reconcile, those jobs are named on the raised error, in its message and on its `unclosable` attribute.
+    - When the subscription window is closed and the call would defer, it raises for those jobs and folders at once
+      and spawns nothing.
+    - On the two `halted` returns (a dirty-tree halt, a rate-limit halt raised during the run) the halt summary is
+      returned so the daemon can act on the halt; each such job or folder is named on stderr and recorded in the
+      error ledger as an opened `job_error` incident with cause `job_unclosable`, keyed on the job.
 
   Notes:
     - When a tick buries a dead job whose spawn outlived its pump, it signals process groups outside this
@@ -876,12 +1166,21 @@ def pump(repo: Path) -> dict:
     READY for the halt to lift.
 
   Raises:
-    OSError: When rewriting the checkout's `.claude/settings.local.json` after stripping a TCC-gated entry fails.
+    _PumpEnvironmentError: When the daemon stream settings are unusable, the checkout's settings files, including
+      `.claude/settings.local.json`, cannot be prepared, the expert binary is missing from PATH, or the work-tree
+      check after a finished run could not be made; the job is left as it stands and its finished response is
+      left as it is. When such a fault ends the call while jobs could not be closed or reconciled, the error
+      names them as well. Also, when a job's closing record could not
+      be written into its own bundle, the dead scan could not reconcile a job's bundle, or an expert queue folder
+      could not be listed: after the READY job has been served, or at once when the subscription window is closed;
+      the message names each such job or folder. A `halted` return raises nothing for them; they are recorded in
+      the error ledger instead.
   """
 
   # Contract:
   # A single call MUST spawn at most one Claude expert process, even when several jobs are
-  # READY across the queue; only the oldest READY job is picked and processed per call.
+  # READY across the queue; the oldest READY job is picked and processed per call, and a younger
+  # one gets the turn only when every older one failed before its claim and could not be closed.
 
   # Contract:
   # An expert process that a call spawns MUST NOT load a TCC-gated `permissions.additionalDirectories`
@@ -921,9 +1220,46 @@ def pump(repo: Path) -> dict:
   # unlinked and no `DONE` is written, so it is queued again, indistinguishable from a never-claimed
   # READY job, and dead-claimant reconciliation MUST NOT finalize it while a retry is due.
 
+  # Contract:
+  # An exception raised while one job is being processed MUST NOT escape the call. The job is
+  # closed as a logical failure whose message names the exception, and the call returns its
+  # normal summary, so the next call serves the next READY job instead of dying on the same one.
+  # The one exception is a fault of the checkout or the host, which is raised instead.
+
+  # Contract:
+  # A fault of the checkout or the host — an unusable daemon setting, a settings file that cannot
+  # be prepared, an expert binary missing from PATH — MUST be raised as the pump's environment error,
+  # and the job is left as it stands: queued and unclaimed. A work-tree check that could not be made
+  # after a finished run, a `git status` that exits non-zero included, is raised the same way, and the
+  # job's finished `response.json` is NEVER overwritten: the job keeps its own response.
+
+  # Contract:
+  # A job the call could neither close nor reconcile — a closing record that cannot be written into
+  # its own bundle, or a bundle the dead scan cannot reconcile — and an expert queue folder that
+  # cannot be listed MUST NOT stop the READY job behind them from being served; the call then raises
+  # the pump's environment error naming every such job or folder. A job that fails to close after it
+  # was claimed ends the call instead, so the single-spawn ceiling holds.
+
+  # Contract:
+  # When a fault of the checkout or the host is re-raised while the call holds jobs it could neither
+  # close nor reconcile, those jobs MUST be named on the raised error, in its message and on its
+  # `unclosable` attribute, so a fault that ends the call never hides them. With no such job the
+  # fault is raised as it is.
+
+  # Contract:
+  # When the subscription window is closed and the call would defer, it raises for those jobs and
+  # folders at once and spawns nothing. The two `halted` returns, a dirty-tree halt and a rate-limit
+  # halt raised during the run, are the exception: the halt summary is returned so the daemon can act
+  # on the halt, and each such job or folder is named on stderr and recorded in the error ledger as
+  # an opened `job_error` incident with cause `job_unclosable`, keyed on the job.
+
   repo = Path(repo)
   daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
-  detected_dead = _detect_dead_jobs(repo, grace_sec = _DEAD_GRACE_SEC)
+
+  # the jobs this call could neither process, close nor reconcile; each is stepped over so it
+  # never blocks the jobs queued behind it, and the call raises for them once a job was served
+  unclosable: list[str] = []
+  detected_dead = _detect_dead_jobs(repo, grace_sec = _DEAD_GRACE_SEC, failures = unclosable)
 
   # the queue root only appears once something has been dispatched
   jobs_root = repo / JOBS_BASE
@@ -945,22 +1281,34 @@ def pump(repo: Path) -> dict:
     if not edir.is_dir():
       continue
     expert_count += 1
-    for jdir in sorted(edir.iterdir()):
-      # guard: only real bundles are queue entries
-      if not is_job_bundle(jdir):
-        continue
-      ready_marker = jdir / JobMarker.READY
-      ready = (
-        ready_marker.exists()
-        and not (jdir / JobMarker.DONE).exists()
-        and not (jdir / JobMarker.DEAD).exists()
-        and not (jdir / JobMarker.CANCELLED).exists()
-      )
 
-      # only actually-ready jobs join the FIFO queue
-      if not ready:
+    # an expert folder that cannot be listed queues nothing this call; the dead scan above has
+    # already named it, so it is stepped over here without a second report
+    try:
+      bundles = sorted(edir.iterdir())
+    except OSError:
+      continue
+    for jdir in bundles:
+      # a bundle whose markers cannot be read queues nothing this call; the dead scan above has
+      # already named it, so it is stepped over here without a second report
+      try:
+        # guard: only real bundles are queue entries
+        if not is_job_bundle(jdir):
+          continue
+        ready_marker = jdir / JobMarker.READY
+        ready = (
+          ready_marker.exists()
+          and not (jdir / JobMarker.DONE).exists()
+          and not (jdir / JobMarker.DEAD).exists()
+          and not (jdir / JobMarker.CANCELLED).exists()
+        )
+
+        # only actually-ready jobs join the FIFO queue
+        if not ready:
+          continue
+        ready_candidates.append((ready_marker.stat().st_mtime, edir.name, jdir))
+      except OSError:
         continue
-      ready_candidates.append((ready_marker.stat().st_mtime, edir.name, jdir))
 
   # while the system is stuck the queue narrows to the bundles their dispatcher marked
   # halt-exempt — the triage job still reaches its spawn, every other job waits for the halt
@@ -984,6 +1332,14 @@ def pump(repo: Path) -> dict:
     # report a deferral with no reopening time attached
     raised = rate_limit_flag.read_live_records() if guard[RateLimitGuardKey.ENABLED] else []
 
+    # guard: the window is closed and the dead scan left a job unreconciled — a deferral can last
+    # for hours, so the call fails for that job now instead of deferring over it in silence;
+    # nothing is spawned either way
+    if raised and unclosable:
+      raise _PumpEnvironmentError(
+        f"could not close or reconcile job(s): {'; '.join(unclosable)}", unclosable = unclosable,
+      )
+
     # guard: the subscription window is closed — postpone rather than burn the call
     if raised:
       # waiver: pump-summary subkeys, mirroring the sibling `halted` summary below
@@ -995,31 +1351,86 @@ def pump(repo: Path) -> dict:
 
     # plain FIFO across the whole queue — oldest READY marker wins
     ready_candidates.sort(key = lambda candidate: candidate[0])
-    _mtime, name, jdir = ready_candidates[0]
-    started = time.monotonic()
-    try:
-      _process_one(repo, name, jdir)
+
+    # the job that got this call's one turn, once there is one
+    served: tuple[str, Path] | None = None
+    for _mtime, name, jdir in ready_candidates:
+      started = time.monotonic()
+      try:
+        _process_one(repo, name, jdir)
+      except _ExpertDirtyTreeError as error:
+        processed = 1
+        _log_job_attempt(repo, name, jdir, started)
+
+        # the halt summary must go back to the daemon, so the call cannot raise for the jobs it
+        # could not close — and the halt hides them from later calls — so the ledger takes them
+        _record_unclosable(repo, unclosable)
+        return {
+          "experts": expert_count, "processed": processed,
+          "detected_dead": detected_dead, "halted": True,
+          "halt_expert": error.expert, "halt_job_id": error.job_id,
+        }
+      except _PumpEnvironmentError as error:
+        # guard: the checkout's own fault would fail every job the same way — the job stays queued, and with
+        # no other job lost the fault goes up as it is
+        if not unclosable:
+          raise
+
+        # the fault ends the call before its closing raise, so it carries the jobs the call could neither
+        # close nor reconcile itself: each is named in the message and listed on the error
+        raise _PumpEnvironmentError(
+          f"{error}; could not close or reconcile job(s): {'; '.join(unclosable)}", unclosable = unclosable,
+        ) from error
+      # waiver: the broad catch is the isolation boundary itself — whatever one bundle makes the
+      # pump raise, the bundle is closed and the queue behind it keeps moving
+      except Exception as error:  # pylint: disable=broad-exception-caught
+        # the full traceback goes to the routine journal; the job keeps the one-line cause
+        traceback.print_exc(file = sys.stderr)
+        try:
+          _write_error(
+            jdir, JobErrorCategory.LOGICAL,
+            f"pump could not process this job: {type(error).__name__}: {error}",
+          )
+        except OSError as close_error:
+          # the closing record cannot be written into this bundle — the job cannot be closed;
+          # it is named on stderr at once, so no later exit of this call can lose it
+          sys.stderr.write(f"pump: cannot close {name}/{jdir.name}: {close_error}\n")
+          unclosable.append(f"{name}/{jdir.name}: {close_error}")
+
+          # guard: the job was claimed, so its expert may already have been spawned — handing
+          # the turn on would risk a second spawn in one call, so the call stops here
+          if (jdir / JobMarker.PID).exists():
+            break
+
+          # a job that failed before it was claimed spawned nothing — the next READY job gets
+          # this call's turn
+          continue
+
+      # this job had the call's one turn, whether it ran or was closed
       processed = 1
       _log_job_attempt(repo, name, jdir, started)
-    except _ExpertDirtyTreeError as error:
-      processed = 1
-      _log_job_attempt(repo, name, jdir, started)
-      return {
-        "experts": expert_count, "processed": processed,
-        "detected_dead": detected_dead, "halted": True,
-        "halt_expert": error.expert, "halt_job_id": error.job_id,
-      }
+      served = ( name, jdir )
+      break
 
     # The pre-spawn check found the flag clear, so a flag up now went up during this run — by this
     # run's own frames or a concurrent writer on the host; either way the window is closed. Halt
     # the daemon until it reopens. The current job was never interrupted for it.
-    if guard[RateLimitGuardKey.ENABLED] and _halt_on_rate_limit(repo, name, jdir):
+    if served is not None and guard[RateLimitGuardKey.ENABLED] and _halt_on_rate_limit(repo, *served):
+      # same as the dirty-tree halt above: the summary goes back, the ledger takes the lost jobs
+      _record_unclosable(repo, unclosable)
       # waiver: pump-summary subkeys, mirroring the sibling dirty-tree halt summary above
       return {
         "experts": expert_count, "processed": processed,
         "detected_dead": detected_dead, "halted": True, "halt_reason": HaltReason.RATE_LIMIT,
-        "halt_expert": name, "halt_job_id": jdir.name,
+        "halt_expert": served[0], "halt_job_id": served[1].name,
       }
+
+  # guard: some job could be neither processed, closed nor reconciled — the call fails for it,
+  # loudly, now that the queue behind it has had its turn
+  if unclosable:
+    raise _PumpEnvironmentError(
+      f"could not close or reconcile job(s): {'; '.join(unclosable)}", unclosable = unclosable,
+    )
   return { "experts": expert_count, "processed": processed, "detected_dead": detected_dead }
 
 
@@ -1157,14 +1568,104 @@ def _read_rejection(jdir: Path) -> str | None:
   )
 
 
+def _drop_earlier_copies(jdir: Path) -> str | None:
+  """
+  Remove from a job's buckets what an earlier claim of the same bundle copied into them.
+
+  Args:
+    jdir: Job bundle directory carrying the record of the earlier claim's copies.
+
+  Returns:
+    None when the earlier copies are gone or there were none, or a one-line message when the record exists but
+    cannot be read or parsed, in which case nothing is removed.
+  """
+  try:
+    record = json.loads((jdir / JobArtifact.CLAIM_COPIES).read_text(encoding = "utf-8"))
+  except FileNotFoundError:
+    # no record: no earlier claim copied anything
+    return None
+  except (OSError, ValueError) as error:
+    # a record that is there but cannot be read or parsed leaves the earlier copies unknown, which is never
+    # read as "no earlier claim"; `ValueError` covers both a JSON syntax error and bytes that are not UTF-8 text
+    return (
+      f"{JobArtifact.CLAIM_COPIES} cannot be read, so what the earlier claim copied is unknown: "
+      f"{type(error).__name__}: {error}"
+    )
+
+  # guard: a record of any other shape names no copies
+  if not isinstance(record, dict):
+    return None
+  for bucket in ( JobIODir.SOURCE, JobIODir.CONTEXT ):
+    names = record.get(bucket)
+
+    # guard: this bucket received no copies at the earlier claim
+    if not isinstance(names, list):
+      continue
+    for name in names:
+      # guard: a copy sits directly in its bucket under a plain name — anything else in the record would
+      # reach outside the bucket, and the record lies in a directory the expert can write to
+      if not isinstance(name, str) or not name or name == os.pardir or Path(name).name != name:
+        continue
+      copy = jdir / bucket / name
+
+      # a symlink is unlinked, never followed; a directory copy goes as a tree
+      if copy.is_symlink() or copy.is_file():
+        copy.unlink()
+      elif copy.is_dir():
+        shutil.rmtree(copy)
+
+  # every recorded copy is gone
+  return None
+
+
+def _write_claim_copies(jdir: Path, copied: dict[str, set[str]]) -> None:
+  """
+  Record what a claim copied into a job's buckets, for the next claim of the same bundle to remove.
+
+  The record is written atomically, so a reader never sees a partial record; a write that fails leaves the
+  previous record as it was.
+
+  Args:
+    jdir: Job bundle directory the record is written into.
+    copied: Bucket name mapped to the names of the entries this claim copied into that bucket.
+  """
+  record_path = jdir / JobArtifact.CLAIM_COPIES
+
+  # guard: this claim copied nothing, and the earlier claim's copies are already gone — no record to keep
+  if not any(copied.values()):
+    record_path.unlink(missing_ok = True)
+    return
+
+  # the record sits beside the buckets, not inside one, so the expert never reads it as an input; it is
+  # written whole into a temp file in the same directory and renamed over the record, so a reader never
+  # sees a truncated record and a write that fails leaves the previous record as it was
+  record_tmp = jdir / _CLAIM_COPIES_TMP
+  try:
+    record_tmp.write_text(
+      json.dumps({ bucket: sorted(names) for bucket, names in copied.items() }, indent = 2), encoding = "utf-8",
+    )
+    os.replace(record_tmp, record_path)
+  except OSError:
+    # the half-written temp file is dropped; the failure itself goes up to the claim
+    record_tmp.unlink(missing_ok = True)
+    raise
+
+
 def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
   """
   Copy a claimed job's declared source and context paths into its bundle directory.
 
   A directory entry is copied whole under `<parent>-<name>`, so two asset folders that share a
   slug across categories stay apart; a file entry lands directly in the bucket under its
-  basename. A bucket whose manifest is empty is not created. An entry resolving outside the
-  work tree is rejected rather than copied.
+  basename. Entries of one claim that land under the same copy name merge. A job can be claimed more than once,
+  and the buckets carry the tree as it stands at the latest claim: a re-claim first removes exactly what the
+  previous claim of this bundle copied, which the bundle keeps a record of, so a file the tree no longer has does
+  not survive in the bucket. A claim record that exists but cannot be read refuses the re-claim: nothing is
+  removed or copied. Nothing else is removed, so the files written into the bucket at dispatch stay. A
+  bucket whose manifest is empty is not created. An entry resolving outside the work tree is rejected rather
+  than copied. A manifest that is not a list, an entry that is not a string, an entry naming a directory that
+  contains the job's own bundle, and a directory entry whose copy name is already a file in the bucket that no
+  claim created are rejected the same way; such a file is left untouched.
 
   Args:
     jdir: Job bundle directory the buckets are created under.
@@ -1173,14 +1674,55 @@ def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
       otherwise the repository checkout.
 
   Returns:
-    None when every declared entry was copied, or a one-line message naming the first entry
-    that could not be resolved.
+    None when every declared entry was copied, or a one-line message naming the first entry that was rejected,
+    including a directory entry whose copy name clashes with an existing file, or saying that the earlier claim's
+    record cannot be read.
   """
+  # a job can be claimed more than once, and the buckets carry the tree as it stands at this claim: what an
+  # earlier claim copied goes first, once, so a file the tree no longer has does not survive. Only recorded
+  # copies are removed — the buckets also hold the files written at dispatch
+  refusal = _drop_earlier_copies(jdir)
 
+  # guard: the earlier claim's record is there but unreadable — which entries are its copies is unknown, so
+  # the re-claim is refused before anything is removed or copied, and the damaged record stays in place
+  if refusal is not None:
+    return refusal
+  copied: dict[str, set[str]] = { JobIODir.SOURCE: set(), JobIODir.CONTEXT: set() }
+
+  # the record is written for whatever landed, also when an entry is rejected or a copy raises midway —
+  # the next claim has to find every copy this one left
+  try:
+    return _copy_manifests(jdir, cfg, work_root, copied)
+  finally:
+    _write_claim_copies(jdir, copied)
+
+
+def _copy_manifests(jdir: Path, cfg: dict, work_root: Path, copied: dict[str, set[str]]) -> str | None:
+  """
+  Copy the entries of a job's two manifests into its buckets, merging entries that share a copy name.
+
+  Args:
+    jdir: Job bundle directory the buckets are created under.
+    cfg: Parsed `config.json` carrying the two manifests.
+    work_root: Tree the entries are read from.
+    copied: Bucket name mapped to the names copied so far; every entry copied here is added to it.
+
+  Returns:
+    None when every declared entry was copied, or a one-line message naming the first entry that was rejected.
+  """
   # both buckets share one loop — the only difference is which manifest key feeds which dir
   for key, bucket in ( ( JobConfigKey.SOURCE_PATHS, JobIODir.SOURCE ),
                        ( JobConfigKey.CONTEXT_PATHS, JobIODir.CONTEXT ) ):
-    for rel in cfg.get(key) or []:
+    manifest = cfg.get(key) or []
+
+    # guard: the manifest is caller-written JSON — anything but a list names no entries to copy
+    if not isinstance(manifest, list):
+      return f"{bucket}/: declared manifest {manifest!r} is not a list of paths"
+    for rel in manifest:
+      # guard: an entry that is not a path string names no file, and joining it onto the work
+      # root would raise instead of failing this one job
+      if not isinstance(rel, str):
+        return f"{bucket}/: declared entry {rel!r} is not a repo-relative path string"
       src = (work_root / rel).resolve()
 
       # guard: a `../`-bearing entry would stage files from outside the checkout into a bundle the
@@ -1191,6 +1733,11 @@ def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
       # guard: the entry vanished between dispatch and claim — deterministic, retry cannot help
       if not src.exists():
         return f"{bucket}/: declared path {rel!r} does not exist at claim time"
+
+      # guard: a directory holding this very bundle would be copied into itself, level after
+      # level, until the path length runs out — and the bundle keeps what was copied
+      if jdir.resolve().is_relative_to(src):
+        return f"{bucket}/: declared path {rel!r} contains the job's own bundle"
       dst_dir = jdir / bucket
       dst_dir.mkdir(exist_ok = True)
 
@@ -1198,8 +1745,20 @@ def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
       # different categories share their own name and would otherwise merge into one; a file goes
       # flat, which is the layout every protocol's per-kind subdir declaration already describes
       if src.is_dir():
-        shutil.copytree(src, dst_dir / f"{src.parent.name}-{src.name}", dirs_exist_ok = True)
+        copy_dir = dst_dir / f"{src.parent.name}-{src.name}"
+
+        # guard: the copy name is taken by something that is not a directory — a file written at dispatch,
+        # or a file entry of this claim; it stays as it is, and the entry cannot be merged into it
+        if copy_dir.is_symlink() or (copy_dir.exists() and not copy_dir.is_dir()):
+          return f"{bucket}/: declared path {rel!r} cannot be copied, {copy_dir.name!r} is already a file there"
+
+        # the name joins the claim's list before the copy, so a copy that raises midway is still in the record
+        # the claim writes once its copies end; the record is not on disk while the copy runs, so a claim
+        # killed midway leaves its partial copy unrecorded. Two entries under one copy name merge
+        copied[bucket].add(copy_dir.name)
+        shutil.copytree(src, copy_dir, dirs_exist_ok = True)
       else:
+        copied[bucket].add(src.name)
         shutil.copy2(src, dst_dir / src.name)
 
   # every declared entry landed — the caller may proceed to the spawn
@@ -1589,13 +2148,41 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
   Raises:
     _ExpertDirtyTreeError: When the expert exited cleanly but left uncommitted changes.
-    OSError: When rewriting the checkout's `.claude/settings.local.json` after stripping a TCC-gated entry fails.
+    _PumpEnvironmentError: When the daemon stream settings are not numbers or the checkout's settings files,
+      including `.claude/settings.local.json`, cannot be prepared (both before anything of the job is read), or
+      when the expert binary is missing from PATH at spawn time, in which case the claim is undone; in all three
+      the job is left queued, unclaimed. Also when git cannot be run to record the claim's head commit, in which
+      case the claim is undone (the PID marker is removed, attempts are not incremented) and the job is left
+      queued. Also when the work-tree check after a finished run could not be made, in which case
+      the job keeps its own finished response, which is left as it is.
+    OSError: When the expert process cannot be started although the binary is on PATH; it is the job's own failure.
   """
   # the idle-watchdog settings are read per job, a cheap single-file read that keeps each spawn on the live config
   daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
-  idle_timeout_sec = int(daemon.get(DaemonKey.STREAM_IDLE_TIMEOUT_SEC, _STREAM_IDLE_TIMEOUT_DEFAULT))
-  # waiver: small internal subkey, not a reusable domain key
-  max_stall_retries = max(0, int(daemon.get("stream_max_retries", _STREAM_MAX_RETRIES_DEFAULT)))
+  try:
+    idle_timeout_sec = int(daemon.get(DaemonKey.STREAM_IDLE_TIMEOUT_SEC, _STREAM_IDLE_TIMEOUT_DEFAULT))
+    # waiver: small internal subkey, not a reusable domain key
+    max_stall_retries = max(0, int(daemon.get("stream_max_retries", _STREAM_MAX_RETRIES_DEFAULT)))
+  except (TypeError, ValueError) as error:
+    raise _PumpEnvironmentError(f"daemon stream settings are not numbers: {error}") from error
+
+  # Decision: the daemon checkout's local overlay is rewritten in place, not shadowed by a
+  # filtered copy — Claude Code concatenates `additionalDirectories` across every loaded
+  # scope, so a copy handed through `--settings` cannot hide an entry the file still carries
+
+  # the sandbox file is re-derived from the declared settings before the command line names it,
+  # so a domain declared since the last install reaches this very job; a TCC-gated directory in
+  # the local overlay would hang the spawn at startup on a consent prompt no background process
+  # can answer, so it is stripped before the spawn loads the file. Both touch the checkout's own
+  # settings and nothing of the job, so they run before the job's bundle is read or written: a
+  # fault here is the checkout's, and the job is still exactly as it was queued
+  try:
+    _refresh_sandbox_file(repo)
+    _sanitize_local_settings(repo)
+  # waiver: every failure of the two settings rewrites is re-labelled, whatever its type, so the
+  # pump's per-job boundary does not charge it to the job
+  except Exception as error:  # pylint: disable=broad-exception-caught
+    raise _PumpEnvironmentError(f"checkout settings could not be prepared: {error}") from error
 
   # Per-job config.json carries everything the pump needs: agent ref,
   # protocols list (declared by the routine that created this job),
@@ -1743,7 +2330,8 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   try:
     # the expert commits under its own identity, passed down through the environment
     git_author = cfg.get(JobConfigKey.GIT_AUTHOR) or {}
-    env = os.environ.copy()
+    # an isolated job's agent runs git with the bootstrap's byproducts ignored; every other job inherits as is
+    env = os.environ.copy() if worktree_dir is None else _isolation_git_env(worktree_dir, os.environ)
     # waiver: environment-variable name, not a domain key
     env["GIT_AUTHOR_NAME"]  = git_author.get("name",  "")
     # waiver: environment-variable name, not a domain key
@@ -1819,8 +2407,14 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     (jdir / JobMarker.PID).write_text(f"{os.getpid()}\n", encoding = "utf-8")
 
     # the commit the buckets above were copied from — the one fact that lets a consumer tell
-    # a change this job already read from one that landed after it started
-    _record_claim_head(jdir, worktree_dir or repo)
+    # a change this job already read from one that landed after it started. Reading it runs git:
+    # when git itself cannot be run the fault is the host's, so the claim is undone and the job
+    # goes back to the queue
+    try:
+      _record_claim_head(jdir, worktree_dir or repo)
+    except OSError as error:
+      (jdir / JobMarker.PID).unlink(missing_ok = True)
+      raise _PumpEnvironmentError(f"the work tree's HEAD could not be read: {error}") from error
 
     # Bump attempts counter — persists across pump kills + recovery cycles.
     # Recovery routine reads this to decide retry vs. permanent-fail.
@@ -1830,18 +2424,6 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     except (OSError, ValueError):
       attempts = 0
     attempts_file.write_text(f"{attempts + 1}\n", encoding = "utf-8")
-
-    # the sandbox file is re-derived from the declared settings before the command line names it,
-    # so a domain declared since the last install reaches this very job
-    _refresh_sandbox_file(repo)
-
-    # Decision: the daemon checkout's local overlay is rewritten in place, not shadowed by a
-    # filtered copy — Claude Code concatenates `additionalDirectories` across every loaded
-    # scope, so a copy handed through `--settings` cannot hide an entry the file still carries
-
-    # a TCC-gated directory in the local overlay would hang the spawn at startup on a consent
-    # prompt no background process can answer, so it is stripped before the spawn loads the file
-    _sanitize_local_settings(repo)
 
     # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
     # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,
@@ -1884,10 +2466,25 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # frames seen across every attempt of this job, for the degradation warning below
     seen_frames = 0
     for stall_attempt in range(max_stall_retries + 1):
-      returncode, stdout, stderr, stalled = _spawn_with_idle_watchdog(
-        # an isolated job's agent works inside its worktree; every other job on the checkout
-        claude_argv, env = env, cwd = worktree_dir or repo, idle_timeout_sec = idle_timeout_sec,
-      )
+      try:
+        returncode, stdout, stderr, stalled = _spawn_with_idle_watchdog(
+          # an isolated job's agent works inside its worktree; every other job on the checkout
+          claude_argv, env = env, cwd = worktree_dir or repo, idle_timeout_sec = idle_timeout_sec,
+        )
+      except OSError as error:
+        # with the binary there, the spawn failed over something of this job (an argument list
+        # too long, a vanished working directory), so the failure is the job's and closes it
+        # waiver: environment-variable name, not a domain key
+        if shutil.which(claude_argv[0], path = env.get("PATH")) is not None:
+          raise
+
+        # the expert binary itself is missing: the host's fault, which would fail every job the
+        # same way. The claim is undone — marker, claim head and the attempt just counted — and
+        # the job goes back to the queue instead of being closed
+        (jdir / JobMarker.PID).unlink(missing_ok = True)
+        (jdir / JobArtifact.CLAIM_HEAD).unlink(missing_ok = True)
+        attempts_file.write_text(f"{attempts}\n", encoding = "utf-8")
+        raise _PumpEnvironmentError(f"expert binary {claude_argv[0]!r} is not on PATH: {error}") from error
       seen_frames += _record_rate_limit(repo, expert_name, stdout)
 
       # a stream that produced output / exited on its own hands off to the outcome path
@@ -1964,15 +2561,36 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       # read-only job would otherwise always fail the unmoved-branch check.
       if not _agent_is_read_only(agent_path):
         if worktree_dir is not None:
-          failure = _isolated_job_failure(worktree_dir, pre_spawn_tip)
+          # the run is finished and its response is on disk — a failure of the tree check itself is the
+          # checkout's, and must not be charged to the job by overwriting that response
+          try:
+            failure = _isolated_job_failure(worktree_dir, pre_spawn_tip)
+          # waiver: whatever the tree check raises is re-labelled, so the pump's per-job boundary
+          # leaves the finished job's response alone
+          except Exception as error:  # pylint: disable=broad-exception-caught
+            raise _PumpEnvironmentError(f"work tree check after the run failed: {error}") from error
+
+          # guard: the worktree could not be read, so the check was never made — the same fault of the
+          # checkout as a check that raised, and the job keeps its finished response
+          if failure == _TREE_CHECK_FAILED:
+            raise _PumpEnvironmentError(f"work tree check after the run failed: {failure}")
 
           # guard: the isolated job broke its commit obligation — fail it, keep the queue moving
           if failure is not None:
             _write_error(jdir, JobErrorCategory.LOGICAL, failure)
             return
-        # guard: abort the tick when the expert left the shared working tree dirty
-        elif _check_post_claude(repo, expert_name, jdir):
-          raise _ExpertDirtyTreeError(expert_name, jdir.name, [])
+        # a shared-tree job settles the halt state; dirt that survives the stray-copy cleanup aborts the tick
+        else:
+          # the run is finished and its response is on disk — a failure of the tree check itself
+          # is the checkout's, and must not be charged to the job by overwriting that response
+          try:
+            is_halted = _update_halt_after_run(repo, expert_name, jdir)
+          # waiver: whatever the tree check raises is re-labelled, so the pump's per-job boundary
+          # leaves the finished job's response alone
+          except Exception as error:  # pylint: disable=broad-exception-caught
+            raise _PumpEnvironmentError(f"work tree check after the run failed: {error}") from error
+          if is_halted:
+            raise _ExpertDirtyTreeError(expert_name, jdir.name, [])
 
       # the correction landed — drop the rejection record so it cannot resurface
       # in the prompt of a later attempt on this same bundle
@@ -2107,6 +2725,8 @@ def _kill_orphaned_spawns(jdir: Path) -> int:
     listing = subprocess.run(
       [ "ps", "-ax", "-o", "pid=,command=" ],
       capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
     ).stdout
   except OSError:
     return 0
@@ -2153,6 +2773,8 @@ def _spawn_with_idle_watchdog(argv: list[str],
     argv, env = env, cwd = str(cwd),
     stdout = subprocess.PIPE, stderr = subprocess.PIPE,
     text = True, start_new_session = True, encoding = "utf-8",
+    # waiver: stdlib decode-error mode, not a domain constant
+    errors = "replace",
   )
   line_q: queue.Queue = queue.Queue()
 
