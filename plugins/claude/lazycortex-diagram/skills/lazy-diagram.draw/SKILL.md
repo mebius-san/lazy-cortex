@@ -51,7 +51,7 @@ A section that has a declared draw seam MUST NOT carry any other visual-authorin
 The dispatcher provides as keyword=value pairs:
 
 - **`target_file`** *(required)* — absolute path of the markdown file the diagram lands in.
-- **`anchor_section`** *(required)* — H2 or H3 heading text the fence anchors under (e.g. `## User Flow`). The heading must already exist in `target_file` — the skill never invents headings.
+- **`anchor_section`** *(required)* — the heading the fence goes under, at any level (e.g. `## User Flow`). The skill places the fence under the heading it was given; it adds headings only when it splits the section (Step 6).
 - **`request`** *(required)* — free-form description of what the diagram should depict. May include a bullet `facts:` list for terminology-parity backstop.
 - **`kind`** *(optional)* — pin to one of the available kinds. When unset, Step 3 picks via the inline heuristic.
 - **`format`** *(optional)* — `mermaid` | `ascii`. When unset, the inline heuristic decides; defaults to `mermaid` when both formats fit.
@@ -63,7 +63,6 @@ The dispatcher provides as keyword=value pairs:
 
 - Parse the dispatch prompt into the keyword inputs above. Apply defaults.
 - `target_file` must exist (`Read` it; `[FAIL] target_file not found` otherwise).
-- `anchor_section` must appear verbatim as an H2 or H3 heading in `target_file` (`Bash(grep -nE "^#{2,3} <anchor>$" <target_file>)` prints it; `[FAIL] anchor not found in target_file` otherwise).
 - `request` must be non-empty (`[FAIL] empty request` otherwise).
 - If `kind` is provided, hold for Step 5 compatibility check.
 - If `format` is provided and is not `mermaid` or `ascii`, `[FAIL] unsupported format=<format>`.
@@ -151,14 +150,14 @@ Outcome: `compatible` or `failed:format-not-supported-for-kind`.
   - `format=ascii` → `Agent(subagent_type: "lazycortex-diagram:lazy-diagram.draw-ascii", prompt: "<above>")`.
 - The agent returns the fence body (without surrounding triple-backticks) OR a `failed:` / `split-into-N:` / `skipped-below-threshold` outcome line.
 - If `failed:` → propagate and short-circuit.
-- If `split-into-N:` → propagate as the skill's outcome and surface the suggested seam list to the caller; the skill does NOT itself emit multiple fences in v1. Short-circuit.
+- If `split-into-N:` → split the anchor section and draw one diagram per part, without asking anyone, exactly as `${CLAUDE_PLUGIN_ROOT}/references/lazy-diagram.section-split.md` describes: the part headings are written, the section's prose is moved into them word for word, and Steps 6–7 run once per part heading. Then go to Step 8 with the outcome `split-into-N` and one outcome per part.
 - If `skipped-below-threshold` → propagate and short-circuit; no fence is written.
 
 Outcome: `drawn (<bytes> bytes)` or `failed:<reason>` or `split-into-N` or `skipped-below-threshold`.
 
 ### Step 7: Byte-compare and place block
 
-- `Read: <target_file>`. Locate the `<anchor_section>` heading.
+- `Read: <target_file>`. Locate the `<anchor_section>` heading, whatever its level; none with that text → `[FAIL] anchor not found in target_file`.
 - Compose the *full* fence text:
   - For mermaid: `` ```mermaid\n<body>\n``` ``
   - For ASCII: `` ```text\n<body>\n``` ``
@@ -166,7 +165,7 @@ Outcome: `drawn (<bytes> bytes)` or `failed:<reason>` or `split-into-N` or `skip
   - **No prior fence** → insert the new fence as the FIRST content block under the anchor heading. Outcome: `created`.
   - **Prior fence, body bytes match** → no-op. Outcome: `unchanged`.
   - **Prior fence, body bytes differ** → replace in place. Outcome: `replaced`.
-  - The skill writes one fence per anchor in v1; multi-fence-per-anchor is out of scope. If the host section needs distinct diagrams, the caller splits them into separate subsections.
+  - The skill writes one fence per anchor; a section that needs several diagrams is split into part headings by Step 6, one fence each.
 - Use the `Edit` tool, never overwrite the whole file.
 
 Outcome: `created` / `replaced` / `unchanged`.
@@ -187,6 +186,7 @@ Render a markdown report. Format:
 [INFO] Step 5 — Format-compatibility check | <outcome>
 [INFO] Step 6 — Dispatch drawer agent | <outcome>
 [INFO] Step 7 — Byte-compare and place block | <outcome>
+[INFO] part <part heading> | <outcome>   (one line per part, only after a split)
 
 ### summary
 
@@ -205,14 +205,14 @@ Outcome: `reported-and-logged`.
 ## Failure modes
 
 - **`/lazy-diagram.draw` aborts: "[FAIL] target_file not found"** — the path passed as `target_file` does not exist on disk → verify the absolute path and create the file before invoking the skill.
-- **`/lazy-diagram.draw` aborts: "[FAIL] anchor not found in target_file"** — `anchor_section` does not appear as an H2 or H3 heading in `target_file` → add the heading to the file first, or correct the spelling to match exactly.
+- **`/lazy-diagram.draw` aborts: "[FAIL] anchor not found in target_file"** — Step 7 found no heading with the `anchor_section` text in `target_file` → correct the spelling to match the heading exactly.
 - **`/lazy-diagram.draw` aborts: "[FAIL] empty request"** — the `request` parameter was omitted or blank → provide a non-empty description of what the diagram should depict.
 - **`/lazy-diagram.draw` aborts: "[FAIL] unsupported format=<format>"** — `format` was pinned to a value other than `mermaid` or `ascii` → use `format=mermaid` or `format=ascii`.
 - **Step 3 aborts: "failed:no-kind-fits-request"** — no row in the kind heuristic matched the request → broaden or rephrase the request, or pin `kind=` explicitly.
 - **Step 4 aborts: "failed:scheme-not-found:<name>"** — the named scheme file (`styles-<name>.json`) does not exist in the plugin templates → omit `scheme=` to use the default, or verify the scheme name against `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-*.json`.
 - **Step 5 aborts: "failed:format-not-supported-for-kind=<kind>"** — no template exists for the requested `(kind, format)` combination → check `${CLAUDE_PLUGIN_ROOT}/templates/diagram.<format>/` for available kinds, or switch format.
 - **Step 6 aborts: "failed:<reason>"** — the drawer agent returned a failure (e.g. `missing-in-style:<role>`, request too sparse, template malformed) → check the reason string and re-run with a more detailed request, or fix the named style/template field.
-- **Step 6 returns: "split-into-N"** — the request spans multiple logical diagrams; the skill surfaces the suggested seam list but does not emit multiple fences in v1 → split the request into N separate `/lazy-diagram.draw` calls, one per seam.
+- **A part reports "failed:split-not-converged"** — after the section was split, that part's content still exceeds one diagram → its prose stays without a diagram; shorten the part's prose or split it into headings of your own, then re-run `/lazy-diagram.draw` on it.
 - **Step 6 returns: "skipped-below-threshold"** — the request is too thin for the kind's lower bound (e.g. `<2` decision points for `flow`) → either rephrase to add more substance, or accept that prose is the better artifact for this section.
 
 ## Verify

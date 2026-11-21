@@ -34,7 +34,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 This skill is **idempotent and quiet on re-run**. Every choice it makes is read first and honoured silently — the user is asked again only when nothing is on record yet.
 
 - **Plugin enabled = full functionality.** An enabled plugin installs its whole surface. There is no per-file "install this?" prompt and no per-artifact opt-in — wanting the plugin means wanting its rules, wrappers, checker stack, overlays, and template.
-- **Install scope is not asked.** lazycortex-python is per-repo tooling — the rule mirror, wrappers, checker stack, and overlays all land under `${CLAUDE_PROJECT_DIR}` regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
+- **Install scope is not asked.** lazycortex-python is per-repo tooling — the rule mirror, wrappers, checker stack, and overlays all land under `<repo-root>` regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
 - **This skill asks the user almost nothing.** It does not touch `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless, so a pointer would be redundant). Everything is derived: install scope (above), and `pch` (PyCharm offline inspections) follows `inspect.sh` presence — Step 3 probes for PyCharm, Step 4 deploys `[tool.pch]` when it is found and omits it otherwise, with no prompt and no persisted flag. Only two `AskUserQuestion`s can ever fire: a genuine contradiction in consumer-owned config (below), and — in Step 7 only — the disambiguation prompt when **more than one** `python.env_source` candidate script is present. Zero or one candidate is handled silently; a recorded value is never re-asked.
 
 The Python ≥ 3.12 floor is owned by `/lazy-core.install` (its single Step 0 probe). This skill MUST NOT re-probe the floor — there is no Python-version question here.
@@ -49,6 +49,12 @@ Two classes of file, two policies. Which applies follows from who owns the bytes
 
 ## Step 1: Mirror plugin rules into `.claude/rules/`
 
+**Resolve the project root (`<repo-root>`) first**, by run kind — every phase, `<core-cli>` and every verb below use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` or use `${CLAUDE_PROJECT_DIR}` — a dispatched agent's Bash cwd and project dir are the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
+
 Mirror every rule file shipped under `${CLAUDE_PLUGIN_ROOT}/rules/` into `<consumer>/.claude/rules/`. References, checkers, skills, agents, hooks, and templates stay in the plugin and are read by absolute path from `${CLAUDE_PLUGIN_ROOT}/...` — only rules ship into the consumer's session-loaded set.
 
 The rules are install-managed mirrors, so the **File-sync policy** applies: absent → copy, identical → nothing, different → overwrite. Consumers are not meant to hand-edit the mirrored files (`/lazy-python.audit` check 1 flags drift), and a mirror that drifted is a stale copy, not a customisation.
@@ -56,7 +62,7 @@ The rules are install-managed mirrors, so the **File-sync policy** applies: abse
 `phase1` is the whole step — it enumerates the shipped rules itself, byte-compares each against its target, overwrites the stale ones, and re-reads every write to confirm it landed. Run it unconditionally; there is nothing here to judge and nothing to hand-merge:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase1 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase1 <repo-root>)
 ```
 
 It prints a JSON receipt mapping each rule to its state and exits non-zero when any write failed to verify. Quote the receipt in the report — an `already-current` claim with no receipt behind it is a reporting defect.
@@ -72,7 +78,7 @@ After this step `bash ./cli/cfg-py`, `bash ./cli/chk-py` and `bash ./cli/tst-py`
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2 <repo-root>)
 ```
 
 The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). They are install-managed mirrors — `phase2` writes the current render unconditionally, so a re-run with an unchanged render is a no-op rewrite and a stale wrapper is replaced. The `.gitignore` append is consumer-owned config and idempotent: the `.venv/` line is added only when absent.
@@ -86,7 +92,7 @@ Deploys the human-facing wrappers — the only files this plugin ever marks exec
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2b ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2b <repo-root>)
 ```
 
 Quote the printed receipt in the report. Then check `command -v chk-py` — if it fails, `~/.local/bin` is not on the operator's `$PATH`; report **path-warning** and note that they need to add it themselves (this skill never edits shell rc files).
@@ -100,7 +106,7 @@ Outcome: the receipt's per-wrapper state (`installed` / `unchanged` / `refreshed
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase4 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase4 <repo-root>)
 ```
 
 Hold the result as `<pycharm_present>`: `pch-ready` → `True` (`inspect.sh` located); `pch-missing-inspect-sh` → `False` (no PyCharm on this machine).
@@ -120,9 +126,9 @@ Run phase3, setting `LAZY_PYTHON_ENABLE_PCH` only when `<pycharm_present>` is `T
 
 ```
 # PyCharm present — also deploy [tool.pch]:
-Bash(LAZY_PYTHON_ENABLE_PCH=1 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 ${CLAUDE_PROJECT_DIR})
+Bash(LAZY_PYTHON_ENABLE_PCH=1 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 <repo-root>)
 # no PyCharm on this machine — leave pch out:
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 <repo-root>)
 ```
 
 A `[tool.mypy]` `plugins` list the consumer already has gains `cli/mypy/protected_access.py` after the consumer's own entries. phase3 writes no edit it cannot make safely — a section without a header line of its own, a `plugins` value that is not a list, or an edit that would not parse back to the intended TOML — and prints one `manual-edit: <what to change by hand>` line per skipped edit instead. Relay every such line to the operator verbatim in the Report; never apply it yourself.
@@ -136,7 +142,7 @@ Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`,
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase5 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase5 <repo-root>)
 ```
 
 Outcome: `overlay-created-N` (where `N` is the count of newly-created files) when at least one was scaffolded; `overlay-already-present` when all four files already existed.
@@ -145,10 +151,10 @@ Outcome: `overlay-created-N` (where `N` is the count of newly-created files) whe
 
 The `scaffold sync-plugin` verb copies this plugin's authoring templates into the consumer and registers them in the scaffold registry, asking nothing. The step is here so `lazy-core.scaffold` matches new `*.py` files against the consumer-local copies of the Python templates (`python-template.py` for regular files, `init-template.py` for `**/__init__.py`).
 
-Resolve this plugin's own `<installPath>` (what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-python` prints: the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-python/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records — never `installed_plugins.json` read by hand; `<core-cli>` is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Every verb runs through the interpreter because the file carries no exec bit.) and the detected `<scope>` (`project` / `user`), then run:
+Resolve this plugin's own `<installPath>` (what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-python --cwd <repo-root>` prints: the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-python/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records — never `installed_plugins.json` read by hand; `<core-cli>` is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Every verb runs through the interpreter because the file carries no exec bit.) and the detected `<scope>` (`project` / `user`), then run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-plugin --plugin lazycortex-python --install-path <installPath> --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-plugin --plugin lazycortex-python --install-path <installPath> --scope <scope> --cwd <repo-root>)
 ```
 
 The verb prints one JSON line: its `templates` array carries one copy state per template (`installed` / `unchanged` / `refreshed` / `protected` / `failed`) and its `status` is the registry outcome (`registered` / `unchanged` / `created-and-registered` / `none` / `collision` / `error`). Exit 3 means a template write did not verify — the `failed` array names it.
@@ -162,7 +168,7 @@ Outcome: one line per `templates` entry (`<group>/<file>: <state>`), then the `s
 Run phase6:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 <repo-root>)
 ```
 
 The phase reads the current value and probes the candidate scripts (`cli/env`, `.env.sh`, `scripts/env.sh`), then emits one outcome:
@@ -184,7 +190,7 @@ The phase reads the current value and probes the candidate scripts (`cli/env`, `
   On a chosen candidate, re-run phase6 with it so the value is recorded:
 
   ```
-  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 ${CLAUDE_PROJECT_DIR})
+  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 <repo-root>)
   ```
 
   On `skip`, write nothing.
@@ -198,7 +204,7 @@ Outcome: `env-source-already-set` / `env-source-no-candidate` / `env-source-reco
 The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with every `lazycortex-python:` subagent the core tier table lists. The step is here so the expert runtime and interactive dispatch resolve a model for this plugin's agents; scope is `project` because lazycortex-python is per-repo tooling (see "Decisions are remembered" above). `<core-cli>` is the file Step 6 resolved.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-python --scope project)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-python --scope project --cwd <repo-root>)
 ```
 
 The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
@@ -214,7 +220,7 @@ The entry never overwrites a value the operator set, and it completes the instal
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase7 ${CLAUDE_PROJECT_DIR})
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase7 <repo-root>)
 ```
 
 Outcome: `expert-registered: python.code-reviewer` (added), `expert-refreshed: python.code-reviewer` (install-managed field completed or corrected), or `expert-already-registered` (entry whole, left untouched).

@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 702f588ca1c39d4fcd68482e154c1dcc3eda50ee
-surface_sha: bedbe687d2d296b7ee45cb2b7563ace3c5ec8acf197b9751939f3843db17c19e
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: e09ff1683df020d5907aa6b3e23193d78a59bf7ceb537d343f2ee9a80992f8ae
 ---
 # Troubleshooting
 

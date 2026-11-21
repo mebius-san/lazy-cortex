@@ -27,7 +27,7 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 ## Input
 
 - **`target_file`** *(required)* — absolute path of the file containing the diagram.
-- **`anchor_section`** *(required)* — H2/H3 heading the fence sits under.
+- **`anchor_section`** *(required)* — the heading the fence sits under, at any level.
 - **`kind`** *(optional)* — pin if the existing fence is malformed enough that inference fails.
 - **`format`** *(optional)* — pin in the same case as kind.
 - **`scheme`** *(optional)* — colour scheme name. Resolves to `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme>.json`. Defaults to `default`. Ignored for `format=ascii`.
@@ -36,7 +36,7 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ### Step 1: Validate inputs and locate fence
 
-- Read `target_file`. `Bash(grep -nE "^#{2,3} <anchor_section>$" <target_file>)` locates the heading (H2 or H3). Within the section's body, locate the FIRST code fence — `` ```mermaid `` or `` ```text `` — and capture its body (between the fences) and the `info-string` (`mermaid` / `text`).
+- Read `target_file` and locate the `<anchor_section>` heading, whatever its level. Within the section's body, locate the FIRST code fence — `` ```mermaid `` or `` ```text `` — and capture its body (between the fences) and the `info-string` (`mermaid` / `text`).
 - If no fence is found → `[FAIL] no fence under anchor`. Short-circuit to Step 7.
 
 Outcome: `located fence at line <N>` or `[FAIL]`.
@@ -70,7 +70,7 @@ Outcome: `inferred kind=<kind> format=<format>` or `[FAIL]`.
 
 ### Step 3: Extract host-section prose as request
 
-- The host section's prose (paragraphs between the anchor heading and the existing fence, plus any prose immediately after the fence within the same H2/H3 block) IS the request the drawer should re-render against. Extract it verbatim.
+- The host section's prose (paragraphs between the anchor heading and the existing fence, plus any prose immediately after the fence before the next heading) IS the request the drawer should re-render against. Extract it verbatim.
 - If the section contains only the fence and no prose, fall back to using the fence's existing node labels and edge labels as the request — `[WARN] no host-section prose; using fence labels as request`.
 
 Outcome: `extracted (<chars>)` or `warned`.
@@ -88,7 +88,8 @@ Outcome: `resolved scheme=<name>` (mermaid) / `n/a (ascii)` / `failed:scheme-not
 - Dispatch the per-format drawer:
   - `format=mermaid` → `Agent(subagent_type: "lazycortex-diagram:lazy-diagram.draw-mermaid", prompt: "<above>")`.
   - `format=ascii` → `Agent(subagent_type: "lazycortex-diagram:lazy-diagram.draw-ascii", prompt: "<above>")`.
-- The agent returns the fence body (without surrounding triple-backticks) OR a `failed:` / `split-into-N:` / `skipped-below-threshold` outcome line. Propagate outcomes; on `failed:` or `split-into-N:` short-circuit to Step 7.
+- The agent returns the fence body (without surrounding triple-backticks) OR a `failed:` / `split-into-N:` / `skipped-below-threshold` outcome line. Propagate outcomes; on `failed:` short-circuit to Step 7.
+- On `split-into-N:` → split the anchor section and draw one diagram per part, without asking anyone, exactly as `${CLAUDE_PLUGIN_ROOT}/references/lazy-diagram.section-split.md` describes: the old fence is removed, the part headings are written, the section's prose is moved into them word for word, and for each part heading the drawer is dispatched with that part's prose as the request and its fence is inserted as the first block under the heading. Then go to Step 7 with the outcome `split-into-N` and one outcome per part.
 
 Outcome: `drawn (<bytes> bytes)` or `failed:<reason>` or `split-into-N` or `skipped-below-threshold`.
 
@@ -106,8 +107,10 @@ Outcome: `unchanged` / `replaced`.
 Render a markdown report. Format mirrors `/lazy-diagram.draw` Step 8 with one line per task. The summary line:
 
 ```
-target_file=<path> anchor=<anchor> kind=<kind> format=<format> outcome=<unchanged|replaced|failed:<reason>>
+target_file=<path> anchor=<anchor> kind=<kind> format=<format> outcome=<unchanged|replaced|split-into-N|failed:<reason>>
 ```
+
+After a split, the report also carries one line per part: `part <part heading> | <created|failed:<reason>>`.
 
 Outcome: `reported`.
 
@@ -118,10 +121,10 @@ Outcome: `reported`.
 - **`/lazy-diagram.fix` aborts: "[FAIL] cannot infer kind from fence syntax"** — for a mermaid fence, the syntax marker matches multiple kinds (e.g. plain `flowchart` could be `flow`, `nav`, `tree`, etc.); for a `` ```text `` fence, the body matches none of the six ASCII shape rules or mixes two families (tree characters plus box connectors, chrome samples plus labelled connectors) → pin `kind=<one>` from the candidate list in the failure message.
 - **Step 4 aborts: "failed:scheme-not-found:<name>"** — the named scheme file (`styles-<name>.json`) does not exist → omit `scheme=` to use the default, or check `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-*.json` for valid names.
 - **Step 5 aborts: "failed:<reason>"** — the drawer agent returned a failure (e.g. request too sparse, `missing-in-style:<role>`, template malformed) → check the reason string; re-run with a richer host-section prose, or fix the named scheme/template field.
-- **Step 5 returns: "split-into-N"** — the host-section prose now spans multiple logical diagrams; fix does NOT split fences in v1 → manually split the section into sub-sections, each with its own fence, and re-run fix per sub-section.
+- **A part reports "failed:split-not-converged"** — after the section was split, that part's prose still exceeds one diagram → its prose stays without a diagram; shorten the part's prose or split it into headings of your own, then run `/lazy-diagram.draw` on it.
 - **Step 5 returns: "skipped-below-threshold"** — the host-section prose is too thin for the inferred kind's lower bound → either expand the prose, or remove the fence (prose alone may be the better artifact).
 
 ## Notes
 
-- The fix skill never CREATES a new fence — `/lazy-diagram.draw` is the entry point for that. Fix only touches an already-present fence.
+- The fix skill creates a fence only for the parts of a section it split; otherwise `/lazy-diagram.draw` is the entry point for a new fence, and fix only touches an already-present one.
 - Use this when bulk-conforming legacy diagrams (e.g. removing palette artifacts from older spec docs that pre-date the current scheme files).

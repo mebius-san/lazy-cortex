@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.install
 description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, a `wiki` / `structure` / `terms` settings section, or a wiki expert is missing. Bootstrap only — what the wiki, the terms dictionary or the structure map covers is `/lazy-wiki.configure`."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-wiki
 
@@ -15,7 +15,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Create template directory`
-   - `Step 4 — Sync navigation rule`
+   - `Step 4 — Sync rules`
    - `Step 5 — Seed wiki + structure + terms settings sections`
    - `Step 6 — Ensure the doc-kind wiki axis`
    - `Step 7 — Seed agent_models`
@@ -46,12 +46,18 @@ The navigation rule's `## Coverage` section is the one region a mirror carries t
 
 ## Step 1: Detect install scope
 
-Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin.
+
+**Resolve the project root (`<repo-root>`) first**, by run kind — `detect-scope` below and every later step use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
 
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-wiki@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-wiki@lazycortex --cwd <repo-root>)
 ```
 
 The command prints exactly one word:
@@ -67,7 +73,7 @@ Outcome: `scope-detected: <user|project>`.
 
 ## Step 2: Determine paths
 
-Run `Bash(git rev-parse --show-toplevel)` to get `<repo-root>` (or use cwd if not in a git repo — warn the user). `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki` prints: the authoring repo's own `plugins/claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+`<repo-root>` is the project root Step 1 resolved. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki` prints: the authoring repo's own `plugins/claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 Resolve paths:
 
@@ -82,15 +88,17 @@ Outcome: `target-resolved: <settings-path>`.
 
 ## Step 3: Create template directory
 
-Ensure `<repo-root>/.claude/templates/wiki/` exists (project scope) or `~/.claude/templates/wiki/` exists (user scope):
+Ensure `<repo-root>/.claude/templates/wiki/` exists (project scope) or `~/.claude/templates/wiki/` exists (user scope). Create it through the core verb — every write this skill makes into the protected `.claude/` tree goes through a `<core-cli>` verb, never `mkdir` / `Write` / `Edit` on the target, so a background install (`lazy-core.autosetup`) is not denied the write:
 
 ```
-Bash(mkdir -p <templates-wiki-dir>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> ensure-dirs <templates-wiki-dir>)
 ```
+
+The verb prints `{"results": [{"path", "state"}], "failed": [...]}`; the one entry's `state` is the outcome — `created` → `created`, `already-exists` → `already-present`. `not-a-directory` (something else occupies the path; the verb leaves it untouched) or `failed` (the verb exits 3) is a failure: report it with the path and continue with the next step.
 
 This directory is reserved for future per-project curator template customisation. Creating it now is idempotent.
 
-Outcome: `created` or `already-present`.
+Outcome: `created`, `already-present`, or `failed` (the `not-a-directory` / `failed` entry above, with its path).
 
 ## Step 4: Sync rules
 
@@ -197,10 +205,10 @@ Outcome: `doc-kind-axis: <added|unchanged|axes-cli-failed>`.
 The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with every `lazycortex-wiki:` subagent the core tier table lists. The step is here so the curator experts Step 8 registers resolve a model when the runtime dispatches them.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-wiki --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-wiki --scope <scope> --cwd <repo-root>)
 ```
 
-`<scope>` is the value resolved in Step 1 (`project` or `user`). The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 10 report. Act on the `outcome`:
+`<scope>` is the value resolved in Step 1 (`project` or `user`); `--cwd <repo-root>` is passed at both scopes — it fixes the repository the verb resolves the core tier table from, and `--scope user` still writes `~/.claude/lazy.settings.json`. The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 10 report. Act on the `outcome`:
 
 - `sot-missing` → abort the install (`lazycortex-core` not installed) — same FAIL as Step 2's defaults check.
 - any other refusal → stop the step and relay its `message`; write no seed lines.
@@ -217,7 +225,7 @@ The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing con
 
 ### Expert (always registered)
 
-Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). Apply absent-only semantics for the `wiki.curator` key:
+Every expert entry below is read and written by its own key, never as the whole `experts` section, and only through the core verbs (Step 3) — never `Write` or `Edit` on `lazy.settings.json`. `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts --key <expert-key> --cwd <target-root>)` prints the entry on record, or `null` when there is none; on `null`, `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key <expert-key> --value '<entry-json>' --cwd <target-root>)` writes the shipped entry and touches no other expert. A non-zero exit of `settings-get` means `lazy.settings.json` does not parse: write nothing, stop the step with outcome `settings-unparseable`, and name the file in the report. The verb creates the section with its version stamp when it is absent; an entry on record gets no write. Apply these absent-only semantics for the `wiki.curator` key:
 
 ```json
 "wiki.curator": {
@@ -291,7 +299,7 @@ State `experts.wiki.tag-curator: <seeded|kept-local>`.
 
 ### Routines
 
-Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). Register each of the five routines below through the registrar in reconcile mode rather than writing the JSON into the file by hand:
+Register each of the five routines below through the registrar in reconcile mode rather than writing the JSON into the file by hand:
 
 ```
 Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg keys> --managed type,watch,command,expert,request,path_filter,git_author")
@@ -378,7 +386,7 @@ The curator dispatch carries the plugin's own `lazy-wiki.tag-curator-protocol` s
 
 ### Domain-spec expert + routines (only when `wiki.domains` is configured)
 
-Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → seed the expert with absent-only semantics, and register the three routines through the registrar in reconcile mode exactly as the five above:
+Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → seed the expert with absent-only semantics, through the same keyed `settings-get` / `settings-set experts --key wiki.domain-writer` pair as the curators above, and register the three routines through the registrar in reconcile mode exactly as the five above:
 
 ```
 Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg keys> --managed type,watch,command,cron,git_author")
@@ -401,7 +409,7 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg ke
 
 No `can_commit_in_repo` here, unlike the curators: the writer returns its files through the job's `result/` and never touches the working tree, so the pump's no-commit clause is exactly its contract. The `lazy-wiki.domain-collect` routine below lands the files, refreshes the index, and commits.
 
-**An existing entry loses the flag.** Absent-only seeding leaves a `wiki.domain-writer` entry composed by an earlier release carrying `can_commit_in_repo: true`, which keeps the pump's no-commit clause out of the writer's prompt. That key is this plugin's own knowledge, not an operator choice, so when the existing entry carries it, remove that one key and leave every other key as it is; report `flag-dropped`, otherwise nothing.
+**An existing entry loses the flag.** Absent-only seeding leaves a `wiki.domain-writer` entry composed by an earlier release carrying `can_commit_in_repo: true`, which keeps the pump's no-commit clause out of the writer's prompt. That key is this plugin's own knowledge, not an operator choice, so when the existing entry carries it, remove that one key with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key 'wiki.domain-writer/can_commit_in_repo' --delete --cwd <target-root>)` and leave every other key as it is; report `flag-dropped`, otherwise nothing.
 
 **Routines**:
 
@@ -498,7 +506,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-j
 
 Every other key stays as the configure wizard or the operator wrote it — `watch`, `expert`, `request`, `protocols`, the cadence keys. A retired grouping key (`group_globs`, a boolean `group`) is not this step's business: `lazy-wiki.audit` reports it and the core `routine-migrate` verb rewrites it. Report each present routine as `refreshed` or `unchanged`, whichever the registrar returned.
 
-Write the file if any expert entry changed (preserve `_version: 1` for both `routines` and `experts`); the routine registrations are written by the registrar, not by this step.
+Every expert entry this step changed was already written by its own `settings-set experts --key <expert-key>` call above, and the verb keeps the section's version stamp; the routine registrations are written by the registrar. No other write to `lazy.settings.json` follows.
 
 ### Seed the mandatory protocol
 
@@ -571,5 +579,6 @@ One line per task in the canonical list above, with its outcome word.
 - **`/lazy-wiki.install` aborts: "plugin not enabled"** — `lazycortex-wiki@lazycortex` absent or empty in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins`, restart Claude Code, re-run.
 - **`/lazy-wiki.install` aborts: "lazycortex-core not installed"** — Step 7's `agent-models-seed` verb answered `sot-missing` → install `lazycortex-core` first, then re-run.
 - **`/lazy-wiki.install` aborts: "plugin cache is empty"** — rule glob returned zero files → run `/plugin update lazycortex-wiki@lazycortex`, then re-run.
-- **Step 5 stops on a `settings-set` error** — the target `lazy.settings.json` is not valid JSON, and the verb refuses to overwrite it → repair the file by hand, then re-run.
+- **Step 5 stops on a `settings-set` error, or Step 8 reports `settings-unparseable`** — the target `lazy.settings.json` is not valid JSON, and the verb refuses to overwrite it → repair the file by hand, then re-run.
+- **`/lazy-wiki.install` reports `unknown subcommand: ensure-dirs`** — the installed lazycortex-core is older than this plugin and lacks the verb → update it with `/plugin update lazycortex-core@lazycortex`, then re-run.
 - **Curator never runs after install** — the routines are registered but nothing fires them: this checkout has no daemon supervising it → tick them by hand with `/lazy-runtime.tick`, or run `/lazy-core.daemon-setup` to enable the daemon and install a supervisor.

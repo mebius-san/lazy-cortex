@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.editor
   - lazy-experts.fiction-writer
   - lazy-experts.fiction-editor
-source_sha: ee0506c1a426ca4c3a67e7b5bde087fe46041726
-surface_sha: 82210ae3ced17617f70ba54581001fca85821bb9124b42fb2e9633711dbdf3ce
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: 8a700ad4ba03f457b51719375661a9466004851613f03eab50f6dad8c54b5aba
 ---
 # Troubleshooting
 
@@ -111,9 +111,19 @@ surface_sha: 82210ae3ced17617f70ba54581001fca85821bb9124b42fb2e9633711dbdf3ce
 
 **Symptom**: The final report from `/lazy-experts.install` includes a line like `verify-failed: agent-ref-unresolved claude-plugin.designer` instead of `verified`.
 
-**Likely cause**: The verify step confirms that every seeded expert's `agent` ref resolves to an actual file under `<installPath>/agents/` (e.g. `lazy-experts.designer.md`). This check fails when the plugin cache is missing an agent file the class map expects for the seeded role — typically a partially completed `/plugin update` that dropped an agent file without also dropping the reference/aspect files the earlier glob checks already passed.
+**Likely cause**: The verify step confirms that every seeded expert's `agent` ref resolves to an actual file under `<installPath>/agents/` (e.g. `lazy-experts.designer.md`). This check fails when the plugin cache is missing an agent file the class map expects for the seeded role, and no pending migration step is going to rewrite that ref (otherwise the report shows `pending-migration`, covered in the next entry) — typically a partially completed `/plugin update` that dropped an agent file without also dropping the reference/aspect files the earlier glob checks already passed.
 
-**Fix**: Run `/plugin update lazycortex-experts@lazycortex` to restore the missing agent file, then re-run `/lazy-experts.install`. The verify step re-checks on every run, so the report should show `verified` once the cache is complete.
+**Fix**: Run `/plugin update lazycortex-experts@lazycortex` to restore the missing agent file, then re-run `/lazy-experts.install`. The verify step re-checks on every run, so the report should show `verified` once the cache is complete. If the report instead shows `pending-migration` lines, see the next entry — the cache is fine in that case.
+
+---
+
+## Report shows `verified-pending-migration` and `pending-migration: <expert-key> (agent <ref>; steps …)`
+
+**Symptom**: The final report from `/lazy-experts.install` ends with `verified-pending-migration` rather than `verified`, and includes lines like `pending-migration: game.developer (agent lazycortex-experts:lazy-experts.implementer; steps <step-file>.md)`.
+
+**Likely cause**: An expert entry's `agent` ref names an agent this plugin no longer ships, but a migration step of the plugin is still waiting to run and will rewrite that ref. When the verify step finds an unresolved agent ref, it checks whether any pending step of `lazycortex-experts` writes to `.claude/lazy.settings.json`. If one does, the ref is reported as `pending-migration` and is not a verify failure — `/lazy-core.setup` runs migrations after the install chain, so the entry has simply not been migrated yet. The line lists the step files that will do it.
+
+**Fix**: Run `/lazy-core.setup`; it applies the pending migration steps and rewrites the stale agent refs. Do not run `/plugin update` for this case — the plugin cache is complete. If no pending step writes to the settings file (or the migration check itself fails), the same ref is reported as `verify-failed: agent-ref-unresolved` instead; follow the previous entry.
 
 ---
 

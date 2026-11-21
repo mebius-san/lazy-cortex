@@ -1,17 +1,17 @@
 ---
 chapter_type: block
 summary: Insert new diagrams and re-conform existing ones — dispatcher picks kind/format, writer agents render against shipped templates and schemes.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How draw and fix route a request"
-  request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
+  request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include skipped-below-threshold as an exit branch. When the writer answers split-into-N, the dispatcher splits the anchor section into part headings, moves the prose into them, and draws one diagram per part automatically (a part that still exceeds the bound ends as failed:split-not-converged); show that as a loop back through the writer, not as a dead-end exit."
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: a5c6f1c67c0b117156a9a20ef0753d604e77f05e9ca06d018d93cd0d45f55484
+source_sha: c368e40beca25e541fdd64a873b2a60dccb22434
+surface_sha: 53191a7d0a4bb27f9a7162d341cbac53b6a7b3d7840b129dbeb3fcc5cfc2ad6f
 ---
 # Insert and refresh diagrams in your documentation
 
@@ -23,7 +23,7 @@ Two skills cover the two main operations: `/lazy-diagram.draw` creates a new fen
 
 ### `/lazy-diagram.draw` — new-fence dispatcher
 
-`/lazy-diagram.draw` takes a `target_file`, an `anchor_section` heading, and a free-form `request` describing what the diagram should depict. It validates that both the file and the heading exist, then works through kind and format resolution before touching the file.
+`/lazy-diagram.draw` takes a `target_file`, an `anchor_section` heading, and a free-form `request` describing what the diagram should depict. The heading can be of any level (`##`, `###`, and so on). It validates that both the file and the heading exist, then works through kind and format resolution before touching the file.
 
 Kind resolution follows a ranked heuristic over your request text. Phrases about services exchanging messages resolve to a sequence diagram; state lifecycle transitions resolve to a state diagram; entity relationships with foreign keys resolve to an ERD; deployment topology with distinct components resolves to an architecture diagram; and so on across more than a dozen supported kinds. When two kinds compete, the dispatcher picks the one whose upper-bound fits the request without splitting. If the request is too thin to satisfy a kind's lower bound, the outcome is `skipped-below-threshold` and no fence is written — prose alone is the better artifact.
 
@@ -37,11 +37,11 @@ You can pin `kind=`, `format=`, or `scheme=` to override any part of the resolut
 
 ### `/lazy-diagram.fix` — in-place re-conformer
 
-`/lazy-diagram.fix` targets a heading that already has a fence. For a Mermaid fence it infers kind and format from the syntax marker — `flowchart` maps to `flow`, `sequenceDiagram` to `sequence`, `architecture-beta` to `architecture`, and so on — so you do not need to know what kind the fence was drawn as. A `text` (ASCII) fence carries no such marker, so fix reads the body's shape instead, testing six ordered rules from most specific to most general: tree characters with a trailing `/` or a ` ← <note>` annotation mean `fs-tree`; tree characters without either mean `tree` (a taxonomy); boxes with no connectors and a chrome-sample inventory (`[ Primary button ]`, `( Spinner ... )`) mean `controls-scheme`; boxes with no connectors that tile one surface mean `layout`; connectors where every multi-exit box is a labelled `<Question?>` diamond mean `decision-tree`; anything else with connectors is `flow`. It then reads the surrounding prose in the host section as the request and re-dispatches the same writer agent pipeline used by `/lazy-diagram.draw`.
+`/lazy-diagram.fix` targets a heading, of any level, that already has a fence. For a Mermaid fence it infers kind and format from the syntax marker — `flowchart` maps to `flow`, `sequenceDiagram` to `sequence`, `architecture-beta` to `architecture`, and so on — so you do not need to know what kind the fence was drawn as. A `text` (ASCII) fence carries no such marker, so fix reads the body's shape instead, testing six ordered rules from most specific to most general: tree characters with a trailing `/` or a ` ← <note>` annotation mean `fs-tree`; tree characters without either mean `tree` (a taxonomy); boxes with no connectors and a chrome-sample inventory (`[ Primary button ]`, `( Spinner ... )`) mean `controls-scheme`; boxes with no connectors that tile one surface mean `layout`; connectors where every multi-exit box is a labelled `<Question?>` diamond mean `decision-tree`; anything else with connectors is `flow`. It then reads the surrounding prose in the host section as the request and re-dispatches the same writer agent pipeline used by `/lazy-diagram.draw`.
 
 Use fix when a diagram has drifted: the palette changed when a new scheme shipped, the init directive format evolved, or the terminology in the host prose was renamed after the fence was first drawn. Fix brings the fence back to the current contract in place. If fix cannot disambiguate kind — a plain `flowchart` marker that could be several Mermaid kinds, or an ASCII body that matches none of the six shape rules or mixes features from two of them — it surfaces the candidate list and asks you to pin `kind=` for that call rather than guess and redraw the wrong shape.
 
-If there is no fence under the anchor yet, fix fails — it does not create new fences. Use `/lazy-diagram.draw` for that.
+If there is no fence under the anchor yet, fix fails — it does not create a diagram for a bare heading. Use `/lazy-diagram.draw` for that. The one case where fix adds fences is a section it splits (see below): the new part headings each get their own fence.
 
 ### Per-format writer agents — the rendering layer
 
@@ -53,7 +53,15 @@ The Mermaid agent covers flow, sequence, state, ERD, class, architecture, layout
 
 Every node label the Mermaid agent emits in a `flowchart` or `graph` diagram is quoted — `id["text"]` — even when the label looks plain. This closes a real rendering bug: Mermaid reads the character right after the opening bracket as a shape modifier, so a label starting with a slash (natural when a node is named after a slash-command, e.g. `/lazy-wiki.install`) used to produce `[/lazy-wiki.install …]`, an unterminated parallelogram that never renders. Quoting also means a label can carry parentheses, brackets, `#`, and `-` without you escaping anything. Practically: you can name a flow/architecture node after any slash-command and trust it to render.
 
-Both agents enforce density bounds. A request that maps to more nodes, participants, or states than the kind's upper bound triggers `split-into-N`, which surfaces a suggested seam list. You then make separate `/lazy-diagram.draw` calls, one per seam, each targeting its own sub-heading.
+Both agents enforce density bounds. A request that maps to more nodes, participants, or states than the kind's upper bound makes the writer answer `split-into-N` with a seam list. You are not asked anything and you make no extra calls: the skill that dispatched the writer (`/lazy-diagram.draw` or `/lazy-diagram.fix`) splits the section in the same run.
+
+- **Part headings.** One heading per seam, each titled for what that seam covers, is inserted one level below your anchor heading, directly under it and in seam order. The anchor heading itself stays.
+- **Your prose moves, unchanged.** The text between the anchor heading and the next heading is distributed into the part it describes, word for word. A bullet that covers two parts is cut at a sentence boundary; a sentence about two parts stays in the first. Nothing is reworded, dropped, or added, except that a sentence left without its subject by a cut gets that subject spelled out. Text under headings you already had below the section's own body is not touched.
+- **The old fence goes.** If the anchor already held a diagram, it is removed, since each part now carries its own.
+- **One diagram per part.** Each part heading is drawn in turn, using the kind already resolved and the original request narrowed to that part. Each part ends with its own outcome.
+- **No second split.** If a part is still too large for one diagram, it is not split again: that part ends as `failed:split-not-converged` and keeps its prose without a diagram. Shorten the part's prose or add headings of your own, then run `/lazy-diagram.draw` on it.
+
+The overall outcome is `split-into-N`, and the report lists one line per part with that part's outcome.
 
 ## How they work together
 
@@ -61,14 +69,14 @@ The dispatcher is the only entry point; the writer agents have no user channel a
 
 Kind and format detection from prose context means you can describe what you want in plain language — "show how the three services talk to each other when a request comes in" — and get an appropriate diagram without declaring a kind. The `scheme` parameter lets you switch from the default palette to any named scheme in `${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-*.json`; non-default palettes are useful when a plugin ships a branded colour set or when a document targets a dark-mode host. ASCII format is chosen automatically for kinds where character-art is structurally clearer (directory trees, terminal layout sketches), and explicitly when the request names terminal or plain-text output.
 
-If you are authoring your own skill and want it to draw a diagram at a fixed point in its own process, `/lazy-diagram.draw` is meant to be called from inside that skill rather than only from a chat prompt. The calling skill declares the invocation as its own numbered substep (never a trailing mention), carries one step-ledger entry per declared invocation whose outcome word is this skill's return value (`created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`), and includes a `## Verify` section diffing its declared seams against what actually got logged. A section with a declared draw seam must not also carry an ASCII sketch or any other hand-authored visual placeholder — the seam invocation is the artifact.
+If you are authoring your own skill and want it to draw a diagram at a fixed point in its own process, `/lazy-diagram.draw` is meant to be called from inside that skill rather than only from a chat prompt. The calling skill declares the invocation as its own numbered substep (never a trailing mention), carries one step-ledger entry per declared invocation whose outcome word is this skill's return value (`created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`), and includes a `## Verify` section diffing its declared seams against what actually got logged. When a draw splits a section, the run log names every part heading, so the caller's Verify step finds a logged seam for each part. A section with a declared draw seam must not also carry an ASCII sketch or any other hand-authored visual placeholder — the seam invocation is the artifact.
 
 The shipped template and scheme files are the contract: every fence drawn by this block is traceable back to a template (structure reference) and a scheme (colour source). No hex is invented by the agent; no style is hand-composed. When the contract changes — a new scheme ships, an init directive format updates — running `/lazy-diagram.fix` across affected files brings them current without you editing any fence by hand.
 
 ## What you need
 
 - lazycortex-diagram installed in your project (run `/lazy-diagram.install` first if you have not already).
-- A Markdown file with the target heading already present. Both `/lazy-diagram.draw` and `/lazy-diagram.fix` require the `anchor_section` heading to exist before they run.
+- A Markdown file with the target heading (any level) already present. Both `/lazy-diagram.draw` and `/lazy-diagram.fix` require the `anchor_section` heading to exist before they run.
 - For `/lazy-diagram.fix`: a fence must already exist under the heading.
 
 ## How draw and fix route a request
@@ -78,48 +86,40 @@ The shipped template and scheme files are the contract: every fence drawn by thi
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   userInvokesDrawOrFix["User invokes draw or fix"]
-  dispatcherValidatesInputs["Dispatcher validates inputs, resolves kind/format"]
-  inputsValid{"Inputs valid?"}
+  validateResolve["Dispatcher validates inputs and resolves kind and format"]
   formatCompatible{"Format compatible with kind?"}
-  reportValidationError["Report validation error"]
-  writerAgentComposes["Writer agent selected (mermaid or ASCII), composes diagram"]
-  densityCheck{"Density within bounds?"}
-  splitIntoN["Return split-into-N"]
-  skippedBelowThreshold["Return skipped-below-threshold"]
-  byteCompare{"Fence changed?"}
-  writeFence["Fence written"]
-  skipWrite["Write skipped, no-op"]
+  formatRefused["Fail: format incompatible with kind"]
+  runWriter["Select writer agent (mermaid or ASCII) and run it"]
+  writerOutcome{"Writer outcome?"}
+  splitParts["Split anchor section into part headings and move prose into them"]
+  byteCompare{"Diagram bytes equal existing fence?"}
+  fenceWritten["Fence written"]
+  fenceSkipped["Fence skipped, unchanged"]
+  skippedBelow["Skipped-below-threshold, prose only"]
+  splitNotConverged["Fail: split-not-converged"]
 
-  userInvokesDrawOrFix -->|invoke| dispatcherValidatesInputs
-  dispatcherValidatesInputs -->|resolve| inputsValid
-  inputsValid -->|invalid| reportValidationError
-  inputsValid -->|valid| formatCompatible
-  formatCompatible -->|incompatible| reportValidationError
-  formatCompatible -->|compatible| writerAgentComposes
-  writerAgentComposes -->|compose| densityCheck
-  densityCheck -->|exceeds density| splitIntoN
-  densityCheck -->|below threshold| skippedBelowThreshold
-  densityCheck -->|within bounds| byteCompare
-  byteCompare -->|changed| writeFence
-  byteCompare -->|identical| skipWrite
+  userInvokesDrawOrFix -->|submit request| validateResolve
+  validateResolve -->|inputs resolved| formatCompatible
+  formatCompatible -->|incompatible| formatRefused
+  formatCompatible -->|compatible| runWriter
+  runWriter -->|return answer| writerOutcome
+  writerOutcome -->|diagram body| byteCompare
+  writerOutcome -->|skipped-below-threshold| skippedBelow
+  writerOutcome -->|split-into-N| splitParts
+  writerOutcome -->|part still over bound| splitNotConverged
+  splitParts -->|draw one diagram per part| runWriter
+  byteCompare -->|differs| fenceWritten
+  byteCompare -->|identical| fenceSkipped
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-
   class userInvokesDrawOrFix entry
-  class dispatcherValidatesInputs action
-  class inputsValid guard
-  class formatCompatible guard
-  class reportValidationError error
-  class writerAgentComposes action
-  class densityCheck guard
-  class splitIntoN error
-  class skippedBelowThreshold error
-  class byteCompare guard
-  class writeFence success
-  class skipWrite success
+  class formatCompatible,writerOutcome,byteCompare guard
+  class validateResolve,runWriter,splitParts action
+  class fenceWritten,fenceSkipped,skippedBelow success
+  class formatRefused,splitNotConverged error
 ```
 <!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->

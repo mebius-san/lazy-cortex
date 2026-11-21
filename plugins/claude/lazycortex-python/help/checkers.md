@@ -22,6 +22,7 @@ diagram_spec:
     request: "Sequence diagram: the user runs chk-py or tst-py; the wrapper sources _ensure_venv.sh, which returns a ready venv; the wrapper then sources _ensure_env.sh, which sources the repo's env-bootstrap script when python.env_source names one and does nothing otherwise; the wrapper then runs the checks (chk-py) or pytest (tst-py) and returns the exit code to the user."
     kind_hint: sequence
 source_skills:
+  - cfg
   - chk
   - tst
   - pcf.py
@@ -29,6 +30,8 @@ source_skills:
   - pch.py
   - review.py
   - _ensure_venv.sh
+  - _cfg_venv.sh
+  - venv_spec.py
   - mypy_protected_access.py
   - mypy-protected-access-shim.py
 source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737

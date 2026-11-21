@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
-last_regen: 2026-11-10
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-diagram.install
-source_sha: c09ec13a2d936204c57a17cd422a64d180b01b9e
-surface_sha: 8ffac780418756c294937a10887575b4458544835b6d8b4b2ec9f6811934808d
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: 142ebcf318537cf8a69a40b58efbb8b278ce496e33eeb1dd8a9ca10d278ba787
 ---
 # Install lazycortex-diagram
 

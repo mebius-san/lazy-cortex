@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.install
 description: "Run when the operator asks to set up lazycortex-experts in a repo or to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when an expert dispatch fails because `lazy.settings.json` lacks its `experts` entry or model tier. `/lazy-experts.audit` only checks; this writes."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(printenv *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 ---
 # Install lazycortex-experts
 
@@ -35,12 +35,18 @@ This skill is **idempotent and quiet on re-run**. It asks exactly one thing, and
 
 ## Step 1: Detect install scope
 
-Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin.
 
-**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve the project root (`<repo-root>`) first**, by run kind — the `<core-cli>` resolver below and every later step use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `git rev-parse --show-toplevel`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
+
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file. Try these stages in order and take the first file that exists (`Bash(test -f <path>)`): (1) `<dir>/bin/lazycortex-core` for each `:`-separated entry `<dir>` of `$LAZYCORTEX_PLUGIN_DIRS` (`Bash(printenv LAZYCORTEX_PLUGIN_DIRS)`; an empty or unset variable skips the stage); (2) the dev-vault sibling `"${CLAUDE_PLUGIN_ROOT}/../lazycortex-core/bin/lazycortex-core"`; (3) the repo's own `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; (4) last, `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record a `Read` of `$HOME/.claude/plugins/installed_plugins.json` shows (never a walk of `~/.claude/plugins/cache/`). No stage matching means core is not installed: abort, naming every stage searched — `$LAZYCORTEX_PLUGIN_DIRS`, the dev-vault sibling, `<repo-root>/plugins/claude/lazycortex-core/`, `installed_plugins.json`. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-experts@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-experts@lazycortex --cwd <repo-root>)
 ```
 
 The command prints exactly one word:
@@ -59,7 +65,9 @@ Outcome: `scope-detected: <user|project>`.
 | Scope | `lazy.settings.json` path |
 |---|---|
 | `user` | `~/.claude/lazy.settings.json` |
-| `project` | `<repo-root>/.claude/lazy.settings.json` (root = `git rev-parse --show-toplevel`, or cwd if not in a git repo — warn the user) |
+| `project` | `<repo-root>/.claude/lazy.settings.json` (`<repo-root>` as Step 1 resolved it) |
+
+`<settings-flag>` is the settings-layer flag every `settings-get` / `settings-set` call of this skill carries: `--home` at `user` scope, `--cwd <repo-root>` at `project` scope. Without it the verb resolves `$LAZY_REPO_ROOT` or the process cwd, which under a `repo=`-targeted run is the coordinator's repo.
 
 The `lazycortex-core` defaults file (`default-tiers.json`, the tier SOT) is located by the seeding primitive itself in Step 4 — this step only resolves the target `lazy.settings.json` path from the scope.
 
@@ -79,7 +87,7 @@ If either glob is empty, abort with `plugin-cache-incomplete: <missing-dir>`.
 
 ### Decide the class set
 
-Load the `experts` section: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts --cwd <repo-root>)`. Partition the entries (besides `_version`) into two groups:
+Load the `experts` section: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts <settings-flag>)`. Partition the entries (besides `_version`) into two groups:
 
 - **Domain entries** — entries whose `aspects` list contains at least one ref of the form `lazycortex-experts:lazy-experts.<domain>-aspect`, excluding the cross-cutting aspects `discipline`, `research`, `tech-writing`, `terms`, and `structure` (they compose onto every technical expert and are not classes). These are the working expert sets this skill owns.
 - **System entries** — everything else: experts seeded by sibling plugins (`wiki.curator`, `review.doc_doctor`, `spec.coordinator`, `runtime.doctor`, …). They never count toward the class decision.
@@ -108,10 +116,10 @@ Outcome: `classes: <comma-list> (asked|derived)`.
 The `agent-models-seed` verb seeds the `agent_models.lazycortex` group in the target `lazy.settings.json` with every `lazycortex-experts:` agent the core tier table lists. The step is here so every expert Step 5 composes resolves a model for its generic agent at dispatch time.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-experts --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-experts --scope <scope> --cwd <repo-root>)
 ```
 
-`<scope>` is the value resolved in Step 1 (`user` or `project`). The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `sot` names the tier table it read; `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Capture that JSON; Step 7 folds it into the install report.
+`<scope>` is the value resolved in Step 1 (`user` or `project`); `--cwd <repo-root>` is passed at both scopes — it fixes the repository the verb resolves the core tier table from, and `--scope user` still writes `~/.claude/lazy.settings.json`. The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `sot` names the tier table it read; `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Capture that JSON; Step 7 folds it into the install report.
 
 Outcome: `seeded` (the verb answered `seeded-N`) or `unchanged` (it answered `unchanged` or `no-entries`); never report a seed the verb did not answer.
 
@@ -213,7 +221,7 @@ This narrows the "existing entries are never overwritten" promise rather than br
 
 State one line per touched entry: `experts.<expert-key> (completed: <aspect>[, <aspect>…])` — a seeded commit flag is reported the same way (`completed: can_commit_in_repo`).
 
-Every write goes through `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<key>' --value '<json>' --cwd <repo-root>)`, which reads and writes the tracked file only, so the local overlay never leaks into it and the `_version` stamp of `agent_models` and `experts` is preserved.
+Every write goes through `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<key>' --value '<json>' <settings-flag>)`, which reads and writes the tracked file only, so the local overlay never leaks into it and the `_version` stamp of `agent_models` and `experts` is preserved.
 
 Outcome (one line per composed entry): `experts.<expert-key> (<state>)`.
 
@@ -237,7 +245,7 @@ A hardcoded table here would name only the roles that existed when someone last 
 
 ### The check
 
-For each declared key, resolve whether the declaring plugin is enabled at the current scope: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope <plugin>@lazycortex)` — treat `project`/`user` as enabled, `not-installed` as disabled (skip its keys, state `skipped: <plugin> not installed`).
+For each declared key, resolve whether the declaring plugin is enabled at the current scope: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope <plugin>@lazycortex --cwd <repo-root>)` — treat `project`/`user` as enabled, `not-installed` as disabled (skip its keys, state `skipped: <plugin> not installed`).
 
 For each enabled plugin's declared keys, check presence in the loaded `experts` section:
 
@@ -252,7 +260,7 @@ Outcome: `system-experts: complete` or `system-experts: <N> missing`.
 
 - Read back the written `lazy.settings.json` and confirm it parses + contains the `lazycortex-experts:*` keys under `agent_models.lazycortex` (one per shipped generic agent) AND the expert keys the Step 5 class map prescribes for the class set under `experts`.
 - For each seeded expert, confirm every aspect ref the class map assigns resolves: the class aspect (already proved by the Step 3 glob), `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, and — for technical-class experts — `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` (all under `<installPath>/references/`), and `lazy-memory.persona-aspect` (under `<core-root>/references/`, where `<core-root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints).
-- For each seeded expert, confirm its `agent` ref resolves to an existing file under `<installPath>/agents/` (i.e. `lazy-experts.<role>.md` exists). A missing agent file is a `verify-failed: agent-ref-unresolved <expert-key>` outcome.
+- For each seeded expert, confirm its `agent` ref resolves to an existing file under `<installPath>/agents/` (i.e. `lazy-experts.<role>.md` exists). A missing agent file is a `verify-failed: agent-ref-unresolved <expert-key>` outcome — unless a migration step of this plugin is still pending, because `/lazy-core.setup` runs the migrations after the install chain and a step may be the one that rewrites a retired agent ref. On the first unresolved ref, run `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> migrate-plan --plugin lazycortex-experts --repo <repo-root>)` once. Each entry of its `plugins.lazycortex-experts.applicable` array carries the step's `path` and its expanded `writes` list; count only the entries whose `writes` names `.claude/lazy.settings.json` — a step that writes nothing there cannot rewrite an agent ref. When at least one such entry exists, every unresolved ref is reported as `pending-migration: <expert-key> (agent <ref>; steps <basename>[, <basename>…])`, listing the basenames of those entries' `path`, and is not a verify failure. When none exists, or the `migrate-plan` call fails (a non-zero exit, or an `error` key in its JSON), every unresolved ref stays `verify-failed: agent-ref-unresolved <expert-key>`.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from (from `installed_plugins.json`).
@@ -261,8 +269,9 @@ Outcome: `system-experts: complete` or `system-experts: <N> missing`.
   - Per-key outcome for `experts`. Every technical class set includes `<domain>.data-writer`, `<domain>.use-case-writer`, `<domain>.ui-designer`, `<domain>.researcher`, and `<domain>.editor`, seeded by the class map's technical row; every fiction class set includes `<domain>.fiction-editor` beside `<domain>.fiction-writer`.
   - System-expert check result (Step 6): the `system-experts:` outcome plus one line per missing/unknown key.
   - One line per entry the Step 5 completion pass touched, naming the aspects appended: `experts.<expert-key> (completed: <aspect>[, <aspect>…])`.
+  - One line per unresolved agent ref deferred to a pending migration step: the `pending-migration: <expert-key> (…)` lines above.
 
-Outcome: `verified` or `verify-failed: <reason>`.
+Outcome: `verified`, `verified-pending-migration` (every check passed except agent refs reported as `pending-migration`), or `verify-failed: <reason>`.
 
 ## Report
 

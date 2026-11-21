@@ -1,14 +1,14 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.install
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 6247756ddd3a8ad62506817bc031c675a4bc0f53a8dbba493b6a778113892e66
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: b693d60f55ddaa95928fdebf55571a261ef5dd6ec0dee399c37275916dd2f570
 ---
 # Troubleshooting
 
@@ -46,9 +46,9 @@ surface_sha: 6247756ddd3a8ad62506817bc031c675a4bc0f53a8dbba493b6a778113892e66
 
 **Symptom**: `/lazy-diagram.draw` fails at Step 1 with `[FAIL] anchor not found in target_file`.
 
-**Likely cause**: The heading text passed as `anchor_section` does not appear verbatim as an H2 or H3 in the target file — casing, extra spaces, or a missing `##` prefix are common causes.
+**Likely cause**: The heading text passed as `anchor_section` does not appear verbatim as a heading in the target file — casing, extra spaces, or a missing `#` prefix are common causes. Any heading level is accepted.
 
-**Fix**: Open the target file and confirm the exact heading text, including `##` or `###` prefix. Pass the heading to `anchor_section=` exactly as it appears, then re-run.
+**Fix**: Open the target file and confirm the exact heading text, including its `#` prefix. Pass the heading to `anchor_section=` exactly as it appears, then re-run.
 
 ---
 
@@ -112,13 +112,23 @@ surface_sha: 6247756ddd3a8ad62506817bc031c675a4bc0f53a8dbba493b6a778113892e66
 
 ---
 
-## Skill returns split-into-N instead of a diagram
+## Skill splits the section instead of drawing one diagram
 
-**Symptom**: `/lazy-diagram.draw` or `/lazy-diagram.fix` reports `split-into-N` and surfaces a suggested seam list, but no fence is written.
+**Symptom**: `/lazy-diagram.draw` or `/lazy-diagram.fix` reports `split-into-N`, and the section you pointed at now has new sub-headings, each with its own fence.
 
-**Likely cause**: The request or host-section prose spans multiple logical diagrams. The drawer agent determined that a single fence would exceed the density bounds for the kind.
+**Likely cause**: The request or host-section prose spans multiple logical diagrams. The drawer determined that a single fence would exceed the density bounds for the kind, so the skill split the section itself without asking.
 
-**Fix**: Split the request into N separate `/lazy-diagram.draw` calls — one per suggested seam — placing each under its own heading in the target file. For fix, split the section into sub-sections first, then re-run fix per sub-section.
+**Fix**: Nothing is required. The new headings sit one level below your anchor heading, your prose was moved into them word for word, and each part got its own diagram; the report lists one line per part with its outcome. An old fence under the anchor is removed in a fix run. If you dislike the split, edit the headings or prose and re-run the skill on the part concerned.
+
+---
+
+## A part reports failed:split-not-converged
+
+**Symptom**: After a split, one part's outcome is `failed:split-not-converged` and that part has no diagram.
+
+**Likely cause**: The drawer judged that the part's prose still exceeds one diagram. Parts are split only once.
+
+**Fix**: Shorten that part's prose, or split it into headings of your own, then run `/lazy-diagram.draw` on the part heading.
 
 ---
 

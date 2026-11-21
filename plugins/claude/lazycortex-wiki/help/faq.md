@@ -20,8 +20,8 @@ source_skills:
   - lazy-wiki.structure-curator
   - lazy-wiki.tag-curator
   - lazy-wiki.terms-curator
-source_sha: c8db3a16da37483d17108e3fb748f277fb0691b5
-surface_sha: 713652ab31db0956acad9e29a8c8a2150ec5072c26f41319d0a84d630743c622
+source_sha: 1fbe4655cc6e1b8a3b3e48817d2bacef6d7abd54
+surface_sha: 5b9aa348f80fb0086711e4b262a5bd3b2155141b38806309bb593ec2d270a267
 ---
 # Frequently asked questions
 

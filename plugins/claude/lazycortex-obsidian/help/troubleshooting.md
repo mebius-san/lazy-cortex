@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 5048c26182621a44f9d4ab628e900ce399ae12f0
-surface_sha: e097d5b54cf4e0f827a0427e8e138c2e22bea7ea6c7f3c0851748b1d0bb9153d
+source_sha: 1fbe4655cc6e1b8a3b3e48817d2bacef6d7abd54
+surface_sha: 8025f7b3a36585371d4fe10eaa4b5d2e50da9e8468d9b314fbbbc732b4d15031
 ---
 # Troubleshooting
 
@@ -58,6 +58,26 @@ surface_sha: e097d5b54cf4e0f827a0427e8e138c2e22bea7ea6c7f3c0851748b1d0bb9153d
 **Likely cause**: The plugin-install step refused one of the three required plugins. The message quotes its reason: the community registry was unreachable, the id was not in the registry, the release could not be fetched and nothing was cached, or the vault's `community-plugins.json` is not a JSON array.
 
 **Fix**: Fix what the quoted reason names — for a network problem, check connectivity. Run `/lazy-obsidian.update-plugin <id>` for the failing plugin directly to see the same refusal on its own. Once resolved, re-run `/lazy-obsidian.iconize-install` — the skill is idempotent and will resume from a clean state.
+
+---
+
+## `/lazy-obsidian.iconize-install` reports `unknown subcommand: ensure-dirs` or `unknown subcommand: move-file`
+
+**Symptom**: `/lazy-obsidian.iconize-install` stops with `unknown subcommand: ensure-dirs` or `unknown subcommand: move-file`.
+
+**Likely cause**: The installed lazycortex-core is older than lazycortex-obsidian and does not have the verb the install step calls.
+
+**Fix**: Run `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-obsidian.iconize-install`. If `/lazy-obsidian.install` chains into the same step and shows the same error, the fix is the same.
+
+---
+
+## `/lazy-obsidian.iconize-install` aborts: core not installed
+
+**Symptom**: `/lazy-obsidian.iconize-install` aborts because it could not find the lazycortex-core command-line tool.
+
+**Likely cause**: lazycortex-core is not installed on this machine, and the install step relies on it.
+
+**Fix**: Install `lazycortex-core@lazycortex`, then re-run `/lazy-obsidian.iconize-install`.
 
 ---
 

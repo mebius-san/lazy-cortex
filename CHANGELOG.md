@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 12.0.2 — 2026-11-21 UTC
+
+- Expert jobs running in isolated worktrees now start with your local permissions. Local settings files are copied into the worktree rather than symlinked, so Read, Write and Bash calls are no longer denied.
+- Install runs inside a background `lazy-core.autosetup` agent now work. Writes under `.claude/` go through new core verbs (`ensure-dirs`, `move-file`, `settings-set --value-file`), and install skills take the target repo from `repo=` and pass it to every core verb. `lazy-experts.install` reports agent refs that a pending migration will rename as pending-migration instead of FAIL.
+
 ### 12.0.1 — 2026-11-21 UTC
 
 - A job that writes a stray copy of its own result under the repository-root `result/` no longer halts the daemon. The pump deletes the identical copy, records a warning naming the expert and the job, and carries on; any other dirt still halts. The runtime doctor gets the same clean-up as a new `drop-stray-copies` recovery verb, for halts raised before this version.
@@ -845,6 +850,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 14.0.1 — 2026-11-21 UTC
+
+- `lazy-spec.install` now works when it runs inside a background `lazy-core.autosetup` agent. Writes into `.claude/` go through the core file verbs instead of direct Bash or Write/Edit calls, which Claude Code auto-denies in that context. The skill also takes the target repo from `repo=` rather than the current directory, and passes it to every core verb it calls.
+
 ### 14.0.0 — 2026-11-21 UTC
 
 - **Breaking:** assets and asset types no longer say who builds them, so the update strips that data from your repo. It removes `spec_tools` from status folder-notes and drops any tool-set question from `# Status brief`. It drops the asset-type settings `default_tools` and `tools`. It drops the `data-report` and `docs-report` review classes that have no documents left. Your own `tool_types` declarations and any report class that still has documents are left in place and reported for you to settle. Run `/lazy-core.setup` to apply it.
@@ -1336,6 +1345,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 7.0.1 — 2026-11-21 UTC
+
+- Install and Iconize install no longer fail when run as a background setup agent: writes into the protected `.claude/` tree now go through core CLI verbs, and every settings call names the target repository instead of the agent's working folder.
+
 ### 7.0.0 — 2026-11-21 UTC
 
 - **Breaking:** The vault manifest `.obsidian.manifest.json` no longer carries per-user state: Obsidian bookmarks and Iconize's recently used icons. Updating strips both entries from an existing manifest, and `/lazy-core.setup` applies it. Each device keeps its own `.obsidian/bookmarks.json`, which is never touched.
@@ -1618,6 +1631,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.1.0 — 2026-11-21 UTC
+
+- `lazy-diagram.draw` and `lazy-diagram.fix` now split a section that is too dense for one picture into parts on their own, with a heading, the matching prose and one diagram per part, and no question asked. Both also accept an anchor heading of any level, not only H2 or H3.
+- `lazy-diagram.install` now installs into the repo named by `repo=` when run headless, for example under `lazy-core.autosetup`. Before, it used the coordinator's working directory.
+
 ### 2.0.4 — 2026-11-12 UTC
 
 - Shorter descriptions for `lazy-diagram.draw`, `lazy-diagram.fix`, `lazy-diagram.audit` and the `lazy-diagram.draw-mermaid` agent. Each now says only when to use it and how it differs from its sibling (`draw` for a new diagram, `fix` for re-conforming an existing one, `audit` for the plugin's own templates). Mechanism, input and output details are dropped, so the plugin costs less context in every session.
@@ -1724,6 +1742,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.16.1 — 2026-11-21 UTC
+
+- Install now works on the repository a background setup agent is pointed at. The project root comes from the agent's `repo=` target before the working folder, so scope detection, model-tier seeding and settings writes no longer land in the repository the agent was started from.
 
 ### 6.16.0 — 2026-11-21 UTC
 
@@ -2188,6 +2210,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 2.0.1 — 2026-11-21 UTC
+
+- `lazy-experts.install` and `lazy-experts.audit` now work when run in the background by `lazy-core.autosetup`. They target the repo passed as `repo=` instead of the coordinator's working directory. All their settings and core-verb calls name that repo, and writes into `.claude/` go through core verbs, so Claude Code no longer auto-denies them.
+- `lazy-experts.install` reports agent refs that a pending migration will rename as `pending-migration` instead of failing verification. It also finds the core CLI more reliably, checking `$LAZYCORTEX_PLUGIN_DIRS` and the dev-vault sibling before falling back to the installed copy.
+
 ### 2.0.0 — 2026-11-21 UTC
 
 - **Breaking:** The agent `lazy-experts.implementer` is renamed `lazy-experts.developer`, so the agent name matches the `developer` role it registers under. Your update rewrites every expert in `lazy.settings.json` (and in the local overlay `lazy.settings.local.json`) whose `agent` still names the old agent. It also moves any `agent_models` tier keyed by the old name to the new one, in those two files and in your user-scope `~/.claude/lazy.settings.json`. `/lazy-core.setup` applies it. An expert you already pointed at another agent is left alone, and the `release.implementer` and `release.implementer_chain` settings of a product keep their names.
@@ -2430,6 +2457,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.15.1 — 2026-11-21 UTC
+
+- `lazy-python.install` now targets the repo passed as `repo=` instead of the current directory, so unattended setup (`lazy-core.autosetup`) installs into the right repo.
 
 ### 4.15.0 — 2026-11-21 UTC
 
@@ -2735,6 +2766,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 4.0.2 — 2026-11-21 UTC
+
+- `lazy-wiki.install` now works when it runs inside a background setup agent. It no longer has its writes into `.claude/` auto-denied. Those writes go through core verbs, and settings calls name the target repo explicitly.
 
 ### 4.0.1 — 2026-11-21 UTC
 

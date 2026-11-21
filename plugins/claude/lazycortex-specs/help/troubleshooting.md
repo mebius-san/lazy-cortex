@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 2f7cbc6131378ad2fb07b51fdc460840760d310a
-surface_sha: 9f2ad9cb23b601b0b89df17baa425459052dcc83315c3d83fdc1d6d71284960d
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: e8eec278aa17da9414b95c59de2216696fb32452b39b600026e2f541d42c4439
 ---
 # Troubleshooting
 
@@ -65,6 +65,26 @@ surface_sha: 9f2ad9cb23b601b0b89df17baa425459052dcc83315c3d83fdc1d6d71284960d
 **Likely cause**: The install step that reached this routine called the plain (non-reconcile) registrar instead of passing its `--managed` key list — the plain call refuses outright on a name it already knows, rather than reconciling it. This should not happen on a normal run of the shipped skill; it points at a stale or hand-modified install step.
 
 **Fix**: Re-invoke `/lazy-spec.install` — every shipped step calls the registrar in reconcile mode, so a normal re-run reports `refreshed` or `unchanged` instead of aborting. If the abort persists across re-runs, treat it as a bug in the install skill itself worth reporting rather than something to fix by hand.
+
+---
+
+## `/lazy-spec.install` reports `unknown subcommand: ensure-dirs` or `unknown subcommand: move-file`
+
+**Symptom**: An install run stops with `unknown subcommand: ensure-dirs` or `unknown subcommand: move-file`.
+
+**Likely cause**: The installed `lazycortex-core` is older than `lazycortex-specs` and does not carry the verb the install step calls.
+
+**Fix**: Update core with `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-spec.install`.
+
+---
+
+## `/lazy-spec.install` reports `settings-unparseable` in Step 6
+
+**Symptom**: The install run reports `settings-unparseable` in Step 6 and does not register the routines.
+
+**Likely cause**: `.claude/lazy.settings.json` is not valid JSON, so install cannot read it.
+
+**Fix**: Repair the JSON syntax error in `.claude/lazy.settings.json` so the file parses again, then re-run `/lazy-spec.install`.
 
 ---
 

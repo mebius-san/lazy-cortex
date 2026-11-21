@@ -22,8 +22,8 @@ source_skills:
   - lazy-experts.researcher
   - lazy-experts.editor
   - lazy-experts.fiction-editor
-source_sha: ee0506c1a426ca4c3a67e7b5bde087fe46041726
-surface_sha: 82210ae3ced17617f70ba54581001fca85821bb9124b42fb2e9633711dbdf3ce
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: 8a700ad4ba03f457b51719375661a9466004851613f03eab50f6dad8c54b5aba
 ---
 # Frequently asked questions
 

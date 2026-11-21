@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
-last_regen: 2026-11-13
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "How the templates reach your project"
   request: "Flow showing python-template.py, init-template.py, and scaffold.entries.json shipping from the plugin, scaffold-sync copying both templates into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching a new *.py file against python-template.py or, when the file is an __init__.py, against init-template.py instead (the more specific glob wins)"
@@ -10,8 +10,8 @@ source_skills:
   - python/init-template.py
   - python/scaffold.entries.json
   - lazy-python.install
-source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
-surface_sha: afd0e43f300a7a23c24b28305c796c4006bc1914a57677eeba04b58c15fa0e08
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: c79b8834c6d463b7abc9b8691253e3f7f58b2af67d918e74cdebc070d019ca60
 ---
 # Python file scaffold
 
@@ -31,7 +31,7 @@ The three members are a template-pair-and-manifest set that do nothing in isolat
 
 After the install, the scaffold rule is live and matches on two globs at once. The next time Claude composes any new `.py` file in your project, `lazy-core.scaffold` checks the filename first: an `__init__.py` matches the more specific `**/__init__.py` glob and starts from `init-template.py`, picking up the package-docstring shape; every other new `.py` file matches the broader `**/*.py` glob and starts from `python-template.py`. Either way the import order, the `from __future__ import annotations` line, and the file's canonical shape are in place before a single line of real code is written. Claude's task becomes filling in the blanks rather than reconstructing conventions from memory.
 
-Both templates are install-managed mirrors, not consumer-owned config: the plugin owns their bytes end to end. If the plugin updates a template, re-running `/lazy-python.install` runs Step 6 again, and the sync byte-compares your consumer-local copy against the shipped source — `unchanged` when they match, `refreshed` when it overwrites a stale copy (a first copy reports `installed`). Install prints one line per template with its state, then the registry outcome. There is no merge step and no preserved local edit; a copy that differs from the shipped source is treated as stale, not as a customisation, and is overwritten silently.
+Both templates are install-managed mirrors, not consumer-owned config: the plugin owns their bytes end to end. If the plugin updates a template, re-running `/lazy-python.install` runs Step 6 again, and the sync byte-compares your consumer-local copy against the shipped source — `unchanged` when they match, `refreshed` when it overwrites a stale copy (a first copy reports `installed`). Install prints one line per template with its state, then the registry outcome (`registered`, `unchanged`, `created-and-registered`, `none`, `collision`, or `error`). Besides `installed`, `unchanged` and `refreshed`, a template can report `protected` or `failed`; `failed` means the write did not verify on re-read, and the sync exits non-zero and names the template, so re-run the install after fixing whatever blocked the write. The install report always carries the sync's own reply — a sync line with no registry outcome behind it means the step did not complete. There is no merge step and no preserved local edit; a copy that differs from the shipped source is treated as stale, not as a customisation, and is overwritten silently.
 
 ## Common adjustments
 

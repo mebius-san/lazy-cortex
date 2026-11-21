@@ -63,6 +63,7 @@ _ENCODING = "utf-8"
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
          "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, "
          "dispatch-job, collect-job, consume-job, retire-jobs, cancel-job, lookup-expert, scaffold, file-sync, "
+         "ensure-dirs, move-file, "
          "remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, "
          "routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, "
          "daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, "
@@ -768,6 +769,8 @@ class _Msg:
 _DELEGATED = {
   "scaffold":              ( "scaffold_registry", "main" ),
   "file-sync":             ( "file_sync", "main" ),
+  "ensure-dirs":           ( "install_fs", "cmd_ensure_dirs" ),
+  "move-file":             ( "install_fs", "cmd_move_file" ),
   "remote-mirror":         ( "remote_mirror", "main" ),
   "safe-pull":             ( "safe_pull", "main" ),
   "settings-get":          ( "settings_cli", "cmd_settings_get" ),

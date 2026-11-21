@@ -83,6 +83,14 @@ A stale shipped default is **not** a genuine conflict: the question of what shou
 
 **Where the consumer is meant to override**, the value records that it was seeded (`{"tier": …, "seeded_from": …}` in `agent_models`) and a bare recorded value is the operator's pin. Refresh reaches the seeded form only; an operator's own value is `kept-local` and never rewritten. A value with no such provenance marker is plugin-owned by default — the marker exists to carve out the operator's, not the reverse.
 
+## Project root
+
+**Resolve the project root (`<repo-root>`) first**, by run kind — Step 0's `python-env`, Step 1's `detect-scope` and every later step use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
+
 ## Step 0: Verify Python ≥ 3.12 (floor)
 
 Every plugin in this marketplace requires Python ≥ 3.12. This step runs first; on a machine where `python3` already meets the floor it is silent (one `python3 -V` invocation) and the install proceeds straight to Step 1. Per-plugin `<ns>.install` skills inherit this gate — they do NOT re-probe.
@@ -97,7 +105,7 @@ State outcome `aborted-python-floor-not-met` and skip Steps 1–15.
 
 `<cmd>` is `python3` → state outcome `python-floor-ok (<version>)` and proceed to Step 1; nothing is recorded.
 
-`<cmd>` is anything else → every plugin call site runs `"${LAZYCORTEX_PYTHON:-python3}"`, so record the override in the gitignored `<repo-root>/.claude/settings.local.json` (`<repo-root>` from `Bash(git rev-parse --show-toplevel)`, the cwd outside git), running the verb under `<cmd>` itself:
+`<cmd>` is anything else → every plugin call site runs `"${LAZYCORTEX_PYTHON:-python3}"`, so record the override in the gitignored `<repo-root>/.claude/settings.local.json` (`<repo-root>` from **Project root** above), running the verb under `<cmd>` itself:
 
 ```
 Bash(<cmd> "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase python-env --command '<cmd>' --cwd <repo-root>)
@@ -117,7 +125,7 @@ Scope = **where the plugin is actually enabled**, not where `/plugin install` la
 Resolve it with the shared helper, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" detect-scope lazycortex-core@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" detect-scope lazycortex-core@lazycortex --cwd <repo-root>)
 ```
 
 The helper prints exactly one word:
@@ -127,7 +135,7 @@ The helper prints exactly one word:
 
 The scope is derived — do NOT ask.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 of this skill targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 of this skill targets `<repo-root>` (resolved under **Project root** above) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
 
 Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
@@ -137,7 +145,7 @@ then run `/plugin install lazycortex/lazycortex-core`.
 
 ## Step 2: Determine paths
 
-Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core` prints: the first of, in this order, a `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin, the dev-vault sibling `plugins/claude/lazycortex-core/` beside core's own tree, the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, and last the install `~/.claude/plugins/installed_plugins.json` records; a miss exits 1 with an `error:` line naming every place it searched. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+Enumerate every rule file shipped by the plugin via `Bash(ls <installPath>/rules/*.md)` — never hardcode filenames. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core --cwd <repo-root>` prints: the first of, in this order, a `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin, the dev-vault sibling `plugins/claude/lazycortex-core/` beside core's own tree, the authoring repo's own `plugins/claude/lazycortex-core/` when this checkout ships the plugin, and last the install `~/.claude/plugins/installed_plugins.json` records; a miss exits 1 with an `error:` line naming every place it searched. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 For each source file `<installPath>/rules/<name>.md`, the target is:
 
@@ -146,7 +154,7 @@ For each source file `<installPath>/rules/<name>.md`, the target is:
 | `user` | `~/.claude/rules/<name>.md` | `~/.claude/templates/core/` |
 | `project` | `<repo-root>/.claude/rules/<name>.md` | `<repo-root>/.claude/templates/core/` |
 
-Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — warn the user).
+Project root is `<repo-root>` (see **Project root** above).
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-core@lazycortex` first.
 
@@ -188,10 +196,10 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> scaffold sync-rule --src <instal
 
 Authoring-template copy **and** scaffold-registry population are both done by the `scaffold sync-plugin` verb, run for `lazycortex-core` itself — core registers through the same path as any other plugin (dogfood).
 
-Resolve this plugin's own `<installPath>` (via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core`, the same resolution the rules mirror used above) and the detected `<scope>` (`project` / `user`), then run:
+Resolve this plugin's own `<installPath>` (via `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-core --cwd <repo-root>`, the same resolution the rules mirror used above) and the detected `<scope>` (`project` / `user`), then run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold sync-plugin --plugin lazycortex-core --install-path <installPath> --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" scaffold sync-plugin --plugin lazycortex-core --install-path <installPath> --scope <scope> --cwd <repo-root>)
 ```
 
 The verb prints one JSON line; its `templates` array carries one copy state per template and its `status` is the registry outcome (`registered`, `unchanged`, `created-and-registered`, `none`, `collision`, `error`). Exit 3 means a template write did not verify — the `failed` array names it.
@@ -218,13 +226,27 @@ Non-destructively seed the `agent_models` section with the three built-in subage
 | `user` | `~/.claude/lazy.settings.json` |
 | `project` | `<repo-root>/.claude/lazy.settings.json` |
 
-### Read or initialize
+### Read the section
 
-Read the target file. If missing or unparseable, treat its contents as `{"version": 1, "agent_models": {}}`.
+Every read and write of this step goes through the core `settings-get` / `settings-set` verbs, never `Read` + `Write`: the target sits under a protected `.claude/` directory, where a background run has no prompt to approve a direct write. `<scope-flag>` is `--home` at `user` scope and `--cwd <repo-root>` at `project` scope.
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get agent_models --verbatim <scope-flag>)
+```
+
+The verb prints the section as stored, or `null` when the file is missing or does not carry it (treat that as an empty section). Exit 1 with an `error` JSON means the file does not parse: write nothing, state **settings-unparseable** for every key, and name the file in the report so the operator can fix it.
 
 ### Ensure reserved groups exist
 
-Ensure `agent_models._builtin`, `agent_models._user`, and `agent_models._project` exist as objects (create empty `{}` if absent — never overwrite existing content).
+Before the first write of this step, ahead of the reserved-groups calls below, print one context line: `Updating <targetPath> (<scope> scope): <N> _builtin seed(s) to write.` Work out `<N>` from the section just read and the per-key semantics below before printing it.
+
+For each of `_user` and `_project` that is absent from the section, create it empty — an existing group is never overwritten:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '_user' --value '{}' <scope-flag>)
+```
+
+`_project` takes the same call with `--key '_project'`. `_builtin` needs no call of its own: the first keyed write below creates it.
 
 ### Seed `_builtin` defaults
 
@@ -244,7 +266,7 @@ An entry this step writes is a **seed**, and it records that it is one:
 
 The two fields together say whether a seed is still untouched: `tier == seeded_from` means nobody has edited it since it was seeded, so a moved shipped default may replace it. `tier != seeded_from` means the operator edited a seeded entry — it is a pin from that moment on, and the marker only records where it started.
 
-Per-key semantics (write back only if anything changed):
+Per-key semantics (a key is written only when its state below says so):
 
 - **absent** in `agent_models._builtin` → add the seed entry with the JSON's tier in both fields. State **added**.
 - **seed, `tier` equals the JSON's** → leave untouched. State **unchanged**.
@@ -256,32 +278,19 @@ Per-key semantics (write back only if anything changed):
 
 Never touch `_user` or `_project` entries — those slots are filled interactively by `lazy-core.agent-models`.
 
-### Pre-write context (MANDATORY before Write)
+### Write each changed key
 
-Before calling `Write` on a **newly-created** file (target was missing or unparseable), print this explanation in the conversation so the subsequent permission prompt has context above it:
+For every key whose state is **added** or **refreshed**, and every bare string the migration above converts to the seed shape, write that one key:
 
-> Creating `<targetPath>` at **<scope>** scope (`user` = `~/.claude/lazy.settings.json` applies to every project; `project` = `<repo-root>/.claude/lazy.settings.json` applies to this repo only).
->
-> This file routes subagent dispatches to model tiers (`haiku` / `sonnet` / `opus` / `fable` / `default`). Structure:
-> - `_builtin` — defaults for the three built-in subagent types (seeded now).
-> - `_user` — your globally-authored agents (filled later by `/lazy-core.agent-models`, writes to the global file).
-> - `_project` — this project's agents (filled later by `/lazy-core.agent-models`, writes to the project file).
->
-> **Routing rule**: `/lazy-core.agent-models` auto-routes by group — `_user.*` → global file, `_project.*` → project file, plugin-domain groups → the plugin's own install scope. Override with `--scope=project|global` for deliberate deviations.
->
-> **Scope precedence when both files exist**: reads merge with **project wins per-group** — a duplicate group in the project file shadows the global file's copy.
->
-> The file looks mostly empty because `_user` / `_project` are reserved slots waiting for `/lazy-core.agent-models` to populate them based on the agents you actually have.
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '_builtin/<name>' --value '{"tier": "<tier>", "seeded_from": "<tier>"}' <scope-flag>)
+```
 
-For **existing files** (mutations to an already-present file), print a one-line context instead: `Updating <targetPath>: <N> _builtin default(s) added.` No permission prompt is expected for in-place edits the user already owns, but the context line keeps the report grounded.
-
-### Write back
-
-If any mutation happened, write the file with `version: 1` at the top. Preserve existing groups (plugin-domain groups like `lazycortex`, third-party groups, etc.) verbatim.
+The verb creates the file, the section and `_builtin` on the way when they are absent, stamps a new section's `_version` itself, and leaves every other key and group (plugin-domain groups like `lazycortex`, third-party groups) as it was. Never write a top-level `version` key. A call that prints an `error` JSON did not land: state that key **failed** and report the error. **unchanged** and **kept-local** keys get no call.
 
 ### Report outcome
 
-One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
+One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise. On an unparseable file, one line `settings-unparseable: <targetPath>` instead.
 
 ## Step 6.5: Seed git-guard flags
 
@@ -291,7 +300,25 @@ Make the two `lazy-core.git-guard` behaviours visible and tunable in the consume
 
 **Target:** `<repo-root>/.claude/lazy.settings.json`, section `git`.
 
-Ensure the section exists with `"_version": 1`, then apply per-key semantics — **absent** → write the default, **present** → leave the operator's value untouched (`kept-local`, report the value):
+Read the section through the core verb — the file sits under protected `.claude/`, so this step never writes it with `Write` or `Edit`:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get git --verbatim --cwd <repo-root>)
+```
+
+`null` means the section is absent; exit 1 with an `error` JSON means the file does not parse — write nothing and state **settings-unparseable**. Otherwise apply per-key semantics — **absent** → write the default, **present** → leave the operator's value untouched (`kept-local`, report the value). Each absent key is one call:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set git --key '<key>' --value 'true' --cwd <repo-root>)
+```
+
+The first write into an absent section stamps its `_version` itself. A section that is present but carries no `_version` gets one more call:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set git --key '_version' --value '1' --cwd <repo-root>)
+```
+
+A call that prints an `error` JSON did not land: state that key **failed** and report the error.
 
 These three are **operator-owned switches**, not install-managed values: absent-only is the correct policy here and stays. The distinction matters because the File-sync policy's refresh rule looks identical at the call site — the test is whether the plugin or the operator owns the value's meaning. A flag the operator flips to change behaviour is theirs; a pointer, mask, or roster this skill composed is the plugin's.
 
@@ -303,7 +330,7 @@ These three are **operator-owned switches**, not install-managed values: absent-
 
 `pathspec_enabled` defaulting to `true` is a **behaviour change** for a repo upgrading from an older plugin version: agents lose bare `git commit`, `git add` with content, `git rm`, and `git mv`. Say so in the report line, and name the rollback: set `pathspec_enabled` to `false` to restore mutex-only behaviour. Do not ask — the default is deliberate and the flag is one edit away.
 
-Report outcome: `git.<key> = <value> (<added|kept-local>)`, or `skipped-user-scope`.
+Report outcome: `git.<key> = <value> (<added|kept-local|failed>)`, or `skipped-user-scope` / `settings-unparseable`.
 
 ## Step 7: Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore
 
@@ -319,7 +346,7 @@ All four concerns are handled by three helpers. This step runs unconditionally (
 Run via:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase logs)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> logs)
 ```
 
 Outcome per helper: `bootstrapped` (something was created/appended) or `already-present` for the first two; `seeded` / `already-present` / `template-missing` for `.lazyignore`.
@@ -331,7 +358,7 @@ Ensure `<repo>/.gitattributes` carries `* text=auto eol=lf` as its first rule, s
 Run via:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase gitattributes)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> gitattributes)
 ```
 
 The verb prints two lines. `.gitattributes: created` / `updated` / `already-present`. `renormalize: needed` / `not-needed` — `needed` means the index already holds CRLF text files (`git ls-files --eol` reports `i/crlf`), which the new rule does not rewrite on its own. On `needed`, report a follow-up for the operator: run `git add --renormalize .` once and commit the result. Never run it from this skill — it stages content, and the index is the operator's.
@@ -343,20 +370,20 @@ The `lazycortex-log` plugin was retired and folded into `lazycortex-core`. Its `
 Run via:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase log-hooks)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> log-hooks)
 ```
 
 Idempotent: a second run on already-clean files is a no-op. Report one line per path with its outcome word (`migrated` or `no-stale-entries`).
 
 ## Step 9: Bootstrap runtime defaults
 
-Steps 9–13.5 set up the per-repo runtime layer (`.experts/`, expert registry, routines, spawn sandbox). They operate on the **current working repo**, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
+Steps 9–13.5 set up the per-repo runtime layer (`.experts/`, expert registry, routines, spawn sandbox). They operate on `<repo-root>`, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
 
-For Steps 9–13.5, `<repo-root>` is the cwd's git toplevel (resolved in 9a, initialized in 9b when the cwd is not yet a repo), even if Step 1 detected install scope as `user`.
+For Steps 9–13.5, `<repo-root>` is the `repo=` target, else the cwd's git toplevel (resolved in 9a, initialized in 9b when the cwd is not yet a repo), even if Step 1 detected install scope as `user`.
 
 ### 9a. Resolve the runtime repo
 
-Run `git rev-parse --show-toplevel` in cwd. If it succeeds, set `<repo-root>` to the returned path and `is_git = true`. If it fails (cwd is not inside a git repo), set `<repo-root>` to cwd and `is_git = false`. Do NOT prompt to initialize git here — that question is 9b's.
+A headless run with `repo=<abs>` sets `<repo-root>` to that path and `is_git` to whether `Bash(test -e <repo-root>/.git)` succeeds, never running `git rev-parse` in the cwd. Otherwise run `git rev-parse --show-toplevel` in cwd. If it succeeds, set `<repo-root>` to the returned path and `is_git = true`. If it fails (cwd is not inside a git repo), set `<repo-root>` to cwd and `is_git = false`. Do NOT prompt to initialize git here — that question is 9b's.
 
 ### 9b. Ensure a repo root for the runtime layer
 
@@ -403,7 +430,7 @@ State **bootstrapped** if any default key or the routines section was newly writ
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step.
 
-Otherwise, perform the following three idempotent operations:
+Otherwise, perform the following two idempotent operations. The `lazy.settings.json[experts]` section is not this step's: Step 11 always registers its two built-in candidates (§ 1b) through keyed `settings-set experts --key …` writes, and the first such write creates the section with its `_version` stamp.
 
 ### Ensure `lazy.runtime.sh` shim
 
@@ -418,12 +445,6 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --
 State = the receipt's state verbatim: **installed** (was absent), **refreshed** (differed, overwritten), or **unchanged**.
 
 The shim resolves `lazycortex-core/bin/runner` from the install `~/.claude/plugins/installed_plugins.json` records at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the `--dev-mode`, `--login-shell`, and repeatable `--env-file <path>` flags are additive and stripped by the shim before the runner exec).
-
-### Ensure `lazy.settings.json[experts]`
-
-Check whether the `experts` section exists in `<repo-root>/.claude/lazy.settings.json`. If missing, create it: `Bash(echo '{}' | "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set experts --cwd <repo-root>)` writes the section with its `_version` stamp.
-
-State **created** if written; **already-present** if it existed.
 
 ### Ensure `.gitignore` entries
 
@@ -441,7 +462,7 @@ If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that out
 Otherwise, ensure `.memory/` exists at the repo root and strip any legacy `!.memory/` line from `.gitignore` (older versions of this skill wrote a defensive un-ignore line; the line was selective paranoia and is now retired — memory notes track in git the normal way):
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase memory-dir)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> memory-dir)
 ```
 
 Outcome: `bootstrapped` (dir created and/or legacy line stripped) or `already-present` (dir existed and no legacy line present).
@@ -508,7 +529,7 @@ Each then flows through §§ 2–4 exactly like a scanned candidate (skipped if 
 Additionally, ensure lazycortex-core's own agent-model tiers — the doctor's included — exist in the **project** `agent_models.lazycortex` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Run the shared seeding verb instead of hand-rolling the SOT lookup (same pattern as Step 4 running `scaffold sync-plugin`):
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" agent-models-seed --prefix lazycortex-core --scope project)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" agent-models-seed --prefix lazycortex-core --scope project --cwd <repo-root>)
 ```
 
 `--scope project` (NOT Step 1's install scope) because Steps 9–13.5 always target the runtime repo and the doctor's tier must land in `<repo-root>/.claude/lazy.settings.json` for expert-runtime resolution. The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `settings-unparseable` (exit 1); `entries` carries one `{dispatch, tier, state}` line per key. The step's outcome is that `outcome` value; never report a seed the verb did not answer. Fold the `entries` lines into the Step 14 report.
@@ -754,13 +775,21 @@ AskUserQuestion:
     - "keep-local" — "Leaves `false`; expert spawns on this checkout run unconfined (`sandbox-conflict`)."
 ```
 
-`Read <repo-root>/.claude/settings.local.json` and apply Block 2 + migrate:
+`Read <repo-root>/.claude/settings.local.json` and compose the merged content per items 5–7 below. The file sits under protected `.claude/`, so it is never written with `Write` or `Edit`: the merged content is staged outside `.claude/` and copied in by `file_sync.py`.
 
-5. **Missing or unparseable** → `Write` Block 2 verbatim. State **perms-created**.
-6. **Present** → union missing `permissions` scope in, silently (add only paths / tool names not already present; never drop existing). `additionalDirectories` lives under `permissions`, where Claude Code reads it; a top-level `additionalDirectories` left by an earlier version of this step is moved under `permissions` in the same edit. State **perms-merged**.
-7. **Migration** — if this file carries a legacy top-level `sandbox` key (written by an earlier version of this step), REMOVE it: the sandbox now lives in the runtime file, and a `sandbox` here would confine the interactive session. State **migrated-local-sandbox**; **no-legacy-sandbox** when absent.
+5. **Missing or unparseable** → the merged content is Block 2 verbatim. State **perms-created**.
+6. **Present** → union missing `permissions` scope in, silently (add only paths / tool names not already present; never drop existing). `additionalDirectories` lives under `permissions`, where Claude Code reads it; a top-level `additionalDirectories` left by an earlier version of this step is moved under `permissions` in the same merge. State **perms-merged**.
+7. **Migration** — if this file carries a legacy top-level `sandbox` key (written by an earlier version of this step), REMOVE it from the merged content: the sandbox now lives in the runtime file, and a `sandbox` here would confine the interactive session. State **migrated-local-sandbox**; **no-legacy-sandbox** when absent.
 
 Never replace an entire key with the recommended value. The consumer's existing files are authoritative for shape; this skill only adds missing scope (and removes the migrated `sandbox` key).
+
+When the merged content equals the file on disk (present, nothing missing, no legacy key), there is nothing to write: state **perms-merged** · **no-legacy-sandbox** and skip the stage and the copy. Otherwise stage it: a file already at `<repo-root>/.runtime/install-stage/settings.local.json` is a leftover of an earlier run — remove it first with `Bash(rm <repo-root>/.runtime/install-stage/settings.local.json)`, so `Write` is not refused. `Write` the whole merged JSON to that path (gitignored by Step 7, not a protected path; `Write` creates the missing directory), then copy it into place:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py" --src <repo-root>/.runtime/install-stage/settings.local.json --dst <repo-root>/.claude/settings.local.json --copy-diverged)
+```
+
+The receipt's state must be `installed` (file was absent) or `refreshed` (file replaced by the merge); `unchanged` means the target already held those bytes — state **perms-merged** · **no-legacy-sandbox**, the same as the skip above; exit 3 or a `failed` entry means the write did not land — report `perms-failed: <path>`, never the item 5–7 state. Remove the stage file after the copy, whether it landed or failed: `Bash(rm <repo-root>/.runtime/install-stage/settings.local.json)`.
 
 ### Outcome
 
@@ -816,6 +845,6 @@ Report to the user:
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
-- **Runtime is per-repo, not per-scope**: Steps 3–8 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 9–13.5 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, routines, the spawn sandbox) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
+- **Runtime is per-repo, not per-scope**: Steps 3–8 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 9–13.5 always target `<repo-root>` (the `repo=` target, else the cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, routines, the spawn sandbox) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
 - **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo, so both `daemon.enabled` and the `daemon.run_here` map travel with the clone; supervisor units are per-checkout and per-machine and do not. Re-run this skill after cloning: a clone the map does not name tears down any stray unit it finds. Installing a unit is `/lazy-core.daemon-setup`'s job.
 - **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

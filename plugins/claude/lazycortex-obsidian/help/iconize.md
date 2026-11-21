@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: e764841e893a236fe4f00ce11ce16a818143c55136841e6bbdae94d6f15803d6
+source_sha: 1fbe4655cc6e1b8a3b3e48817d2bacef6d7abd54
+surface_sha: 596e4832651ef6b53d65ad63693c54ac692f5549c7fb3e00f7ffce7c0cad5dfe
 ---
 # Iconize — frontmatter-driven icon management for Obsidian vaults
 

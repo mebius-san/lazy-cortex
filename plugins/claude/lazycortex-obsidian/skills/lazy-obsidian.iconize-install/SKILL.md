@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.iconize-install
 description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Chained from `/lazy-obsidian.install`; run from the vault's git root."
-allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Glob, Skill, Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test *), Bash(date *), Bash(rm *), Bash(rmdir *), Bash(printenv *), AskUserQuestion, Agent
 argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ (repo= sets the target under headless dispatch)"
 ---
 # Install iconize-sync (Obsidian)
@@ -57,6 +57,9 @@ The plugin no longer scaffolds a vault-local protocol doc. The single canonical 
   - **Headless dispatch** — if the invoking prompt carries `repo=<abs>` (a `repo=`-targeted run, e.g. from `lazy-core.autosetup` / `lazy-obsidian.install`), `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target, so cwd-derived roots mutate the wrong repo.
   - **Interactive** — no `repo=` in the prompt: `<repo-root>` = `git rev-parse --show-toplevel` (cwd is the vault the operator is standing in).
 - Vault (`<vault>`): walk from `<repo-root>` looking for `.obsidian/` (usually `<repo-root>` itself). If none found, abort with a message telling the user to initialize Obsidian first.
+- Core CLI (`<core-cli>`): the core plugin's `bin/lazycortex-core` file, resolved once, before the first call. Try these stages in order and take the first file that exists (`Bash(test -f <path>)`): (1) `<dir>/bin/lazycortex-core` for each `:`-separated entry `<dir>` of `$LAZYCORTEX_PLUGIN_DIRS` (`Bash(printenv LAZYCORTEX_PLUGIN_DIRS)`; an empty or unset variable skips the stage); (2) the dev-vault sibling `"${CLAUDE_PLUGIN_ROOT}/../lazycortex-core/bin/lazycortex-core"`; (3) the repo's own `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; (4) last, `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record a `Read` of `$HOME/.claude/plugins/installed_plugins.json` shows (never a walk of `~/.claude/plugins/cache/`). No stage matching means core is not installed: abort, naming every stage searched — `$LAZYCORTEX_PLUGIN_DIRS`, the dev-vault sibling, `<repo-root>/plugins/claude/lazycortex-core/`, `installed_plugins.json`. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)`: the file carries no exec bit and is not on `PATH`.
+
+Every write this skill makes itself into `<repo-root>/.claude/` goes through a `<core-cli>` verb, never `mkdir` / `cp` / `mv` / `Write` / `Edit` on the target, so a background install is not denied a write into a protected path. Content the skill computes itself (a merge result) is written with `Write` to `<repo-root>/.runtime/install-stage/<basename>` and landed with `file-sync --copy-diverged`.
 
 Every mutating command below MUST target `<repo-root>` / `<vault>` explicitly (`--vault <vault>`, `git -C <repo-root>`, absolute `<repo-root>/…` paths) — never a cwd-relative path or a cwd walk-up. Only the Claude-run hook entrypoint (PostToolUse) is allowed to resolve the vault from cwd, because there cwd is guaranteed to be the repo.
 
@@ -107,7 +110,7 @@ Unlike the orphans in Steps 2 / 2.5, the shim is deleted, not kept: the `HOOK_VE
 
 1. Read `<repo-root>/.githooks/pre-commit`. Absent → Outcome: **not-present**.
 2. Present without a `HOOK_VERSION:` marker → not ours; leave untouched. Outcome: **kept-foreign**.
-3. Present with the marker → delete the file. If `.githooks/` is now empty AND `git -C <repo-root> config core.hooksPath` returns `.githooks`, unset it (`git -C <repo-root> config --unset core.hooksPath`) and remove the empty dir. Outcome: **legacy-shim-removed** (append **hooksPath-unset** when the config was cleared).
+3. Present with the marker → delete the file. If `.githooks/` is now empty AND `git -C <repo-root> config core.hooksPath` returns `.githooks`, unset it (`git -C <repo-root> config --unset core.hooksPath`) and remove the empty dir with `Bash(rmdir <repo-root>/.githooks)`. Outcome: **legacy-shim-removed** (append **hooksPath-unset** when the config was cleared).
 
 ## Step 2.6 — Assert Iconize frontmatter-feature settings
 
@@ -140,11 +143,22 @@ Retrieve `SCHEMA_VERSION`, `SUPPORTED_SCHEMA`, and `HOOK_VERSION` from the worke
 
 ### Decision matrix
 
-**Pre-flight (case 0): legacy-path migration.** Pre-1.0.0 versions of this skill placed the icon-map at `.claude/obsidian-iconize/icon-map.json`. The 1.0.0 layout is `.claude/iconize/obsidian-icon-map.json` — `iconize/` as the resolver subsystem dir, file name carries the platform tag. A path move is a clean `mv` with no content change — apply it silently, no prompt. If the legacy file exists AND the new path does not: `mkdir -p <repo-root>/.claude/iconize && mv <repo-root>/.claude/obsidian-iconize/icon-map.json <repo-root>/.claude/iconize/obsidian-icon-map.json && rmdir <repo-root>/.claude/obsidian-iconize 2>/dev/null`. Outcome contributes `path-migrated` to the Step 6 report; then continue with cases 1–5 below against the new path (the file is now at the new path → cases 2-or-later apply, never case 1). If both the legacy and the new path exist, leave the legacy file as a **kept-orphan** (don't clobber the new path) and proceed against the new path.
+**Pre-flight (case 0): legacy-path migration.** Pre-1.0.0 versions of this skill placed the icon-map at `.claude/obsidian-iconize/icon-map.json`. The 1.0.0 layout is `.claude/iconize/obsidian-icon-map.json` — `iconize/` as the resolver subsystem dir, file name carries the platform tag. A path move is a clean move with no content change — apply it silently, no prompt, with one verb call:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> move-file --src <repo-root>/.claude/obsidian-iconize/icon-map.json --dst <repo-root>/.claude/iconize/obsidian-icon-map.json --prune-src-dir)
+```
+
+Map its JSON `state`:
+
+- `moved` — the legacy file moved to the new path (and `.claude/obsidian-iconize/` was removed if left empty). Outcome contributes `path-migrated` to the Step 6 report; then continue with cases 1–5 below against the new path (the file is now at the new path → cases 2-or-later apply, never case 1).
+- `kept-both` — both the legacy and the new path exist; the verb never overwrites. The legacy file stays as a **kept-orphan** and the step proceeds against the new path.
+- `absent` — no legacy file; nothing to migrate, proceed against the new path.
+- `failed` (exit 3) — the move did not land; report **failed** for the pre-flight and proceed against the new path.
 
 Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json`:
 
-1. **Target missing** → install the plugin's template at `${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json`. No prompt. State: **installed**.
+1. **Target missing** → install the plugin's template with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src "${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json" --dst <repo-root>/.claude/iconize/obsidian-icon-map.json)`; the verb creates the directory. No prompt. State: **installed** (the verb's `installed`; `failed`, exit 3, is state **failed**).
 2. **Target present, `schema_version == SCHEMA_VERSION`** (handshake OK):
    - Byte-identical to template → no prompt. State: **unchanged**.
    - Byte-differs (authored customizations on the current schema) → **three-way merge silently**, no top-level drift prompt. For every top-level key and nested entry (registries' inner maps, `matchers[]` keyed by `id`, `stage_colors`):
@@ -163,8 +177,8 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
        ```
 
        This is the ONLY prompt this case can raise; when there are no value conflicts the merge is fully silent.
-     Atomic write (`icon-map.json.tmp` → `mv`). State: **merged** (annotate count of additions, conflicts-kept-authored, conflicts-took-shipped).
-3. **Target present, `schema_version` (call it `N`) `< SCHEMA_VERSION` and a migration chain `N → N+1 → … → SCHEMA_VERSION` is fully covered by the transforms table below.** A missing `schema_version` is treated as `N=1` (pre-handshake back-compat). The schema transform is a non-contradicting in-place upgrade — **apply it silently**, no prompt. Apply each chain step in order; each step mutates `schema_version` to its target and applies its transform. Final atomic write (`icon-map.json.tmp` → `mv`). Preserve all keys not touched by any step (registries, stage_colors, matchers' unrelated fields, key order). State: **migrated-v`N`-to-v`SCHEMA_VERSION`** (e.g. `migrated-v1-to-v2`, future `migrated-v2-to-v3`, `migrated-v1-to-v3` for a two-step walk). After migrating, if the file now byte-differs from the current-schema template, run the case-2 three-way merge on top (silent except per-key value conflicts).
+     Single write through the stage file: a file already at `<repo-root>/.runtime/install-stage/obsidian-icon-map.json` is a leftover of an earlier run — remove it first with `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)`, so `Write` is not refused. `Write` the merged content to that path, then `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <repo-root>/.runtime/install-stage/obsidian-icon-map.json --dst <repo-root>/.claude/iconize/obsidian-icon-map.json --copy-diverged)`; the verb byte-verifies the target (`failed`, exit 3, is state **failed**). Then remove the stage file, whether the copy landed or failed: `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)`. State: **merged** (annotate count of additions, conflicts-kept-authored, conflicts-took-shipped).
+3. **Target present, `schema_version` (call it `N`) `< SCHEMA_VERSION` and a migration chain `N → N+1 → … → SCHEMA_VERSION` is fully covered by the transforms table below.** A missing `schema_version` is treated as `N=1` (pre-handshake back-compat). The schema transform is a non-contradicting in-place upgrade — **apply it silently**, no prompt. Apply each chain step in order; each step mutates `schema_version` to its target and applies its transform. A step's implementation verb rewrites the file itself; any content the skill computes on top lands through the stage file and `file-sync --copy-diverged`, with the leftover removal before the `Write` and the stage-file removal after the copy, as in case 2. Preserve all keys not touched by any step (registries, stage_colors, matchers' unrelated fields, key order). State: **migrated-v`N`-to-v`SCHEMA_VERSION`** (e.g. `migrated-v1-to-v2`, future `migrated-v2-to-v3`, `migrated-v1-to-v3` for a two-step walk). After migrating, if the file now byte-differs from the current-schema template, run the case-2 three-way merge on top (silent except per-key value conflicts).
 
    #### Transforms table (one row per `N → N+1` step)
 
@@ -186,6 +200,8 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
    - Answers: `merge-shipped` — file replaced with the plugin's empty current-schema template; EVERY authored registry, matcher, and stage-colour is wiped; `keep-local` — file untouched, state **migration-path-missing**, surfaced as FAIL; syncing stays disabled until a plugin release adds the missing transform
    AskUserQuestion: header "Icon-map schema", question "obsidian-icon-map.json is at schema v<N>, the worker needs v<M>, and no migration path covers step <K → K+1>. Replace it with the empty current-schema template, or keep it as is?", options `merge-shipped` — "replace with the empty template — all authored registries, matchers, and stage-colours are lost", `keep-local` — "keep the file; report migration-path-missing as FAIL".
    ```
+
+   On `merge-shipped`, land the template through the core verb: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src "${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json" --dst <repo-root>/.claude/iconize/obsidian-icon-map.json --copy-diverged)`. The verb's `refreshed` (or `unchanged`) is state **replaced-with-template**; `failed` (exit 3) is state **failed**. Then run the `paint_roots` seeding below, as for case 1.
 4. **Target present, `schema_version` outside `SUPPORTED_SCHEMA` on the high side** (future version the installed worker doesn't know) → **plugin too old** blocker. Report and do not edit. State: **blocker-plugin-too-old**.
 5. **Target present, `schema_version == SCHEMA_VERSION` but `min_hook_version` exceeds the installed `HOOK_VERSION`** → same **plugin too old** blocker.
 
@@ -193,10 +209,10 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
 
 `paint_roots` is the top-level list of repo-relative directory prefixes the worker may paint inside; outside them the worker neither reads nor writes the note; existing icon keys there stay as they are. The shipped template carries `[ "specs" ]`, but the consumer's spec content root is theirs to name, so the seeded value is read from config rather than copied from the template.
 
-Run this after the case above has landed its write, and only when the key is being **introduced** — case 1 (fresh install), or case 2 / case 3 where the merge added `paint_roots` because the authored file did not carry it. An authored `paint_roots` already on disk is the operator's; never rewrite it here, and never widen or narrow it to match the template.
+Run this after the case above has landed its write, and only when the key is being **introduced** — case 1 (fresh install) or case 3a `merge-shipped` (the template replaced the file; seeded exactly as case 1), or case 2 / case 3 where the merge added `paint_roots` because the authored file did not carry it. An authored `paint_roots` already on disk is the operator's; never rewrite it here, and never widen or narrow it to match the template.
 
 1. Read `spec.vault_root` from `<repo-root>/.claude/lazy.settings.json`. Absent key, absent `spec` section, or absent settings file → `specs`.
-2. Write `paint_roots` as that single value: `[ "<vault_root>" ]`. Atomic write (`icon-map.json.tmp` → `mv`) folded into the same write the case already performs.
+2. Write `paint_roots` as that single value: `[ "<vault_root>" ]`. In case 2 / case 3 the value goes into the merged content before it is staged, so it lands in the same `file-sync` write. In case 1, when the installed template's `paint_roots` is not already `[ "<vault_root>" ]`, remove a leftover stage file first (`Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)` when one is there), `Write` the template content with that value to `<repo-root>/.runtime/install-stage/obsidian-icon-map.json`, land it with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <repo-root>/.runtime/install-stage/obsidian-icon-map.json --dst <repo-root>/.claude/iconize/obsidian-icon-map.json --copy-diverged)`, then remove the stage file with `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)`, whether the copy landed or failed.
 
 No prompt: this seeds a key the consumer did not have, which is a non-contradicting addition exactly like every other shipped-key addition in case 2. Outcome contributes `paint-roots-seeded=<vault_root>` to the Step 2.7 report line; omit the annotation when the key was already authored.
 
@@ -260,8 +276,10 @@ same `git_author` block into `experts["lazy-obsidian.repaint"]` in `lazy.setting
 sibling coordinators read the experts table alone; they read the routine registry too now, so the
 duplicate is dead config — and an experts entry carrying no `agent` is a FAIL in core's expert
 preflight (`missing 'agent' reference`), which the entry can never satisfy: no agent serves it,
-it names an identity rather than a role. Delete the whole `experts["lazy-obsidian.repaint"]` key
-when it is present, leaving the routine's own `git_author` as the single record. Outcome:
+it names an identity rather than a role. When `Read` of `<repo-root>/.claude/lazy.settings.json` shows
+the key, delete it through the core verb (so a background install is not denied the write), leaving
+the routine's own `git_author` as the single record:
+`Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key 'lazy-obsidian.repaint' --delete --cwd <repo-root>)`. Outcome:
 **identity-pruned** / **identity-absent**.
 
 Then paint what predates the routine. A git-watch routine records the current HEAD on its first
@@ -276,11 +294,13 @@ Commit the paths it reports. Outcome: **backfilled-<count>** / **backfill-clean*
 
 ## Step 4 — Create callbacks dir
 
+Create the directory with a `.gitkeep` so it is tracked, through the core verb so a background install is not denied the write:
+
 ```
-mkdir -p <repo-root>/.claude/callbacks
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> ensure-dirs --gitkeep <repo-root>/.claude/callbacks)
 ```
 
-Leave empty; add a `.gitkeep` so the directory is tracked. (Users drop executable scripts here to implement exotic `callback:` matchers.)
+Leave it otherwise empty. (Users drop executable scripts here to implement exotic `callback:` matchers.) Map the verb's JSON `results` entry: `state: created` → **created**, `state: already-exists` → **already-present**, and append **.gitkeep-added** when `gitkeep` is `installed`. A `not-a-directory` or `failed` state (exit 3 for `failed`) is reported with that word. An entry whose `gitkeep` is `failed` (exit 3, the path listed under `failed`, while `state` is still `created` or `already-exists`) is a failure too: report **failed** with the path — the directory exists, but without its keep-file git does not track it.
 
 ## Step 4.5 — Ensure iconize `data.json` is gitignored
 
@@ -289,7 +309,7 @@ Iconize (`obsidian-icon-folder`) stores the vault's full icon-mapping database (
 Because this step runs only inside `iconize-install`, the opt-in is implicit: the user is scaffolding iconize-sync, so they clearly intend to use it.
 
 1. `entry = ".obsidian/plugins/obsidian-icon-folder/data.json"` (repo-root relative — the path iconize writes regardless of vault subdir, because the vault is `.obsidian/` under the repo root per Step 1).
-2. Resolve `<core-cli>` — the core plugin's `bin/lazycortex-core`: `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core` when this repo authors the core plugin, else `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record in `$HOME/.claude/plugins/installed_plugins.json`. Then write the line through the core verb, silently — no create/skip prompt; this is the one `.gitignore` line the skill manages, and the verb never touches other lines:
+2. With `<core-cli>` from Step 1, write the line through the core verb, silently — no create/skip prompt; this is the one `.gitignore` line the skill manages, and the verb never touches other lines:
    `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> gitignore-ensure .obsidian/plugins/obsidian-icon-folder/data.json --cwd <repo-root>)`
    It prints one JSON line. Map its `state`: `created` → **gitignore-created**, `updated` → **added**, `already-present` → **already-ignored**.
 3. When the JSON `tracked` list names `entry`, emit a one-line WARN in the report reminding the user to run `git rm --cached <entry>` to stop tracking it. Never auto-`git rm` — that's a history-touching action, user's call.
@@ -327,9 +347,9 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 2.5** legacy PostToolUse: **kept-orphan** (count) / **not-present**.
 - **Step 2.55** legacy pre-commit shim: **legacy-shim-removed** (+ **hooksPath-unset**) / **kept-foreign** / **not-present**.
 - **Step 2.6** Iconize frontmatter settings: **asserted** / **refused: `<output>`**.
-- **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`; append `paint-roots-seeded=<vault_root>` when the key was introduced this run) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
+- **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`; append `paint-roots-seeded=<vault_root>` when the key was introduced this run) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **replaced-with-template** / **migration-path-missing** / **blocker-plugin-too-old** / **failed**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
 - **Step 3.5** repaint routine: **registered** / **refreshed** / **unchanged** / **no-daemon**, plus the legacy-identity prune (**identity-pruned** / **identity-absent**) and backfill outcomes.
-- **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
+- **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added** / **not-a-directory** / **failed**.
 - **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN when the verb's `tracked` list names the entry (user runs `git rm --cached`, never auto).
 - **Step 4.6** plugin registries: **registries-visible-<count>** (one line per registry) / **no-registries**.
 - **Step 5** verify: `check-versions` status + `reconcile --dry-run` summary.
@@ -340,6 +360,8 @@ Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-o
 
 - **`/lazy-obsidian.iconize-install` aborts: no `.obsidian/` found** — the repo root has no Obsidian vault directory → initialize Obsidian in this repo first, then re-run.
 - **`/lazy-obsidian.iconize-install` aborts: "Hard dependency `<id>` could not be installed/updated"** — the `plugin-install` verb refused `folder-notes`, `obsidian-icon-folder`, or `iconize-reloader`; the quoted reason is its `reason` (registry unreachable, id not in the registry, release fetch failed with nothing cached, or the vault's `community-plugins.json` not an array) → fix what the reason names, then re-run.
+- **`/lazy-obsidian.iconize-install` reports `unknown subcommand: ensure-dirs` or `unknown subcommand: move-file`** — the installed lazycortex-core is older than this plugin and lacks the verb → update it with `/plugin update lazycortex-core@lazycortex`, then re-run.
+- **`/lazy-obsidian.iconize-install` aborts: core not installed** — no stage of the `<core-cli>` resolver found `bin/lazycortex-core` → install `lazycortex-core@lazycortex`, then re-run.
 
 ## Idempotency
 

@@ -6,19 +6,21 @@ execution-discipline-waiver: "nested-from-install — the calling install skill 
 ---
 # Seed agent-model tiers for a plugin
 
-Seed the `agent_models.lazycortex` domain group of a consumer's `lazy.settings.json` with the canonical model tiers for the subagents one plugin ships. Invoked with `args: "prefix=lazycortex-<x> scope=<project|user>"`; an install skill that can already run the core plugin's `bin/lazycortex-core` calls the `agent-models-seed` verb directly instead. Idempotent; a re-run with unchanged inputs writes nothing.
+Seed the `agent_models.lazycortex` domain group of a consumer's `lazy.settings.json` with the canonical model tiers for the subagents one plugin ships. Invoked with `args: "prefix=lazycortex-<x> scope=<project|user> [repo=<abs>]"`; an install skill that can already run the core plugin's `bin/lazycortex-core` calls the `agent-models-seed` verb directly instead. Idempotent; a re-run with unchanged inputs writes nothing.
 
 ## Process
 
 ### Resolve inputs
 
-Parse `prefix` (the plugin's dispatch-string prefix, e.g. `lazycortex-diagram`) and `scope` (`project` or `user`, the install scope the caller already resolved) from `args`.
+Parse `prefix` (the plugin's dispatch-string prefix, e.g. `lazycortex-diagram`), `scope` (`project` or `user`, the install scope the caller already resolved) and the optional `repo` (the caller's `<repo-root>`) from `args`.
 
 ### Run the verb
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" agent-models-seed --prefix <prefix> --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" agent-models-seed --prefix <prefix> --scope <scope> --cwd <repo>)
 ```
+
+With no `repo` in `args`, drop `--cwd <repo>`; the verb then targets `$LAZY_REPO_ROOT` or the cwd, which under a `repo=`-targeted run is the coordinator's repo.
 
 The `agent-models-seed` verb owns the tier table lookup, the per-key comparison and the write; it prints one JSON line. Exit 0 carries `outcome` (`seeded-N`, `unchanged`, `no-entries`), `sot` (the tier table it read) and `entries` (`{dispatch, tier, state, previous}` with `state` one of `added`, `unchanged`, `refreshed`, `kept-local`). Exit 1 carries a refusal `outcome` — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` — and a `message`. The outcome of this skill is the verb's `outcome`; never report a seed the verb did not answer.
 

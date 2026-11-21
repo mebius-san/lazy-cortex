@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: c8db3a16da37483d17108e3fb748f277fb0691b5
-surface_sha: b5285177ac7bded5b30cd66a264f1bef624020c8f2ff4a7059ad5379822ae664
+source_sha: 1fbe4655cc6e1b8a3b3e48817d2bacef6d7abd54
+surface_sha: 99c69259f41773f57d25a02245cf6d2f9ed50295fb7c55529902cc4516ae8312
 ---
 # Troubleshooting
 
@@ -47,6 +47,16 @@ surface_sha: b5285177ac7bded5b30cd66a264f1bef624020c8f2ff4a7059ad5379822ae664
 **Likely cause**: The plugin was enabled in settings but the local cache directory has not been populated, so the rule-file glob found nothing.
 
 **Fix**: Run `/plugin update lazycortex-wiki@lazycortex` in Claude Code to fetch the plugin files, then re-run `/lazy-wiki.install`.
+
+---
+
+## `/lazy-wiki.install` reports `unknown subcommand: ensure-dirs`
+
+**Symptom**: `/lazy-wiki.install` fails at the step that creates the wiki templates directory with the message `unknown subcommand: ensure-dirs`.
+
+**Likely cause**: The installed `lazycortex-core` is older than this plugin. Install asks core to create the directory through its `ensure-dirs` verb, and the older core does not have that verb yet.
+
+**Fix**: Run `/plugin update lazycortex-core@lazycortex`, restart Claude Code so the new version is picked up, then re-run `/lazy-wiki.install`.
 
 ---
 

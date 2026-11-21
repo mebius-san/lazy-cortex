@@ -10,8 +10,8 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: dbf4ac2af2fc1367194968c35f02eae46f72806c94e6938d6249c69ca04580d2
+source_sha: 1fbe4655cc6e1b8a3b3e48817d2bacef6d7abd54
+surface_sha: bdc7049a3c8a145d6766055c1cf7c57a87fae77b7020955df2d3a30ec58b7290
 ---
 # How do I wire up a fresh vault from scratch?
 

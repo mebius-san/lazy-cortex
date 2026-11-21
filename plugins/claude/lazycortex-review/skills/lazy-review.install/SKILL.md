@@ -28,7 +28,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 This skill is **idempotent and quiet on re-run**. Every choice is derived or read-first; the user is asked again only when nothing is on record.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-artifact opt-in.
-- **Scope is not asked.** lazy-review is per-repo — all runtime artifacts land under the cwd's git root regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
+- **Scope is not asked.** lazy-review is per-repo — all runtime artifacts land under `<repo-root>` regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
 - **No daemon gate.** The routine trio is registered unconditionally. `/lazy-runtime.tick` fires the same interval, git-watch, and cron routines on a checkout with no daemon, so gating registration on `daemon.enabled` would only withhold config the manual tick needs. The flag governs the supervisor unit and the metrics endpoint, both `lazy-core.install`'s business.
 - **No Python re-probe.** The Python ≥ 3.12 floor is enforced once by `lazy-core.install`; this skill does NOT re-probe it.
 
@@ -44,7 +44,13 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 ## Step 1 — Bootstrap settings + dirs
 
-Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd .`. The script applies the File-sync policy at the section level:
+**Resolve the project root (`<repo-root>`) first**, by run kind — `install.py` below and every later step use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
+
+Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd <repo-root>`. The script applies the File-sync policy at the section level:
 
 - Creates `.claude/lazy.settings.json` if missing, or merges the `review` / `experts` defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here). Sections are read and written through the core CLI's `settings-get` / `settings-set` verbs, one section at a time and only the sections that changed.
 - Reconciles the three routines below through the core CLI's `reconcile-routine` verb instead of the absent-only merge, so a registration made by an older version of this plugin does not stay on its old shape forever.
@@ -73,7 +79,7 @@ Step 1's seed gives `lazy-review.coordinator-watch` its **mandatory** protocol, 
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-review" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-review.coordinator-watch --ids lazycortex-core:lazy-core.markdown-style)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-review.coordinator-watch --ids lazycortex-core:lazy-core.markdown-style --cwd <repo-root>)
 ```
 
 That is the whole step. The coordinator is a system expert: its protocol set is fixed by design, so install never offers optional protocols for its routine and asks the operator nothing here. An operator who wants an extra protocol on a routine attaches it deliberately via `/lazy-routine.offer-protocols` — that skill is the operator-facing channel, not an install sub-step.
@@ -118,7 +124,7 @@ Outcome: **cli-allow-added**.
 The core `agent-models-seed` verb seeds the canonical model tiers of this plugin's `review.coordinator` and `lazy-review.doc_doctor` subagents into `agent_models.lazycortex`; the expert runtime resolves their models from there. lazy-review is per-repo, so the scope is always `project`:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-review --scope project)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-review --scope project --cwd <repo-root>)
 ```
 
 The verb prints one JSON line: `outcome` (`seeded-N` / `unchanged` / `no-entries`) and one `entries` row per agent with its state (`added` / `unchanged` / `refreshed` / `kept-local`). Fold those rows into the Report; never report a seed the verb did not answer. Exit 1 carries `sot-missing`, `missing-prefix`, `missing-scope`, or an unparseable settings file — relay its message and do not fabricate seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
@@ -133,7 +139,7 @@ The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the
 |---|---|---|
 | `review-callouts.css` snippet | `<vault>/.obsidian/snippets/review-callouts.css` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/review-callouts.css` |
 
-1. **Locate the vault.** Repo root is `git rev-parse --show-toplevel` (fall back to cwd); vault is `<repo-root>/.obsidian`. If it does not exist, this repo is not an Obsidian vault — state **no-vault** and continue to Step 6. Otherwise `mkdir -p <vault>/snippets`.
+1. **Locate the vault.** Repo root is the `<repo-root>` Step 1 resolved; vault is `<repo-root>/.obsidian`. If it does not exist, this repo is not an Obsidian vault — state **no-vault** and continue to Step 6. Otherwise `mkdir -p <vault>/snippets`.
 2. **Sync the snippet** per the File-sync policy above. Compare first with `Bash(cmp -s <shipped> <target>)`: exit 0 means byte-identical → nothing is copied (**unchanged**); a missing target → `cp` silently (**installed**); locally changed with the shipped delta applying to disjoint regions → merge silently (**merged**); same region changed incompatibly on both sides → the only case that asks (**merged** / **kept-local**):
 
    ```
@@ -149,7 +155,7 @@ The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the
 3. **Enable it through `lazycortex-obsidian`.** The Obsidian config belongs to that plugin, and its `snippet-enable` verb registers the snippet. Resolve its root first:
 
    ```
-   Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-obsidian)
+   Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-obsidian --cwd <repo-root>)
    ```
 
    Exit 1 means `lazycortex-obsidian` is not installed: the snippet stays copied but not enabled — state **deferred-no-obsidian** and continue; review works without it. Otherwise `<obsidian-cli>` is the obsidian plugin's `bin/lazycortex-obsidian` file under the printed root; run the verb through the interpreter:

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
-last_regen: 2026-11-12
+last_regen: 2026-11-21
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -9,8 +9,8 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
   - lazy-diagram.install
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: d1517ff4b8e4307bd8533b502b9b20421562a87696b1b49a051c2693547063da
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: 91b0dee7ad5479b228bcdd2b1942846406519cd9c2d24f9518c231bdddeade4f
 ---
 # Frequently asked questions
 
@@ -40,9 +40,23 @@ A scheme is a named JSON file that ships with the plugin and governs the colour 
 
 ## What happens when the dispatcher says "split-into-N"?
 
-The drawer agent returns `split-into-N` when the request would produce a diagram that exceeds the kind's upper-bound density (for example, more than 12 distinct nodes in a flow diagram, or more than 6 participants in a sequence). When this happens, the dispatcher surfaces the suggested seam list and stops — it does not emit multiple fences in a single call. You then run `/lazy-diagram.draw` once per seam, each targeting its own sub-section heading. The seam list in the output tells you where the natural split points are.
+The drawer agent returns `split-into-N` when the request would produce a diagram that exceeds the kind's upper-bound density (for example, more than 12 distinct nodes in a flow diagram, or more than 6 participants in a sequence). Both `/lazy-diagram.draw` and `/lazy-diagram.fix` then split the section for you in the same run, without asking anything. The seam list the drawer returns becomes N part headings, inserted one level below your anchor heading, in seam order. The section's existing prose moves into the part it describes, word for word: a bullet that covers two parts is cut at a sentence boundary, and a sentence that covers two parts stays in the first. Nothing is reworded beyond spelling out a subject where a cut bullet needs it, nothing is dropped, and nothing is added. The old fence under the anchor, if there was one, is removed, and each part gets its own diagram.
 
-If you encounter `split-into-N` from `/lazy-diagram.fix`, the cause is different: the host-section prose has grown to span multiple logical diagrams since the fence was first created. Fix does not split fences automatically — you must manually divide the section into sub-sections (each with its own heading), then re-run `/lazy-diagram.fix` per sub-section.
+The report ends with one line per part (the part heading and its outcome), and the run log names every part heading. Text under subheadings your section already held is not touched.
+
+The same happens from `/lazy-diagram.fix` when the host-section prose has grown to span several logical diagrams since the fence was first created: fix replaces the single old fence with one fence per part.
+
+---
+
+## A part reported "failed:split-not-converged". What now?
+
+After a section is split, each part is drawn once. If the drawer answers `split-into-N` again for a part, that part is not split a second time: its outcome is `failed:split-not-converged`, and its prose stays in place without a diagram. Shorten that part's prose or divide it into headings of your own, then run `/lazy-diagram.draw` on the part heading.
+
+---
+
+## Does the anchor heading have to be an H2?
+
+No. Both `/lazy-diagram.draw` and `/lazy-diagram.fix` accept an `anchor_section` heading of any level, for example `## User Flow` or `### Request path`. Pass the heading text exactly as it appears in the file; if no heading with that text exists, draw stops with `[FAIL] anchor not found in target_file`. The skills place the fence under the heading they were given and add headings only when they split a section.
 
 ---
 

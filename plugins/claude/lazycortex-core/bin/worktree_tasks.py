@@ -4,13 +4,14 @@ Lifecycle for job-isolated git worktrees: create-or-reuse, provision, bootstrap,
 An isolated expert job runs on its own branch inside a linked worktree under
 `<repo>/<worktree_root>/job-<job_id>/`, so the primary checkout never leaves the base branch and
 an agent's dirt or crash cannot touch the operator's tree. The manager creates the worktree off
-fresh base (or off the job's existing branch on a continuation), symlinks the gitignored local
+fresh base (or off the job's existing branch on a continuation), copies the gitignored local
 config in, runs the operator's bootstrap command, and removes the worktree once the job ends —
 the branch always survives; reintegration belongs to the coordinator, never to the runtime.
 """
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -162,11 +163,11 @@ class WorktreeTaskManager:
 
   def _provision(self, wt: Path) -> None:
     """
-    Symlink the primary checkout's gitignored local config into a worktree.
+    Copy the primary checkout's gitignored local config into a worktree as regular files.
 
     A fresh worktree materialises only tracked files, so the gitignored local
-    settings layer is absent and must be linked in so job agents inherit the
-    permission and path posture. Only the config layer is linked — the execution
+    settings layer is absent and must be copied in so job agents inherit the
+    permission and path posture. Only the config layer is copied — the execution
     environment (a venv and the like) is the bootstrap command's business.
 
     Args:
@@ -177,8 +178,13 @@ class WorktreeTaskManager:
     # # Config inheritance for an isolated job worktree
     # A freshly created job worktree materialises only the files git tracks, so the
     # gitignored local configuration layer an ordinary checkout carries is simply absent
-    # from it. That layer is linked in explicitly so a job's agents inherit the same
-    # permission and path posture as the primary checkout; building the rest of the
+    # from it. That layer is copied in explicitly, as regular files, so a job's agents
+    # inherit the same permission and path posture as the primary checkout. It cannot be
+    # linked instead: the agent runtime treats a linked worktree as an untrusted workspace
+    # and refuses permission rules read from a local settings file that is a link, which
+    # would leave the job's agents with no permissions at all. The copy is a snapshot taken
+    # when the worktree is created; later changes to the primary checkout's local
+    # configuration do not reach a job already running. Building the rest of the
     # execution environment a worktree also lacks — installed packages, a virtualenv,
     # anything else gitignored — is left entirely to the isolation's own bootstrap step.
 
@@ -191,7 +197,13 @@ class WorktreeTaskManager:
       # guard: nothing to link / already linked
       if not src.is_file() or dst.exists() or dst.is_symlink():
         continue
-      os.symlink(src.resolve(), dst)
+
+      # Decision: copy the file, not symlink it — Claude Code drops `permissions.allow` from a
+      # `settings.local.json` that is a symlink inside a linked worktree as untrusted, so a link
+      # would leave the job's agent with no permissions at all
+
+      # place a regular-file copy of the local config layer in the worktree
+      shutil.copyfile(src, dst)
 
   def _untracked(self, wt: Path) -> set[str] | None:
     """

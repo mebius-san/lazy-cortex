@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.install
 description: "Run when the operator asks to set up Obsidian for this repo or wire up a fresh vault, after a plugin update, or when tag pages render empty, the tag-page template is missing from `.claude/templates/`, icons are unpainted, or diagrams render unstyled. The plugin family's root entry point; it chains `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`."
-allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash(printenv *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-obsidian
 
@@ -12,7 +12,7 @@ Bootstrap the plugin in the right scope. What this skill does, in one pass:
 - Neither path ever prompts.
 - At project scope this skill is the root entry point for the plugin family: after the rule/template work it installs Dataview (needed by tag pages), syncs and enables every CSS snippet the plugin ships (the plugin owns `appearance.json` through its `snippet-enable` verb, which `lazy-review.install` calls too), and runs `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so a fresh vault reaches a usable state.
 
-The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill leaves it in place as a kept-orphan (it is never auto-deleted).
+The plugin's rules are whatever `rules/` ships; Step 2 enumerates them. A no-longer-shipped rule such as `lazy-obsidian.vault-hygiene.md` from an earlier version stays in place as a kept-orphan (it is never auto-deleted).
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -39,12 +39,18 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 - The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`.
 - Enablement is the source of truth for where config belongs.
 
-Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
+Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin.
 
-**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve the project root (`<repo-root>`) first**, by run kind — the `<core-cli>` resolver below and every later step use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `git rev-parse --show-toplevel`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
+
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file. Try these stages in order and take the first file that exists (`Bash(test -f <path>)`): (1) `<dir>/bin/lazycortex-core` for each `:`-separated entry `<dir>` of `$LAZYCORTEX_PLUGIN_DIRS` (`Bash(printenv LAZYCORTEX_PLUGIN_DIRS)`; an empty or unset variable skips the stage); (2) the dev-vault sibling `"${CLAUDE_PLUGIN_ROOT}/../lazycortex-core/bin/lazycortex-core"`; (3) the repo's own `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; (4) last, `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record a `Read` of `$HOME/.claude/plugins/installed_plugins.json` shows (never a walk of `~/.claude/plugins/cache/`). No stage matching means core is not installed: abort, naming every stage searched — `$LAZYCORTEX_PLUGIN_DIRS`, the dev-vault sibling, `<repo-root>/plugins/claude/lazycortex-core/`, `installed_plugins.json`. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-obsidian@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-obsidian@lazycortex --cwd <repo-root>)
 ```
 
 The command prints exactly one word:
@@ -54,7 +60,7 @@ The command prints exactly one word:
 
 The scope is derived — do NOT ask.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (resolved in Step 2 — the `repo=` dispatch arg when headless, else `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (resolved above — the `repo=` dispatch arg when headless, else `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
 
 Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
@@ -73,11 +79,7 @@ For each source file `<installPath>/rules/<name>.md`, the rule destination by sc
 | `user` | `~/.claude/rules/<name>.md` |
 | `project` | `<repo-root>/.claude/rules/<name>.md` |
 
-Project root (`<repo-root>`), by run kind:
-
-1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
-2. Interactive run with no `repo=`: `<repo-root>` = `git rev-parse --show-toplevel`.
-3. Not in a git repo: fall back to the current working directory — but warn the user.
+`<repo-root>` is the project root Step 1 resolved.
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-obsidian@lazycortex` first.
 
@@ -86,22 +88,29 @@ If the glob returns zero files, abort and tell the user the plugin cache is empt
 ### Enumerate source and target
 
 - Source rules: `Bash(ls <installPath>/rules/*.md)`.
-- Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex-obsidian` → `lazy-obsidian`), plus every unique `<ns>.` prefix appearing in source rule filenames. When no rules ship, the owned namespace is just `lazy-obsidian`.
-- Target candidates: `Bash(ls <targetRulesDir>/<ns>.*.md)` for each owned namespace.
-- Ensure the destination directory exists with `mkdir -p`.
+- Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex-obsidian` → `lazy-obsidian`), plus every unique `<ns>.` prefix appearing in source rule filenames.
+- Target directory `<targetRulesDir>`: the rule destination's directory from Step 2.
 
 ### Per-rule decision (quiet file-sync)
 
-Rules are install-managed mirrors: the plugin owns every byte, and a consumer who wants different content authors their own rule file rather than editing the mirror. So a target that differs from the shipped source is a stale copy, and the sync never prompts:
+Rules are install-managed mirrors: the plugin owns every byte, and a consumer who wants different content authors their own rule file rather than editing the mirror. So a target that differs from the shipped source is a stale copy, and the sync never prompts.
 
-1. **Absent** — target missing, source present → `cp <source> <target>`. State **installed**.
+Run one `file-sync` call over the whole rules directory, one `--owned-glob` per owned namespace. The write goes through the verb so a background install is not denied a write into `.claude/`:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --owned-glob '<ns>.*.md')
+```
+
+The verb creates `<targetRulesDir>` when missing and prints a JSON receipt; take each rule's state from its `results` entry:
+
+1. **Absent** — target missing, source present → copied. State **installed**.
 2. **Byte-identical** — both present and equal → no action. State **unchanged**.
-3. **Different** — both present and the bytes differ → overwrite from the shipped source, then re-compare to confirm the write landed. State **refreshed**, or **failed** when the target still differs afterwards.
-4. **Orphan** — target present, source missing → leave it in place silently. State **kept-orphan**. Orphans are never deleted: the rule may still be relied on, and we can't prove removal is safe.
+3. **Different** — both present and the bytes differ → overwritten from the shipped source and byte-verified. State **refreshed**, or **failed** when the target still differs afterwards (the verb lists it under `failed` and exits 3).
+4. **Orphan** — target present inside an owned namespace, source missing → left in place. State **kept-orphan**. Orphans are never deleted: the rule may still be relied on, and we can't prove removal is safe.
 
-The verdict is a byte comparison, never an impression from reading the two files.
+The verdict is the verb's byte comparison, never an impression from reading the two files.
 
-With zero source rules, nothing is written and orphans are silently kept. Users upgrading from an earlier version see `lazy-obsidian.vault-hygiene.md` reported as **kept-orphan** (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in the `plugin-install` verb + `/lazy-obsidian.iconize-install`) — the report notes it is retired so the user can delete it by hand.
+Orphans are silently kept. Users upgrading from an earlier version see `lazy-obsidian.vault-hygiene.md` reported as **kept-orphan** (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in the `plugin-install` verb + `/lazy-obsidian.iconize-install`) — the report notes it is retired so the user can delete it by hand.
 
 ### Namespace-scoped orphan handling
 
@@ -116,14 +125,21 @@ The `lazy-obsidian.gen-tag-pages` agent reads its template from the consumer rep
 - Source: `<installPath>/templates/obsidian/tag-page-template.md`
 - Target: `<repo-root>/.claude/templates/lazy-obsidian.tag-page-template.md`
 
-Ensure `<repo-root>/.claude/templates/` exists with `mkdir -p` before any write.
-
 ### Per-file decision (seed, not mirror)
 
-This file is **not** an install-managed mirror, and Step 3's overwrite-on-drift policy does not apply to it. The vault is expected to tailor its tag pages, and there is no `_local` override path for this template — the file itself is the customisation surface. So the shipped copy is a seed:
+This file is **not** an install-managed mirror, and Step 3's overwrite-on-drift policy does not apply to it. The vault is expected to tailor its tag pages, and there is no `_local` override path for this template — the file itself is the customisation surface. So the shipped copy is a seed.
 
-1. **Absent** — target missing → `cp <source> <target>` silently. State **installed**.
-2. **Present** — whatever it contains → leave it byte-for-byte. State **kept-local**.
+Run `file-sync` in file mode, without `--copy-diverged`. The write goes through the verb so a background install is not denied a write into `.claude/`:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <installPath>/templates/obsidian/tag-page-template.md --dst <repo-root>/.claude/templates/lazy-obsidian.tag-page-template.md)
+```
+
+The verb creates `<repo-root>/.claude/templates/` when missing. Map its single `results` state:
+
+1. **Absent** — `installed` → the seed was copied. State **installed**.
+2. **Present** — `unchanged` or `diverged`, whatever the file contains → left byte-for-byte. State **kept-local**.
+3. `failed` (exit 3) → the copy did not verify. State **failed**.
 
 No comparison, no merge, no prompt, ever. Once the file exists it belongs to the vault, and a plugin update that changes the shipped default does not reach it. No orphan detection is needed — the plugin owns exactly one template file under this name.
 
@@ -221,7 +237,7 @@ Invoke `/lazy-obsidian.diagram-install` as the next skill call. Record **chained
   - Scope detected
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
   - For each rule: state (**installed**, **unchanged**, **refreshed**, **kept-orphan**, or **failed**) and target `<path>`
-  - Tag-page template: state (**installed** or **kept-local**) and target `<path>` — omit when scope is `user`
+  - Tag-page template: state (**installed**, **kept-local**, or **failed**) and target `<path>` — omit when scope is `user`
   - Dataview install: `plugin-install` state tuple (`binary=... overrides=... community=...`) or **failed:`<reason>`** — omit when scope is `user`
   - iconize-install chain: **chained** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
   - Snippets (Step 6.5) — one bullet per snippet: sync state (**installed** / **unchanged** / **merged** / **kept-local**) and appearance.json state (**enabled** / **already-enabled** / **deferred** / **refused: `<reason>`**), with target `<path>` — omit when scope is `user`.
@@ -234,8 +250,10 @@ The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with ever
 Run, passing the scope resolved in Step 1 (`project` | `user`):
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-obsidian --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-obsidian --scope <scope> --cwd <repo-root>)
 ```
+
+`--cwd <repo-root>` is passed at both scopes: it fixes the repository the verb resolves the core tier table from, and `--scope user` still writes `~/.claude/lazy.settings.json`.
 
 The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 7 report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 

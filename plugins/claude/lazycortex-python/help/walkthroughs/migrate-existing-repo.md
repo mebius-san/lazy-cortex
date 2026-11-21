@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
-last_regen: 2026-11-13
+last_regen: 2026-11-21
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy cfg-py/chk-py/tst-py wrappers, detect PyCharm, bootstrap pyproject.toml, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → the six-step gate (pcf, toi, cmp, mypy, ruff, pylint) surfaces existing violations, including pcf's language and project-package findings → user fixes violations in chunks and commits iteratively until chk-py all exits clean → user dispatches lazy-python.knowledge-sweep to grow the domain-groups dictionary from any parked Domain(unfiled) blocks the fixes surfaced and file them under real groups"
@@ -12,8 +12,8 @@ source_skills:
   - pcf.py
   - lazy-python.knowledge-sweep
   - lazy-python.contract-writer
-source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
-surface_sha: e7258b9a82f3812dcbddbd8b1897a717f5748e98a44aaba5775d5785ccb1dceb
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: 522c40692289e5a8775a7736f784a63d9a0609c34631a8e6c232b8ceb6e1c424
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -34,7 +34,7 @@ After this walkthrough you have:
 
 - `lazycortex-core` installed and enabled in Claude Code.
 - `lazycortex-python@lazycortex` installed and enabled — `enabledPlugins` in your `~/.claude/settings.json`.
-- Python 3 reachable on `$PATH`.
+- Python 3.12 or newer reachable on `$PATH` — the version floor is checked by `/lazy-core.install`, so this install does not ask about it again.
 - Write access to the repo root (`pyproject.toml`, `.gitignore`, `cli/`, `docs/guidelines/`, `.claude/`).
 - A `pyproject.toml` at the repo root — even a minimal one. If the repo predates `pyproject.toml`, create a stub with `[project]` before running the install; Step 4 merges checker sections into it without replacing consumer sections.
 - A sense of what language the existing comments and docstrings are written in — `pcf` checks this by default (see Step 2) and a repo that isn't purely English needs a decision before remediation starts.
@@ -67,7 +67,7 @@ The same applies to private labels in a docstring's `Attributes` section. `pcf` 
 
 **Migrating past the 3.0 marker rename.** Release 3.0 renamed three marker comments to fit a name-register scheme (the register a marker's name uses now encodes its category): `REF:` became `ref:` (lowercase, one-line annotation), `# DOC(...):` became `# Domain(...):` (Capitalized, opens a standalone knowledge block), and `# Contract!` became `# Contract:` (also Capitalized, also standalone — no text after the colon on the marker line itself). `pcf` also enforces a blank-line boundary around every Capitalized block marker (`Domain(...):`, `Contract:`, `Decision:`) — a marker glued to a statement, or a block whose last line touches the code that follows, is a violation in its own right, independent of the rename. If this repo's Python predates 3.0, expect leftover `REF:` / `DOC(...):` / `Contract!` occurrences and un-separated `Domain(...):` / `Contract:` / `Decision:` blocks to surface as `pcf` findings in Step 2's inventory — rename the markers and insert the separating blank lines as part of remediation.
 
-**Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: the rule-mirror outcome covering all four shipped rules (style, docstrings, tests, and failing-tests), `wrappers-deployed-4 + gitignore-ensured` (or `gitignore-already-present`), the human-facing wrapper install's per-copy state (`installed` / `unchanged` / `refreshed`) for `~/.local/bin/cfg-py`, `chk-py` and `tst-py` — plus a `path-warning` note if `~/.local/bin` isn't on your `$PATH` — `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped` or `pyproject-already-complete` (suffixed `+manual-edit` when the install printed a `manual-edit:` line), an `env-source-*` outcome, a `seeded` or `unchanged` tier-seed outcome, an `expert-registered`, `expert-refreshed`, or `expert-already-registered` outcome, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
+**Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: the rule-mirror outcome covering all four shipped rules (style, docstrings, tests, and failing-tests), `wrappers-deployed-4 + gitignore-ensured` (or `gitignore-already-present`), the human-facing wrapper install's per-copy state (`installed` / `unchanged` / `refreshed`) for `~/.local/bin/cfg-py`, `chk-py` and `tst-py` — plus a `path-warning` note if `~/.local/bin` isn't on your `$PATH` — `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped` or `pyproject-already-complete` (suffixed `+pch-enabled` or `+pch-skipped-no-pycharm`, and `+manual-edit` when the install printed a `manual-edit:` line), the scaffold-template sync (one copy state per template — `installed` / `unchanged` / `refreshed` / `protected` / `failed` — followed by the registry outcome), an `env-source-*` outcome, a `seeded` or `unchanged` tier-seed outcome, an `expert-registered`, `expert-refreshed`, or `expert-already-registered` outcome, and so on. The rule-mirror step also prints a per-rule receipt (`installed` / `unchanged` / `refreshed` / `failed`) — a `failed` entry means a write did not verify, so fix that before proceeding. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
 
 ### Step 2 — Take a full violation inventory
 

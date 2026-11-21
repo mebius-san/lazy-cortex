@@ -453,17 +453,45 @@ def cmd_settings_get(argv: list[str]) -> int:
   return 0
 
 
+def _read_value_source(key: str | None, value: str | None, value_file: str | None) -> str | None:
+  """
+  Return the raw JSON text a `settings-set` call writes.
+
+  Args:
+    key: The keyed-write path, or None for a whole-section write read from stdin.
+    value: The inline `--value` text, when given.
+    value_file: The `--value-file` path, when given.
+
+  Returns:
+    The raw JSON text, or None when the keyed write deletes.
+
+  Raises:
+    OSError: If the value file cannot be read.
+  """
+  # a whole-section write reads stdin
+  if key is None:
+    return sys.stdin.read()
+
+  # a keyed write without a value file takes the inline value
+  if value_file is None:
+    return value
+
+  # a value file is read whole as UTF-8 text
+  with open(value_file, encoding = "utf-8") as handle:
+    return handle.read()
+
+
 def cmd_settings_set(argv: list[str]) -> int:
   """
   Run the `settings-set` subcommand: persist a whole section from stdin, or one nested value.
 
   Args:
     argv: Argument vector after the subcommand name (section plus optional `--key`,
-      `--value`, `--delete`, `--scope`, `--verbatim`, `--home`, `--cwd`).
+      `--value`, `--value-file`, `--delete`, `--scope`, `--verbatim`, `--home`, `--cwd`).
 
   Returns:
-    Process exit code: 0 on success, 1 on malformed / non-object input or when the existing
-    settings file on the target layer is not valid JSON.
+    Process exit code: 0 on success, 1 on malformed / non-object input, on a value file that
+    cannot be read, or when the existing settings file on the target layer is not valid JSON.
 
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser; this
@@ -478,6 +506,8 @@ def cmd_settings_set(argv: list[str]) -> int:
   # waiver: argparse CLI signature and help strings, not domain keys
   parser.add_argument("--value", default = None, help = "JSON value to store under --key")
   # waiver: argparse CLI signature and help strings, not domain keys
+  parser.add_argument("--value-file", default = None, help = "File holding the JSON value to store under --key")
+  # waiver: argparse CLI signature and help strings, not domain keys
   parser.add_argument("--delete", action = "store_true", help = "Remove --key instead of setting it")
   _add_verbatim_arg(parser)
   args = parser.parse_args(argv)
@@ -487,23 +517,34 @@ def cmd_settings_set(argv: list[str]) -> int:
     # waiver: one-off argparse usage message
     parser.error("--verbatim writes a whole tracked section; it takes neither --key nor another --scope")
 
-  # guard: --value or --delete given without --key
-  if args.key is None and (args.value is not None or args.delete):
-    # waiver: one-off argparse usage message
-    parser.error("--value and --delete require --key")
+  # how many keyed-write sources were given decides which usage errors apply
+  sources = (args.value is not None) + (args.value_file is not None) + bool(args.delete)
 
-  # guard: a keyed write needs exactly one of --value / --delete
-  if args.key is not None and (args.value is None) == (not args.delete):
+  # guard: --value, --value-file or --delete given without --key
+  if args.key is None and sources:
     # waiver: one-off argparse usage message
-    parser.error("--key needs exactly one of --value or --delete")
+    parser.error("--value, --value-file and --delete require --key")
 
-  # the value comes from stdin for a whole-section write and from --value for a keyed one
+  # guard: a keyed write needs exactly one of --value / --value-file / --delete
+  if args.key is not None and sources != 1:
+    # waiver: one-off argparse usage message
+    parser.error("--key needs exactly one of --value, --value-file or --delete")
+
+  # the raw value comes from stdin for a whole-section write, from --value or the --value-file file for a keyed one
+  origin = "stdin" if args.key is None else ("--value-file" if args.value_file is not None else "--value")
+  try:
+    raw = _read_value_source(args.key, args.value, args.value_file)
+  except OSError as error:
+    print(json.dumps({ ConfirmKey.ERROR: f"{origin} read: {error}" }))
+    return 1
+
+  # the raw text parses as JSON before anything touches disk
   # waiver: parsed under its own except so a parse error names its source; the write below catches a
   # different exception, so the local cannot be inlined into it
   try:
-    value = json.loads((sys.stdin.read() if args.key is None else args.value) or "null")
+    value = json.loads(raw or "null")
   except json.JSONDecodeError as error:
-    print(json.dumps({ ConfirmKey.ERROR: f"{'stdin' if args.key is None else '--value'} parse: {error}" }))
+    print(json.dumps({ ConfirmKey.ERROR: f"{origin} parse: {error}" }))
     return 1
 
   # the write's confirmation is printed as is; a rejected value, or a settings file on the target

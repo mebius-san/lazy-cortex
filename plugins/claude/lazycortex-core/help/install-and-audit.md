@@ -14,8 +14,8 @@ source_skills:
   - lazy-core.autosetup
   - lazy-core.autocheckup
   - lazy-core.daemon-setup
-source_sha: 5048c26182621a44f9d4ab628e900ce399ae12f0
-surface_sha: c7392e9f3190b242f43adc045c7af89c61e191268a00f98c4534180b3ac00735
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: a4289e58cbe93ab13a9bb0198a2362723a9b32550530351e5c03d6961857e2a5
 ---
 # Install, audit, and maintain lazycortex-core
 

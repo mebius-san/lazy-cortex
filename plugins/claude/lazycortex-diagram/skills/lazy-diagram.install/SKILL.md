@@ -43,10 +43,16 @@ Scope = **where the plugin is actually enabled**, not where `/plugin install` la
 
 Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
+**Resolve the project root (`<repo-root>`) first**, by run kind — `<core-cli>`, `detect-scope` below and every later step use it:
+
+1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
+3. Not in a git repo: fall back to the current working directory — but warn the user.
+
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file: when this repo authors the plugin itself (`plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists) that is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; otherwise `Read` `$HOME/.claude/plugins/installed_plugins.json` and take `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record (the registry keeps one record per project; never a walk of `~/.claude/plugins/cache/`). Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-diagram@lazycortex)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-diagram@lazycortex --cwd <repo-root>)
 ```
 
 The command prints exactly one word:
@@ -56,7 +62,7 @@ The command prints exactly one word:
 
 The scope is derived — do NOT ask.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (resolved in Step 1) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
 
 Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
@@ -75,7 +81,7 @@ For each source file `<installPath>/rules/<name>.md`, the rule destination by sc
 | `user` | `~/.claude/rules/<name>.md` |
 | `project` | `<repo-root>/.claude/rules/<name>.md` |
 
-Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — but warn the user).
+Project root is the `<repo-root>` Step 1 resolved.
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-diagram@lazycortex` first.
 
@@ -108,7 +114,7 @@ The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with ever
 Run, passing the scope resolved in Step 1 (`project` | `user`):
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-diagram --scope <scope>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-diagram --scope <scope> --cwd <repo-root>)
 ```
 
 The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 5 report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon, then recover it with /lazy-runtime.recover from any of its halt reasons.
-last_regen: 2026-11-18
+last_regen: 2026-11-21
 diagram_spec:
   - anchor: "Install and daemon setup"
     request: "Sequence diagram: User runs /lazy-core.install, which writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections with daemon.enabled false and never touches the daemon; then runs /lazy-core.daemon-setup, answers yes to enabling the daemon and to driving it from this checkout, and the skill installs the supervisor unit."
@@ -16,8 +16,8 @@ source_skills:
   - lazy-core.install
   - lazy-core.daemon-setup
   - lazy-runtime.recover
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: a7c719d057cd7ab06e78d458e952b03cc180dd103f84895350a52549a94c21c6
+source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
+surface_sha: e0ec3204a219fa3ab6c59fc93404715403cf511bcddcc891863701822779329e
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
