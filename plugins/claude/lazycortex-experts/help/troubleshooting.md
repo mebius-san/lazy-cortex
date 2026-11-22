@@ -51,7 +51,7 @@ surface_sha: 8b72cf18c9f32ba8c8696a1f881d1ff5d283c2848708ed748c33a5c5f64a25f9
 
 **Symptom**: Running `/lazy-experts.install` stops with `plugin-cache-incomplete: <missing-dir>` while enumerating the available expert classes.
 
-**Likely cause**: The skill globs `<installPath>/references/lazy-experts.*-aspect.md` (domain aspects) and `<installPath>/agents/lazy-experts.*.md` (agent roles) to build the class/role menu. If either glob comes back empty, the plugin cache is only partially synced — a `/plugin install` or `/plugin update` was interrupted, or the cache directory was manually cleared.
+**Likely cause**: The skill lists the domain aspects (`<installPath>/references/lazy-experts.*-aspect.md`) and the agent roles (`<installPath>/agents/lazy-experts.*.md`) through the plugin's `list-classes` verb to build the class/role menu. If either set comes back empty, the plugin cache is only partially synced — a `/plugin install` or `/plugin update` was interrupted, or the cache directory was manually cleared.
 
 **Fix**: Run `/plugin update lazycortex-experts@lazycortex` to restore the cache, then re-run `/lazy-experts.install`.
 

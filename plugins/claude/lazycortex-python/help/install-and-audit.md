@@ -3,9 +3,12 @@ chapter_type: block
 summary: Bootstrap lazycortex-python with an 11-step install (incl. env_source and job-worktree venv link) and verify with the 14-check read-only audit.
 last_regen: 2026-11-22
 diagram_spec:
-  anchor: "How install and audit relate"
-  request: "Show the two-skill lifecycle: /lazy-python.install runs its install steps (mirror rules → deploy wrappers → detect PyCharm → bootstrap pyproject (pch auto when PyCharm present) → scaffold overlays → sync scaffold templates, python-template.py for regular files and init-template.py for __init__.py → record python.env_source, disambiguating if multiple candidate bootstrap scripts exist) producing a verified install state, then /lazy-python.audit walks its read-only checks against that state and emits PASS/WARN/FAIL/INFO per check. Depict the flow from user invocation through install steps to installed-state artifacts, then through audit checks to the audit report. Highlight that re-running install is the fix for any FAIL."
-  kind_hint: flow
+  - anchor: "Install steps"
+    request: "Show the /lazy-python.install half of the two-skill lifecycle: from the user invoking /lazy-python.install through its install steps in order (mirror rules → deploy wrappers → detect PyCharm → bootstrap pyproject (pch auto when PyCharm present) → scaffold overlays → sync scaffold templates, python-template.py for regular files and init-template.py for __init__.py → record python.env_source, disambiguating if multiple candidate bootstrap scripts exist → record the in-checkout venv for isolated job worktrees, the last step: when the project venv lies inside the checkout, core's worktree-links-add verb adds its repo-relative path to daemon.git.worktree_links so every job worktree carries it as a link; a venv at an absolute path outside the checkout needs no link) to the verified installed-state artifacts it produces."
+    kind_hint: flow
+  - anchor: "Audit and repair"
+    request: "Show the /lazy-python.audit half of the two-skill lifecycle: from the verified install state, /lazy-python.audit walks its read-only checks against that state and emits PASS/WARN/FAIL/INFO per check into the audit report. Highlight that re-running /lazy-python.install is the fix for any FAIL."
+    kind_hint: flow
 source_skills:
   - lazy-python.install
   - lazy-python.audit
@@ -67,56 +70,92 @@ The connection between install and audit is intentionally simple for most of the
 
 ## How install and audit relate
 
+### Install steps
+
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userInvokesInstall[User runs /lazy-python.install]
-  mirrorAndDeploy[Mirror rules, deploy wrappers]
-  detectPycharm{PyCharm present?}
-  bootstrapPyproject[Bootstrap pyproject]
-  scaffoldAndSync[Scaffold overlays, sync templates - python-template.py, init-template.py]
-  recordEnvSource{Multiple bootstrap candidates?}
-  installState[Verified install state]
-  userInvokesAudit[User runs /lazy-python.audit]
-  walkChecks[Walk read-only checks]
-  auditOutcome{Check outcome}
-  auditReport[Audit report]
-  rerunInstall[Re-run install]
+  userInvokesInstall["User invokes /lazy-python.install"]
+  mirrorRules["Mirror rules"]
+  deployWrappers["Deploy wrappers"]
+  detectPycharm{"PyCharm present?"}
+  bootstrapPyproject["Bootstrap pyproject"]
+  scaffoldOverlays["Scaffold overlays"]
+  syncScaffoldTemplates["Sync scaffold templates: python-template.py for regular files, init-template.py for __init__.py"]
+  recordEnvSource{"Record python.env_source: multiple candidate bootstrap scripts?"}
+  disambiguateScripts["Disambiguate candidate bootstrap scripts"]
+  venvLocation{"Project venv inside checkout?"}
+  worktreeLinksAdd["worktree-links-add adds repo-relative venv path to daemon.git.worktree_links"]
+  installedState["Verified installed-state artifacts"]
 
-  userInvokesInstall -->|runs install steps| mirrorAndDeploy
-  mirrorAndDeploy -->|next| detectPycharm
-  detectPycharm -->|pycharm found| bootstrapPyproject
-  detectPycharm -->|no pycharm| bootstrapPyproject
-  bootstrapPyproject -->|pch auto when applicable| scaffoldAndSync
-  scaffoldAndSync -->|record env source| recordEnvSource
-  recordEnvSource -->|single candidate| installState
-  recordEnvSource -->|disambiguate| installState
-  installState -->|triggers| userInvokesAudit
-  userInvokesAudit -->|walks install state| walkChecks
-  walkChecks -->|evaluate| auditOutcome
-  auditOutcome -->|PASS or INFO| auditReport
-  auditOutcome -->|WARN| auditReport
-  auditOutcome -->|FAIL| rerunInstall
-  rerunInstall -->|fixes FAIL| userInvokesInstall
+  userInvokesInstall -->|start| mirrorRules
+  mirrorRules -->|next| deployWrappers
+  deployWrappers -->|next| detectPycharm
+  detectPycharm -->|yes, pch auto| bootstrapPyproject
+  detectPycharm -->|no| bootstrapPyproject
+  bootstrapPyproject -->|next| scaffoldOverlays
+  scaffoldOverlays -->|next| syncScaffoldTemplates
+  syncScaffoldTemplates -->|next| recordEnvSource
+  recordEnvSource -->|multiple| disambiguateScripts
+  recordEnvSource -->|single| venvLocation
+  disambiguateScripts -->|script chosen| venvLocation
+  venvLocation -->|inside checkout| worktreeLinksAdd
+  venvLocation -->|absolute path outside checkout, no link needed| installedState
+  worktreeLinksAdd -->|link recorded| installedState
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  class userInvokesInstall entry
+  class detectPycharm guard
+  class recordEnvSource guard
+  class venvLocation guard
+  class mirrorRules action
+  class deployWrappers action
+  class bootstrapPyproject action
+  class scaffoldOverlays action
+  class syncScaffoldTemplates action
+  class disambiguateScripts action
+  class worktreeLinksAdd action
+  class installedState success
+```
+
+### Audit and repair
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  verifiedInstallState["Verified install state"]
+  runAudit["/lazy-python.audit walks its read-only checks"]
+  checkResult{"Check result?"}
+  passEntry["PASS in audit report"]
+  warnEntry["WARN in audit report"]
+  infoEntry["INFO in audit report"]
+  failEntry["FAIL in audit report"]
+  rerunInstall["Fix: re-run /lazy-python.install"]
+
+  verifiedInstallState -->|audit starts| runAudit
+  runAudit -->|evaluate each check| checkResult
+  checkResult -->|pass| passEntry
+  checkResult -->|warn| warnEntry
+  checkResult -->|info| infoEntry
+  checkResult -->|fail| failEntry
+  failEntry -->|repair route| rerunInstall
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-
-  class userInvokesInstall entry
-  class mirrorAndDeploy action
-  class detectPycharm guard
-  class bootstrapPyproject action
-  class scaffoldAndSync action
-  class recordEnvSource guard
-  class installState success
-  class userInvokesAudit entry
-  class walkChecks action
-  class auditOutcome guard
-  class auditReport success
-  class rerunInstall error
+  class verifiedInstallState entry
+  class runAudit action
+  class checkResult guard
+  class passEntry success
+  class warnEntry action
+  class infoEntry action
+  class failEntry error
+  class rerunInstall success
 ```
 
 ## See also

@@ -8,6 +8,7 @@ source_skills:
   - lazy-core.daemon-setup
   - lazy-core.setup
   - lazy-core.audit
+  - lazy-core.checkup
   - lazy-core.autocheckup
   - lazy-core.autosetup
   - lazy-core.doctor
@@ -45,7 +46,7 @@ source_skills:
   - lazy-log.summary
   - lazy-log.timeline
 source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
-surface_sha: 92ac75f16982757e6dfb59698332bbbb30ed7b649b06be0471905737443d58a1
+surface_sha: 5032e6f1a743b4995fbf6f635e137f2cd9f2ad22527f4953d98604fe8405476a
 ---
 # FAQ
 
@@ -114,6 +115,16 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 `/lazy-core.slim-context` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
 
 Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want it repaired (mechanical fixes applied, the rest offered), and `/lazy-core.slim-context` specifically to shrink startup context.
+
+---
+
+## When do I run `/lazy-core.checkup` instead of `/lazy-core.audit` or `/lazy-core.doctor`?
+
+Run `/lazy-core.checkup` when you want one pass over everything and a single question at the end about what to fix. It is pure orchestration: it runs `/lazy-core.audit` and `/lazy-core.doctor` (the doctor in report-only mode, so it does not start its own fix loop), then merges every finding into one table per section — the repo-level section first, then one section per plugin in alphabetical order. Each row carries a severity (`FAIL`, `WARN`, `INFO`), a resolution, the skill that raised it, the path, the problem, and a suggested fix. Nothing is changed during this read-only pass.
+
+The `Resolution` column tells you whether a fix is worth asking about: `mechanical` means the change follows unambiguously from what was read, `selective` means you must choose between defensible changes, and `report-only` means no change is expected. A finding that arrives without a resolution counts as `report-only`. If no finding is `mechanical` or `selective`, the run prints the table and ends without asking you anything.
+
+Otherwise it asks once, as a multi-select, which fix-flows to run: `/lazy-core.slim-context`, the doctor's interactive fix loop, one option for each fix-flow another installed plugin publishes, or "Nothing — done". The chosen flows run one after another, each finishing before the next starts. Use `/lazy-core.audit` alone for a quick read on context footprint, `/lazy-core.doctor` alone when you want the per-finding repair loop straight away, and `/lazy-core.checkup` when you want both reads merged before deciding. The weekly `lazy-core.autocheckup` routine is the no-operator counterpart: it runs the checks on a schedule and applies only mechanical fixes.
 
 ---
 
