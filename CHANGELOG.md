@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 12.0.3 — 2026-11-22 UTC
+
+- Jobs that run in an isolated worktree can now reuse the project's Python virtualenv. A new `daemon.git.worktree_links` setting lists checkout paths to carry into the worktree, so `chk-py` and `tst-py` no longer break there. `lazy-core.audit` notes an expert that has neither links nor a bootstrap command.
+- `lazy-core.autosetup` runs unattended without failing on steps that need file listing or skill chaining. The core CLI gains an `agent-discover` verb, and a chained child install skill now runs in place and removes its snapshot file.
+- `lazy-core.autocheckup` and the install and audit steps now name the target repository when they resolve plugin CLIs, so they no longer resolve against the wrong checkout.
+- `lazy-log.clean` no longer aborts on an unreadable or undecodable `installed_plugins.json`. It skips that file instead.
+
 ### 12.0.2 — 2026-11-21 UTC
 
 - Expert jobs running in isolated worktrees now start with your local permissions. Local settings files are copied into the worktree rather than symlinked, so Read, Write and Bash calls are no longer denied.
@@ -850,6 +857,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 15.0.0 — 2026-11-22 UTC
+
+- **Breaking:** release build and test journals (`code-report.md`, `test-report.md`) that landed without the spec frontmatter keys (`spec_role`, `spec_doc_type`, product tag, `wiki_pinned_topics`, `iconize_icon`) get them added in place, keeping every key already there and leaving the body untouched. Run `/lazy-core.setup` to apply it.
+- Build and test journals now land with their spec frontmatter, so a journal waiting for the operator shows its icon and appears in tag and topic views.
+- Seeded documents of a type without stages no longer carry a stage or source requests.
+- Install no longer needs file listing or skill chaining that a background setup run cannot do; the document-type template check runs through one verb, so a headless setup finishes cleanly.
+- Install and audit resolve the core plugin against the repository they work on, so a setup run started from another checkout no longer runs that checkout's unreleased core sources.
+- A build journal lists only real departures from the plan as deviations; outcomes the plan itself predicted, such as a first test run failing before the code exists, are no longer listed.
+
 ### 14.0.1 — 2026-11-21 UTC
 
 - `lazy-spec.install` now works when it runs inside a background `lazy-core.autosetup` agent. Writes into `.claude/` go through the core file verbs instead of direct Bash or Write/Edit calls, which Claude Code auto-denies in that context. The skill also takes the target repo from `repo=` rather than the current directory, and passes it to every core verb it calls.
@@ -1345,6 +1361,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 7.0.2 — 2026-11-22 UTC
+
+- The icon install now merges the shipped icon map into the vault's own through a new `icon-map-merge` verb. Your entries are kept, new shipped ones are added, and a conflicting value is asked about once per key. The routine registration goes through the core reconcile verb, so a background setup run can complete the install without an operator.
+- The install now resolves the plugin root against the repository being installed. A background setup run started from another checkout reads the installed plugin, not that checkout's sources.
+
 ### 7.0.1 — 2026-11-21 UTC
 
 - Install and Iconize install no longer fail when run as a background setup agent: writes into the protected `.claude/` tree now go through core CLI verbs, and every settings call names the target repository instead of the agent's working folder.
@@ -1630,6 +1651,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Depends on `lazycortex-core`.
 
 ## lazycortex-diagram
+
+### 2.1.1 — 2026-11-22 UTC
+
+- `lazy-diagram.audit` now looks up the plugin root against the repository it is checking, so an audit started from another checkout judges the installed plugin instead of that checkout's sources.
 
 ### 2.1.0 — 2026-11-21 UTC
 
@@ -2210,6 +2235,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 2.0.2 — 2026-11-22 UTC
+
+- The developer expert reports only real departures from the plan as deviations in its build journal. It now fixes, or waives where the language canon allows, the guideline reviewer's WARN findings on code it wrote in the same task, instead of leaving them for you at acceptance.
+- `lazy-experts.install` now runs unattended in headless setup runs and resolves the plugin CLIs against the target repository.
+
 ### 2.0.1 — 2026-11-21 UTC
 
 - `lazy-experts.install` and `lazy-experts.audit` now work when run in the background by `lazy-core.autosetup`. They target the repo passed as `repo=` instead of the coordinator's working directory. All their settings and core-verb calls name that repo, and writes into `.claude/` go through core verbs, so Claude Code no longer auto-denies them.
@@ -2457,6 +2487,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.16.0 — 2026-11-22 UTC
+
+- `lazy-python.install` now records an in-checkout project venv so isolated worktree jobs can link it, and `chk-py` / `tst-py` work inside those worktrees instead of breaking for lack of a `.venv`.
+- `lazy-python.audit` has a new check that warns when a worktree job would run without the project venv linked.
+- `chk-py` always runs pylint single-process, fixing a crash in sandboxed daemon jobs when a project set `jobs = 0`.
 
 ### 4.15.1 — 2026-11-21 UTC
 
@@ -2766,6 +2802,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 4.0.3 — 2026-11-22 UTC
+
+- `/lazy-wiki.install` now runs unattended on another repository. It registers its routines through the core `reconcile-routine` verb against the target repository, so settings no longer land in the wrong repo. It lists its rules with a plain shell command. It also locates the plugin sources against the repository being set up.
 
 ### 4.0.2 — 2026-11-21 UTC
 

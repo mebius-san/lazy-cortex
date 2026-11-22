@@ -26,7 +26,7 @@ Severity is the shared vocabulary of `lazy-core.audit-contract.md` and nothing e
 Resolution says what kind of change the finding implies, and `/lazy-core.checkup` reads it to decide whether to offer a fix-flow at all:
 
 - **`mechanical`** — the repair follows unambiguously from what the check already read; there is no second defensible answer. Checks: L1 consumer-scope copy absent, L2, L3; Agent B scaffold-registry `plugin_root_var`, path hygiene, Python runtime FAIL, rule-writing 3 (inline-array `paths:`) and 9 (missing template pointer), model routing 4 (orphans) and 5 (gaps), audit-shape S4 (contract not named); Agent D D3, D4, D10 index desync, D11 rows other than `not_a_symlink` / `source_missing`, D13.
-- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4, L6; Agent A oversize rule, oversize `MEMORY.md`, and every non-`PASS` description grade; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17.
+- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4, L6; Agent A oversize rule, oversize `MEMORY.md`, and every non-`PASS` description grade; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17, D18.
 - **`report-only`** — a measurement or an observation with no change expected. Checks: every sizing row, the `total_kb` and `descriptions_total` lines from Agents A and B, the Python-runtime `[INFO]` line, model routing 1 (`_version` provenance), 3 (merged entries) and 7 (env var), every visible-waiver `[INFO]` (execution-discipline, `size-waiver:`, dirty-tree), Agent C H1 and H2 (both clear at the next publish bump — there is no manual route), D1's experts-count line, D3's absent-section lines, and D10's persona-but-empty line.
 
 A check added here is assigned a resolution in the same edit; an unassigned finding counts as `report-only` downstream, which silently drops a real repair out of `/lazy-core.checkup`'s question.
@@ -282,7 +282,7 @@ Scope: `lazy.settings.json[experts]`, the flat `lazy.settings.json[daemon]` and 
 
 **Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
 
-Perform these 17 sub-checks in order:
+Perform these 18 sub-checks in order:
 
 **D1 — `lazy.settings.json[experts]` schema**
 
@@ -495,6 +495,19 @@ Aspects compose additively (`lazy-core.expert-aspects-contract.md` § 4): obliga
 
 One finding per conflicting pair per expert. No entry with two or more resolved aspects, or no conflict found → emit nothing. Aspect text and expert composition are operator content — report only, never auto-repair.
 
+**D18 — Worktree execution environment**
+
+A job of an expert with `workspace: branch` runs in a fresh git worktree holding only tracked files; its gitignored environment (a venv and the like) arrives only through `daemon.git.worktree_links` or `daemon.git.worktree_bootstrap_cmd`. Run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" worktree-env-check)
+```
+
+The verb prints `{branch_experts, worktree_links, worktree_bootstrap_cmd, gap}` from the merged settings (exit 1 with a `message` when a settings file does not parse — that is D3's `[FAIL]`, emit nothing here).
+
+- `gap: true` → `[INFO] expert(s) <comma-joined branch_experts> run in job worktrees that get no execution environment — daemon.git.worktree_links and daemon.git.worktree_bootstrap_cmd are both empty | .claude/lazy.settings.json[daemon.git]`; `fix: list the gitignored paths the jobs need in daemon.git.worktree_links (a plugin install such as /lazy-python.install adds its own), or set daemon.git.worktree_bootstrap_cmd`.
+- `gap: false` → emit nothing.
+
 ### Structured report shape (Agents A, B, C — unchanged)
 
 ```
@@ -584,11 +597,14 @@ plugins_scanned: <n>  warn: <m>
 ### protocol_envelope
 - [FAIL] protocol <name> overrides the response envelope: <detail> | <path>
 
+### worktree_environment
+- [INFO] expert(s) <keys> run in job worktrees that get no execution environment — daemon.git.worktree_links and daemon.git.worktree_bootstrap_cmd are both empty | .claude/lazy.settings.json[daemon.git]
+
 ### summary
 pass: <n>  warn: <n>  fail: <n>
 ```
 
-The `aspect_conflicts`, `external_dirs` and `inbox_ownership` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
+The `aspect_conflicts`, `external_dirs`, `inbox_ownership` and `worktree_environment` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
 
 ## Phase 3 — Render
 
@@ -749,7 +765,9 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Operator git hooks** — one line per `[WARN]` from D15. Omit the section when D15 produced no findings.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D17 findings).
+**Worktree environment** — one line per `[INFO]` from D18, with its `fix:` route. Rendered despite being `[INFO]` — the finding names a repair. Omit the section when D18 produced no findings.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D18 findings).
 
 ### Logging compliance
 

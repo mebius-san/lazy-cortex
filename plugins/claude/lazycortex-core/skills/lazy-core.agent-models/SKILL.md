@@ -51,12 +51,14 @@ Parse `$ARGUMENTS`:
 
 Record the parsed values in the report.
 
+**Resolve the project root (`<repo-root>`)**, by run kind: a headless run whose prompt carries `repo=<abs>` (`lazy-core.autosetup`) takes that path, and never `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target; an interactive run takes `git rev-parse --show-toplevel`; outside a git repo, the current directory, with a warning. Every `./.claude/` path below means `<repo-root>/.claude/`, and every project-file `settings-get` / `settings-set` call carries `--cwd <repo-root>`.
+
 ## Step 2: Load or initialize configs
 
 Load both settings files via the core CLI (the verb reads through `bin/lazy_settings.py`); the first call prints `projectConfig`, the second `userConfig`, each as the section's JSON:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get agent_models)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get agent_models --cwd <repo-root>)
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get agent_models --home)
 ```
 
@@ -70,25 +72,33 @@ Build an in-memory merged view: `projectConfig` wins per-group over `userConfig`
 
 ## Step 3: Discover agents
 
-Shared enumeration (same as `lazy-core.audit` / `lazy-core.doctor` Phase), deduped by full dispatch string:
+One core verb discovers every agent and builds both lists Step 4 reports; it reads the directories, the install registry, the marketplace catalogs and both `agent_models` sections itself, so no file listing precedes it:
 
-1. **Built-ins** — hardcoded: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch: bare name.
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" agent-discover --cwd <repo-root>)
+```
+
+It prints one JSON object and exits 0: `agents` (one `{dispatch, group, plugin, source}` per discovered agent, deduped by dispatch string), `missing` and `stale` (Step 4). The enumeration it applies:
+
+1. **Built-ins** — `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch: bare name.
 2. **User-authored, global** — `~/.claude/agents/*.md`. Group: `_user`. Dispatch: filename stem.
-3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch: filename stem.
-4. **Plugin-shipped** — `<core-cli>` is the core plugin's own `bin/lazycortex-core` file, `${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core` — this skill ships with that plugin, so no lookup is needed; every verb runs through the interpreter because the file carries no exec bit. For every plugin name `installed_plugins.json` records (plus, in a repo that authors plugins, every `plugins/claude/<name>/` carrying a manifest), glob `<root>/agents/*.md` where `<root>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root <name>` prints — the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/<name>/`, and last the `installPath` of the highest-version record in `~/.claude/plugins/installed_plugins.json`; a walk of `~/.claude/plugins/cache/**` is never the route — it keeps every version ever installed and surfaces copies the registry no longer names. Group: domain (plugin name up to first `-`, else whole name). Dispatch: `<plugin-name>:<stem>`. **Install-scope filter:** the registry is machine-global, so filter each discovered plugin against `~/.claude/plugins/installed_plugins.json` — keep its agents only when the plugin is installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root, or the repo authors it. A plugin installed only into some other project's scope is invisible to this repo's run — skipping it here is what keeps a foreign project-scoped plugin from being re-flagged `needs-interactive` forever in every unrelated repo. **Enablement filter:** then drop every plugin whose `enabledPlugins["<plugin>@<marketplace>"]` is not `true` in the merged `./.claude/settings.json` + `./.claude/settings.local.json` (local overriding tracked, key by key — the same reading `lazy_setup.py discover` applies). The install registry records where a plugin was ever installed, never whether this repo still wants it: a repo that stripped a plugin keeps its stale project-scope record, and without this filter every one of that plugin's agents is seeded back into `agent_models` on the next run.
+3. **User-authored, project** — `<repo-root>/.claude/agents/*.md`. Group: `_project`. Dispatch: filename stem.
+4. **Plugin-shipped** — every plugin `installed_plugins.json` records, plus every `plugins/claude/<name>/` with a manifest in a repo that authors plugins: `<root>/agents/*.md`, `<root>` being what `plugin-root <name>` resolves (never a walk of `~/.claude/plugins/cache/`). Group: plugin name up to the first `-`, else the whole name. Dispatch: `<plugin-name>:<stem>`. **Install-scope filter:** kept only when installed at `user` scope, or at `project` scope with a `projectPath` equal to `<repo-root>`, or authored by the repo — a plugin installed only into some other project's scope is invisible here, so it is never re-flagged `needs-interactive` in every unrelated repo. **Enablement filter:** then dropped unless `enabledPlugins["<plugin>@<marketplace>"]` is `true` in the merged `<repo-root>/.claude/settings.json` + `settings.local.json` — the install registry records where a plugin was ever installed, never whether this repo still wants it.
 
-For each, record: dispatch string, target group, plugin name (if applicable), source path, and whether a merged-config entry exists.
+For each entry Step 7 needs the agent's frontmatter `description`: `Read` the `source` path the verb printed. A non-zero exit is `failed: agent-discover: <stderr>` — skip Steps 4–8 and report it.
 
 ## Step 4: Build missing- and stale-entries lists
 
-**Missing.** For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"default"` in either scope count as decided — exclude them.
+Both lists come from the Step 3 answer; this step only records them.
 
-**Stale.** Walk every configured entry (both scope files, every group) whose key is plugin-namespaced (`<plugin>:<stem>`). An entry is stale under either of two proofs:
+**Missing** — the answer's `missing`: every discovered dispatch string absent from both `agent_models` sections. Entries explicitly set to `"default"` in either scope count as decided and are not listed.
 
-1. **The agent was deleted.** The plugin is present in `~/.claude/plugins/installed_plugins.json` (or authored by this repo) AND the root `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root <plugin>` resolves has no `agents/<stem>.md` — the agent provably existed under that plugin's dispatch convention and is gone. The cached version alone is never the proof — the install registry is `plugin-root`'s last stage: in an authoring repo an agent that exists only in the tree is a new agent, not a deleted one, and pruning its row would undo the seed the next publish depends on.
-2. **The plugin was retired.** The plugin appears in NEITHER `installed_plugins.json` NOR any registered marketplace's catalog (`~/.claude/plugins/marketplaces/*/.claude-plugin/marketplace.json`, the `plugins[].name` values). A plugin the operator merely uninstalled still stands in its marketplace and is left alone; one that stands nowhere no longer exists to be reinstalled, so its keys can never resolve again.
+**Stale** — the answer's `stale`: one `{scope, group, dispatch, proof}` per configured plugin-namespaced key (`<plugin>:<stem>`) in either scope file that one of two proofs retires (`proof` is `agent-deleted` or `plugin-retired`):
 
-Record `(source file, group, dispatch)` in the stale list. Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems) are never flagged — absence can't be proven for them. A plugin-namespaced key whose stem names a skill rather than an agent (`superpowers:brainstorming`) is NOT exempt: the model router matches `Agent(subagent_type: …)` alone, a skill is never dispatched that way, and no seed re-creates the key, so proof 1 retires it like any other. Neither can it for an uninstalled plugin its marketplace still offers, which is why proof 2 requires both absences and not just the first.
+1. **The agent was deleted.** The plugin is present in `~/.claude/plugins/installed_plugins.json` (or authored by this repo) AND the root the `plugin-root` resolution gives it has no `agents/<stem>.md` — the agent provably existed under that plugin's dispatch convention and is gone. The cached version alone is never the proof — the install registry is `plugin-root`'s last stage: in an authoring repo an agent that exists only in the tree is a new agent, not a deleted one, and pruning its row would undo the seed the next publish depends on.
+2. **The plugin was retired.** The plugin appears in NEITHER `installed_plugins.json` NOR any registered marketplace's catalog (`~/.claude/plugins/marketplaces/*/.claude-plugin/marketplace.json`, the `plugins[].name` values). A plugin the operator merely uninstalled still stands in its marketplace and is left alone; one that stands nowhere no longer exists to be reinstalled, so its keys can never resolve again. A plugin the repo authors is never retired.
+
+Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems) are never listed — absence can't be proven for them. A plugin-namespaced key whose stem names a skill rather than an agent (`superpowers:brainstorming`) is NOT exempt: the model router matches `Agent(subagent_type: …)` alone, a skill is never dispatched that way, and no seed re-creates the key, so proof 1 retires it like any other.
 
 If both lists are empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
 
@@ -215,16 +225,16 @@ One `AskUserQuestion` at a time. Wait for each answer before the next prompt.
 
 ## Step 8: Write back
 
-**Prune first.** For each stale entry from Step 4, delete the key with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '<group>/<dispatch>' --delete)` (add `--home` when the user file holds it), then delete the group itself the same way when it has no entries left. Pruning is mechanical — both staleness proofs rest on what is on disk, not on judgement — so it applies in interactive AND non-interactive runs without a prompt; every removal is reported in Step 9, naming which proof retired it. If a pruned dispatch is still referenced as `experts.<name>.agent`, do NOT touch the expert entry — report it as `WARN: expert <name> references deleted agent <dispatch>`.
+**Prune first.** For each stale entry from Step 4, delete the key with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '<group>/<dispatch>' --delete --cwd <repo-root>)` (`--home` in place of `--cwd <repo-root>` when the entry's `scope` is `user`), then delete the group itself the same way when it has no entries left. Pruning is mechanical — both staleness proofs rest on what is on disk, not on judgement — so it applies in interactive AND non-interactive runs without a prompt; every removal is reported in Step 9, naming which proof retired it. If a pruned dispatch is still referenced as `experts.<name>.agent`, do NOT touch the expert entry — report it as `WARN: expert <name> references deleted agent <dispatch>`.
 
 Then group the planned writes from Steps 6 and 7 by destination file. For each destination that has at least one planned entry:
 
 1. Load the current section from the destination file via `load_section` (handles missing file transparently — no separate existence check needed).
 2. Apply all planned entries for this destination to the loaded section dict (creating missing group sub-keys on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries). Every entry it writes is a bare tier string: a value the operator chose in this wizard is a pin, and a pin carries no `seeded_from`. Writing one over a seed object replaces the object outright, which is the intended effect — the operator has spoken.
-3. Persist via the core CLI — one call per planned entry, with `--home` when the resolved destination is the user file (`$HOME/.claude/lazy.settings.json`) and without it for the project file:
+3. Persist via the core CLI — one call per planned entry, with `--home` when the resolved destination is the user file (`$HOME/.claude/lazy.settings.json`) and `--cwd <repo-root>` for the project file:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '<group>/<dispatch>' --value '"<tier>"')
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set agent_models --key '<group>/<dispatch>' --value '"<tier>"' --cwd <repo-root>)
 ```
 
 The verb does steps 1–2 itself (it loads the section, creates the missing group sub-key on demand, and prints `{"status":"written",...}`), performs an atomic write and never discards unrelated sections in the file.

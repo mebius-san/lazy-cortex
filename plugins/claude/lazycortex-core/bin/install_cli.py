@@ -1,18 +1,9 @@
 """
 Install-phase verbs for the `lazycortex-core` CLI.
 
-This module backs the `install-phase`, `daemon-run-here` and `gitignore-ensure` subcommands the
-`lazy-core.install` and `lazy-core.doctor` skills call instead of embedding Python.
-`install-phase <name>` runs one idempotent bootstrap phase from `lazy_install_phases` (or a
-one-line derivation such as the repo id) and prints the phase's outcome word, or for the
-`interpreter` phase the interpreter path a supervisor unit should record: the operator's pin,
-else the version-neutral `python3` on `PATH` outside a virtualenv, else the running interpreter;
-the `python-env` phase additionally requires `--command` naming the interpreter command an install
-probe resolved. `daemon-run-here` reads or writes the `daemon.run_here` host-to-checkout gate for
-the current host; `daemon-run-here check --json` prints the verdict together with the gate entry it
-rests on as one JSON object. The repository root follows the dispatcher convention: the
-`LAZY_REPO_ROOT` env var, falling back to the process working directory, overridable per-call with
-`--cwd`. `gitignore-ensure` adds ignore lines to the repository's `.gitignore`.
+This module backs the subcommands the `lazy-core.install` and `lazy-core.doctor` skills call instead of
+embedding Python: running the idempotent bootstrap install phases, managing the host-to-checkout daemon gate,
+and keeping the repository's `.gitignore` current.
 """
 from __future__ import annotations
 
@@ -51,24 +42,26 @@ if TYPE_CHECKING:
   from collections.abc import Callable
 
 
+# The shipped `.lazyignore` template the lazyignore phase seeds from.
 # waiver: shipped template location relative to this bin/ dir, fixed by the plugin layout
 _LAZYIGNORE_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / ".lazyignore"
 
-# waiver: daemon settings field names seeded absent-only by install; the pump reads them as literals too
+# The daemon settings install seeds when absent, with their default values.
 _DAEMON_DEFAULTS: dict[str, object] = {
   DaemonKey.ENABLED: False,
   DaemonKey.POLLING_INTERVAL_SEC: 5,
-  "cleanup_completed_after": "7d",
-  "cleanup_failed_after": "30d",
-  "cleanup_dead_after": "7d",
+  DaemonKey.CLEANUP_COMPLETED_AFTER: "7d",
+  DaemonKey.CLEANUP_FAILED_AFTER: "30d",
+  DaemonKey.CLEANUP_DEAD_AFTER: "7d",
   DaemonKey.STREAM_IDLE_TIMEOUT_SEC: 900,
-  "stream_max_retries": 3,
+  DaemonKey.STREAM_MAX_RETRIES: 3,
 }
 
+# The Claude Code settings files the retired log-hook commands are stripped from.
 # waiver: external Claude Code settings locations, not reusable domain keys
 _LOG_HOOK_SETTINGS = ( ".claude/settings.json", ".claude/settings.local.json" )
 
-# width of the SHA-256 prefix that keeps two same-named checkouts apart in the supervisor unit name
+# Width of the SHA-256 prefix that keeps two same-named checkouts apart in the supervisor unit name
 _REPO_ID_HASH_LEN = 8
 
 
@@ -249,7 +242,7 @@ def cmd_install_phase(argv: list[str]) -> int:
     print("python-env:", record_python_env(resolve_repo_root(args.cwd), args.command, sys.executable))
     return 0
 
-  # each phase prints exactly what its former inline snippet printed, so the skill's readers keep working
+  # the named phase runs against the repository root and prints its outcome word for the skill to read
   _PHASES[args.phase](resolve_repo_root(args.cwd), Path(args.template) if args.template else _LAZYIGNORE_TEMPLATE)
   return 0
 

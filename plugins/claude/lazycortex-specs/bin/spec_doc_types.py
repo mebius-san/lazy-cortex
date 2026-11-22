@@ -46,6 +46,63 @@ import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
+# waiver: CLI verb tokens -- dispatch keys for this module's own argparse router
+_VERB_OF = "of"
+_VERB_RESOLVE = "resolve"
+_VERB_LIST = "list"
+_VERB_BACKFILL = "backfill"
+_VERB_RENAME = "rename"
+_VERB_TEMPLATES = "templates"
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+_OUT_DOC_TYPE = "doc_type"
+_OUT_DECLARED = "declared"
+_OUT_TYPES = "types"
+
+# waiver: rename-result field names -- the JSON report shape this module's `rename` verb prints
+_OUT_DECLARATION = "declaration"
+_OUT_DOCS = "docs"
+_OUT_FILES = "files"
+_OUT_TEMPLATE = "template"
+_OUT_CLASSES = "classes"
+_OUT_COPIES = "copies"
+_OUT_ROLES = "roles"
+
+# The field names and outcomes of the report the `templates` verb prints.
+_OUT_OUTCOME = "outcome"
+_OUT_CHECKED = "checked"
+_OUT_UNKNOWN = "unknown"
+_OUT_FILE = "file"
+_OUT_PRODUCT = "product"
+_OUTCOME_NOTHING = "nothing-to-check"
+_OUTCOME_OK = "ok"
+_OUTCOME_UNKNOWN = "unknown-type"
+
+# The directory-name prefix marking a per-category template family (`spec.bug`, `spec.change`, …).
+_SPEC_TMPL_PREFIX = "spec."
+
+# waiver: backfill-only frontmatter tokens -- keys and result fields the one-shot migration uses
+_SPEC_ROLE = "spec_role"
+_STATUS_ROLE = "status"
+_MD_SUFFIX = ".md"
+_TOUCHED = "touched"
+_SKIPPED = "skipped"
+_CLEANED = "cleaned"
+_PATHS = "paths"
+
+# The frontmatter anchors the new key lands against: below `spec_role` when the document has one
+# (a scalar key — the next line is free), otherwise above `tags` — a block-mapping key whose list
+# items follow on the next lines, so writing below it would split the key from its items.
+_FM_ROLE_ANCHOR_RE = re.compile(r"(?m)^spec_role\s*:.*$")
+_FM_TAGS_ANCHOR_RE = re.compile(r"(?m)^tags\s*:.*$")
+
+# The opening frontmatter fence, used when a document carries neither anchor line.
+_FM_OPEN_FENCE = "---\n"
+
+# The `spec_doc_type` line itself, matched so the migration can take the key back off a level
+# note an earlier release typed. A scalar key, so the match ends at its own newline.
+_FM_DOC_TYPE_LINE_RE = re.compile(r"(?m)^spec_doc_type\s*:.*\n?")
+
+
 # ----------------------------------------------------------------------------------------
 class DocTypeFlag:
   """
@@ -115,52 +172,6 @@ class _K:
   CLASS = "class"
   # Separator between a class name and the product qualifying it.
   CLASS_PRODUCT_SEP = "@"
-
-
-# waiver: CLI verb tokens -- dispatch keys for this module's own argparse router
-_VERB_OF = "of"
-_VERB_RESOLVE = "resolve"
-_VERB_LIST = "list"
-_VERB_BACKFILL = "backfill"
-_VERB_RENAME = "rename"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
-_OUT_DOC_TYPE = "doc_type"
-_OUT_DECLARED = "declared"
-_OUT_TYPES = "types"
-
-# waiver: rename-result field names -- the JSON report shape this module's `rename` verb prints
-_OUT_DECLARATION = "declaration"
-_OUT_DOCS = "docs"
-_OUT_FILES = "files"
-_OUT_TEMPLATE = "template"
-_OUT_CLASSES = "classes"
-_OUT_COPIES = "copies"
-_OUT_ROLES = "roles"
-
-# The directory-name prefix marking a per-category template family (`spec.bug`, `spec.change`, …).
-_SPEC_TMPL_PREFIX = "spec."
-
-# waiver: backfill-only frontmatter tokens -- keys and result fields the one-shot migration uses
-_SPEC_ROLE = "spec_role"
-_STATUS_ROLE = "status"
-_MD_SUFFIX = ".md"
-_TOUCHED = "touched"
-_SKIPPED = "skipped"
-_CLEANED = "cleaned"
-_PATHS = "paths"
-
-# The frontmatter anchors the new key lands against: below `spec_role` when the document has one
-# (a scalar key — the next line is free), otherwise above `tags` — a block-mapping key whose list
-# items follow on the next lines, so writing below it would split the key from its items.
-_FM_ROLE_ANCHOR_RE = re.compile(r"(?m)^spec_role\s*:.*$")
-_FM_TAGS_ANCHOR_RE = re.compile(r"(?m)^tags\s*:.*$")
-
-# The opening frontmatter fence, used when a document carries neither anchor line.
-_FM_OPEN_FENCE = "---\n"
-
-# The `spec_doc_type` line itself, matched so the migration can take the key back off a level
-# note an earlier release typed. A scalar key, so the match ends at its own newline.
-_FM_DOC_TYPE_LINE_RE = re.compile(r"(?m)^spec_doc_type\s*:.*\n?")
 
 
 # Flag defaults applied to any declaration that omits them — a project type declaring only
@@ -816,13 +827,8 @@ def rename(repo: Path, old: str, new: str) -> dict:
   """
   Rename one document type everywhere it is recorded, in the declaration and on disk.
 
-  The declaration key moves with its flags intact, every catalog document carrying the old
-  type in its `spec_doc_type` or `spec_role` has the matching value rewritten, and a document
-  whose basename matched the old type is also renamed to match the new one. The shipped
-  template and every per-category template copy under `spec.*` directories, in both the
-  plugin's own template tree and the repo's override tree, follow with their own frontmatter
-  rewritten, and every review class named after the type — product-qualified variants
-  included — is renamed with it. A document whose basename never matched the old type keeps
+  Carries the retired type name over to the new one in every place the repository records it, so no
+  trace of the old name is left behind. A document whose basename never matched the old type keeps
   the name it has.
 
   Guarantees:
@@ -892,6 +898,96 @@ def rename(repo: Path, old: str, new: str) -> dict:
            _OUT_COPIES: _rename_copies(repo, old, new), _OUT_ROLES: roles }
 
 
+def _find_all_spec_templates(repo: Path) -> list[tuple[Path, str | None]]:
+  """
+  List every consumer template under the template-context directories, with the product layer it belongs to.
+
+  Args:
+    repo: Repository root holding `.claude/templates/`.
+
+  Returns:
+    `(path, product)` pairs sorted by path; `product` is the first subdirectory under the context directory, or
+    None for a file directly in it.
+  """
+  base = repo / _K.SETTINGS_REL.parent / _K.TEMPLATES_DIR
+
+  # guard: a repo without consumer templates has nothing to list
+  if not base.is_dir():
+    return []
+
+  # every markdown file below each `spec.<context>/`, at any depth
+  found: list[tuple[Path, str | None]] = []
+  for context in sorted(os.listdir(base)):
+    context_dir = base / context
+
+    # guard: only template-context directories hold spec templates
+    if not context.startswith(_SPEC_TMPL_PREFIX) or not context_dir.is_dir():
+      continue
+    for dirpath, _dirnames, filenames in os.walk(context_dir):
+      rel_parts = Path(dirpath).relative_to(context_dir).parts
+      product = rel_parts[0] if rel_parts else None
+      found.extend((Path(dirpath) / name, product) for name in filenames if name.endswith(_MD_SUFFIX))
+  return sorted(found, key = lambda pair: pair[0])
+
+
+def verify_templates(repo: Path) -> dict:
+  """
+  Check that every typed consumer spec template names a declared document type.
+
+  A baseline template is accepted when the shipped set or any registered product declares its type; a template under
+  a product's override folder is accepted only when that product's own scope declares it.
+
+  Args:
+    repo: Repository root holding `.claude/templates/` and `.claude/lazy.settings.json`.
+
+  Returns:
+    The `outcome` (`nothing-to-check`, `ok` or `unknown-type`), the count of typed templates `checked`, and the
+    `unknown` entries naming each offending file, its type and its product layer.
+
+  Raises:
+    ValueError: If a settings file the declarations depend on cannot be read; a `spec_paths.SettingsError`
+      naming the settings file.
+  """
+  typed = [ (path, product, doc_type_of(path)) for path, product in _find_all_spec_templates(repo) ]
+  typed = [ entry for entry in typed if entry[2] ]
+
+  # guard: no template carries a type, so there is nothing to resolve and no settings to read
+  if not typed:
+    return { _OUT_OUTCOME: _OUTCOME_NOTHING, _OUT_CHECKED: 0, _OUT_UNKNOWN: [] }
+
+  # Domain(spec.declarations):
+  # # Where a template's document type must be declared
+  # A consumer template names the document type it produces, and that type is legitimate only when some declaration
+  # stands behind it. Which declarations count depends on where the template lives. A baseline template sits in the
+  # project-wide template folder and serves every product, so its type is accepted when the shipped declarations or the
+  # declarations of any registered product cover it. A template in a product's override folder serves that product
+  # alone, so its type is accepted only when that product's own scope declares it: the shipped declarations, its own,
+  # and those of the products enclosing it. A declaration made by any other product never legitimises an override,
+  # because that product's types are not visible to this one.
+
+  # the scopes a type may be declared in: the product's own for an override, any product's for a baseline
+  products = resolve_product.load_products(repo)
+  scopes: dict[str | None, set[str]] = { None: set(declared_types(repo, None, products = products)) }
+  for key in products:
+    scopes[None].update(declared_types(repo, key, products = products))
+
+  # walk the typed templates, each checked against the scope of its product layer
+  unknown: list[dict] = []
+  for path, product, doc_type in typed:
+    # opt: the product registry and the shipped declarations stay fixed for the whole call
+    if product not in scopes:
+      scopes[product] = set(declared_types(repo, product, products = products))
+
+    # a type its scope does not declare is reported with its file and product layer
+    if doc_type not in scopes[product]:
+      unknown.append({ _OUT_FILE: path.relative_to(repo).as_posix(), _OUT_DOC_TYPE: doc_type,
+                       _OUT_PRODUCT: product })
+
+  # the outcome follows from whether anything stayed undeclared
+  return { _OUT_OUTCOME: _OUTCOME_UNKNOWN if unknown else _OUTCOME_OK, _OUT_CHECKED: len(typed),
+           _OUT_UNKNOWN: unknown }
+
+
 def _repo_from_args(cwd: str | None) -> Path:
   """
   Resolve the repository root the same way every other lazycortex-specs subcommand does.
@@ -907,23 +1003,23 @@ def _repo_from_args(cwd: str | None) -> Path:
 
 def main(argv: list[str]) -> int:
   """
-  Run the `doc-type` subcommand: read a document's type or a type's declaration, or rename one.
+  Run the `doc-type` subcommand: read a document's type or a type's declaration, rename a type, or check templates.
 
   Args:
-    argv: Subcommand argv tail (`of <file>`, `resolve <type>`, `list`, `backfill`, or
-      `rename <old> <new>`).
+    argv: Subcommand argv tail (`of <file>`, `resolve <type>`, `list`, `backfill`, `rename <old> <new>`, or
+      `templates`).
 
   Returns:
-    Exit code: `0` on success, `1` when `resolve` finds no declaration, `2` on argparse failure or when the
-    settings cannot be read (the message goes to stderr).
+    Exit code: `0` on success, including `templates`, which prints its JSON outcome and exits `0`; `1` when `resolve`
+    finds no declaration; `2` on argparse failure or when the settings cannot be read during `resolve`, `list` or
+    `templates` (the message goes to stderr).
   """
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs doc-type")
   # waiver: argparse CLI signature -- subparser slot each verb registers into
   sub = parser.add_subparsers(dest = "verb", required = True)
-  p_of = sub.add_parser(_VERB_OF)
   # waiver: argparse CLI signature -- positional argument name
-  p_of.add_argument("file", type = Path)
+  sub.add_parser(_VERB_OF).add_argument("file", type = Path)
   p_resolve = sub.add_parser(_VERB_RESOLVE)
   # waiver: argparse CLI signature -- positional argument name
   p_resolve.add_argument("doc_type")
@@ -932,9 +1028,9 @@ def main(argv: list[str]) -> int:
     verb_parser.add_argument("--product", default = None)
     # waiver: argparse CLI signature -- option flag + default
     verb_parser.add_argument("--cwd", default = None)
-  p_backfill = sub.add_parser(_VERB_BACKFILL)
-  # waiver: argparse CLI signature -- option flag + default
-  p_backfill.add_argument("--cwd", default = None)
+  for verb in (_VERB_BACKFILL, _VERB_TEMPLATES):
+    # waiver: argparse CLI signature -- option flag + default
+    sub.add_parser(verb).add_argument("--cwd", default = None)
   p_rename = sub.add_parser(_VERB_RENAME)
   # waiver: argparse CLI signature -- positional argument names
   p_rename.add_argument("old")
@@ -962,6 +1058,9 @@ def main(argv: list[str]) -> int:
   try:
     if args.verb == _VERB_LIST:
       print(json.dumps({ _OUT_TYPES: sorted(declared_types(repo, args.product)) }))
+      return 0
+    if args.verb == _VERB_TEMPLATES:
+      print(json.dumps(verify_templates(repo)))
       return 0
     declaration = resolve(repo, args.doc_type, args.product)
   except spec_paths.SettingsError as error:

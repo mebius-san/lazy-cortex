@@ -13,19 +13,23 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_install_phases import ensure_self_ignoring_dir  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from collections.abc import Sequence
 
 
 class WorktreeStartError(RuntimeError):
   """
-  Raised when a job worktree cannot be created (git failure / directory collision).
+  Raised when a job worktree cannot be created or provisioned.
+
+  Covers an invalid `daemon.git.worktree_links` setting (not a list, or an entry that is not a string or names no
+  path inside the repository), a git failure or directory collision while adding the worktree, and a failed
+  provisioning (local config copy or links).
   """
 
 
@@ -41,17 +45,28 @@ class WorktreeTaskManager:
   """
 
   _LOCAL_CONFIG = ( ".claude/settings.local.json", ".claude/lazy.settings.local.json" )
-  # The failure a bootstrap returns when git could not list the worktree's untracked paths.
-  _LISTING_FAILED = "bootstrap could not list the worktree's untracked paths"
-  # The file inside a worktree's private git directory that records the paths its bootstrap created.
+  # The failure a recording step returns when git could not list the worktree's untracked paths.
+  _LISTING_FAILED = "could not list the worktree's untracked paths"
+  # The step names a recording failure is reported under: the links of provisioning and the bootstrap command.
+  _LINKS_STEP = "worktree_links"
+  _BOOTSTRAP_STEP = "bootstrap"
+  # The file inside a worktree's private git directory that records the byproducts its provisioning links and its
+  # bootstrap created.
   _RECORD = "lazy-bootstrap-paths"
   # The excludes file beside the record that git, run for the job in that worktree, reads as `core.excludesFile`.
   _EXCLUDE = "lazy-bootstrap-exclude"
   # Characters gitignore reads as pattern syntax anywhere in a line, and those it reads so only at the line start.
   _GLOB_CHARS = b"\\*?["
   _LEAD_CHARS = b"!#"
+  # The path segment that climbs out of a directory.
+  _PARENT_SEGMENT = ".."
 
-  def __init__(self, repo: Path, base_branch: str, worktree_root: str = ".worktrees") -> None:
+  def __init__(self,
+               repo: Path,
+               base_branch: str,
+               *,
+               worktree_root: str = ".worktrees",
+               worktree_links: Sequence[str] = ()) -> None:
     """
     Bind the manager to one repository and its worktree configuration.
 
@@ -59,10 +74,13 @@ class WorktreeTaskManager:
       repo: Path-like reference to the primary checkout's root.
       base_branch: Branch that fresh job branches fork from.
       worktree_root: Repo-relative directory that holds the per-job worktrees.
+      worktree_links: Repo-relative paths from `daemon.git.worktree_links` that every worktree carries from the
+        primary checkout as links.
     """
     self._repo = Path(repo)
     self._base = base_branch
     self._root = self._repo / worktree_root
+    self._links = worktree_links
 
   @property
   def repo(self) -> Path:
@@ -71,11 +89,11 @@ class WorktreeTaskManager:
     """
     return self._repo
 
-  def _git(
-      self, *args: str, cwd: Path | None = None,
-      # waiver: stdlib decode-error mode, not a domain constant
-      errors: str = "replace",
-  ) -> subprocess.CompletedProcess:
+  def _git(self,
+           *args: str,
+           cwd: Path | None = None,
+           # waiver: stdlib decode-error mode, not a domain constant
+           errors: str = "replace") -> subprocess.CompletedProcess:
     """
     Run one git subcommand and return its completed process.
 
@@ -97,6 +115,25 @@ class WorktreeTaskManager:
       done.stdout.decode("utf-8", errors = errors), done.stderr.decode("utf-8", errors = errors),
     )
 
+  @classmethod
+  def validate_link(cls, rel: str) -> str | None:
+    """
+    Validate that a `daemon.git.worktree_links` entry names a path inside the repository.
+
+    Args:
+      rel: The entry as configured.
+
+    Returns:
+      None when the entry is a repo-relative path below the repository root, else a one-line refusal.
+    """
+    path = PurePosixPath(rel)
+
+    # an empty entry, the root itself, an absolute path on any host, or a climb out of the tree names nothing inside
+    if (not rel or path == PurePosixPath() or path.is_absolute() or PureWindowsPath(rel).anchor
+        or cls._PARENT_SEGMENT in path.parts):
+      return f"worktree_links entry {rel!r} is not a path inside the repository"
+    return None
+
   def create(self, job_id: str, branch: str) -> tuple[Path, bool]:
     """
     Create and provision a worktree for one job, on a fresh or an existing branch.
@@ -108,6 +145,10 @@ class WorktreeTaskManager:
     Guarantees:
       - The worktree root directory gains its own self-ignoring `.gitignore` before any
         worktree is added beneath it.
+      - A `worktree_links` entry that is not a string or does not name a path inside the repository fails the
+        creation before any worktree or branch is created.
+      - A provisioning failure removes the worktree it was provisioning and keeps the branch; no half-provisioned
+        worktree is ever returned.
 
     Args:
       job_id: Job identifier; names the worktree directory.
@@ -117,7 +158,8 @@ class WorktreeTaskManager:
       A `(worktree_path, branch_created)` pair; `branch_created` is False on a continuation.
 
     Raises:
-      WorktreeStartError: When the worktree cannot be created.
+      WorktreeStartError: When a configured link entry is invalid, the worktree cannot be created, or its
+        provisioning (local config copy or links) fails.
     """
     wt = self.path_for(job_id)
     # waiver: git CLI vocabulary, not a domain constant
@@ -126,6 +168,23 @@ class WorktreeTaskManager:
     # Contract:
     # The worktree root directory MUST gain its own self-ignoring `.gitignore` before any
     # worktree is added beneath it.
+
+    # Contract:
+    # A `worktree_links` entry that is not a string or does not name a path inside the repository fails the
+    # creation with `WorktreeStartError` BEFORE any worktree or branch is created.
+
+    # Contract:
+    # A provisioning failure removes the worktree it was provisioning, keeps the branch, and raises
+    # `WorktreeStartError`; no half-provisioned worktree is ever returned.
+
+    # guard: a setting that is not a list of paths is the operator's to fix — refused before anything is created
+    if not isinstance(self._links, ( list, tuple )):
+      raise WorktreeStartError(f"worktree_links {self._links!r} is not a list of paths")
+    for rel in self._links:
+      # guard: an entry naming nothing inside the repository fails the job before any worktree exists
+      if refusal := ( self.validate_link(rel) if isinstance(rel, str)
+                      else f"worktree_links entry {rel!r} is not a path" ):
+        raise WorktreeStartError(refusal)
 
     # the worktree root itself must never reach the primary checkout's tracked tree — each
     # job directory beneath it is its own linked worktree with its own git bookkeeping
@@ -146,7 +205,14 @@ class WorktreeTaskManager:
     # guard: worktree add failed (dir collision, branch checked out elsewhere, git error)
     if add.returncode != 0:
       raise WorktreeStartError(f"worktree add {branch}: {add.stderr.strip()[-300:]}")
-    self._provision(wt)
+
+    # the fresh worktree receives the local config and the listed links
+    failure = self._provision(wt)
+
+    # guard: a worktree that could not be provisioned is removed rather than handed to a spawn
+    if failure is not None:
+      self.remove(wt)
+      raise WorktreeStartError(failure)
     return wt, not branch_exists
 
   def path_for(self, job_id: str) -> Path:
@@ -161,17 +227,22 @@ class WorktreeTaskManager:
     """
     return self._root / f"job-{job_id}"
 
-  def _provision(self, wt: Path) -> None:
+  def _provision(self, wt: Path) -> str | None:
     """
-    Copy the primary checkout's gitignored local config into a worktree as regular files.
+    Equip a worktree with the primary checkout's gitignored local config and the configured linked paths.
 
-    A fresh worktree materialises only tracked files, so the gitignored local
-    settings layer is absent and must be copied in so job agents inherit the
-    permission and path posture. Only the config layer is copied — the execution
-    environment (a venv and the like) is the bootstrap command's business.
+    A fresh worktree materialises only tracked files, so the gitignored local settings layer is absent and is
+    copied in as regular files so job agents inherit the permission and path posture. The paths listed in
+    `daemon.git.worktree_links` follow as links; anything else of the execution environment is the bootstrap
+    command's business.
 
     Args:
       wt: Path to the worktree directory to provision.
+
+    Returns:
+      None when the worktree is provisioned, else a one-line failure description. A failure is returned, never
+      raised, when the `.claude/` directory cannot be created, a local config file cannot be copied, or the
+      linked paths cannot be carried.
     """
 
     # Domain(runtime.job-execution):
@@ -184,17 +255,23 @@ class WorktreeTaskManager:
     # and refuses permission rules read from a local settings file that is a link, which
     # would leave the job's agents with no permissions at all. The copy is a snapshot taken
     # when the worktree is created; later changes to the primary checkout's local
-    # configuration do not reach a job already running. Building the rest of the
-    # execution environment a worktree also lacks — installed packages, a virtualenv,
-    # anything else gitignored — is left entirely to the isolation's own bootstrap step.
+    # configuration do not reach a job already running. The rest of the execution
+    # environment a worktree also lacks — installed packages, a virtualenv, anything else
+    # gitignored — reaches it only by the two routes the operator configures: the paths
+    # listed to be shared as links with the primary checkout, and the isolation's own
+    # bootstrap step, which runs after those links exist.
 
-    # waiver: filesystem path idiom, not a domain constant
-    ( wt / ".claude" ).mkdir(parents = True, exist_ok = True)
+    # the local config layer lives under `.claude/`, which a worktree of a branch without it lacks
+    try:
+      # waiver: filesystem path idiom, not a domain constant
+      ( wt / ".claude" ).mkdir(parents = True, exist_ok = True)
+    except OSError as error:
+      return f"local config could not be copied: {' '.join(str(error).split())}"
     for rel in self._LOCAL_CONFIG:
       src = self._repo / rel
       dst = wt / rel
 
-      # guard: nothing to link / already linked
+      # guard: no local config file to copy, or the worktree already holds one
       if not src.is_file() or dst.exists() or dst.is_symlink():
         continue
 
@@ -202,8 +279,66 @@ class WorktreeTaskManager:
       # `settings.local.json` that is a symlink inside a linked worktree as untrusted, so a link
       # would leave the job's agent with no permissions at all
 
-      # place a regular-file copy of the local config layer in the worktree
-      shutil.copyfile(src, dst)
+      # place a regular-file copy of the local config layer in the worktree; a failed copy fails the provisioning
+      try:
+        shutil.copyfile(src, dst)
+      except OSError as error:
+        return f"local config could not be copied: {rel}: {' '.join(str(error).split())}"
+
+    # the listed paths of the execution environment follow as links, recorded so they never count as dirt
+    return self._carry_links(wt)
+
+  def _carry_links(self, wt: Path) -> str | None:
+    """
+    Link each listed path of the primary checkout into a worktree and record the links as its byproducts.
+
+    Args:
+      wt: Path to the worktree directory.
+
+    Returns:
+      None when every listed path is linked or skipped, else a one-line failure description.
+    """
+
+    # Domain(runtime.job-execution):
+    # # Execution environment carried into an isolated job worktree
+    # The operator may list paths of the primary checkout that a job's working copy must share, such as
+    # the project's virtual environment: each one reaches the working copy as a link, so nothing is
+    # rebuilt or copied. A listed path that is itself a link in the checkout arrives as a link to the
+    # same place the original points at: a target given relative to the original's own directory is
+    # first anchored there, since the working copy sits elsewhere, and no further link is followed; a
+    # real file or directory arrives as a link to the checkout's own path. A listed path the checkout
+    # does not hold, or one the working copy already holds, is left alone. The links exist before the
+    # preparation step runs, and like that step's own byproducts they are recorded in the working copy's
+    # private list, so they never count as the job's dirt. A link that cannot be made or recorded fails
+    # the job before its agent starts.
+
+    # guard: nothing listed — the worktree carries no extra paths and no record is written for them
+    if not self._links:
+      return None
+
+    # the untracked paths before the links, so the record holds exactly what linking added
+    before = self._untracked(wt)
+
+    # guard: without the listing taken before the links, what they created cannot be told apart
+    if before is None:
+      return f"{self._LINKS_STEP} {self._LISTING_FAILED}"
+    for rel in self._links:
+      src = self._repo / rel
+      dst = wt / rel
+
+      # guard: nothing to carry, or the worktree already holds the path
+      if not os.path.lexists(src) or os.path.lexists(dst):
+        continue
+
+      # a link in the checkout points the worktree's link at its own target, a relative one anchored at the checkout
+      # link's directory (a join keeps an absolute target as is); anything else is linked to the checkout's path
+      try:
+        target = os.path.join(src.parent, os.readlink(src)) if src.is_symlink() else str(src)
+        dst.parent.mkdir(parents = True, exist_ok = True)
+        dst.symlink_to(target)
+      except OSError as error:
+        return f"{self._LINKS_STEP} could not link {rel}: {' '.join(str(error).split())}"
+    return self._record_created(wt, before, self._LINKS_STEP)
 
   def _untracked(self, wt: Path) -> set[str] | None:
     """
@@ -260,6 +395,8 @@ class WorktreeTaskManager:
         ignore file is ever written: neither a `.gitignore` the repository may track nor an exclude file git
         shares with the main checkout and every other worktree. The record dies with the worktree, and nothing
         is written when the command created nothing untracked.
+      - The paths an earlier provisioning step of the same worktree recorded, the links of `worktree_links`, stay
+        in the record and in the excludes file after the bootstrap writes its own.
       - Beside the record, a private excludes file holds the operator's effective global excludes followed by one
         anchored literal line per recorded path, so git run for the job with it as `core.excludesFile` ignores
         exactly those paths and keeps every global rule.
@@ -291,6 +428,10 @@ class WorktreeTaskManager:
     # record file inside the worktree's own private git directory. No ignore file is EVER written: neither a
     # `.gitignore` the repository may track nor an exclude file git shares with the main checkout and the other
     # worktrees. Nothing is written when the command created nothing untracked.
+
+    # Contract:
+    # The paths an earlier provisioning step of the same worktree recorded — the links of `worktree_links` — STAY
+    # in the record and in the excludes file after the bootstrap writes its own.
 
     # Contract:
     # Beside the record, a private excludes file MUST hold the operator's effective global excludes first, then one
@@ -325,8 +466,8 @@ class WorktreeTaskManager:
     # either, the same working copy also gets a private ignore list — the operator's personal
     # ignore rules followed by one literal line per byproduct — which only the job's agent and the
     # job's own checks are pointed at. A byproduct whose name holds a line break fails the
-    # preparation, and nothing is recorded. A listing of byproducts that cannot be read fails the preparation as well; a
-    # failed listing is never taken to mean that there are no byproducts.
+    # preparation, and nothing is recorded. A listing of byproducts that cannot be read fails the
+    # preparation as well; a failed listing is never taken to mean that there are no byproducts.
 
     # guard: no bootstrap configured — the worktree runs on tracked files alone
     if not cmd:
@@ -335,7 +476,7 @@ class WorktreeTaskManager:
 
     # guard: without the listing taken before the command, what the command created cannot be told apart
     if before is None:
-      return self._LISTING_FAILED
+      return f"{self._BOOTSTRAP_STEP} {self._LISTING_FAILED}"
     proc = subprocess.run(
       # waiver: shell invocation idiom shared with the post-push hook, not a domain constant
       [ "sh", "-c", cmd ], cwd = str(wt),
@@ -347,14 +488,31 @@ class WorktreeTaskManager:
     # guard: bootstrap failed — the caller fails the job rather than spawning into a broken env
     if proc.returncode != 0:
       return f"bootstrap exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[-300:]}"
+
+    # what the command produced joins the record, beside the links provisioning recorded
+    return self._record_created(wt, before, self._BOOTSTRAP_STEP)
+
+  def _record_created(self, wt: Path, before: set[str], step: str) -> str | None:
+    """
+    Record the untracked paths that appeared in a worktree since an earlier listing, keeping those already recorded.
+
+    Args:
+      wt: Path to the worktree directory.
+      before: The untracked paths listed before the step that created the new ones.
+      step: Name of the step that created the paths, `worktree_links` or `bootstrap`; prefixes every failure.
+
+    Returns:
+      None when nothing new appeared or the new paths were recorded, else a one-line failure description
+      starting with the step name.
+    """
     after = self._untracked(wt)
 
-    # guard: without the listing taken after the command, what the command created is unknown
+    # guard: without the listing taken after the step, what the step created is unknown
     if after is None:
-      return self._LISTING_FAILED
+      return f"{step} {self._LISTING_FAILED}"
     created = sorted(after - before)
 
-    # guard: the command created nothing untracked — nothing to record
+    # guard: the step created nothing untracked — nothing to record
     if not created:
       return None
 
@@ -362,19 +520,24 @@ class WorktreeTaskManager:
     # waiver: line terminators, not domain constants
     unlistable = [ path for path in created if "\n" in path or "\r" in path ]
 
-    # guard: a produced name cannot be recorded — the bootstrap fails and nothing is written
+    # guard: a produced name cannot be recorded — the step fails and nothing is written
     if unlistable:
       # waiver: stdlib codec names and list separator, not domain constants
       escaped = ", ".join(path.encode("unicode_escape").decode("ascii") for path in unlistable)
-      return f"bootstrap produced a path no record can hold: {escaped}"
+      return f"{step} produced a path no record can hold: {escaped}"
 
-    # the paths go to the worktree's private git directory, never to an ignore file another checkout reads
-    return self._write_record(wt, created) or self._write_exclude(wt, created)
+    # the paths go to the worktree's private git directory, never to an ignore file another checkout reads; what an
+    # earlier step of the same worktree recorded stays recorded
+    recorded = sorted(set(created) | self.read_recorded_paths(wt))
+    failure = self._write_record(wt, recorded) or self._write_exclude(wt, recorded)
+
+    # a write failure is reported under the step whose paths it was recording
+    return None if failure is None else f"{step} {failure}"
 
   @staticmethod
   def _record_file(wt: Path) -> Path | None:
     """
-    Return the bootstrap record file inside a worktree's private git directory.
+    Return the record file of provisioning and bootstrap byproducts inside a worktree's private git directory.
 
     Args:
       wt: Path to the worktree directory.
@@ -397,7 +560,7 @@ class WorktreeTaskManager:
 
   def _write_record(self, wt: Path, paths: list[str]) -> str | None:
     """
-    Write the paths a bootstrap created into the record file of a worktree's private git directory.
+    Write the recorded byproduct paths into the record file of a worktree's private git directory.
 
     Args:
       wt: Path to the worktree directory.
@@ -412,14 +575,14 @@ class WorktreeTaskManager:
     # guard: git could not name the private git directory — nothing is written
     if record is None:
       # waiver: one-off human-facing message
-      return "bootstrap could not locate the worktree's private git directory"
+      return "could not locate the worktree's private git directory"
 
     # NUL-separated bytes keep every name exactly as git listed it
     try:
       # waiver: NUL record separator, not a domain constant
       record.write_bytes(b"".join(os.fsencode(path) + b"\0" for path in paths))
     except OSError as error:
-      return f"bootstrap could not write the worktree's record file: {' '.join(str(error).split())}"
+      return f"could not write the worktree's record file: {' '.join(str(error).split())}"
     return None
 
   def _global_excludes(self, wt: Path) -> bytes | None:
@@ -509,7 +672,7 @@ class WorktreeTaskManager:
     # guard: without the private git directory or the global rules the file would hide too much or too little
     if record is None or inherited is None:
       # waiver: one-off human-facing message
-      return "bootstrap could not read the excludes git applies in the worktree"
+      return "could not read the excludes git applies in the worktree"
 
     # the global rules come first and end on a line break, so the first own line starts a line of its own
     # waiver: line terminator, not a domain constant
@@ -518,13 +681,13 @@ class WorktreeTaskManager:
     try:
       record.with_name(self._EXCLUDE).write_bytes(inherited + b"".join(self._ignore_line(path) for path in paths))
     except OSError as error:
-      return f"bootstrap could not write the worktree's excludes file: {' '.join(str(error).split())}"
+      return f"could not write the worktree's excludes file: {' '.join(str(error).split())}"
     return None
 
   @staticmethod
   def exclude_file(wt: Path) -> Path | None:
     """
-    Return the private excludes file the bootstrap of a worktree wrote for git run on the job's behalf.
+    Return the private excludes file written for a worktree's recorded byproducts, for git run on the job's behalf.
 
     Args:
       wt: Path to the worktree directory.
@@ -534,18 +697,21 @@ class WorktreeTaskManager:
     """
     record = WorktreeTaskManager._record_file(wt)
 
-    # the file exists only when a bootstrap created something untracked
+    # the file exists only when provisioning or the bootstrap recorded something untracked
     exclude = None if record is None else record.with_name(WorktreeTaskManager._EXCLUDE)
     return exclude if exclude is not None and exclude.is_file() else None
 
   @staticmethod
-  def bootstrap_paths(wt: Path) -> set[str]:
+  def read_recorded_paths(wt: Path) -> set[str]:
     """
-    Return the paths the bootstrap of a worktree recorded as its own byproducts.
+    Return the paths recorded as byproducts of a worktree's provisioning and bootstrap.
+
+    The record holds the links `daemon.git.worktree_links` created, recorded before any bootstrap runs, together
+    with the paths the bootstrap command created.
 
     Guarantees:
-      - Fails closed: a missing git directory, a missing record or an unreadable one answers an empty set, so a
-        byproduct is never hidden by a record nobody wrote.
+      - Fails closed: a missing git directory, a missing record or an unreadable one answers an empty set, so
+        nothing is ever excused from the dirty check by a record nobody wrote.
 
     Args:
       wt: Path to the worktree directory.
@@ -555,7 +721,7 @@ class WorktreeTaskManager:
     """
 
     # Contract:
-    # `bootstrap_paths` fails closed: a missing git directory, a missing record or an unreadable one answers an
+    # `read_recorded_paths` fails closed: a missing git directory, a missing record or an unreadable one answers an
     # empty set, so nothing is ever excused from the dirty check by a record nobody wrote.
 
     record = WorktreeTaskManager._record_file(wt)

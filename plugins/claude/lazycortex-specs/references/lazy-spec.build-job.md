@@ -51,7 +51,7 @@ The implementer writes the unit tests of the code the build changes and runs the
 
 **Each build runs on its own branch**, the `branch` the dispatch names, `spec/<product>/releases/<n>/build-<k>`; every continuation of the same build runs on the same branch.
 
-**The journal.** Result is the release's `code-report.md`, written by the job itself. Each run opens a `#### build <k>` entry, `<k>` the `spec_build` value its dispatch names, recording the tasks done, each specialist's material and where it was placed, every validator run with its outcome, and the unit-test run. When the journal exists its path is in the job's `context`, and the job returns it whole: every earlier entry intact, plus the new entry. A build that cannot finish returns `outcome: error` together with the journal holding the failed run's entry.
+**The journal.** Result is the release's `code-report.md`, written by the job itself. Each run opens a `#### build <k>` entry, `<k>` the `spec_build` value its dispatch names, recording the tasks done, each specialist's material and where it was placed, every validator run with its outcome, and the unit-test run. A deviation the entry names is a departure from the plan; an outcome the plan itself predicted, such as a first test run failing because the code it tests does not exist yet, is no deviation and is not listed as one. When the journal exists its path is in the job's `context`, and the job returns it whole: every earlier entry intact, plus the new entry. A build that cannot finish returns `outcome: error` together with the journal holding the failed run's entry.
 
 ## What "done" means
 

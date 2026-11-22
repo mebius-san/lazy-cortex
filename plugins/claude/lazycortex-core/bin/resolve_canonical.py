@@ -210,7 +210,7 @@ def merge(into: dict[ str, set[str] ], more: dict[ str, set[str] ]) -> None:
     into[kind] |= names
 
 
-def repo_root() -> Path | None:
+def find_repo_root() -> Path | None:
   """
   Return the nearest ancestor of the current working directory that contains a `.git` entry.
 
@@ -226,7 +226,7 @@ def repo_root() -> Path | None:
   return None
 
 
-def in_repo_plugin_roots(repo: Path | None) -> list[Path]:
+def find_all_in_repo_plugin_roots(repo: Path | None) -> list[Path]:
   """
   Return every immediate child of the repository's `plugins/claude/` directory.
 
@@ -249,7 +249,7 @@ def in_repo_plugin_roots(repo: Path | None) -> list[Path]:
   return [ entry for entry in candidate.iterdir() if entry.is_dir() ]
 
 
-def project_local_root(repo: Path | None) -> Path | None:
+def find_project_local_root(repo: Path | None) -> Path | None:
   """
   Return the project-local `.claude/` root for the current session.
 
@@ -274,13 +274,13 @@ def project_local_root(repo: Path | None) -> Path | None:
   return candidate if candidate.is_dir() else None
 
 
-def installed_plugin_roots() -> list[Path]:
+def read_installed_plugin_roots() -> list[Path]:
   """
   Return the install paths of every plugin recorded in `~/.claude/plugins/installed_plugins.json`.
 
   Returns:
     A deduplicated list of plugin install directories in first-seen order. Empty when the
-    registry file is missing or contains invalid JSON.
+    registry file is missing, cannot be read or decoded, or contains invalid JSON.
   """
   # guard: registry file must exist before parsing
   if not INSTALLED.is_file():
@@ -288,8 +288,10 @@ def installed_plugin_roots() -> list[Path]:
   try:
     # waiver: stdlib idiom, not a domain constant
     data = json.loads(INSTALLED.read_text(encoding = "utf-8"))
-  except json.JSONDecodeError:
+  except (OSError, UnicodeDecodeError, json.JSONDecodeError):
     return []
+
+  # collect the install path of every recorded plugin entry
   roots: list[Path] = []
   # waiver: external installed-plugins JSON field name, not an internal key
   for entries in data.get("plugins", {}).values():
@@ -309,7 +311,7 @@ def installed_plugin_roots() -> list[Path]:
   return unique
 
 
-def global_root() -> Path:
+def compute_global_root() -> Path:
   """
   Return the user-level `~/.claude/` directory.
 
@@ -340,42 +342,39 @@ def find_all_canonical_names() -> dict:
   logged: set[str] = set()
 
   # every root below is resolved relative to the repository the script was invoked in
-  repo = repo_root()
+  repo = find_repo_root()
 
-  # scan in-repo plugin sources first so authoring overrides win on tie
-  for root in in_repo_plugin_roots(repo):
+  # the in-repo plugin source trees this checkout authors
+  for root in find_all_in_repo_plugin_roots(repo):
     merge(aggregate, harvest_root(root, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["in_repo_plugin_roots"] += 1
 
   # then the project-local `.claude/` tree (consumer-side artifacts)
-  proj = project_local_root(repo)
+  proj = find_project_local_root(repo)
   if proj is not None:
     merge(aggregate, harvest_root(proj, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["project_local_root"] = 1
 
   # then every installed plugin recorded in the marketplace registry
-  for root in installed_plugin_roots():
+  for root in read_installed_plugin_roots():
     merge(aggregate, harvest_root(root, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["installed_roots"] += 1
 
   # finally the user-level `~/.claude/` root
-  global_dir = global_root()
+  global_dir = compute_global_root()
   if global_dir.is_dir():
     merge(aggregate, harvest_root(global_dir, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["global_root"] = 1
 
-  # project the accumulated sets into stable, sorted lists so the JSON is diff-friendly
-  by_kind = { kind: sorted(names) for kind, names in aggregate.items() }
-  canonical = sorted(set().union(*aggregate.values()))
-
-  # assemble the wire payload: the merged names plus a per-root tally the caller can sanity-check
+  # assemble the wire payload: the merged names as stable, sorted lists so the JSON is diff-friendly, plus a
+  # per-root tally the caller can sanity-check
   return {
-    "canonical": canonical,
-    "by_kind": by_kind,
+    "canonical": sorted(set().union(*aggregate.values())),
+    "by_kind": { kind: sorted(names) for kind, names in aggregate.items() },
     "logged": sorted(logged),
     "sources": {
       # waiver: internal counter/summary dict subkey, single-source set in this script

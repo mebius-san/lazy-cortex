@@ -160,7 +160,11 @@ elif [ "$cmd" = "mypy" ]; then
 # pylint checks (excludes read from pyproject.toml)
 elif [ "$cmd" = "pylint" ]; then
   ensure_venv
-  pylint "${mods[@]}"
+  # always single-process: a parallel run (`jobs = 0` or > 1 in the project config) needs a
+  # process pool, whose system-limits check calls os.sysconf("SC_SEM_NSEMS_MAX"), and the
+  # Claude Code sandbox forbids that call (PermissionError), so pylint would crash before
+  # checking anything. The CLI flag overrides any config value; the checks run are the same.
+  pylint --jobs=1 "${mods[@]}"
 
 # ruff checks (excludes read from pyproject.toml)
 elif [ "$cmd" = "rf" ]; then

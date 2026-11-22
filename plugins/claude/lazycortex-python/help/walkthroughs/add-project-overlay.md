@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
   request: "Sequence diagram of one flow: the user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, and dispatches lazy-python.docstring-writer. The agent reads the plugin's documenting-guidelines canon, then the project overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, applies the merged ruleset plus the pyproject.toml registrations to the target file, then runs chk-py against the changed file to verify. Show the overlay directory and pyproject.toml [tool.pcf] block as the two inputs feeding one agent and one verification command."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.coding-guidelines
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: efee4b2ece0471372f1be704908cc7f45afdcc098c8572ec86b3f2d18e7c6611
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 74c61aad19ed4a1be07b541e60069d670f2e9557da56a77a9a5570730b8e89f5
 ---
 # Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 
@@ -46,6 +46,8 @@ If it's missing, re-run:
 The install is idempotent and quiet: Step 5 creates only the missing stub files and never touches an overlay you've already started editing — safe to re-run mid-project without losing prior work.
 
 The same run also refreshes the plugin's always-loaded rules in `.claude/rules/` (Step 1) — `lazy-python.style`, `lazy-python.docstrings`, `lazy-python.tests`, and `lazy-python.failing-tests`, the rule for how a failing test is judged before anything is fixed. Those mirrors are plugin-owned and overwritten on every install; your overlay files are the project-owned layer, so put project rules there rather than in the mirrors.
+
+The install also makes the project venv reachable from isolated job worktrees. When your venv lives inside the checkout (the default `.venv/`), install lists it among the paths that every job worktree carries from the checkout, so `chk-py` and `tst-py` keep working inside an expert job that runs in its own worktree. A venv at an absolute path outside the checkout needs nothing. If `[tool.lazy-python].venv` is a relative path that climbs out of the checkout, install reports a warning; make that value absolute and re-run `/lazy-python.install`. You never edit the worktree list by hand — the install records it.
 
 ### Step 2 — Understand what lazy-python.docstring-writer reads
 
@@ -119,7 +121,7 @@ Once the first clause is confirmed, add more as your project's documentation con
 
 `docs/guidelines/documenting_guidelines.md` and the `[tool.pcf]` registrations in `pyproject.toml` are living project config. Track both in version control. When a teammate's `lazy-python.docstring-writer` dispatch produces a docstring that disagrees with a project convention, the fix is an overlay edit (and, for structural additions, a `pyproject.toml` registration) — not a one-off manual rewrite repeated file by file.
 
-To verify the overlay stub itself is intact (not accidentally deleted or corrupted), run `/lazy-python.audit` — its overlay check covers all four `docs/guidelines/*.md` files, not just the one this walkthrough touches, and looks for the `# Project additions to <topic>` header each stub opens with. Keep that header when you edit: it is how the writer agents recognize the file as an overlay rather than the canon. If a header goes missing, restore it by hand — a re-run of `/lazy-python.install` keeps your edited overlay body untouched. The audit does not validate clause content — that judgment belongs to you and your team, backed by the docstrings `lazy-python.docstring-writer` actually produces.
+To verify the overlay stub itself is intact (not accidentally deleted or corrupted), run `/lazy-python.audit` — its overlay check covers all four `docs/guidelines/*.md` files, not just the one this walkthrough touches, and looks for the `# Project additions to <topic>` header each stub opens with. Keep that header when you edit: it is how the writer agents recognize the file as an overlay rather than the canon. If a header goes missing, restore it by hand — a re-run of `/lazy-python.install` keeps your edited overlay body untouched. The same audit also warns when a job running in an isolated worktree would start without the project venv link; the fix it names is a re-run of `/lazy-python.install`. The audit does not validate clause content — that judgment belongs to you and your team, backed by the docstrings `lazy-python.docstring-writer` actually produces.
 
 ## How the overlay and pyproject.toml layers combine
 

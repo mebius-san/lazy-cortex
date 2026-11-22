@@ -82,6 +82,7 @@ _SUB_MIGRATE_SOURCE_LINKS = "migrate-source-links"
 _SUB_MIGRATE_UPSTREAM_HISTORY = "migrate-upstream-history"
 _SUB_MIGRATE_GATE_ROWS = "migrate-gate-rows"
 _SUB_CANCEL_SWEEP = "cancel-sweep"
+_SUB_MIGRATE_JOURNALS = "migrate-journals"
 _SUB_DOCTOR = "doctor"
 _SUB_LOCKIT_TEXT = "lockit-text"
 _SUB_LOCKIT_KEYS = "lockit-keys"
@@ -143,6 +144,9 @@ _USAGE = (
     "                                  nothing and exits 0 when a doc would change, 1 when none would\n"
     "  doc-type of <file> | resolve <type> [--product K] | list [--product K] | backfill [--cwd DIR]\n"
     "                                  read a document's spec_doc_type, or a type's declaration\n"
+    "  doc-type templates [--cwd DIR]\n"
+    "                                  check every typed .claude/templates/spec.*/ template names a\n"
+    "                                  declared type\n"
     "  doc-type rename <old> <new> [--cwd DIR]\n"
     "                                  rename a document type in the declaration, the catalog (the\n"
     "                                  same-named spec_role values included), the template and its\n"
@@ -241,6 +245,10 @@ _USAGE = (
     "                                  regroup the flat # History list of upstream unit notes under day headings\n"
     "                                  (no commit); --check exits 0 when a note would change, 1 when none\n"
     "                                  would, 2 on failure\n"
+    "  migrate-journals [--dry-run | --check] [--cwd DIR]\n"
+    "                                  give release report journals without spec_role the frontmatter a fresh\n"
+    "                                  seed carries, their own keys kept (no commit); --check exits 0 when a\n"
+    "                                  journal would change, 1 when none would, 2 on failure\n"
     "  cancel-sweep [--dry-run | --check] [--cwd DIR]\n"
     "                                  apply the cancel cascade to cancelled assets whose documents an earlier\n"
     "                                  version left behind, one commit per asset; --check exits 0 when an asset\n"
@@ -317,6 +325,7 @@ _ROUTES: dict[str, tuple[str, str]] = {
     _SUB_MIGRATE_UPSTREAM_HISTORY: ( "upstream_history_migrate", _MAIN ),
     _SUB_MIGRATE_GATE_ROWS: ( "gate_rows_migrate", _MAIN ),
     _SUB_CANCEL_SWEEP: ( "cancel_sweep", _MAIN ),
+    _SUB_MIGRATE_JOURNALS: ( "seed_doc", "main_journals" ),
     _SUB_DOCTOR: ( "spec_doctor", _MAIN ),
     _SUB_LOCKIT_TEXT: ( "note_explainers", "main_lockit_text" ),
     _SUB_LOCKIT_KEYS: ( "note_explainers", "main_lockit_keys" ),

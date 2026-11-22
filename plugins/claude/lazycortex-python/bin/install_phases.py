@@ -14,14 +14,9 @@ Phases:
   phase6 — record python.env_source when the repo ships an env-bootstrap script
   phase7 — register the code-reviewer agent as an expert in lazy.settings.json
 
-Scaffold-template sync (formerly phase6) is no longer a phase here — the install
-skill's Step 6 runs the core CLI verb `scaffold sync-plugin` directly via Bash, which
-copies the templates into the consumer's `.claude/templates/python/` and upserts the
-registry entries pointing at that consumer-local path.
-
-The PostToolUse check-style hook (formerly phase8) is no longer registered by
-install — it auto-registers from the plugin's `hooks/hooks.json` manifest when the
-plugin is enabled; no phase writes to the consumer's settings.json.
+Scaffold-template sync and check-style hook registration are not phases: the install skill runs the core CLI
+verb `scaffold sync-plugin` for the templates, and the hook registers itself from the plugin's
+`hooks/hooks.json` manifest.
 """
 from __future__ import annotations
 
@@ -42,22 +37,19 @@ if TYPE_CHECKING:
   from collections.abc import Callable
 
 
-# The plugin's own `bin/`, home of the shared TOML array editor.
-_PLUGIN_BIN = Path(__file__).resolve().parents[3] / "bin"
-if str(_PLUGIN_BIN) not in sys.path:
-  sys.path.insert(0, str(_PLUGIN_BIN))
-# waiver: operator-approved exception to the same-`bin/` sibling scheme — the install skill launches this file from
-# the skill directory, and the shared TOML array editor lives in the plugin `bin/`; ruff E402 by design
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from toml_array import append_to_array  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# location of the plugin tree (this file lives at .../skills/lazy-python.install/bin/install_phases.py)
+# location of the plugin tree (this file lives at .../bin/install_phases.py)
 # Allow override via env (Claude Code sets CLAUDE_PLUGIN_ROOT; consumer install → cache path, not dev source).
-# Default fallback resolves to .../plugins/claude/lazycortex-python via parents[3].
+# Default fallback resolves to .../plugins/claude/lazycortex-python, the parent of this bin/.
 # Single assignment so PLUGIN_ROOT reads as the module constant it is.
-_THIS_FILE = Path(__file__).resolve()
 _env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
-PLUGIN_ROOT = Path(_env_root).resolve() if _env_root else _THIS_FILE.parents[3]
+PLUGIN_ROOT = Path(_env_root).resolve() if _env_root else _BIN.parent
 
 
 # ----------------------------------------------------------------------------------------
@@ -110,6 +102,10 @@ class Phase1MirrorRules:
     """
     Mirror every shipped rule into the consumer's rules directory.
 
+    Guarantees:
+      - Reports a rule as installed or refreshed only after its target has been read back and found to hold
+        the shipped bytes; a write that does not verify is reported as failed and the run returns 1.
+
     Notes:
       - Prints a JSON receipt to stdout mapping each rule filename to `installed`, `unchanged`,
         `refreshed`, or `failed`.
@@ -122,12 +118,17 @@ class Phase1MirrorRules:
     # Only files shipped by the plugin under its rules directory are ever written to the
     # consumer's rules directory; any other file already present there is left untouched.
 
+    # Contract:
+    # A rule is reported as installed or refreshed only after its target has been read back and
+    # found to hold the shipped bytes; a write that does not verify is reported as failed, and
+    # the run then returns 1.
+
     self.target_dir.mkdir(parents = True, exist_ok = True)
     shipped = sorted(name for name in os.listdir(self.source_dir) if name.endswith(".md"))
     states = { name: self._mirror(name) for name in shipped }
     print(json.dumps({ "phase": "phase1", "rules": states }, indent = 2))
 
-    # guard: an unverified write must not read as a successful mirror
+    # an unverified write must not read as a successful mirror, so it decides the exit code
     if "failed" in states.values():
       return 1
     return 0
@@ -169,11 +170,7 @@ class Phase1MirrorRules:
       state = "refreshed"
     shutil.copyfile(source, target)
 
-    # Contract:
-    # A successful outcome is reported only after the target has been read back and its
-    # bytes verified to match what was shipped; an unverified write is reported as failed.
-
-    # guard: the write is only an outcome once the target actually holds the shipped bytes
+    # the write is only an outcome once the target actually holds the shipped bytes
     if target.read_bytes() != shipped:
       return "failed"
     return state
@@ -212,9 +209,17 @@ class Phase2Wrappers:
     Write the `cfg-py`, `chk-py` and `tst-py` wrappers and the `mypy/protected_access.py` shim to the
     consumer's `cli/` directory and update `.gitignore`.
 
+    Guarantees:
+      - Leaves a `.gitignore` that already ignores `.venv` byte-for-byte untouched.
+
     Returns:
       0 on success.
     """
+
+    # Contract:
+    # A `.gitignore` that already ignores `.venv` is left byte-for-byte untouched; the
+    # ignore line is appended only when genuinely absent.
+
     self.target_dir.mkdir(parents = True, exist_ok = True)
     for template_name, target_name in self.WRAPPERS:
       # Templates are path-agnostic: deployed verbatim, they resolve the active
@@ -242,14 +247,9 @@ class Phase2Wrappers:
     # rewriting a line the consumer already wrote.
 
     existing = self.gitignore.read_text(encoding = "utf-8") if self.gitignore.exists() else ""
-    present = any(line.strip() in (".venv", ".venv/") for line in existing.splitlines())
-
-    # Contract:
-    # A `.gitignore` that already ignores `.venv` is left byte-for-byte untouched; the
-    # ignore line is appended only when genuinely absent.
 
     # guard: already ignored → leave the file byte-for-byte
-    if present:
+    if any(line.strip() in (".venv", ".venv/") for line in existing.splitlines()):
       print("gitignore-already-present")
       return
     prefix = existing if existing == "" or existing.endswith("\n") else existing + "\n"
@@ -300,9 +300,12 @@ class HomeWrappersPhase:
     self.target_dir.mkdir(parents = True, exist_ok = True)
     receipt: dict = {}
     for template, name in self.TEMPLATES:
+      # the shipped wrapper and where its copy goes
       src = self.plugin_root / "templates" / template
       dst = self.target_dir / name
       body = src.read_bytes()
+
+      # an absent copy is installed, a differing one refreshed, an identical one left as it is
       state = "unchanged"
       if not dst.exists():
         state = "installed"
@@ -329,13 +332,10 @@ class Phase3Pyproject:
   Install phase that bootstraps the consumer's `pyproject.toml` with checker-stack sections
   from the template.
 
-  Adds the `[tool.pcf]`, `[tool.pcf.overrides]`, `[tool.toi]`, `[tool.pch]`,
-  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.protected_access]`, `[tool.pylint]`, and
-  `[tool.ruff]` sections
-  (and any nested sub-tables, e.g. `[tool.ruff.lint]`) that the consumer's file is missing,
-  and completes the missing sub-keys of any of those sections the consumer already has. A
-  `[tool.mypy]` `plugins` list the consumer already has gains the template's plugin entries
-  it lacks, after the consumer's own.
+  Adds the checker-stack sections (with their nested sub-tables) that the consumer's file is missing,
+  and completes the missing sub-keys of any such section the consumer already has. A `[tool.mypy]`
+  `plugins` list the consumer already has gains the template's plugin entries it lacks, after the
+  consumer's own.
 
   Guarantees:
     - Never overwrites a sub-key the consumer has already set; a `plugins` list keeps every
@@ -451,7 +451,7 @@ class Phase3Pyproject:
       injected = "\n".join(template_keys[k] for k in missing_keys)
       existing_text = self._try_edit(
         existing_text, self._insert_after_header(existing_text, section_name, injected),
-        partial(self._check_section_keys, section_name, missing_keys),
+        partial(self._verify_section_keys, section_name, missing_keys),
         f"[tool.{section_name}] — add the missing keys {', '.join(missing_keys)} by hand",
       )
 
@@ -469,7 +469,7 @@ class Phase3Pyproject:
       if block:
         existing_text = self._try_edit(
           existing_text, existing_text.rstrip() + "\n\n" + block + "\n",
-          partial(self._check_section_keys, section_name, []),
+          partial(self._verify_section_keys, section_name, []),
           f"[tool.{section_name}] — copy the section from the plugin's pyproject-defaults.toml by hand",
         )
 
@@ -573,9 +573,9 @@ class Phase3Pyproject:
     return after
 
   @staticmethod
-  def _check_section_keys(top_name: str, keys: list[str], data: dict) -> bool:
+  def _verify_section_keys(top_name: str, keys: list[str], data: dict) -> bool:
     """
-    Tell whether a parsed document has a `[tool.<top_name>]` table carrying the given keys.
+    Verify that a parsed document has a `[tool.<top_name>]` table carrying the given keys.
 
     Args:
       top_name: Name of the top-level tool section.
@@ -764,7 +764,7 @@ class Phase6EnvSource:
 
   `python.env_source` names a shell script that `chk-py` / `tst-py` source after the venv is
   active, so a project that exports secret paths or provider credentials from its own wrapper
-  keeps working under the plugin runners. This phase never overwrites a value already on record.
+  keeps working under the plugin runners.
 
   Guarantees:
     - Never overwrites a `python.env_source` value already on record.
@@ -772,25 +772,14 @@ class Phase6EnvSource:
       candidates are reported without being recorded.
 
   Notes:
-    - A value already on record is left untouched and reported as `env-source-already-set`.
-    - When `LAZY_PYTHON_ENV_SOURCE` is set, its value is recorded as the skill's disambiguated choice.
-    - Exactly one detected candidate script is recorded silently.
-    - Multiple candidates are reported without recording so the caller can disambiguate.
-    - No candidates leaves the settings file unchanged.
+    - The outcome is reported on stdout as a status word, followed by the recorded path or the candidate list
+      when one applies; an explicit choice passed through
+      `LAZY_PYTHON_ENV_SOURCE` is recorded in place of detection.
 
   Attributes:
     consumer_dir: Root directory of the consumer repository being installed into.
     settings: Path to the consumer's `.claude/lazy.settings.json` file.
   """
-
-  # Domain(install.reconciliation):
-  # # Environment-source detection precedence
-  # A value already on record for this setting is treated as final and is never reconsidered
-  # by a later install, however detection would resolve today. Only when nothing is recorded
-  # yet does detection run at all, and even then an explicit choice always outranks whatever
-  # auto-detection would have found. Auto-detection itself only ever commits a value when
-  # exactly one recognised candidate exists; finding several is reported without picking one,
-  # leaving the ambiguity for a human to resolve rather than silently guessing.
 
   CANDIDATES = ("cli/env", ".env.sh", "scripts/env.sh")
   OVERRIDE_ENV = "LAZY_PYTHON_ENV_SOURCE"
@@ -811,15 +800,24 @@ class Phase6EnvSource:
     # Once `python.env_source` is recorded, a later install run never overwrites it,
     # however auto-detection would resolve today.
 
+    # Domain(install.reconciliation):
+    # # Environment-source detection precedence
+    # A value already on record for this setting is treated as final and is never reconsidered
+    # by a later install, however detection would resolve today. Only when nothing is recorded
+    # yet does detection run at all, and even then an explicit choice always outranks whatever
+    # auto-detection would have found. Auto-detection itself only ever commits a value when
+    # exactly one recognised candidate exists; finding several is reported without picking one,
+    # leaving the ambiguity for a human to resolve rather than silently guessing.
+
     # guard: a recorded value is authoritative — never overwrite it
-    if self._already_set():
+    if self._has_env_source():
       print("env-source-already-set")
       return 0
 
     # an explicit choice made by the operator outranks anything auto-detection would find
     override = os.environ.get(self.OVERRIDE_ENV)
 
-    # guard: the skill passes an explicit choice back when it disambiguated multiple candidates
+    # the skill passes an explicit choice back when it disambiguated multiple candidates; it is recorded as given
     if override:
       self._record(override)
       print(f"env-source-recorded: {override}")
@@ -845,9 +843,9 @@ class Phase6EnvSource:
     print("env-source-multiple: " + ",".join(found))
     return 0
 
-  def _already_set(self) -> bool:
+  def _has_env_source(self) -> bool:
     """
-    Report whether an `env_source` key is already present under the `python` section.
+    Report whether an `env_source` key is present under the `python` section.
 
     Returns:
       True when the section carries an `env_source` key (any value), otherwise False.
@@ -962,7 +960,7 @@ class Phase7Expert:
     if not isinstance(experts, dict):
       experts = {}
 
-    # guard: no entry on record yet — register a full copy of the template
+    # no entry on record yet — register a full copy of the template
     if self.EXPERT_KEY not in experts:
       experts[self.EXPERT_KEY] = dict(self.EXPERT_ENTRY)
       data["experts"] = experts

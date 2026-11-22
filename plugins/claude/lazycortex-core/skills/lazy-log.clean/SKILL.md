@@ -36,7 +36,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 Run the helper script and parse its JSON output:
 
 ```
-"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-log.clean/scripts/resolve-canonical.py"
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/resolve_canonical.py"
 ```
 
 The script returns `{ "canonical": [...], "by_kind": {...}, "logged": [...], "sources": {...} }`. Read the `canonical` array into a set called `CANONICAL` and the `logged` array — the artifacts whose frontmatter declares `logging: true` — into a set called `LOGGED`.
@@ -48,10 +48,10 @@ Outcome line: `resolved <N> canonical names from <sources.files_scanned> files` 
 Run the classifier:
 
 ```
-"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-log.clean/scripts/log-folders.py" classify
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/log_folders.py" classify
 ```
 
-The `log-folders.py classify` script reads the same canonical and logged sets Step 1 resolved and puts every immediate subdirectory of `./.logs/claude/` into exactly one bucket. It prints `{"buckets": {...}, "folders": [...]}`: `buckets` holds `unlogged` (the artifact exists but no longer writes a log, so every file is residue), `canonical`, `orphan-rename-candidate` (`{name, match, ratio}`), `orphan-pattern` and `orphan-other`; `folders` holds `{name, file_count, oldest, newest}` per folder. Capture both as in-memory state.
+The `log_folders.py classify` script reads the same canonical and logged sets Step 1 resolved and puts every immediate subdirectory of `./.logs/claude/` into exactly one bucket. It prints `{"buckets": {...}, "folders": [...]}`: `buckets` holds `unlogged` (the artifact exists but no longer writes a log, so every file is residue), `canonical`, `orphan-rename-candidate` (`{name, match, ratio}`), `orphan-pattern` and `orphan-other`; `folders` holds `{name, file_count, oldest, newest}` per folder. Capture both as in-memory state.
 
 Outcome line: `enumerated <total>: unlogged=<u>, canonical=<a>, rename=<b>, pattern=<c>, other=<d>`.
 
@@ -161,10 +161,10 @@ Append to intent lists. Outcome line: `other-decided <count>` or `no-other-orpha
 Execute the deferred filesystem actions in one call — one `--merge <source>:<target>` per Step 4 merge, one `--delete <name>` per folder Steps 3–7 marked for deletion:
 
 ```
-"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-log.clean/scripts/log-folders.py" apply --merge <source>:<target> --delete <name>
+"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/log_folders.py" apply --merge <source>:<target> --delete <name>
 ```
 
-The `log-folders.py apply` script runs every merge before any deletion and never leaves `./.logs/claude/`. It prints `{"merged": N, "deleted": N, "refused": [{name, reason}]}`; a `refused` entry (`invalid-name`, `missing`, `exists-in-target`) is reported by name and left on disk.
+The `log_folders.py apply` script runs every merge before any deletion and never leaves `./.logs/claude/`. It prints `{"merged": N, "deleted": N, "refused": [{name, reason}]}`; a `refused` entry (`invalid-name`, `missing`, `exists-in-target`) is reported by name and left on disk.
 
 Outcome line: `applied merges=<merged> deletions=<deleted>` plus one `refused <name>: <reason>` line per refusal — or `none` if both lists are empty (the script is not run).
 

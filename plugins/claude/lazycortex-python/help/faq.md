@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -22,8 +22,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 35fd78e2af2d3282ab1b805646bb5445944275f8144397e33fba1d672b8ce0a4
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 4eabe96ccdab4ccf8b1eec836cc7df4343152a78ce55a18aafa8c079e28baa5d
 ---
 # Frequently asked questions
 
@@ -90,6 +90,12 @@ The always-loaded style rule's Verification Order scopes each run by the moment 
 ## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
 No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv, and it takes the bare module name (`tst-py core -q`, `tst-py billing -q`), never a file path or a `.py` filename.
+
+---
+
+## I set `jobs = 0` (or more than 1) for pylint in my project config, but `chk-py` runs it on one process. Why?
+
+`chk-py pylint` always passes `--jobs=1`, and the command-line flag overrides whatever `jobs` value your project config carries. A parallel pylint run needs a process pool whose start-up check reads a system limit that the Claude Code sandbox forbids, so inside a sandboxed session or a daemon job pylint would crash before checking anything. The set of checks that run is the same; only the process count differs.
 
 ---
 
@@ -302,6 +308,24 @@ A guarantee that is part of an interface's protocol belongs on the interface (or
 ## Where does the domain-groups dictionary live, and who owns it?
 
 The default path is `docs/guidelines/domain-groups.md`, beside the project's other guideline documents — a language-neutral registry of `## <group>` headings with one-line glosses, shared by every language's knowledge markers (not just Python's). `.claude/lazy.settings.json[wiki.domains.dictionary]` overrides that convention when set. `/lazy-python.install` deliberately does not seed this file — it is either created by the wiki plugin's domain configurator (for a repo that runs that tooling) or by `/lazy-python.knowledge-sweep` the first time it grows a dictionary from parked knowledge. Both `lazy-python.domain-writer` and `/lazy-python.knowledge-sweep` read whatever path the dispatch or settings name, falling back to the `docs/guidelines/domain-groups.md` convention only when nothing else is configured.
+
+---
+
+## `chk-py` and `tst-py` fail inside an expert job, but work in my own session. Why?
+
+An expert job with `workspace: branch` runs in a fresh git worktree that holds only tracked files, so a gitignored project venv inside your checkout (the default `<repo>/.venv`) is missing there. `/lazy-python.install` handles this in Step 7.7: when the venv lies inside the checkout, it lists the venv's path among the paths every job worktree carries over from the checkout (core's `worktree-links-add` verb writes that list; you never edit it by hand). The step reports `worktree-link-added`, `worktree-link-already-present`, or `worktree-link-not-needed`. A venv at an absolute path outside the checkout needs nothing, because each worktree's own `pyproject.toml` already points at it. If you installed before this step existed, re-run `/lazy-python.install`.
+
+---
+
+## `/lazy-python.install` reports `worktree-link-unreachable` or `worktree-link-failed`. What do I do?
+
+`worktree-link-unreachable` (a `[WARN]`) means `[tool.lazy-python] venv` in your `pyproject.toml` is a relative path that climbs out of the checkout, such as `../venvs/proj`. Each job worktree resolves it against its own root, and the carried-over list cannot hold a path outside the repository, so the venv is out of reach. Make `venv` an absolute path, then re-run the install. `worktree-link-failed` means `pyproject.toml` is not valid TOML, so the venv location could not be read; fix the file and re-run. If the verb itself answers `error`, the `daemon.git` section of `.claude/lazy.settings.json` has an unexpected shape (it must be an object holding a list); the install relays the message verbatim, and that shape has to be corrected before re-running.
+
+---
+
+## `/lazy-python.audit` warns about job worktrees (Check 14). What does that mean?
+
+Check 14 fires when an expert with `workspace: branch` exists, your project venv lies inside the checkout, and the venv's path is neither in the list of paths carried into job worktrees nor named by the worktree bootstrap command. Without it, `chk-py` / `tst-py` break inside such a job. The fix is to re-run `/lazy-python.install`, whose Step 7.7 lists the venv. A relative `venv` path that climbs out of the checkout is the case install cannot fix: make `[tool.lazy-python] venv` an absolute path. A settings file or `pyproject.toml` that does not parse is also a finding; fix that file first. The check reports `PASS` when no `workspace: branch` expert exists or the venv sits at an absolute path outside the checkout.
 
 ---
 

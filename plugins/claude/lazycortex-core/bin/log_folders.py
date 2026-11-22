@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import importlib.util
 import json
 import os
 import re
@@ -21,12 +20,17 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from types import ModuleType
+  pass
 
 
-# The canonical-name resolver this script reuses, beside it on disk.
-_RESOLVER = Path(__file__).resolve().parent / "resolve-canonical.py"
-_RESOLVER_MODULE = "resolve_canonical"
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import resolve_canonical  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # The resolver's list of every canonical name.
 _RESOLVED_CANONICAL = "canonical"
 # The resolver's list of names whose artifacts write a run log.
@@ -49,39 +53,15 @@ _UNLOGGED, _CANONICAL, _RENAME, _PATTERN, _OTHER = (
 _INVALID, _MISSING, _EXISTS = "invalid-name", "missing", "exists-in-target"
 
 
-def _load_resolver() -> ModuleType:
-  """
-  Load the canonical-name resolver module that sits beside this script.
-
-  Returns:
-    The loaded resolver module.
-
-  Raises:
-    FileNotFoundError: If the resolver file cannot be loaded as a module.
-  """
-  # the resolver's file name carries a hyphen, so it is loaded by path rather than imported
-  spec = importlib.util.spec_from_file_location(_RESOLVER_MODULE, _RESOLVER)
-
-  # guard: a resolver missing beside this script cannot be loaded
-  if spec is None or spec.loader is None:
-    raise FileNotFoundError(_RESOLVER)
-  module = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(module)
-  return module
-
-
 def load_canonical() -> tuple[set[str], set[str]]:
   """
   Load the canonical artifact names visible to this session.
 
   Returns:
     The set of every canonical name and the subset of names whose artifacts write a run log.
-
-  Raises:
-    FileNotFoundError: If the canonical-name resolver file cannot be loaded.
   """
   # the canonical names and the logged subset, as the resolver reports them
-  result = _load_resolver().find_all_canonical_names()
+  result = resolve_canonical.find_all_canonical_names()
   return set(result[_RESOLVED_CANONICAL]), set(result[_LOGGED])
 
 
@@ -202,7 +182,7 @@ def _merge(root: Path, source: str, target: str, refused: list[dict]) -> bool:
       refused.append({ "name": name, "reason": _INVALID })
       return False
 
-  # the source folder the files move out of
+  # the source folder the log files are moved out of below
   src = root / source
   # guard: a source that is not there has nothing to merge
   if not src.is_dir():
@@ -296,7 +276,7 @@ def main(argv: list[str]) -> int:
   """
   # two subcommands over one root: classify reads, apply writes
   # waiver: argparse CLI signature, not a domain key
-  parser = argparse.ArgumentParser(prog = "log-folders.py")
+  parser = argparse.ArgumentParser(prog = "log_folders.py")
   # waiver: argparse CLI signature, not a domain key
   sub = parser.add_subparsers(dest = "cmd", required = True)
   # waiver: argparse CLI signature, not a domain key

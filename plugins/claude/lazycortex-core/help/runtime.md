@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -17,8 +17,8 @@ source_skills:
   - lazy-core.state-schema
   - lazy-core.expert-runtime-schema
   - lazy-core.metrics-schema
-source_sha: 9c1ced653d3b39ce5c6cd750a63e47b0236e7d44
-surface_sha: d205255a5fd07620f0da16c259f5ba01dabcf19fe45b83e25ef6ec6b9ffa1575
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 4d54edacba5cd407d58f1985163cfa0e9f106e188fe74391862dadc97ee484e0
 ---
 # Runtime daemon — routine management and recovery
 
@@ -102,8 +102,21 @@ Before any of the above matters, `/lazy-core.daemon-authoring` is the fork in th
 
 The daemon exposes runtime metrics when `/lazy-core.daemon-setup` has set up the metrics endpoint. Two are worth knowing. `lazycortex_runtime_daemon_paused` is 1 while your local pause semaphore (`.runtime/daemon.pause`) is present and the daemon skips whole iterations, with no git sync and no routine dispatch; it is not a halt and records no incident. `lazycortex_runtime_incidents_total` counts error-ledger incidents once each, by kind and cause, at the event that opens them. Every halt is counted exactly once in `daemon_halts_total`, whichever process wrote it. On its hourly pass the daemon drops a closed incident from the error journal once its last event is older than `daemon.errors.retention_days` (30 by default); open incidents are never dropped by age.
 
+## Isolated job worktrees
+
+An expert declared `workspace: branch` runs a job in its own git worktree whenever that job's request names a `branch`; a job without one runs on the checked-out tree like any other. The worktree lives under the repo-relative `daemon.git.worktree_root` (default `.worktrees`), the primary checkout never leaves the base branch, and the worktree is removed after every outcome — the branch is the only durable product. Provisioning goes in this order:
+
+- The gitignored local settings (`settings.local.json`, `lazy.settings.local.json`) are copied in as regular files, never symlinked.
+- Every path listed in `daemon.git.worktree_links` — a project venv, `node_modules`, any other gitignored execution environment — is carried over from the primary checkout as a link. A symlink in the checkout arrives pointing where the checkout's link points; a real file or directory arrives as a link to the checkout's path. A listed path missing from the checkout is skipped. An entry that names nothing inside the repository (empty, absolute, or climbing out with `..`) fails the job before any worktree exists.
+- `daemon.git.worktree_bootstrap_cmd`, when configured, then runs in the worktree to rebuild whatever else the environment needs; a non-zero exit fails the job as transient before any spawn.
+
+Everything provisioning and bootstrap create is recorded and kept out of git's sight for that job, so it never trips the post-job dirty-tree check, and no `.gitignore` is written anywhere. An artefact that only appears during the spawn still counts as dirt unless the repository's own ignore rules cover it, and dirt fails that one job — it never halts the daemon.
+
+You do not edit the links list by hand. `/lazy-python.install` records a project venv kept inside the checkout, `/lazy-python.audit` warns when a worktree job would run without it, and `/lazy-core.audit` notes an expert that has neither links nor a bootstrap command.
+
 ## Common adjustments
 
+- **Make a `workspace: branch` job see the project venv** — run `/lazy-python.install`; when the venv sits inside the checkout, it is recorded in `daemon.git.worktree_links` so `chk-py` and `tst-py` work inside the job's worktree. Re-run `/lazy-python.audit` to confirm.
 - **Change a routine's configuration** — run `/lazy-routine.register <name> --force` to overwrite in one step, or run `/lazy-routine.unregister <name>` first and then re-register with the new parameters.
 - **Remove `lazy-expert.pump` or `lazy-runtime.doctor`** — only do this if you are intentionally disabling expert job processing or the hourly stuck-job repair. Pass `--force` to `/lazy-routine.unregister <name>`. Run `/lazy-core.install` to restore it.
 - **Validate an expert before wiring it into a live routine** — run `/lazy-runtime.preflight <expert>` after registering an expert-shape routine but before you rely on it firing unattended. A quick structural sweep with `--no-probe` catches config typos instantly; the full probe also catches MCP servers that hang or need auth.

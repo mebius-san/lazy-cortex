@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories and ask "why was X changed?" across every source at once.
-last_regen: 2026-11-18
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from run logs + commits.jsonl + git log to answer history queries, and recall and summary also read memory; (3) lazy-log.bullets reads git commits to draft a release block."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-log.timeline
   - lazy-log.summary
   - lazy-log.bullets
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: f508b798af5d5886434923073eedfa188571532452771eb3d6a0501f16a55a20
+source_sha: 19520b00de04ac761ac7acab54bbc470c0176abf
+surface_sha: cc43bc7f3f39662022a6c746b32d05193544b87d75b467f7e4e742cec7596462
 ---
 # Change history and run-log housekeeping
 
@@ -55,6 +55,7 @@ All three return git SHAs so you can `git show <sha>` to inspect the exact chang
 - Run logs exist only for artifacts whose frontmatter declares `logging: true`; a skill you expect to see under `.logs/claude/` and do not has simply not opted in — see the `lazy-log.logging` rule.
 - `/lazy-log.clean` holds all merges and deletions until you have answered every prompt; if you change your mind mid-run, abort and re-run — no changes land until the final apply step. A merge or delete the final step cannot carry out (an invalid name, a folder that has vanished, a file already present in the merge target) is reported by name and left on disk.
 - If `.logs/claude/` does not exist yet, `/lazy-log.clean` reports every step as absent; run any logging skill once to create it.
+- If `/lazy-log.clean` stops at its first step with a "failed" reason, it could not resolve the live skill, agent, and command names (for example Python is missing or the plugin is not set up). It aborts rather than guess, because without that name set every folder would look orphaned; re-run `/lazy-core.install`, then retry.
 - `lazy-log.bullets` expects coordinate-style input (`plugin`, `plugin_dir`, `range`, `new_version`, `date`) and is typically dispatched by the publish pipeline rather than invoked directly.
 
 ## Where this fits

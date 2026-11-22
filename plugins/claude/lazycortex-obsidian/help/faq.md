@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,8 +14,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 1fbe4655cc6e1b8a3b3e48817d2bacef6d7abd54
-surface_sha: 8025f7b3a36585371d4fe10eaa4b5d2e50da9e8468d9b314fbbbc732b4d15031
+source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
+surface_sha: edede0959220815c78a08a5217a2f5dfec039aa14e76f7310ae75f2ff632a1b4
 ---
 # Frequently asked questions
 
@@ -51,7 +51,7 @@ Nothing repaints inside your commit: no hook stages into your index behind your 
 
 ## I upgraded the plugin and my repaint routine still behaves the old way. Do I need to re-register it by hand?
 
-No — re-running `/lazy-obsidian.iconize-install` fixes it for you. It re-registers `lazy-obsidian.repaint` through `lazy-routine.register` in reconcile mode, naming `type`, `watch`, `command`, and `git_author` as the managed keys — the ones only the plugin can know, since they carry the watch mode, the worker the daemon resolves, and the bot identity every authorship check keys on. Those four are corrected back to the shipped shape on every run, which is what brings a vault registered by an older version of this step current; `interval_sec`, `branch`, and `ignore_halt` stay outside the managed set, since you could reasonably have tuned any of them, and the registrar only fills one in when the recorded entry never carried it at all. The report line reads **refreshed** when a managed key needed correcting, or **unchanged** when the entry already matched. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
+No — re-running `/lazy-obsidian.iconize-install` fixes it for you. It re-registers `lazy-obsidian.repaint` through core's `reconcile-routine` verb, naming `type`, `watch`, `command`, and `git_author` as the managed keys — the ones only the plugin can know, since they carry the watch mode, the worker the daemon resolves, and the bot identity every authorship check keys on. Unlike a plain register, which refuses a routine name it already knows, the reconcile verb updates an existing entry in place. Those four keys are corrected back to the shipped shape on every run, which is what brings a vault registered by an older version of this step current; `interval_sec`, `branch`, and `ignore_halt` stay outside the managed set, since you could reasonably have tuned any of them, and the verb only fills one in when the recorded entry never carried it at all. The report line reads **refreshed** when a managed key needed correcting, **unchanged** when the entry already matched, or **registered** when the routine did not exist yet. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
 
 ---
 

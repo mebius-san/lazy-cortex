@@ -6,13 +6,13 @@ user-invocable: true
 ---
 # Install lazycortex-python
 
-Idempotent and quiet install (plus a log write). Mirrors the four plugin rules into `.claude/rules/`, deploys the `cfg-py` / `chk-py` / `tst-py` wrappers and the mypy plugin shim (`cli/mypy/`) into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
+Idempotent and quiet install (plus a log write). Mirrors the four plugin rules into `.claude/rules/`, deploys the `cfg-py` / `chk-py` / `tst-py` wrappers and the mypy plugin shim (`cli/mypy/`) into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, records `python.env_source` when the repo ships an env-bootstrap script, and lists a project venv kept inside the checkout in `daemon.git.worktree_links` so isolated job worktrees reach it. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
 
 The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.json` when the plugin is enabled — no install step writes to the consumer's settings.json.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
@@ -25,6 +25,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 7 — Record python.env_source when a project env script is present`
    - `Step 7.5 — Seed agent-model tiers`
    - `Step 7.6 — Register the code-reviewer expert`
+   - `Step 7.7 — Carry the project venv into job worktrees`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`installed`, `unchanged`, `merged`, `wrappers-deployed-3`, `already-present`, …).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -62,7 +63,7 @@ The rules are install-managed mirrors, so the **File-sync policy** applies: abse
 `phase1` is the whole step — it enumerates the shipped rules itself, byte-compares each against its target, overwrites the stale ones, and re-reads every write to confirm it landed. Run it unconditionally; there is nothing here to judge and nothing to hand-merge:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase1 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase1 <repo-root>)
 ```
 
 It prints a JSON receipt mapping each rule to its state and exits non-zero when any write failed to verify. Quote the receipt in the report — an `already-current` claim with no receipt behind it is a reporting defect.
@@ -78,7 +79,7 @@ After this step `bash ./cli/cfg-py`, `bash ./cli/chk-py` and `bash ./cli/tst-py`
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase2 <repo-root>)
 ```
 
 The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). They are install-managed mirrors — `phase2` writes the current render unconditionally, so a re-run with an unchanged render is a no-op rewrite and a stale wrapper is replaced. The `.gitignore` append is consumer-owned config and idempotent: the `.venv/` line is added only when absent.
@@ -92,7 +93,7 @@ Deploys the human-facing wrappers — the only files this plugin ever marks exec
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase2b <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase2b <repo-root>)
 ```
 
 Quote the printed receipt in the report. Then check `command -v chk-py` — if it fails, `~/.local/bin` is not on the operator's `$PATH`; report **path-warning** and note that they need to add it themselves (this skill never edits shell rc files).
@@ -106,7 +107,7 @@ Outcome: the receipt's per-wrapper state (`installed` / `unchanged` / `refreshed
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase4 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase4 <repo-root>)
 ```
 
 Hold the result as `<pycharm_present>`: `pch-ready` → `True` (`inspect.sh` located); `pch-missing-inspect-sh` → `False` (no PyCharm on this machine).
@@ -126,9 +127,9 @@ Run phase3, setting `LAZY_PYTHON_ENABLE_PCH` only when `<pycharm_present>` is `T
 
 ```
 # PyCharm present — also deploy [tool.pch]:
-Bash(LAZY_PYTHON_ENABLE_PCH=1 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 <repo-root>)
+Bash(LAZY_PYTHON_ENABLE_PCH=1 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase3 <repo-root>)
 # no PyCharm on this machine — leave pch out:
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase3 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase3 <repo-root>)
 ```
 
 A `[tool.mypy]` `plugins` list the consumer already has gains `cli/mypy/protected_access.py` after the consumer's own entries. phase3 writes no edit it cannot make safely — a section without a header line of its own, a `plugins` value that is not a list, or an edit that would not parse back to the intended TOML — and prints one `manual-edit: <what to change by hand>` line per skipped edit instead. Relay every such line to the operator verbatim in the Report; never apply it yourself.
@@ -142,7 +143,7 @@ Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`,
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase5 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase5 <repo-root>)
 ```
 
 Outcome: `overlay-created-N` (where `N` is the count of newly-created files) when at least one was scaffolded; `overlay-already-present` when all four files already existed.
@@ -168,7 +169,7 @@ Outcome: one line per `templates` entry (`<group>/<file>: <state>`), then the `s
 Run phase6:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase6 <repo-root>)
 ```
 
 The phase reads the current value and probes the candidate scripts (`cli/env`, `.env.sh`, `scripts/env.sh`), then emits one outcome:
@@ -190,7 +191,7 @@ The phase reads the current value and probes the candidate scripts (`cli/env`, `
   On a chosen candidate, re-run phase6 with it so the value is recorded:
 
   ```
-  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase6 <repo-root>)
+  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase6 <repo-root>)
   ```
 
   On `skip`, write nothing.
@@ -220,10 +221,35 @@ The entry never overwrites a value the operator set, and it completes the instal
 Run:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py" phase7 <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install_phases.py" phase7 <repo-root>)
 ```
 
 Outcome: `expert-registered: python.code-reviewer` (added), `expert-refreshed: python.code-reviewer` (install-managed field completed or corrected), or `expert-already-registered` (entry whole, left untouched).
+
+## Step 7.7: Carry the project venv into job worktrees
+
+A daemon job of an expert with `workspace: branch` runs in a fresh git worktree that holds only tracked files, so a gitignored venv inside the checkout is missing there and `chk-py` / `tst-py` break inside the job. The core setting `daemon.git.worktree_links` lists the repo-relative paths every job worktree carries from the checkout as links. This step lists the project venv there when it lies inside the checkout; a venv at an absolute path outside the checkout needs nothing, because each worktree's own `pyproject.toml` already points at it. A relative venv path that climbs out of the checkout (`../venvs/proj`) is out of reach: each worktree resolves it against its own root, and `worktree_links` carries no path outside the repository.
+
+Run the venv reader's `worktree-link` command, which resolves the venv by the runners' own rule (`[tool.lazy-python].venv` from `pyproject.toml`, `~` expanded, a relative value resolved against `<repo-root>`, else `<repo-root>/.venv`):
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/venv_spec.py" worktree-link <repo-root>)
+```
+
+It prints one line:
+
+- `worktree-link: <rel>` — the venv lies inside the checkout at `<rel>`. Add it through the core verb, with the `<core-cli>` Step 6 resolved:
+
+  ```
+  Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> worktree-links-add <rel> --cwd <repo-root>)
+  ```
+
+  The verb prints one JSON line whose `status` is `added` (the path joined the list), `present` (already listed, file untouched) or `error` (exit 1, with a `message`, nothing written). Relay an `error` message verbatim.
+- `worktree-link-none: <reason>` — the venv lies at an absolute path outside the checkout; nothing is written.
+- `worktree-link-unreachable: <reason>` — the venv is a relative path outside the checkout; nothing is written. Report it as `[WARN]` with the fix the line names: make `[tool.lazy-python].venv` in `<repo-root>/pyproject.toml` an absolute path.
+- `worktree-link-failed: <reason>` (exit 1) — `pyproject.toml` does not parse; nothing is written. Relay the reason verbatim.
+
+Outcome: `worktree-link-added: <rel>` / `worktree-link-already-present: <rel>` / `worktree-link-not-needed` / `worktree-link-unreachable` (`[WARN]`, fix: an absolute `[tool.lazy-python].venv`) / `worktree-link-failed`.
 
 ## Report
 
@@ -234,3 +260,5 @@ One line per task in the canonical list, with its outcome word. A missing line i
 - **`/lazy-python.install` aborts: plugin source not found** — `${CLAUDE_PLUGIN_ROOT}` is unset or points at a path with no `rules/lazy-python.*.md` files → ensure the plugin is installed and enabled, then re-run.
 - **Step 1: target rule file is read-only** — consumer's `.claude/rules/lazy-python.*.md` is write-protected → unlock the file and re-run; the mirror always overwrites.
 - **Step 2: wrapper template missing** — `${CLAUDE_PLUGIN_ROOT}/templates/{cfg,chk,tst}-wrapper.sh` absent from the plugin cache → run `/plugin update lazycortex-python@lazycortex` to restore templates, then re-run.
+- **Step 7.7 reports `worktree-link-failed`** — `<repo-root>/pyproject.toml` is not valid TOML, so the venv location is unknown → fix the file and re-run.
+- **Step 7.7: `worktree-links-add` answers `error`** — `daemon.git.worktree_links` in `.claude/lazy.settings.json` is not a list, or `daemon.git` is not an object → make it a list of repo-relative paths by hand, then re-run.

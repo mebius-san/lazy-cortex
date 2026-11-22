@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Audit lazycortex-python
 
-Read-only health check that walks the 13 invariants the Python surface promises to hold. Each check is a separate sub-process call against `bin/audit_checks.py`; the skill aggregates `{severity, message}` payloads into a single report. Findings are surfaced; nothing is mutated, and every finding carries its own repair route.
+Read-only health check that walks the 14 invariants the Python surface promises to hold. Each check is a separate sub-process call against `bin/audit_checks.py`; the skill aggregates `{severity, message}` payloads into a single report. Findings are surfaced; nothing is mutated, and every finding carries its own repair route.
 
 The run follows the shared audit shape in `plugins/claude/lazycortex-core/references/lazy-core.audit-contract.md` — severity vocabulary, finding shape, and the read-only boundary come from there.
 
@@ -14,7 +14,7 @@ A check that reports `FAIL` is a finding, and its exit code stays 0. A non-zero 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 13 ordered steps (13 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 14 ordered steps (14 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Check 1 — Rules mirror integrity`
@@ -30,6 +30,7 @@ This skill has 13 ordered steps (13 checks plus the log write). The executing ag
    - `Check 11 — Venv bootstrap state`
    - `Check 12 — Domain-groups dictionary`
    - `Check 13 — Protected-access mypy plugin wired`
+   - `Check 14 — Job worktrees reach the project venv`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps.
 3. **Do not reach the Report block until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report block is a structural verifier.** Its output MUST contain one line per check above with its severity. A missing line is a bug; do not render the report with gaps.
@@ -190,9 +191,21 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py"
 
 Outcome: `PASS` (plugin listed, shim present and current) / `WARN` (`[tool.mypy]` `plugins` omits `cli/mypy/protected_access.py`, the shim file is missing, or the shim is stale against the template → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts); a string-form `plugins` without the entry, or a non-table `tool` / `tool.mypy` → make the edit the message names by hand) / `FAIL` (`pyproject.toml` absent or not valid TOML → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
 
+## Check 14: Job worktrees reach the project venv
+
+A daemon job of an expert with `workspace: branch` (`lazy.settings.json[experts][<key>].workspace`) runs in a fresh git worktree that holds only tracked files. A project venv inside the checkout — `[tool.lazy-python].venv`, else `<consumer>/.venv` — reaches such a worktree only when its repo-relative path is listed in `daemon.git.worktree_links` or `daemon.git.worktree_bootstrap_cmd` names it as a shell word of its own (its relative or absolute path, normalised; a longer word such as `.venv-tools` does not count, and neither does the word right after `-m`, which is a Python module name: `python -m venv venv` names the venv `venv`, `python -m venv .other` does not); with neither, `chk-py` / `tst-py` break inside the job. The tracked settings file is read with its local overlay merged on top, as the runtime merges them (objects key by key, lists appended, any other overlay value replaces the tracked one). A venv at an absolute path outside the checkout needs neither: each worktree's own `pyproject.toml` points at it. A relative venv path that climbs out of the checkout is out of reach: each worktree resolves it against its own root, and `worktree_links` carries no path outside the repository.
+
+Run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check14 ${CLAUDE_PROJECT_DIR})
+```
+
+Outcome: `PASS` (no `workspace: branch` expert, a venv at an absolute path outside the checkout, or a venv the worktrees reach) / `WARN` (a `workspace: branch` expert exists, the venv lies inside the checkout, and its path is in neither `worktree_links` nor `worktree_bootstrap_cmd` → re-run `/lazy-python.install`, whose Step 7.7 lists it; a `workspace: branch` expert exists and the venv is a relative path outside the checkout → make `[tool.lazy-python].venv` an absolute path; a settings file or `pyproject.toml` that does not parse → fix the file by hand).
+
 ## Report
 
-One line per check in the canonical list, with its severity and the repair route that check's own outcome names — the contract's `[<SEVERITY>] <path-or-artifact> — <what is wrong>; <repair route>` shape, laid out as the fixed-width table below so thirteen checks read as one block. A missing line is a bug, and a route repeated across several lines stays repeated — there is no trailing recommendations section. The closing line is the contract's summary, its verdict the highest severity present with `INFO` counting as `PASS`.
+One line per check in the canonical list, with its severity and the repair route that check's own outcome names — the contract's `[<SEVERITY>] <path-or-artifact> — <what is wrong>; <repair route>` shape, laid out as the fixed-width table below so fourteen checks read as one block. A missing line is a bug, and a route repeated across several lines stays repeated — there is no trailing recommendations section. The closing line is the contract's summary, its verdict the highest severity present with `INFO` counting as `PASS`.
 
 ```
 Check  1 — Rules mirror integrity         [<sev>] <message> | <route>
@@ -208,6 +221,7 @@ Check 10 — PostToolUse hook registration  [<sev>] <message> | <route>
 Check 11 — Venv bootstrap state           [<sev>] <message> | <route>
 Check 12 — Domain-groups dictionary       [<sev>] <message> | <route>
 Check 13 — Protected-access mypy plugin   [<sev>] <message> | <route>
+Check 14 — Worktrees reach the venv       [<sev>] <message> | <route>
 
 audit: <PASS|WARN|FAIL> (<n> findings)   pass=<n> info=<n> warn=<n> fail=<n>
 ```

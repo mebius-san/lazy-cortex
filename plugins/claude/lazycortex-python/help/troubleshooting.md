@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: e09ff1683df020d5907aa6b3e23193d78a59bf7ceb537d343f2ee9a80992f8ae
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 71d0312d51a9e22253bc8813d05351a573e2c96d7d8a8d52b36c4452e64b1c2c
 ---
 # Troubleshooting
 
@@ -266,7 +266,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: The check itself crashed — a missing positional argument, an unrecognized check ID, or an internal exception — rather than finding an actual invariant violation. A check that finds a real problem always reports `FAIL` and exits `0`; a crash is a different failure class and means the check never ran to completion.
 
-**Fix**: Read the command's stderr for the underlying traceback, confirm the check argument is one of `check1`–`check13`, and re-run `/lazy-python.audit`. If the crash persists on a clean re-run with a valid argument, the plugin's own `audit_checks.py` has a bug — file an issue against `lazycortex-python@lazycortex` rather than treating it as a project-level finding.
+**Fix**: Read the command's stderr for the underlying traceback, confirm the check argument is one of `check1`–`check14`, and re-run `/lazy-python.audit`. If the crash persists on a clean re-run with a valid argument, the plugin's own `audit_checks.py` has a bug — file an issue against `lazycortex-python@lazycortex` rather than treating it as a project-level finding.
 
 ---
 
@@ -357,6 +357,26 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: `/lazy-python.install` deploys the mypy shim verbatim into `cli/mypy/protected_access.py` and adds that path to the `[tool.mypy]` `plugins` list. A missing entry or file means the install never ran or predates this feature; a differing shim means the plugin updated since the last install or the shim was hand-edited. A `plugins` value written as one comma-separated string counts as listing each of its entries, but install only extends a list — so a string form without the entry, or a `tool` / `tool.mypy` that is not a table, is a `WARN` the install cannot repair on its own.
 
 **Fix**: Re-run `/lazy-python.install` — it is idempotent and overwrites the shim with the current shipped copy. If the finding came from the string-form or non-table case, the install prints a `manual-edit:` line naming the exact change; make that edit in `pyproject.toml` as the line says, then re-run `/lazy-python.audit`. For a `FAIL`, fix or create `pyproject.toml` first (see the `pyproject.toml` entry above), then re-run the install.
+
+---
+
+## `/lazy-python.audit` `check14` reports `WARN` — job worktrees cannot reach the project venv
+
+**Symptom**: Check 14 shows `WARN`. Either it says a daemon job would run without the project venv, or it says a relative venv path lies outside the checkout, or it says a settings file or `pyproject.toml` does not parse. Inside such a job `chk-py` and `tst-py` fail because the venv is missing.
+
+**Likely cause**: An expert with `workspace: branch` runs in a fresh git worktree that holds only tracked files. A project venv kept inside the checkout (`[tool.lazy-python].venv`, else `.venv`) is untracked, so it reaches the worktree only when it is listed among the paths every job worktree links from the checkout, or when the daemon's worktree bootstrap command names it. Neither is set for your venv. A venv at an absolute path outside the checkout needs nothing, because each worktree's own `pyproject.toml` points at it. A relative venv path that climbs out of the checkout (for example `../venvs/proj`) cannot be linked at all, since each worktree resolves it against its own root.
+
+**Fix**: For the missing link, re-run `/lazy-python.install` — Step 7.7 finds the venv and records it through the core worktree-links verb, with no hand edit of the settings file. For a relative path outside the checkout, make `[tool.lazy-python].venv` in `pyproject.toml` an absolute path. For a file that does not parse, repair that file, then re-run `/lazy-python.audit`; check 14 returns to `PASS`.
+
+---
+
+## `/lazy-python.install` Step 7.7 reports `worktree-link-failed` or the link verb answers `error`
+
+**Symptom**: Install finishes the other steps, but Step 7.7 ends with `worktree-link-failed`, or the core worktree-links verb replies with `error` and the venv is not recorded for job worktrees.
+
+**Likely cause**: Two separate causes. `worktree-link-failed` means `pyproject.toml` at the repo root is not valid TOML, so the venv location cannot be read. An `error` reply from the verb means the core `daemon.git.worktree_links` setting is not a list, or `daemon.git` is not an object. In both cases nothing was written.
+
+**Fix**: For `worktree-link-failed`, fix `pyproject.toml` and re-run `/lazy-python.install`. For the `error` reply, the install documents a manual fallback: make `daemon.git.worktree_links` in `.claude/lazy.settings.json` a list of repo-relative paths (and `daemon.git` an object), then re-run `/lazy-python.install`. `/lazy-python.audit` check 14 confirms the result.
 
 ---
 

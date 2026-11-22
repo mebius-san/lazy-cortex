@@ -12,7 +12,8 @@ checkout's index is shared with the operator and with every other routine.
 A landing ends in one of three results: `landed` when files were written and committed, `empty` when
 the job had nothing to deliver, and `refused` — with a one-line reason — when a delivery was declared
 but this worker will not make it. A job that ended in error against a report journal lands its files
-like a successful one.
+like a successful one. A report journal keeps its own `spec_role` frontmatter, else keeps the on-disk copy's, else
+gains a seed's when its folder-note is beside it; with none of these, it lands as the job returned it.
 
 A job whose document belongs outside its own asset folder, inside the spec catalog, names a foreign target; the
 coordinator lands such a cascade fold through the `--target` call. A `--target` landing that ends `landed` or
@@ -50,6 +51,12 @@ import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import seed_doc  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -534,12 +541,65 @@ def _fix_links(body: str, names: list[str], job_dir: Path) -> str:
     prose = [ _RESULT_LINK_RE.sub(_neighbour, part) for part in _CODE_SPAN_RE.split(line)[::2] ]
     spans = [ span.group(0) for span in _CODE_SPAN_RE.finditer(line) ]
     lines[idx] = "".join(piece for pair in zip(prose, [ *spans, "" ], strict = True) for piece in pair)
-  out = "\n".join(lines)
 
   # a file nobody references is still landed — the operator is told, the job is not failed
   for name in sorted(delivered - linked):
     sys.stderr.write(f"land-result: {job_dir.name}: attachment {name!r} is not linked from the document\n")
-  return out
+  return "\n".join(lines)
+
+
+def _compose_document(repo: Path, target_doc: Path, body: str) -> str:
+  """
+  Build the text the job's result document lands as.
+
+  Gives a report journal the spec frontmatter every spec document carries when the job returned it without.
+
+  Args:
+    repo: The repository root.
+    target_doc: The path the job's result document takes.
+    body: The document text as the job returned it.
+
+  Returns:
+    `body` itself for a document that is not a report journal and for a journal whose body carries its own
+    `spec_role`. For any other journal whose copy on disk carries `spec_role`, that copy's frontmatter followed by
+    the body without its own frontmatter, whether or not a folder-note exists. For any other journal with a
+    folder-note beside it, the body with the keys a fresh seed of the journal carries added to it, every key the
+    body already has keeping its own value. Otherwise `body` itself.
+
+  Raises:
+    LandResultError: When the seed frontmatter cannot be built — no template fits the journal, or a settings file
+      the seed depends on cannot be read.
+  """
+
+  # Domain(spec.lifecycle):
+  # # A landed journal keeps or gains the spec keys
+  # A report journal is returned whole by the job that ran, and on the first run the job writes it from nothing,
+  # without the keys every spec document carries: its role, its type, its product tag, its topic pins and its icon.
+  # A journal that brings them along lands as it came. A journal already on disk with them keeps the ones it has when
+  # the job returned the text without them, so no job can strip them. A journal landing for the first time beside its
+  # asset's note gets exactly the keys a fresh seed of that journal beside that note would carry. Only a journal with
+  # no keys of its own, no keyed copy on disk and no note to seed from lands as the job returned it.
+
+  values, body_end = flip_gate.parse_frontmatter(body)
+
+  # guard: only a report journal is seeded, and one carrying its own role needs nothing
+  if target_doc.name not in _JOURNAL_DOCS or SpecKey.ROLE in values:
+    return body
+
+  # a journal already on disk with the spec keys keeps its own frontmatter; one that cannot be read has none to keep
+  try:
+    existing = target_doc.read_text(encoding = "utf-8") if target_doc.is_file() else ""
+  except (OSError, UnicodeDecodeError):
+    existing = ""
+  existing_values, existing_end = flip_gate.parse_frontmatter(existing)
+  if SpecKey.ROLE in existing_values:
+    return existing[:existing_end] + body[body_end:]
+
+  # otherwise the journal is completed with the keys a fresh seed of it carries, its own keys kept
+  try:
+    return seed_doc.complete_frontmatter(repo, target_doc, body, doc_type = target_doc.stem)
+  except (scaffold_asset.ScaffoldRefusal, ValueError) as error:
+    raise LandResultError(f"cannot seed the frontmatter of {target_doc.name!r}: {error}") from error
 
 
 def _commit(repo: Path, paths: list[str]) -> None:
@@ -634,7 +694,7 @@ def _restore(snapshot: dict[Path, bytes | None]) -> None:
     snapshot: The mapping `_snapshot` returned before the landing's first write.
   """
   for dest, before in snapshot.items():
-    # guard: a destination the landing itself created is removed, not left behind empty
+    # a destination the landing itself created is removed, not left behind empty
     if before is None:
       dest.unlink(missing_ok = True)
       continue
@@ -655,9 +715,18 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
       that is neither `edited` nor `error`, when an entry is not a plain filename under
       `result/`, when the bundle file is a symlink or absent, when the document's basename is
       not the target's, or when an attachment's destination is a symlink, the result document,
-      or a spec catalog's own note.
+      or a spec catalog's own note, or when the frontmatter a report journal needs cannot be seeded — no template
+      fits it, or the settings the seed depends on cannot be read.
     - A job that ended in `error` against `code-report.md` or `test-report.md` lands its files
       like one that ended with an edit.
+    - A report journal (`code-report.md` or `test-report.md`) whose returned body carries no `spec_role` frontmatter
+      lands keeping the existing target's frontmatter when that carries `spec_role`. Otherwise, when the journal's
+      folder-note exists beside it, it lands with the frontmatter a fresh `seed-doc` of that journal beside that note
+      would carry, product resolved from the folder and `iconize_icon` paint included, merged with the returned
+      body's own frontmatter keys: every key the body carries keeps its own value, and the text below its
+      frontmatter is unchanged.
+    - A returned body with its own `spec_role` frontmatter, any document that is not a report journal, and a journal
+      whose copy on disk carries no `spec_role` and which has no folder-note beside it land as returned.
     - The commit carries exactly the landed paths plus their icon repaint — content another
       writer parked in the shared index stays unpublished; a landing that changed no byte
       reports `landed` and makes no commit at all.
@@ -690,6 +759,16 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # caller.
 
   # Contract:
+  # A report journal whose returned body carries no `spec_role` frontmatter keeps the existing target's frontmatter
+  # when that carries `spec_role`; otherwise, with its folder-note beside it, it gets the frontmatter a fresh seed of
+  # that journal beside that note carries, merged with its own keys, each of which keeps its own value, the text below
+  # its frontmatter unchanged. The seeded frontmatter is the one for the product owning the journal's folder and
+  # carries the type's `iconize_icon` paint, so the iconize matchers, which read `iconize_icon` and `spec_doc_type`,
+  # paint the landed report. A body with its own `spec_role`, a document that is not a report journal, and a journal
+  # with neither a `spec_role` copy on disk nor a folder-note beside it land as returned. A landing whose seed
+  # frontmatter cannot be built is refused and writes nothing.
+
+  # Contract:
   # A job that delivers nothing is reported `empty`; a job whose declared delivery this call will
   # not make is reported `refused`, with a one-line reason. A refusal is never reported as
   # `empty`, because the caller halts the asset on `refused` and retires the job on `empty`.
@@ -714,8 +793,16 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   except LandResultError as exc:
     return _refuse_landing(job_dir, str(exc))
 
-  # what every destination holds right now, so a failed commit can undo the whole landing
+  # the document text as it lands, built before anything is written so a journal that cannot be given its spec
+  # keys lands nothing at all
   repo = flip_gate.repo_root(target_doc.parent)
+  returned = (job_dir / _RESULT_DIR / names[0]).read_text(encoding = "utf-8")
+  try:
+    document = _compose_document(repo, target_doc, returned)
+  except LandResultError as error:
+    return _refuse_landing(job_dir, str(error))
+
+  # what every destination holds right now, so a failed commit can undo the whole landing
   destinations = [target_doc, *(target_doc.parent / name for name in names[1:])]
   before = _snapshot(destinations)
   indexed = _indexed(repo, [str(dest.resolve().relative_to(repo.resolve())) for dest in destinations])
@@ -724,9 +811,8 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # write and commit as one step: whatever the folder held comes back if the commit does not land
   try:
     # the document first, with its links pointed at the neighbours it will sit beside
-    body = (job_dir / _RESULT_DIR / names[0]).read_text(encoding = "utf-8")
     target_doc.parent.mkdir(parents = True, exist_ok = True)
-    spec_paths.write_text_atomic(target_doc, _fix_links(body, names[1:], job_dir))
+    spec_paths.write_text_atomic(target_doc, _fix_links(document, names[1:], job_dir))
     landed.append(str(target_doc.resolve().relative_to(repo.resolve())))
 
     # then every attachment, beside it, under the basename the response declared
@@ -782,7 +868,7 @@ def land_job(job_dir: Path, asset_dir: Path) -> dict:
   if target is not None:
     return land_result(job_dir, target)
 
-  # guard: files with nowhere to go are a refused landing, not an empty one
+  # files with nowhere to go are a refused landing, not an empty one
   if _declared_entries(_read_response(job_dir)):
     return _refuse_landing(job_dir, reason)
   return { _ACTION_KEY: _ACTION_EMPTY, _LANDED_KEY: [] }
@@ -832,8 +918,10 @@ def main(argv: list[str]) -> int:
                       help = "land the document here instead of where the dispatch said")
   args = parser.parse_args(argv)
 
-  # guard: the job bundle must exist before anything is read out of it
+  # the job bundle, resolved once for every read below
   job_dir: Path = args.job_dir.resolve()
+
+  # guard: the job bundle must exist before anything is read out of it
   if not job_dir.is_dir():
     sys.stderr.write(f"no job bundle: {job_dir}\n")
     return 2

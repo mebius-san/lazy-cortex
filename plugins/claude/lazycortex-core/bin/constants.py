@@ -6,11 +6,6 @@ hooks all read and write a fixed vocabulary of dict keys, marker filenames,
 and settings-section names. Defining each one here once means a mistyped key
 surfaces as an `AttributeError` at import time rather than as silent state
 corruption in the running loop.
-
-Every value is a plain `str` (byte-identical to the literal it replaces), not
-an `enum.Enum` member — these tokens are compared against parsed JSON/dict
-strings and used as path segments, so they must stay `str`-typed to keep
-those comparisons working.
 """
 from __future__ import annotations
 
@@ -231,6 +226,7 @@ class DaemonKey:
     CLEANUP_DEAD_AFTER: The retention window of a job bundle marked dead.
     POLLING_INTERVAL_SEC: The main-loop polling cadence in seconds.
     STREAM_IDLE_TIMEOUT_SEC: Seconds of expert-spawn stdout silence before the watchdog re-spawns it.
+    STREAM_MAX_RETRIES: Stall re-spawns the watchdog allows per job run before it fails the job.
     TRANSIENT_MAX_RETRIES: Transient-error budget per job bundle before the pump closes it.
     RUN_HERE: The hostname-to-checkout-path mapping deciding whether the daemon starts in this working copy.
     RATE_LIMIT_GUARD: The subscription-rate-limit guard sub-configuration block.
@@ -272,6 +268,8 @@ class DaemonKey:
   RATE_LIMIT_GUARD = "rate_limit_guard"
   # Seconds of expert-spawn stdout silence before the watchdog re-spawns it.
   STREAM_IDLE_TIMEOUT_SEC = "stream_idle_timeout_sec"
+  # Stall re-spawns the watchdog allows per job run before it fails the job.
+  STREAM_MAX_RETRIES = "stream_max_retries"
   # Transient-error budget per job bundle before the pump closes it.
   TRANSIENT_MAX_RETRIES = "transient_max_retries"
   # The name of the environment variable holding this daemon's OAuth token.
@@ -382,6 +380,7 @@ class MetricsNet:
   PORT_BASE = 9464
   # The last port considered; the allocation range is `PORT_BASE..PORT_CEIL` inclusive.
   PORT_CEIL = 9563
+  # The scrape-targets file location relative to the XDG config home.
   # waiver: filesystem path idiom relative to XDG config home, not an internal key
   SCRAPE_TARGETS_REL = "lazycortex/scrape-targets.json"
 
@@ -395,6 +394,7 @@ class GitConfigKey:
     BASE_BRANCH: The integration base branch.
     WORKTREE_ROOT: The directory isolated job worktrees are created under.
     WORKTREE_BOOTSTRAP_CMD: The shell command run in a fresh job worktree before the spawn.
+    WORKTREE_LINKS: The repo-relative paths a fresh job worktree carries from the primary checkout as links.
     REMOTE_SYNC: The remote-sync mode (`pull`, `pull_push`, or off).
     POST_PUSH_HOOK: The operator shell command run after each push that advances origin.
     POST_PUSH_TIMEOUT_SEC: The wall-clock cap on the post-push hook process, in seconds.
@@ -407,6 +407,8 @@ class GitConfigKey:
   WORKTREE_ROOT = "worktree_root"
   # The shell command run in a fresh job worktree before the spawn.
   WORKTREE_BOOTSTRAP_CMD = "worktree_bootstrap_cmd"
+  # The repo-relative paths a fresh job worktree carries from the primary checkout as links.
+  WORKTREE_LINKS = "worktree_links"
   # The remote-sync mode (`pull`, `pull_push`, or off).
   REMOTE_SYNC = "remote_sync"
   # The operator shell command run after each push that advances origin.

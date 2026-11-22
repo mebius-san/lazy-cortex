@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 3b5f4faad8e122c3a0bc82149a1a4047b1ee200ba3f9f654ba9b9b6d4c8b7239
+source_sha: 50b26dd1a6a11cb6c9cd3d62c7e7dc47b74223c2
+surface_sha: 727aacfe40d36cace6e7f60be03940ee23f0852c806125090d80aa696752fa0f
 ---
 # Per-agent model routing
 
@@ -38,7 +38,7 @@ Plugin-shipped agents pass through two filters before they ever reach the missin
 
 The remaining agents surface in three ordered batches. The first covers built-ins and agents from LazyCortex plugins that ship a curated tier table. For these the wizard already knows the right tier: `Explore` routes to haiku (fast, cheap navigation), `Plan` to opus (deliberate multi-step reasoning), review dispatchers and log taggers to haiku, and synthesis agents to sonnet. The second batch covers any other plugin agents not in the curated table. The third batch covers your own project agents. Each batch is a single prompt: accept all suggestions, review each agent individually, mass-set the whole batch to `default`, or skip it for now.
 
-Accepting a batch records every entry as planned. Reviewing routes those agents into a per-agent prompt where you can accept the suggestion, pick a neighboring tier, fall back to `default`, or skip. For agents outside the curated table the wizard applies a heuristic: names containing `log`, `distill`, `tag`, or `timeline` land on haiku; names hinting at review, audit, or planning land on opus; everything else lands on sonnet.
+Accepting a batch records every entry as planned. Reviewing routes those agents into a per-agent prompt where you can accept the suggestion, pick a neighboring tier, fall back to `default`, or skip. For agents outside the curated table the wizard applies a heuristic: names containing `log`, `distill`, `tag`, or `timeline` whose description also reads as a rewriter, formatter, or other mechanical prose job land on haiku; names hinting at review, audit, planning, or design land on opus; everything else lands on sonnet.
 
 After the prompts, the skill writes each entry to its structurally correct file. `_user.*` agents land in the global settings file (those agents live in `~/.claude/agents/`, so their tiers belong globally). `_project.*` agents land in the project settings file. Built-ins land in the global file because they are identical across every repo. Plugin agents follow the plugin's install scope. Pass `--scope=project` to force every entry into the project file — useful for repo-specific overrides — or `--scope=global` to bulk-promote decisions to your global settings.
 

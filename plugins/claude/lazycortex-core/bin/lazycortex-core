@@ -70,9 +70,10 @@ USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
          "history-append, reconcile-routine, plugin-root, resolve-ref, external-dirs, inbox-check, "
          "protocol-audit, provider-validate, provider-token, routine-validate, routine-register, "
          "routine-unregister, routine-show, routine-migrate, install-phase, daemon-run-here, git-lock, recover, "
-         "list-jobs, routines-bootstrap, memory-reflect, plugin-dirs, agent-models-seed, permission-edit, "
+         "list-jobs, routines-bootstrap, memory-reflect, plugin-dirs, agent-models-seed, agent-discover, "
+         "permission-edit, "
          "guard-public-write, guard-public-files, mcp-config-drop, context-scan, gitignore-ensure, runtime-gc, "
-         "migrate-plan, migrate-stamp, migrate-release, settings-rungs")
+         "migrate-plan, migrate-stamp, migrate-release, settings-rungs, worktree-links-add, worktree-env-check")
 
 
 
@@ -804,12 +805,15 @@ _DELEGATED = {
   "memory-reflect":        ( "memory_cli", "cmd_memory_reflect" ),
   "plugin-dirs":           ( "plugin_dirs_cli", "cmd_plugin_dirs" ),
   "agent-models-seed":     ( "agent_models_seed", "cmd_agent_models_seed" ),
+  "agent-discover":        ( "agent_discover", "cmd_agent_discover" ),
   "permission-edit":       ( "permission_cli", "cmd_permission_edit" ),
   "guard-public-write":    ( "guard_public_cli", "cmd_guard_public_write" ),
   "guard-public-files":    ( "guard_public_cli", "cmd_guard_public_files" ),
   "mcp-config-drop":       ( "settings_cli", "cmd_mcp_config_drop" ),
   "context-scan":          ( "context_scan", "cmd_context_scan" ),
   "gitignore-ensure":      ( "install_cli", "cmd_gitignore_ensure" ),
+  "worktree-links-add":    ( "worktree_cli", "cmd_worktree_links_add" ),
+  "worktree-env-check":    ( "worktree_cli", "cmd_worktree_env_check" ),
 }
 
 

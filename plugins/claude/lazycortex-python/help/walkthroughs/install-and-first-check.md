@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step checker gate is clean.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "Install-and-first-check flow"
   request: "Sequence diagram: user runs /lazy-python.install (quiet install wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the six-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, each reporting clean on the still-untouched repo (the guideline-review phase is deliberately NOT part of this run — it has its own cadence) → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
@@ -11,8 +11,8 @@ source_skills:
   - chk
   - tst
   - pcf.py
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 62e309f28a4ef4a2a969c3d2248748267dcadaedb2169fdac6fa34de0f9462e8
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 74d195ffc44dab9bfc63444b791a399096ed93885fc489a1c3cbdb041d7d8fb3
 ---
 # Bootstrap the plugin in a clean repo and confirm the checker stack is wired up
 
@@ -42,9 +42,9 @@ After this walkthrough you have:
 /lazy-python.install
 ```
 
-This is a quiet, mostly prompt-free install — the only two prompts it can ever raise are a genuine file-sync conflict and, when your repo ships more than one recognised environment-bootstrap script, a one-time choice of which one `python.env_source` should record. The full step-by-step breakdown — rule mirroring, wrapper and mypy-shim deployment, the `~/.local/bin/cfg-py` / `chk-py` / `tst-py` human-facing copies, the PyCharm `pch` probe, `pyproject.toml` bootstrapping, overlay scaffolding, scaffold-template sync, `env_source` detection, and the closing agent-model-tier and code-reviewer-expert registration — is covered in the **install-and-audit** block article, not here.
+This is a quiet, mostly prompt-free install — the only two prompts it can ever raise are a genuine file-sync conflict and, when your repo ships more than one recognised environment-bootstrap script, a one-time choice of which one `python.env_source` should record. The full step-by-step breakdown — rule mirroring, wrapper and mypy-shim deployment, the `~/.local/bin/cfg-py` / `chk-py` / `tst-py` human-facing copies, the PyCharm `pch` probe, `pyproject.toml` bootstrapping, overlay scaffolding, scaffold-template sync, `env_source` detection, the closing agent-model-tier and code-reviewer-expert registration, and the last step that lists an in-checkout project venv among the links every isolated job worktree carries — is covered in the **install-and-audit** block article, not here.
 
-**Verification gate**: the install ends with a one-line-per-step report. Confirm every line shows an outcome word (`installed`, `wrappers-deployed-4 + gitignore-ensured`, `pyproject-bootstrapped + pch-skipped-no-pycharm`, etc.) with no `ERROR`. Once that report is clean, `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` exist at the repo root — run through `bash`, no exec bit needed, so a mode-blind sync client can never break them — and `~/.local/bin/cfg-py` / `chk-py` / `tst-py` are installed alongside them, so a bare `cfg-py` / `chk-py` / `tst-py` works from anywhere under the repo once `~/.local/bin` is on your `$PATH` (the install report calls out a `path-warning` if it isn't). The install also makes sure `.venv/` is listed in your `.gitignore`, so the project venv built in Step 2 never lands in a commit. If the `pyproject.toml` step could not make a safe edit on its own (for example, a section without a header line of its own), the report ends that line with `+manual-edit` and prints what to change by hand — apply it yourself, because the install never forces such an edit.
+**Verification gate**: the install ends with a one-line-per-step report. Confirm every line shows an outcome word (`installed`, `wrappers-deployed-4 + gitignore-ensured`, `pyproject-bootstrapped + pch-skipped-no-pycharm`, etc.) with no `ERROR`. Once that report is clean, `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` exist at the repo root — run through `bash`, no exec bit needed, so a mode-blind sync client can never break them — and `~/.local/bin/cfg-py` / `chk-py` / `tst-py` are installed alongside them, so a bare `cfg-py` / `chk-py` / `tst-py` works from anywhere under the repo once `~/.local/bin` is on your `$PATH` (the install report calls out a `path-warning` if it isn't). The install also makes sure `.venv/` is listed in your `.gitignore`, so the project venv built in Step 2 never lands in a commit. The closing worktree step reports one of `worktree-link-added`, `worktree-link-already-present`, `worktree-link-not-needed` (the venv lives at an absolute path outside the checkout), `worktree-link-unreachable` (a relative `[tool.lazy-python] venv` that climbs out of the checkout; the fix is an absolute path there) or `worktree-link-failed` (`pyproject.toml` does not parse; fix it and re-run). The link matters once expert jobs run in isolated git worktrees: a gitignored `.venv/` is not in a fresh worktree, so without the link `chk-py` and `tst-py` would break inside the job. If the `pyproject.toml` step could not make a safe edit on its own (for example, a section without a header line of its own), the report ends that line with `+manual-edit` and prints what to change by hand — apply it yourself, because the install never forces such an edit.
 
 ### Step 2 — Run the six-step gate and let it build the venv
 
@@ -78,7 +78,7 @@ bash ./cli/tst-py -q
 
 `chk-py review` is the separate guideline-review pass — run it at the end of a logical piece of work, and mandatorily at the end of a full cycle of planned work. It resolves its scope from the working-tree diff plus any untracked `.py` files (or `chk-py review --base <ref>` to widen the scope to everything since a given commit, so a unit of work with intermediate commits gets reviewed as a whole rather than just its tail), builds a manifest of every applicable guideline layer, and prints a dispatch directive naming the `lazy-python.code-reviewer` agent — it never calls an LLM itself, so it also works unattended from pre-commit and CI. A manifested-but-undecided review exits `2` (`PENDING`): dispatch the named agent against the printed manifest and render its findings with `chk-py review --render <findings.json>` to close it.
 
-The venv you built in Step 2 persists at the repo root and is reused by every future `chk-py` / `tst-py` run — it is reconfigured only when it goes missing or stale — after you change the dependencies, extras, dependency groups, or Python requirement in `pyproject.toml` — and `bash ./cli/cfg-py` reconfigures it on demand. If you ever suspect the install itself has drifted (missing wrapper, stale rule mirror, broken venv resolution) rather than the checker findings themselves, `/lazy-python.audit` — covered in the install-and-audit block article — is the read-only diagnostic to reach for before re-running install.
+The venv you built in Step 2 persists at the repo root and is reused by every future `chk-py` / `tst-py` run — it is reconfigured only when it goes missing or stale — after you change the dependencies, extras, dependency groups, or Python requirement in `pyproject.toml` — and `bash ./cli/cfg-py` reconfigures it on demand. If you ever suspect the install itself has drifted (missing wrapper, stale rule mirror, broken venv resolution) rather than the checker findings themselves, `/lazy-python.audit` — covered in the install-and-audit block article — is the read-only diagnostic to reach for before re-running install. Among its checks, one warns when an isolated job worktree would run without the venv link; the repair is a re-run of `/lazy-python.install`, which records the link.
 
 ## Install-and-first-check flow
 

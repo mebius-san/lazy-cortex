@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through its approved design to its publication in a product release.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved, lazy-spec.flip-gate closes spec_design_done, the operator ticks Start release and a release builds and tests the product, lazy-spec.sync-with-code reconciles code reality and proposes the release's spec_develop_done, and the operator's Publish tick sets the asset's spec_released."
@@ -101,6 +101,8 @@ With `spec_design_done` closed, the asset's own ladder is done: it is design-onl
 Everything about implementation — plan, build, tests, deploy — happens on the release's note, never on the asset's. Each build runs in two steps. First the architect revises the product's `architecture.md` against everything the release includes: an unchanged document lets the build continue, a revised one goes through review and the build waits for its approval. Then one `Build` job by the product's release implementer writes the work — delegating each foreign tool's share to that tool's expert — and journals it in the release's `code-report.md`. If you want a plan reviewed before the build, tick the `Write code-plan` row on the release note.
 
 The release's `spec_plan_done` closes once the first step is settled and its `code-plan.md` is absent or approved; `spec_develop_done` closes once `code-report.md` is accepted and the build's branch is merged; then the tester runs — against `staging` when the product declares it — and an accepted green `test-report.md` closes `spec_tests_passing`.
+
+Both journals, `code-report.md` and `test-report.md`, land in the release folder with the same frontmatter every spec document carries: its role and document type, the product tag, pinned wiki topics and the type icon. That is why they show their icon in the vault and appear in tag and topic views. Journals a release wrote before you updated the plugin lack those keys; the migration step that `/lazy-core.setup` runs after an update heals them in place, keeping every key they already carry (review keys included) and leaving the body untouched.
 
 **Verification gate:** the asset's folder-note still carries only `spec_design_done: true` and `spec_released: false`, and the release note under `releases/NNN/` lists the asset among its included assets.
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -10,8 +10,8 @@ source_skills:
   - lazy-python.comment-guidelines
   - lazy-python.testing-guidelines
   - lazy-python.guidelines-index
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 17ffe530f3634950c7e1cd3366fda25dcb2522e95878f917c7db66aab35babef
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 4ec91c22a9ac392534a171f75137a78270079db315dda441f7a885b0da37d588
 ---
 # Per-repo overlay guidelines
 
@@ -102,4 +102,4 @@ This follows the same File-sync policy `/lazy-python.install` applies to every a
 
 ## Where this fits
 
-The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Step 5. The canon they extend lives in the `discipline` block — the six reference guidelines (`coding-guidelines`, `documenting-guidelines`, `comment-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer and reviewer agents load before reading your overlay. The `agents` block is where the docstring-writer, test-writer, domain-writer, contract-writer, and code-reviewer agents live; their full dispatch discipline — including exactly how each one reads canon and overlay together — is described in that block's article. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.
+The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Step 5. The same install run also lists a project venv kept inside the checkout among the paths that isolated job worktrees carry over (its Step 7.7), so `chk-py` and `tst-py` keep working inside a daemon job; that is part of the install-and-audit block, not of the overlay. The canon they extend lives in the `discipline` block — the six reference guidelines (`coding-guidelines`, `documenting-guidelines`, `comment-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer and reviewer agents load before reading your overlay. The `agents` block is where the docstring-writer, test-writer, domain-writer, contract-writer, and code-reviewer agents live; their full dispatch discipline — including exactly how each one reads canon and overlay together — is described in that block's article. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.

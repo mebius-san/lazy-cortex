@@ -29,6 +29,8 @@ import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import seed_doc  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import set_stage  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_check  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -78,6 +80,7 @@ class Check:
     LEVEL_NOTE: Class of a level note that is missing or lacks part of the level schema.
     CONFLICTED_FLAG: Class of a folder-note whose `spec_conflicted` flag disagrees with its conflict callouts.
     DANGLING_REQUEST_LINK: Class of an upstream unit frozen on a request link that no longer resolves.
+    JOURNAL_FRONTMATTER: Class of a release's report journal whose frontmatter carries no `spec_role`.
   """
 
   # Class of a cancelled asset whose documents are not all cancelled.
@@ -96,6 +99,8 @@ class Check:
   CONFLICTED_FLAG = "conflicted-flag"
   # Class of an upstream unit frozen on a request link that no longer resolves.
   DANGLING_REQUEST_LINK = "dangling-request-link"
+  # Class of a release's report journal whose frontmatter carries no `spec_role`.
+  JOURNAL_FRONTMATTER = "journal-frontmatter"
 
 
 # ----------------------------------------------------------------------------------------
@@ -142,6 +147,8 @@ class _Message:
   LEVEL_NOTE_LACKS = "the level note lacks"
   # Message of a folder-note whose conflict flag disagrees with its callouts.
   CONFLICTED_FLAG = "`spec_conflicted` does not match the conflict callouts on the note"
+  # Message of a release's report journal missing its spec frontmatter.
+  JOURNAL_FRONTMATTER = "the report journal carries no `spec_role` and lacks the spec frontmatter a seed gives it"
   # Suffix lead-in of a class whose check failed before it found anything.
   CHECK_FAILED = "the check could not run"
   # Suffix lead-in of a finding whose class failed during repair.
@@ -308,8 +315,9 @@ class SpecDoctor:
     # # A repair heals the drift an older version left behind
     # A catalog written by an older plugin version can hold data that a rule added later would have prevented: assets
     # cancelled while their documents never followed, stage tags that do not track the stages, documents and status
-    # notes missing their type keys or topic pins, level notes missing part of the level schema, a conflict flag that
-    # disagrees with the callouts on its note, and upstream units frozen on a request link that no longer resolves.
+    # notes missing their type keys or topic pins, a release's report journals landed without the keys every spec
+    # document carries, level notes missing part of the level schema, a conflict flag that disagrees with the
+    # callouts on its note, and upstream units frozen on a request link that no longer resolves.
     # Each such class has exactly one deterministic repair, applied on request. Legacy data that became inconsistent
     # only because an older version lacked a rule is always healed; a guard that protects a new action never blocks
     # the repair of that data, because the repair is not the action the guard was written for.
@@ -329,6 +337,8 @@ class SpecDoctor:
         Check.ASSET_TYPE, asset_types.backfill, _Message.ASSET_TYPE))
     self._run_class(Check.PINNED_TOPICS, lambda: self._run_backfill(
         Check.PINNED_TOPICS, spec_pins.backfill, _Message.PINNED_TOPICS))
+    self._run_class(Check.JOURNAL_FRONTMATTER, lambda: self._run_backfill(
+        Check.JOURNAL_FRONTMATTER, seed_doc.backfill_journals, _Message.JOURNAL_FRONTMATTER))
     self._run_class(Check.LEVEL_NOTE, self._run_level_notes)
     self._run_class(Check.CONFLICTED_FLAG, self._run_conflicted)
     self._run_class(Check.DANGLING_REQUEST_LINK, self._run_upstream)

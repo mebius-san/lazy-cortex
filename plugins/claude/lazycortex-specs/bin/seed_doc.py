@@ -19,10 +19,10 @@ CLI: `seed-doc <product> <folder-note-path> --doc <name>:<spec_doc_type>
 [--replace-cancelled] [--cwd <repo>]`. The folder-note path is repo-relative and must exist; the
 target doc must not, unless `--replace-cancelled` is given and the target sits at `spec_stage: cancelled`, in
 which case a fresh seed replaces it and nothing of the old content survives. A target at any other stage is
-refused either way, and `--replace-cancelled` beside `--refresh-sources` is refused. The seeded doc starts at
-stage `empty` and inherits the folder-note's `spec_source_requests` list, so the review dispatcher's
-`context_from_frontmatter` can resolve the originating request(s) when the
-doc's writer is dispatched.
+refused either way, and `--replace-cancelled` beside `--refresh-sources` is refused. A seeded doc of a type declared
+with stages starts at stage `empty` and inherits the folder-note's `spec_source_requests` list, so the review
+dispatcher's `context_from_frontmatter` can resolve the originating request(s) when the doc's writer is dispatched;
+a doc of a stageless type, such as a report journal, carries neither key.
 
 Level mode: `seed-doc --root <folder-note-path> --doc <name>:<spec_doc_type>
 [--replace-cancelled] [--cwd <repo>]` seeds a system document beside a level folder-note — the
@@ -35,6 +35,11 @@ override layer applies.
 Naming a product alongside `--root` is refused; the two spellings never
 combine.
 
+Journals mode: `migrate-journals [--dry-run | --check] [--cwd <repo>]` completes the spec frontmatter of every
+release's `code-report.md` and `test-report.md` that carries no `spec_role`, keeping each key the journal already
+has, and commits nothing. `--dry-run` writes nothing and reports what would change; `--check` also answers through the
+exit code whether anything is left to heal. Its stdout is a JSON object with `touched`, `skipped` and `paths`.
+
 Stdout: a JSON object with `outcome` and the created doc's repo-relative
 path under `doc`. On error: a JSON object with `error` field and non-zero
 exit.
@@ -43,7 +48,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import sys
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -109,6 +116,20 @@ _PRODUCT_TAG_LINE_RE = re.compile(
 
 # The release documents written from the included assets' designs, which therefore cite them as sources
 _RELEASE_PLAN_DOCS = frozenset({ SiblingDoc.CODE_PLAN, SiblingDoc.TEST_PLAN })
+
+# The report journals of a release: documents a job writes run after run, healed by `migrate-journals`
+_JOURNAL_DOCS = frozenset({ SiblingDoc.CODE_REPORT, SiblingDoc.TEST_REPORT })
+
+# A frontmatter line opening a top-level key: a column-0 name, optional blanks, the colon
+_TOP_KEY_RE = re.compile(r"^([^\s#-][^:\s]*)[ \t]*:(?=\s|$)", re.M)
+
+# The `migrate-journals` verb: its program name, the daemon-exported repo root, its result keys and its failure exit
+_PROG_JOURNALS = "lazycortex-specs migrate-journals"
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+_TOUCHED_KEY = "touched"
+_SKIPPED_KEY = "skipped"
+_PATHS_KEY = "paths"
+_EXIT_FAILED = 2
 
 
 def _note_source_requests(note_text: str) -> list[str]:
@@ -347,6 +368,306 @@ def _drop_empty_tag_line(template: str, tokens: dict) -> str:
   return _PRODUCT_TAG_LINE_RE.sub("", template)
 
 
+def render_seed(repo: Path,
+                note_path: Path,
+                name: str,
+                *,
+                doc_type: str,
+                product: str | None,
+                record: dict) -> tuple[str, dict]:
+  """
+  Render the text a fresh seed of one document beside a folder-note carries, without writing it.
+
+  Guarantees:
+    - Writes nothing to disk.
+    - A document of a type declared with `stages: true` carries `spec_stage: empty` and the folder-note's
+      `spec_source_requests`; a document of any other type carries neither key.
+
+  Args:
+    repo: Repository root the templates and declarations are resolved against.
+    note_path: Absolute path of the existing folder-note the document is seeded beside.
+    name: Filename of the document being seeded.
+    doc_type: The document's declared type, which the seed is rendered for.
+    product: The product key the caller named, or None for a level note seeded with no product.
+    record: The named product's effective record; empty when no product is named.
+
+  Returns:
+    The seeded document text and the effective record of the product owning it.
+
+  Raises:
+    ScaffoldRefusal: When no template of the override chain fits `name` and `doc_type`.
+    ValueError: When a settings file the product or the declarations depend on cannot be read.
+  """
+
+  # Contract:
+  # Rendering a seed writes nothing. The rendered document carries `spec_stage: empty` and the folder-note's
+  # `spec_source_requests` only when its type is declared with `stages: true`; a document of any other type, such as a
+  # report journal, carries neither key, whatever its template held.
+
+  # the note's own declarations drive the template chain, exactly as a scaffold's would
+  note_text = note_path.read_text(encoding = "utf-8")
+  note_fm, _fm_end = apply_request.parse_frontmatter(note_text)
+
+  # a product's own level note is seeded from the product context even when the caller named
+  # the product; only an asset's status note drives the asset-type chain
+  if product and note_fm.get(SpecKey.ROLE) != SpecValue.ROLE_PRODUCT:
+    # an asset inside a nested product's tree is that product's, whichever key the caller named: its
+    # tokens, templates and paint below all come from the owner
+    product, record = scaffold_asset.resolve_owning_product(
+        repo, note_path.parent, product = product, record = record)
+    asset_type = note_fm.get(scaffold_asset.Keys.ASSET_TYPE, "") or scaffold_asset.Keys.DESIGN_STEM
+    alias_base = scaffold_asset.resolve_alias_base(asset_type, record)
+    tokens = { "product": product, "product_tag": scaffold_asset.product_tag(record),
+               "slug": note_path.stem, "category": asset_type }
+    tmpl_path = scaffold_asset.resolve_template(
+        repo, asset_type, product, name, alias_base = alias_base, expect_type = doc_type)
+  else:
+    product, tokens, tmpl_path = _root_seed_inputs(repo, note_path, note_fm, note_path.stem, name, doc_type)
+
+  # the template with an unfilled product-tag line dropped, then every token filled in
+  template = _drop_empty_tag_line(tmpl_path.read_text(encoding = "utf-8"), tokens)
+  doc_text = scaffold_asset.substitute(template, tokens)
+  doc_text = scaffold_asset.ensure_doc_type(doc_text, doc_type)
+
+  # the type's own paint: the icon names the kind of document, matchers own the colour later
+  if (doc_paint := spec_doc_types.icon_color(repo, doc_type, product or None)):
+    doc_text = scaffold_asset.inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
+
+  # the seeded frontmatter, split off the body so its keys can be settled on their own
+  _doc_fm, doc_fm_end = apply_request.parse_frontmatter(doc_text)
+  fm_text = doc_text[:doc_fm_end]
+
+  # Domain(spec.notes):
+  # # Only a document with stages carries a stage and a request lineage
+  # A document type either moves through stages or does not. A journal is written run after run and is never
+  # drafted, approved or rejected, so it has no stage to start at, and it answers to no request of its own. A
+  # freshly seeded document of such a type carries neither a stage nor the request lineage; a document of a type
+  # with stages starts at the empty stage and carries the lineage.
+
+  # a stageless type, by its declaration in the owner's scope, keeps neither key, whatever the template carried
+  if not (spec_doc_types.resolve(repo, doc_type, product or None) or {}).get(spec_doc_types.DocTypeFlag.STAGES):
+    fm_text = spec_frontmatter.drop_key(spec_frontmatter.drop_key(fm_text, _STAGE_KEY), _SOURCE_REQUESTS_KEY)
+    return fm_text + doc_text[doc_fm_end:], record
+
+  # Domain(spec.notes):
+  # # A freshly seeded document inherits its asset's own request lineage
+  # A document seeded beside an asset's status note did not exist when the requests that led
+  # to the asset were opened, yet it still needs the same attribution those requests carry, so
+  # a reviewer later dispatched against the document can resolve exactly which request or
+  # requests motivated it. The seed copies the note's own recorded request lineage onto the
+  # new document rather than leaving it to be rediscovered, so that attribution survives even
+  # once the asset's status note itself has moved on to citing something else.
+
+  # the seeded doc is an unwritten skeleton inheriting the note's request attribution; the list writer quotes each
+  # `[[...]]` member — bare, it parses as a nested YAML list
+  fm_text = apply_request.set_fm_list(_set_stage_empty(fm_text), _SOURCE_REQUESTS_KEY,
+                                      _note_source_requests(note_text))
+  return fm_text + doc_text[doc_fm_end:], record
+
+
+def complete_frontmatter(repo: Path, doc: Path, text: str, *, doc_type: str) -> str:
+  """
+  Give a document beside a folder-note the spec frontmatter a fresh seed of it carries, keeping its own keys.
+
+  Guarantees:
+    - Writes nothing to disk.
+    - Every top-level key the document already carries keeps its own value; the seeded key of the same name is
+      dropped.
+    - The text after the frontmatter is returned byte-identical.
+    - Text whose frontmatter carries `spec_role`, or with no folder-note beside the document, is returned unchanged.
+
+  Args:
+    repo: Repository root the templates and declarations are resolved against.
+    doc: Path of the document; its folder-note is `<folder>/<folder>.md`.
+    text: The document's text.
+    doc_type: The document's declared type, which the seed is rendered for.
+
+  Returns:
+    `text` unchanged when its frontmatter already carries `spec_role` or no folder-note sits beside it; otherwise
+    `text` whose frontmatter holds every seeded key it lacks followed by every key of its own, the body after the
+    frontmatter unchanged.
+
+  Raises:
+    ScaffoldRefusal: When no template of the override chain fits the document.
+    ValueError: When a settings file the product or the declarations depend on cannot be read.
+  """
+
+  # Contract:
+  # Completing a document's frontmatter writes nothing and never changes what the document already says: every
+  # top-level key it carries keeps its own value, and the text after its frontmatter comes back byte-identical. A
+  # document that carries `spec_role`, or has no folder-note beside it, comes back unchanged, so a completed document
+  # completes to itself.
+
+  # Domain(spec.notes):
+  # # A document missing its spec keys is completed, never rewritten
+  # A document that lacks the keys every spec document carries — its role, its type, its product tag, its topic pins
+  # and its icon — gets exactly the keys a fresh seed of it beside its note would carry. Whatever the document
+  # already records stays as it is: a key it carries keeps its own value, and its text below the keys is not
+  # touched.
+
+  values, fm_end = spec_frontmatter.parse(text)
+  note = doc.parent / f"{doc.parent.name}.md"
+
+  # guard: a document carrying its role is complete, and one with no note beside it has nothing to be seeded from
+  if SpecKey.ROLE in values or not note.is_file():
+    return text
+
+  # the seed of this document beside this note, the product resolved from the folder as a seed resolves it
+  product, record = scaffold_asset.resolve_owning_product(repo, doc.parent, product = "", record = {})
+  seeded, _record = render_seed(repo, note, doc.name, doc_type = doc_type, product = product or None,
+                                record = record)
+  seeded_fm = seeded[:spec_frontmatter.parse(seeded)[1]]
+
+  # every key the document already carries leaves the seed, so its own value is the one kept
+  own = spec_frontmatter.block(text)[0]
+  for key in _TOP_KEY_RE.findall(own):
+    seeded_fm = spec_frontmatter.drop_key(seeded_fm, key)
+  return spec_frontmatter.insert_before_close(seeded_fm, own) + text[fm_end:]
+
+
+def _is_release_folder(folder: Path) -> bool:
+  """
+  Tell whether a folder is a release's, by its folder-note.
+
+  Args:
+    folder: The folder to look at.
+
+  Returns:
+    True when `<folder>/<folder>.md` exists and reads `spec_asset_type: release`.
+  """
+  note = folder / f"{folder.name}.md"
+  return note.is_file() and spec_frontmatter.parse(spec_paths.read_text(note))[0].get(
+      scaffold_asset.Keys.ASSET_TYPE) == ReleaseKey.ASSET_TYPE
+
+
+def backfill_journals(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> dict:
+  """
+  Give every release's report journal that carries no `spec_role` the spec frontmatter a fresh seed of it carries.
+
+  Guarantees:
+    - Commits nothing; the caller owns any commit.
+    - A dry run writes nothing and reports the same counts and paths a real run would.
+    - A second run finds nothing left to change.
+
+  Args:
+    repo: The repository root, or any directory under the one holding `.claude/lazy.settings.json`.
+    dry_run: When True, count what would change and write nothing.
+    with_paths: When True, add the `paths` key to the result.
+
+  Returns:
+    `{"touched": N, "skipped": M}` — `N` journals completed (or due to be), `M` journals left as they are. With
+    `with_paths`, also `paths`: the sorted settings-root-relative posix paths written, or due to be written.
+
+  Raises:
+    ScaffoldRefusal: When no template of the override chain fits a journal.
+    ValueError: When a settings file the seed depends on cannot be read.
+    OSError: When a journal cannot be read or written, or no settings file lies at or above `repo`.
+    VaultRootError: When `spec.vault_root` names no sub-directory of the settings root, or the settings file exists
+      but cannot be read as a JSON object.
+  """
+
+  # Contract:
+  # A dry run reports exactly the counts and paths a real run would write, and writes nothing; a real run commits
+  # nothing and leaves every journal it completed carrying `spec_role`, so a second run touches none. The doctor and
+  # the migration step rely on both.
+
+  settings_root = spec_paths.require_settings_root(repo)
+  touched = 0
+  skipped = 0
+  written: list[str] = []
+
+  # every release folder under the content root, its journals in a stable order
+  for dirpath, dirnames, filenames in os.walk(spec_paths.spec_content_root(settings_root)):
+    dirnames.sort()
+    folder = Path(dirpath)
+
+    # guard: only a release folder holds the report journals
+    if not _JOURNAL_DOCS & set(filenames) or not _is_release_folder(folder):
+      continue
+    for name in sorted(_JOURNAL_DOCS & set(filenames)):
+      doc = folder / name
+      text = spec_paths.read_text(doc)
+      new_text = complete_frontmatter(settings_root, doc, text, doc_type = doc.stem)
+
+      # a journal that already carries its keys is left as it is
+      if new_text == text:
+        skipped += 1
+        continue
+
+      # a completed journal is counted, and written unless the run is dry
+      if not dry_run:
+        spec_paths.write_text_atomic(doc, new_text)
+      written.append(doc.relative_to(settings_root).as_posix())
+      touched += 1
+
+  # the counts, and on request the files written or due to be written
+  result: dict = { _TOUCHED_KEY: touched, _SKIPPED_KEY: skipped }
+  if with_paths:
+    result[_PATHS_KEY] = sorted(written)
+  return result
+
+
+def main_journals(argv: list[str]) -> int:
+  """
+  Run the `migrate-journals` verb: complete the spec frontmatter of release report journals and print the result.
+
+  Guarantees:
+    - With `--check`, writes nothing and exits 0 when at least one journal would change, 1 when none would.
+    - Any failure exits 2 under every flag and prints no result, never an answer `--check` gives.
+
+  Notes:
+    - Prints the `backfill_journals` result, with `paths`, to stdout as one JSON object.
+    - The repository root is `--cwd`, else the `LAZY_REPO_ROOT` environment variable, else the process working
+      directory.
+
+  Args:
+    argv: The verb's argv tail: `--dry-run`, `--check` and `--cwd`.
+
+  Returns:
+    Exit code: with `--check`, 0 when a journal would change and 1 when none would; 0 otherwise; 2 on any failure.
+
+  Raises:
+    SystemExit: With code 2, when an argument is unknown or malformed; also told apart from both `--check` answers.
+  """
+
+  # Contract:
+  # With `--check` the verb MUST write nothing and exit 0 when at least one journal would change, 1 when none would;
+  # any failure MUST exit 2, so a migration step's `applies_when` predicate never reads a failure as an answer.
+
+  # waiver: argparse CLI signature, not a domain key
+  parser = argparse.ArgumentParser(prog = _PROG_JOURNALS)
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--dry-run", action = "store_true")
+  # waiver: argparse CLI signature, not a domain key
+  parser.add_argument("--check", action = "store_true")
+  parser.add_argument(scaffold_asset.Keys.ARG_CWD, default = None, help = scaffold_asset.Keys.HELP_CWD)
+  args = parser.parse_args(argv)
+
+  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
+  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+
+  # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
+  try:
+    result = backfill_journals(repo, dry_run = args.dry_run or args.check, with_paths = True)
+  # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
+  # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
+  except Exception as error:  # pylint: disable=broad-exception-caught
+    sys.stderr.write(f"migrate-journals: {error!r}\n")
+    return _EXIT_FAILED
+  # a refused content root is a `BaseException` the broad catch above lets through; it fails the run the same way
+  except spec_paths.VaultRootError as error:
+    sys.stderr.write(f"migrate-journals: {error!r}\n")
+    return _EXIT_FAILED
+
+  # the result goes to stdout for the caller to read
+  print(json.dumps(result))
+
+  # only a check answers through its exit code
+  if args.check:
+    return 0 if result[_TOUCHED_KEY] else 1
+  return 0
+
+
 def refresh_release_plan(repo: Path, plan: Path) -> dict:
   """
   Re-derive an existing release plan's `spec_source_docs` and `## Docs` from the release's current members.
@@ -402,8 +723,8 @@ def main(argv: list[str]) -> int:
       request is refused with a JSON error object and a non-zero exit status, and the existing file is never opened
       for writing.
     - With `--replace-cancelled`, an existing target document at `spec_stage: cancelled` is replaced by a fresh seed
-      at stage `empty` with the usual source requests, and nothing of the old content survives; an existing target
-      at any other stage is still refused, and `--replace-cancelled` beside `--refresh-sources` is refused.
+      exactly as a first seed would be, and nothing of the old content survives; an existing target at any other
+      stage is still refused, and `--replace-cancelled` beside `--refresh-sources` is refused.
     - A refusal at any guard — a missing folder-note, a malformed or missing `--doc` token, an existing
       target document that is not replaced, a product named alongside `--root`, `--refresh-sources` beside any
       seed argument or beside `--replace-cancelled`, or `--refresh-sources` naming no existing release plan —
@@ -501,8 +822,8 @@ def main(argv: list[str]) -> int:
   # disk is never opened for writing.
 
   # Contract:
-  # With `--replace-cancelled`, an existing target document at `spec_stage: cancelled` is replaced by a fresh seed:
-  # stage `empty`, the usual source requests, and nothing of the old content survives. An existing target at any
+  # With `--replace-cancelled`, an existing target document at `spec_stage: cancelled` is replaced by a fresh seed,
+  # exactly as a first seed of its type would be, and nothing of the old content survives. An existing target at any
   # other stage is still refused exactly as without the flag.
 
   # Domain(spec.lifecycle):
@@ -518,54 +839,14 @@ def main(argv: list[str]) -> int:
     scaffold_asset.fail(scaffold_asset.Keys.CAT_LOGICAL,
                          f"target doc already exists: {name}")
 
-  # the note's own declarations drive the template chain, exactly as a scaffold's would
-  note_text = note_path.read_text(encoding = "utf-8")
-  note_fm, _fm_end = apply_request.parse_frontmatter(note_text)
-  slug = note_path.stem
-
-  # a product's own level note is seeded from the product context even when the caller named
-  # the product; only an asset's status note drives the asset-type chain
-  if product and note_fm.get(SpecKey.ROLE) != SpecValue.ROLE_PRODUCT:
-    # an asset inside a nested product's tree is that product's, whichever key the caller named: its
-    # tokens, templates and paint below all come from the owner
-    product, record = scaffold_asset.resolve_owning_product(
-        repo, note_path.parent, product = product, record = record)
-    asset_type = note_fm.get(scaffold_asset.Keys.ASSET_TYPE, "") or scaffold_asset.Keys.DESIGN_STEM
-    alias_base = scaffold_asset.resolve_alias_base(asset_type, record)
-    tokens = { "product": product, "product_tag": scaffold_asset.product_tag(record),
-               "slug": slug, "category": asset_type }
-    tmpl_path = scaffold_asset.resolve_template(
-        repo, asset_type, product, name, alias_base = alias_base, expect_type = doc_type)
-  else:
-    product, tokens, tmpl_path = _root_seed_inputs(repo, note_path, note_fm, slug, name, doc_type)
-  # the template with an unfilled product-tag line dropped, then every token filled in
-  template = _drop_empty_tag_line(tmpl_path.read_text(encoding = "utf-8"), tokens)
-  doc_text = scaffold_asset.substitute(template, tokens)
-  doc_text = scaffold_asset.ensure_doc_type(doc_text, doc_type)
-
-  # the type's own paint: the icon names the kind of document, matchers own the colour later
-  if (doc_paint := spec_doc_types.icon_color(repo, doc_type, product or None)):
-    doc_text = scaffold_asset.inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
-
-  # Domain(spec.notes):
-  # # A freshly seeded document inherits its asset's own request lineage
-  # A document seeded beside an asset's status note did not exist when the requests that led
-  # to the asset were opened, yet it still needs the same attribution those requests carry, so
-  # a reviewer later dispatched against the document can resolve exactly which request or
-  # requests motivated it. The seed copies the note's own recorded request lineage onto the
-  # new document rather than leaving it to be rediscovered, so that attribution survives even
-  # once the asset's status note itself has moved on to citing something else.
-
-  # the seeded doc is an unwritten skeleton inheriting the note's request attribution
-  _doc_fm, doc_fm_end = apply_request.parse_frontmatter(doc_text)
-  fm_text = _set_stage_empty(doc_text[:doc_fm_end])
-
-  # the list writer quotes each `[[...]]` member — bare, it parses as a nested YAML list
-  fm_text = apply_request.set_fm_list(fm_text, _SOURCE_REQUESTS_KEY, _note_source_requests(note_text))
-  spec_paths.write_text_atomic(doc_path, fm_text + doc_text[doc_fm_end:])
+  # the seeded text comes from the one renderer every seeding caller shares
+  doc_text, record = render_seed(repo, note_path, name, doc_type = doc_type, product = product, record = record)
+  spec_paths.write_text_atomic(doc_path, doc_text)
 
   # a release's plans cite the included assets' designs and the owner's architecture, frontmatter and `## Docs`
   # alike, so their writers find their sources on the document itself
+  note_text = note_path.read_text(encoding = "utf-8")
+  note_fm, _fm_end = apply_request.parse_frontmatter(note_text)
   if note_fm.get(scaffold_asset.Keys.ASSET_TYPE) == ReleaseKey.ASSET_TYPE and name in _RELEASE_PLAN_DOCS:
     sources_refresh.refresh_sources(
         doc_path, set_docs = _build_release_plan_sources(repo, note_text, record = record, plan_name = name))

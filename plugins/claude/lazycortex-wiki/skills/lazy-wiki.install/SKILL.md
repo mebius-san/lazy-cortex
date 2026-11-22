@@ -73,7 +73,7 @@ Outcome: `scope-detected: <user|project>`.
 
 ## Step 2: Determine paths
 
-`<repo-root>` is the project root Step 1 resolved. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki` prints: the authoring repo's own `plugins/claude/lazycortex-wiki/` when this checkout ships the plugin, else the daemon's exported plugin dir, else the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
+`<repo-root>` is the project root Step 1 resolved. `<installPath>` is what `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki --cwd <repo-root>` prints: the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-wiki/`, and last the `installPath` the install `~/.claude/plugins/installed_plugins.json` records. Never read `installed_plugins.json` for it by hand — in a repo that authors the plugin that hands back the previous publish instead of the sources at hand, and every role, rule, template, or tier row added since is silently missed.
 
 Resolve paths:
 
@@ -102,7 +102,7 @@ Outcome: `created`, `already-present`, or `failed` (the `not-a-directory` / `fai
 
 ## Step 4: Sync rules
 
-Enumerate every rule file shipped by the plugin: `Glob <installPath>/rules/*.md` (currently `lazy-wiki.navigation.md` and `lazy-wiki.structure.md`). If the glob returns zero files → FAIL: *"Plugin cache is empty — run `/plugin update lazycortex-wiki@lazycortex` to refresh."*
+Enumerate every rule file shipped by the plugin: `Bash(ls <installPath>/rules/*.md)` (currently `lazy-wiki.navigation.md` and `lazy-wiki.structure.md`). If the listing returns zero files → FAIL: *"Plugin cache is empty — run `/plugin update lazycortex-wiki@lazycortex` to refresh."*
 
 Owned namespace: `lazy-wiki`.
 
@@ -299,11 +299,13 @@ State `experts.wiki.tag-curator: <seeded|kept-local>`.
 
 ### Routines
 
-Register each of the five routines below through the registrar in reconcile mode rather than writing the JSON into the file by hand:
+Register each of the five routines below through the core `reconcile-routine` verb rather than writing the JSON into the file by hand. `<name>` is the routine's key in the block below and `<cfg-json>` its object body, placeholders filled:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg keys> --managed type,watch,command,expert,request,path_filter,git_author")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<cfg-json>' --managed type,watch,command,expert,request,path_filter,git_author --cwd <target-root>)
 ```
+
+The verb prints `{"status": "registered|refreshed|unchanged"}` and exits 0, or `{"status": "error", "reason": …}` and exits 1 when the merged entry fails the routine schema — report that routine as `failed: <reason>` and continue with the next.
 
 **Absent-only seeding is what leaves a consumer on an old shape forever.** A routine registered before this plugin changed what it watches or how it dispatches keeps the old record, because nothing ever revisits an entry that already exists. The keys named in `--managed` are this plugin's own knowledge and are corrected on every install run. `git_author` is among them for the same reason it is on every other routine this plugin registers: every check across the runtime reads that identity to tell a system commit from a person's, so a registration predating the block would keep the wrong answer indefinitely. The cadence keys `interval_sec`, `timeout_sec`, `priority` and `hooks_enabled` stay outside the list because an operator may have tuned them.
 
@@ -311,7 +313,7 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg ke
 
 `protocols` is outside it for the same shape of reason. An operator attaches an extra protocol to a routine deliberately, and reasserting the shipped list would delete that attachment on every install. The shipped refs still reach a registration that lacks them, through the additive union the protocol sub-step below performs.
 
-Report each routine as `registered`, `refreshed`, or `unchanged`, whichever the registrar returned.
+Report each routine as `registered`, `refreshed`, or `unchanged`, whichever the verb returned.
 
 **`lazy-wiki.scan`** — event-driven git-watch routine, processes changed files:
 
@@ -386,10 +388,10 @@ The curator dispatch carries the plugin's own `lazy-wiki.tag-curator-protocol` s
 
 ### Domain-spec expert + routines (only when `wiki.domains` is configured)
 
-Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → seed the expert with absent-only semantics, through the same keyed `settings-get` / `settings-set experts --key wiki.domain-writer` pair as the curators above, and register the three routines through the registrar in reconcile mode exactly as the five above:
+Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → seed the expert with absent-only semantics, through the same keyed `settings-get` / `settings-set experts --key wiki.domain-writer` pair as the curators above, and register the three routines through the core `reconcile-routine` verb exactly as the five above:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=<name> <cfg keys> --managed type,watch,command,cron,git_author")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<cfg-json>' --managed type,watch,command,cron,git_author --cwd <target-root>)
 ```
 
 `cron` is this plugin's own here and not the operator's: the weekly full pass is insurance against a missed wake, not a cadence anyone tunes, and the pair only works when the two schedules stay apart. `git_author` is owned because every check across the runtime reads it to tell a system commit from a person's. `interval_sec`, `timeout_sec` and `priority` stay outside the list. Report each of the three as `registered`, `refreshed`, or `unchanged`.
@@ -457,10 +459,10 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wik
 
 ### Mirror-sync routines (only for scopes with a `mirror` block)
 
-Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` through the registrar in reconcile mode:
+Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` through the core `reconcile-routine` verb:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.mirror-sync.<scope-id> <cfg keys> --managed type,command,git_author")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine lazy-wiki.mirror-sync.<scope-id> --cfg-json '<cfg-json>' --managed type,command,git_author --cwd <target-root>)
 ```
 
 `cron` is deliberately outside the list here, unlike the domain pair: how often a mirror re-fetches its source is a judgement about that source, and an operator who slowed a noisy one down must keep the answer. `command` is owned because the scope id it carries is the routine's whole identity, and `git_author` because the mirror family commits under one identity that authorship checks key on. Report each scope's routine as `registered`, `refreshed`, or `unchanged`.
@@ -504,13 +506,13 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-j
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <target-root>)
 ```
 
-Every other key stays as the configure wizard or the operator wrote it — `watch`, `expert`, `request`, `protocols`, the cadence keys. A retired grouping key (`group_globs`, a boolean `group`) is not this step's business: `lazy-wiki.audit` reports it and the core `routine-migrate` verb rewrites it. Report each present routine as `refreshed` or `unchanged`, whichever the registrar returned.
+Every other key stays as the configure wizard or the operator wrote it — `watch`, `expert`, `request`, `protocols`, the cadence keys. A retired grouping key (`group_globs`, a boolean `group`) is not this step's business: `lazy-wiki.audit` reports it and the core `routine-migrate` verb rewrites it. Report each present routine as `refreshed` or `unchanged`, whichever the verb returned.
 
-Every expert entry this step changed was already written by its own `settings-set experts --key <expert-key>` call above, and the verb keeps the section's version stamp; the routine registrations are written by the registrar. No other write to `lazy.settings.json` follows.
+Every expert entry this step changed was already written by its own `settings-set experts --key <expert-key>` call above, and the verb keeps the section's version stamp; the routine registrations are written by the `reconcile-routine` verb. No other write to `lazy.settings.json` follows.
 
 ### Seed the mandatory protocol
 
-`lazy-wiki.scan` and `lazy-wiki.relink-weekly` dispatch curator jobs that write into vault notes (`wiki_summary`, tag values, the glossed `# See also` block), so both carry one mandatory protocol. Attach it after the routine registration, whatever the registrar reported — the union is idempotent and never removes what the operator added:
+`lazy-wiki.scan` and `lazy-wiki.relink-weekly` dispatch curator jobs that write into vault notes (`wiki_summary`, tag values, the glossed `# See also` block), so both carry one mandatory protocol. Attach it after the routine registration, whatever the `reconcile-routine` verb reported — the union is idempotent and never removes what the operator added:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wiki.scan --ids lazycortex-core:lazy-core.markdown-style)

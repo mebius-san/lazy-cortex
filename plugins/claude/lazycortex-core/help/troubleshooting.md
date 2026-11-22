@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -42,8 +42,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 00df6fc72808ab14d949a84e3534c8f80ff9e4b518a6f36888ac1edcc35a4b1f
+source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
+surface_sha: 125e7ed94be40355e5e09c9f2898ff56f1228022c0814565e4450c11b65b1366
 ---
 # Troubleshooting
 
@@ -581,6 +581,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `${CLAUDE_PLUGIN_ROOT}/bin` did not resolve in the current environment (a sandboxed session, or a plugin path that failed to expand), so the audit's Python helper (`lazy_settings.py`) could never be imported.
 
 **Fix**: Confirm `${CLAUDE_PLUGIN_ROOT}` resolves to the actual plugin install path in your session, and that `bin/lazy_settings.py` exists at that path. If the plugin cache looks intact but the variable still doesn't resolve, restart Claude Code and re-run `/lazy-core.audit`.
+
+---
+
+## `/lazy-core.audit` reports that expert jobs get no execution environment in their worktrees
+
+**Symptom**: `/lazy-core.audit` (or the expert-runtime part of `/lazy-core.doctor`) prints an `[INFO]` line under "Worktree environment" like "expert(s) `<keys>` run in job worktrees that get no execution environment — `daemon.git.worktree_links` and `daemon.git.worktree_bootstrap_cmd` are both empty". Jobs of those experts may fail because the project's virtual environment or other ignored files are missing.
+
+**Likely cause**: An expert configured to work on its own branch runs each job in a fresh git worktree that holds tracked files only. Anything git-ignored — a virtual environment, for example — reaches the worktree only through the daemon's worktree link list or its bootstrap command, and neither is set.
+
+**Fix**: Re-run the install of the plugin that provides the environment (for Python projects, `/lazy-python.install`) — it adds its own links. If your environment comes from elsewhere, follow the `fix:` line the audit prints: list the git-ignored paths the jobs need in `daemon.git.worktree_links`, or set `daemon.git.worktree_bootstrap_cmd`. Re-run `/lazy-core.audit` to confirm the line is gone. Experts that do not work on their own branch never trigger this finding.
 
 ---
 
@@ -1470,7 +1480,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause (absent)**: The run-log directory does not exist yet — no skill has produced a run log in this repo.
 
-**Likely cause (Step 1 failed)**: The canonical-name resolver script (`resolve-canonical.py`) errored — typically because `CLAUDE_PLUGIN_ROOT` is unset, Python is missing, or the script produced malformed JSON.
+**Likely cause (Step 1 failed)**: The canonical-name resolver script (`bin/resolve_canonical.py` in the core plugin) errored — typically because `CLAUDE_PLUGIN_ROOT` is unset, Python is missing, or the script produced malformed JSON.
 
 **Fix (absent)**: Run any logged skill once (for example `/lazy-core.audit`) to create `.logs/claude/` and at least one log file. Then re-run `/lazy-log.clean`.
 

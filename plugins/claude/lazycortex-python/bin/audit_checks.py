@@ -8,12 +8,13 @@ check itself crashed, not a finding).
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 import fnmatch
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,9 @@ if str(_BIN) not in sys.path:
 import pcf  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from venv_spec import VenvSpec  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+# One value of a JSON settings file.
+JsonValue: TypeAlias = dict | list | str | float | bool | None
 
 
 # Allow override via env (Claude Code sets CLAUDE_PLUGIN_ROOT; consumer install → cache path, not dev source).
@@ -294,8 +298,8 @@ class Check5Pyproject:
     # guard: an unparseable pyproject.toml has no sections to look up
     try:
       data = tomllib.loads(pyproject.read_text(encoding = "utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-      return {"severity": "FAIL", "message": f"pyproject.toml is not valid TOML: {exc}"}
+    except tomllib.TOMLDecodeError as error:
+      return {"severity": "FAIL", "message": f"pyproject.toml is not valid TOML: {error}"}
 
     # collect the required sections the tool table lacks
     tool_table = data.get("tool", {})
@@ -537,8 +541,8 @@ class Check10Hook:
     # guard: an unparseable manifest has no hook entries to scan
     try:
       data = json.loads(manifest.read_text(encoding = "utf-8"))
-    except json.JSONDecodeError as exc:
-      return {"severity": "FAIL", "message": f"{self.MANIFEST_REL} is not valid JSON: {exc}"}
+    except json.JSONDecodeError as error:
+      return {"severity": "FAIL", "message": f"{self.MANIFEST_REL} is not valid JSON: {error}"}
 
     # look for a PostToolUse entry that runs the check-style hook
     post_tool_use = data.get("hooks", {}).get("PostToolUse", [])
@@ -800,8 +804,8 @@ class Check13MypyPlugin:
     # guard: a file that does not parse carries no readable mypy configuration
     try:
       data = tomllib.loads(pyproject.read_text(encoding = "utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-      return {"severity": "FAIL", "message": f"pyproject.toml is not valid TOML: {exc}"}
+    except tomllib.TOMLDecodeError as error:
+      return {"severity": "FAIL", "message": f"pyproject.toml is not valid TOML: {error}"}
 
     # the `[tool.mypy]` table, or None when `tool` itself is not a table
     tool = data.get("tool", {})
@@ -852,6 +856,215 @@ class Check13MypyPlugin:
     return {"severity": "PASS", "message": f"protected-access plugin wired and {self.SHIM_REL} current"}
 
 
+# ----------------------------------------------------------------------------------------
+class Check14WorktreeVenv:
+  """
+  Audit check that isolated job worktrees of a `workspace: branch` expert can reach the project venv.
+
+  Attributes:
+    SETTINGS_REL: Repo-relative path of the tracked settings file.
+    LOCAL_REL: Repo-relative path of the local settings overlay.
+    consumer_dir: Absolute path to the consumer repository root.
+  """
+
+  SETTINGS_REL = ".claude/lazy.settings.json"
+  LOCAL_REL = ".claude/lazy.settings.local.json"
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    self.consumer_dir: Path = consumer_dir
+
+  @classmethod
+  def _merge(cls, base: JsonValue, overlay: JsonValue) -> JsonValue:
+    """
+    Merge a local-overlay value onto a tracked one.
+
+    Objects merge key by key, lists keep the tracked entries and append the overlay's new ones, and any other overlay
+    value replaces the tracked one.
+
+    Args:
+      base: The tracked value.
+      overlay: The local-overlay value laid on top of it.
+
+    Returns:
+      The merged value.
+    """
+
+    # Domain(settings.versioning):
+    # # Overlay onto tracked settings by value type
+    # Effective settings come from two layers: the committed, shared file and a personal overlay kept beside
+    # it. The overlay is laid on the shared file by the type of each value, so it only has to state what it
+    # changes. Objects combine key by key, recursively, and a key present in only one layer is kept as it is.
+    # A list keeps every shared entry in its original order and appends only the overlay entries not already
+    # there. Any other overlay value, a scalar or a value of a different type from the shared one, replaces
+    # the shared value.
+
+    # objects merge key by key, lists append the overlay's new entries, anything else is replaced
+    if isinstance(base, dict) and isinstance(overlay, dict):
+      return cls._merge_objects(base, overlay)
+    if isinstance(base, list) and isinstance(overlay, list):
+      return base + [ item for item in overlay if item not in base ]
+    return overlay
+
+  @classmethod
+  def _merge_objects(cls, base: dict, overlay: dict) -> dict:
+    """
+    Merge a local-overlay object onto a tracked one, key by key.
+
+    Args:
+      base: The tracked object.
+      overlay: The local-overlay object laid on top of it.
+
+    Returns:
+      A new object holding every tracked key, each overlay key merged onto its tracked value or added.
+    """
+    merged = { **base }
+
+    # each overlay key merges onto the tracked value it shares a key with, or joins as new
+    for key, value in overlay.items():
+      merged[key] = cls._merge(merged[key], value) if key in merged else value
+    return merged
+
+  @staticmethod
+  def _names_path(cmd: str, link: str, venv: Path) -> bool:
+    """
+    Tell whether a shell command names a venv path as one of its words.
+
+    Args:
+      cmd: The shell command.
+      link: The venv's repo-relative path.
+      venv: The venv's absolute path.
+
+    Returns:
+      True when a word of the command, normalised, equals the relative or the absolute venv path.
+    """
+    # a command shlex cannot split, such as one with an unclosed quote, is split on whitespace instead
+    try:
+      words = shlex.split(cmd)
+    except ValueError:
+      words = cmd.split()
+
+    # a word right after `-m` is a Python module name, never a path, so it is left out of the comparison
+    paths = [ word for index, word in enumerate(words) if word and ( index == 0 or words[index - 1] != "-m" ) ]
+
+    # each word is compared as a path, so `./.venv/` names `.venv` while `.venv-tools` does not
+    targets = { link, os.path.normpath(venv) }
+    return any(os.path.normpath(word) in targets for word in paths)
+
+  def _read_settings(self) -> dict:
+    """
+    Read the tracked settings file with its local overlay merged on top.
+
+    Returns:
+      The effective settings; an empty mapping when neither file exists.
+
+    Raises:
+      ValueError: If a layer is not valid JSON.
+    """
+    merged: dict = {}
+    for rel in ( self.SETTINGS_REL, self.LOCAL_REL ):
+      path = self.consumer_dir / rel
+
+      # guard: an absent layer declares nothing
+      if not path.is_file():
+        continue
+
+      # the layer's content; an empty file reads as an empty object
+      data = json.loads(path.read_text(encoding = "utf-8") or "{}")
+
+      # a layer that is a JSON object merges onto what the layers before it gave
+      if isinstance(data, dict):
+        merged = self._merge_objects(merged, data)
+    return merged
+
+  def run(self) -> dict:
+    """
+    Report whether a branch expert's worktrees miss the project venv or cannot reach it.
+
+    A venv given as a relative path outside the checkout is reported with the fix of making it absolute; a venv
+    inside the checkout is reported unless a shared link carries it or a shell word of the bootstrap command, once
+    normalised, equals its relative or absolute path.
+
+    Returns:
+      Finding dict with `severity` (PASS or WARN) and a `message` string.
+    """
+
+    # Domain(install.reconciliation):
+    # # Venv reach of isolated job worktrees
+    # An expert that runs its jobs in an isolated working copy needs the project venv there as much as the
+    # operator's checkout does. A venv at an absolute place outside the checkout is reached by its
+    # configured path from any copy; a relative location that climbs out of the checkout lands elsewhere
+    # in every copy and no sharing can carry it. A venv inside the checkout reaches a copy only when it is
+    # listed among the paths shared as links, or when the preparation command names that path as a word
+    # of its own — a longer word that merely contains it builds something else, and the word that follows
+    # a module switch names a module, never a path. With neither, the checker runners break inside every
+    # such job.
+
+    # guard: settings that do not parse name no experts and no worktree environment
+    try:
+      settings = self._read_settings()
+    except ValueError as error:
+      return {"severity": "WARN", "message": f"{self.SETTINGS_REL} or its local overlay is not valid JSON: {error}"}
+
+    # the experts whose jobs run in a worktree, in name order
+    experts = settings.get("experts")
+    branch_experts = sorted(
+      name for name, entry in ( experts.items() if isinstance(experts, dict) else () )
+      if isinstance(entry, dict) and entry.get("workspace") == "branch"
+    )
+
+    # guard: no expert runs in a worktree, so no worktree needs the venv
+    if not branch_experts:
+      return {"severity": "PASS", "message": "no expert with workspace: branch — no job runs in a worktree"}
+
+    # guard: without a readable pyproject.toml the venv location is unknown
+    try:
+      spec = VenvSpec(project_dir = self.consumer_dir)
+    except tomllib.TOMLDecodeError as error:
+      return {"severity": "WARN", "message": f"pyproject.toml is not valid TOML, venv location unknown: {error}"}
+
+    # the venv's repo-relative path, or None when it lies outside the checkout
+    link = spec.worktree_link()
+
+    # a relative venv climbing out of the checkout names another place in every worktree, and no link can carry it
+    if spec.is_unreachable_from_worktrees():
+      return {
+        "severity": "WARN",
+        "message": (f"workspace: branch expert(s) {', '.join(branch_experts)} run in job worktrees, which resolve "
+                    f"the relative venv {spec.target_venv()} against their own root — make "
+                    "[tool.lazy-python].venv an absolute path"),
+      }
+
+    # an absolute venv outside the checkout is reached from every worktree by its configured path
+    if link is None:
+      return {"severity": "PASS", "message": f"project venv {spec.target_venv()} lies outside the checkout"}
+
+    # the effective git block: its links, and its bootstrap command
+    daemon = settings.get("daemon")
+    git = daemon.get("git") if isinstance(daemon, dict) else None
+    git = git if isinstance(git, dict) else {}
+    entries = git.get("worktree_links")
+    links = {Path(entry).as_posix() for entry in entries if isinstance(entry, str) and entry} \
+      if isinstance(entries, list) else set()
+    cmd = git.get("worktree_bootstrap_cmd")
+
+    # the bootstrap command names the venv only by a shell word that is the venv path itself
+    named = isinstance(cmd, str) and self._names_path(cmd, link, spec.target_venv())
+
+    # the venv is carried as a link, or the bootstrap command names it
+    if link in links or named:
+      return {
+        "severity": "PASS",
+        "message": f"project venv {link} reaches the job worktrees of {', '.join(branch_experts)}",
+      }
+    return {
+      "severity": "WARN",
+      "message": (f"workspace: branch expert(s) {', '.join(branch_experts)} run in job worktrees, but project venv "
+                  f"{link} "
+                  "is in neither daemon.git.worktree_links nor daemon.git.worktree_bootstrap_cmd — "
+                  "re-run /lazy-python.install"),
+    }
+
+
 def main() -> int:
   """
   Dispatch a named check, emit its JSON finding to stdout, and return 0.
@@ -878,6 +1091,7 @@ def main() -> int:
     "check11": Check11Venv,
     "check12": Check12DomainDictionary,
     "check13": Check13MypyPlugin,
+    "check14": Check14WorktreeVenv,
   }
   handler = checks.get(check_id)
   if handler is None:

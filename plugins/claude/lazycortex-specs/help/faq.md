@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, assets, vision/design docs, gates, release specialists, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 01bfc1c3bccce09a32da36664c785f634e6055dd514e7dab7dff25a92b0a1e23
+source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
+surface_sha: 175ad1a7f7a538315aca79441d813ca75ce76b5dbf662045a974b1e5617d7ba9
 ---
 # Frequently asked questions
 
@@ -360,6 +360,14 @@ On a product that owns releases the audit asks for the specialist list, and a no
 ## `/lazy-spec.audit` reports a stale `spec_tools` key, or a retired `data-report` / `docs-report` document. What now?
 
 Assets no longer carry a tool set: implementation belongs to the release, and its journal is `code-report.md` alone. A status folder-note that still carries `spec_tools` is reported as stale, and the audit names the repair, the `migrate-spec-tools` verb of the specs CLI, run through the interpreter with `--cwd <repo-root>`. A document typed `data-report` or `docs-report` is reported as a type that is no longer shipped: move its content into the release's `code-report.md`, or declare the type yourself under the product's document types if you still want it.
+
+---
+
+## A release's `code-report.md` or `test-report.md` shows no icon and is missing from tag and topic views. How do I fix it?
+
+An earlier version of the plugin landed a release's build and test journals exactly as the job wrote them, so a journal could carry none of the keys every spec document carries: no `spec_role`, no `spec_doc_type`, no product tag, no `wiki_pinned_topics`, no `iconize_icon`. Without them the type's icon never matches, a journal parked for you shows no icon at all, and the tag and topic views leave it out. Journals landing now get the same frontmatter a freshly seeded document of that type carries, and a type that has no stages never receives `spec_stage` or `spec_source_requests`.
+
+Journals already on disk are healed by the `migrate-journals` verb of the specs CLI, run through the interpreter with `--cwd <repo-root>`: `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> migrate-journals --cwd <repo-root>`. It keeps every key a journal already has, review keys included, and leaves the body untouched. `/lazy-core.setup` runs it for you as migration step 015 after you update the plugin; the same verb with `--check` exits 1 once no `code-report.md` or `test-report.md` in a release folder lacks `spec_role`.
 
 ---
 

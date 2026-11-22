@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Usage text printed with no arguments or a help flag
 USAGE = ("usage: lazycortex-obsidian <subcommand> [args...]\n"
-         "Subcommands: tag-pages (plan | apply), plugin-install, snippet-enable, "
+         "Subcommands: tag-pages (plan | apply), plugin-install, snippet-enable, icon-map-merge, "
          "vault-manifest (capture | deploy | drift | lookup | strip-personal), and every iconize_sync "
          "subcommand — sync, sync-paths, reconcile, reconcile-plugin, reconcile-dirty, reconcile-commit, "
          "check-versions")
@@ -30,6 +30,7 @@ _ROUTES = {
   "plugin-install": "plugin_install",
   "snippet-enable": "snippet_enable",
   "vault-manifest": "vault_manifest",
+  "icon-map-merge": "icon_map_merge",
 }
 
 

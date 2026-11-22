@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-11-21
+last_regen: 2026-11-22
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: e8eec278aa17da9414b95c59de2216696fb32452b39b600026e2f541d42c4439
+source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
+surface_sha: d85e4c484ca1b17af04be2c05a52470ba130ee717259bdb71b20bfd2b8c2aa00
 ---
 # Troubleshooting
 
@@ -216,7 +216,7 @@ surface_sha: e8eec278aa17da9414b95c59de2216696fb32452b39b600026e2f541d42c4439
 
 **Likely cause**: `/lazy-spec.audit` is read-only in every invocation — it reports and stops, and it has no apply mode at all. Repair is a separate move you make.
 
-**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-set-key` / `note-drop-key` for a frontmatter key, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doctor --apply` for a missing `spec_doc_type` / `spec_asset_type` / `wiki_pinned_topics` pin, a stage/tag mirror drift, a cancelled asset with documents left behind, level-note schema drift, a `spec_conflicted` mismatch, or a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
+**Fix**: Run the route the report names beside each finding — `/lazy-spec.set-stage` for a stage/tag drift, `/lazy-spec.flip-gate` for a gate, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> note-set-key` / `note-drop-key` for a frontmatter key, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doctor --apply` for a missing `spec_doc_type` / `spec_asset_type` / `wiki_pinned_topics` pin, a stage/tag mirror drift, a cancelled asset with documents left behind, level-note schema drift, a `spec_conflicted` mismatch, a `journal-frontmatter` finding on a release's build or test journal, or a `dangling-request-link` finding on a mirrored upstream unit, `/lazy-spec.sync-with-code` for a stale tech doc, `/lazy-spec.product-config` for a product or repo record. Findings with no named verb are hand edits. `/lazy-core.doctor` runs this audit as one of its delegated checks and drives a fix/waive loop over the merged findings if you want one place to work through them.
 
 ---
 
@@ -247,6 +247,16 @@ surface_sha: e8eec278aa17da9414b95c59de2216696fb32452b39b600026e2f541d42c4439
 **Likely cause**: The catalog was registered before the mandatory-vault-spec contract landed, or `/lazy-spec.install` was never re-run afterward — the content-root `vision.md` that every product split is a consequence of was never seeded. If a content-root `design.md` exists but no `vision.md` sits beside it, doctor reports `[INFO] pre-vision vault` instead — a legal starting state, migrated by hand whenever you're ready, not a WARN.
 
 **Fix**: Re-run `/lazy-spec.install` — its Step 6.9 seeds a draft `vision.md` at the content-root when neither file exists — then fill it in. This is a WARN, not a FAIL: the rest of the catalog keeps working while it's absent.
+
+---
+
+## A release's `code-report.md` or `test-report.md` has no icon and is missing from tag and topic views
+
+**Symptom**: A release's build or test journal shows no icon, or the wrong one, and tag and topic views leave it out. The spec doctor reports a `journal-frontmatter` finding: the journal carries no `spec_role` and lacks the spec frontmatter a fresh seed gives it.
+
+**Likely cause**: The journal was landed by an earlier plugin version, which wrote the job's text as it came. Such a journal has none of the keys every spec document carries: `spec_role`, `spec_doc_type`, the product tag, `wiki_pinned_topics`, `iconize_icon`. Current versions give a landing journal that frontmatter from the start, so only journals already on disk are affected.
+
+**Fix**: Run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> doctor --apply` to heal them with the rest of the catalog, or run `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> migrate-journals` for the journals alone (add `--dry-run` to preview). The fix keeps every key the journal already has, review keys included, and leaves its body untouched. `/lazy-core.setup` also runs this as a migration step after a plugin update. Re-run `/lazy-spec.audit` to confirm the finding clears.
 
 ---
 

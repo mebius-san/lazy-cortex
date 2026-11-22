@@ -161,11 +161,15 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
 1. **Target missing** → install the plugin's template with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src "${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json" --dst <repo-root>/.claude/iconize/obsidian-icon-map.json)`; the verb creates the directory. No prompt. State: **installed** (the verb's `installed`; `failed`, exit 3, is state **failed**).
 2. **Target present, `schema_version == SCHEMA_VERSION`** (handshake OK):
    - Byte-identical to template → no prompt. State: **unchanged**.
-   - Byte-differs (authored customizations on the current schema) → **three-way merge silently**, no top-level drift prompt. For every top-level key and nested entry (registries' inner maps, `matchers[]` keyed by `id`, `stage_colors`):
-     - Keys present only in shipped template → **add** to authored file (silent).
-     - Keys present only in authored file → **keep** verbatim (silent).
-     - Keys present in both with byte-equal values → no-op.
-     - Keys present in both with **different** values → genuine conflict. One `AskUserQuestion` per conflict — no bulk "resolve all" shortcut, each conflict is a separate decision — with its context filled per key:
+   - Byte-differs (authored customizations on the current schema) → **three-way merge silently**, no top-level drift prompt, through the plugin's merge verb:
+
+     ```
+     Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-obsidian" icon-map-merge <repo-root>/.claude/iconize/obsidian-icon-map.json --shipped "${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json" --out <repo-root>/.runtime/install-stage/obsidian-icon-map.json)
+     ```
+
+     The verb merges every top-level key and nested entry (registries' inner maps, `matchers[]` keyed by `id`, `stage_colors`): a key only in the shipped template is **added**, a key only in the authored file is **kept** verbatim, a key both carry with equal values is a no-op, and a key both carry with **different** values is a genuine conflict. It prints `{"state", "added", "conflicts", "kept_authored", "took_shipped"}`:
+     - `unchanged` (exit 0) — nothing to add, nothing written. State: **unchanged**.
+     - `conflicts` (exit 1) — nothing written; `conflicts` lists each `{path, authored, shipped}`. One `AskUserQuestion` per conflict — no bulk "resolve all" shortcut, each conflict is a separate decision — with its context filled per key:
 
        ```
        Context (print before asking):
@@ -176,9 +180,10 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
        AskUserQuestion: header "Icon-map conflict", question "obsidian-icon-map.json key `<key path>` — keep your value `<authored value>` or take the shipped `<shipped value>`?", options `keep-authored` — "your value stays", `take-shipped` — "the template value replaces yours".
        ```
 
-       This is the ONLY prompt this case can raise; when there are no value conflicts the merge is fully silent.
-     Single write through the stage file: a file already at `<repo-root>/.runtime/install-stage/obsidian-icon-map.json` is a leftover of an earlier run — remove it first with `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)`, so `Write` is not refused. `Write` the merged content to that path, then `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <repo-root>/.runtime/install-stage/obsidian-icon-map.json --dst <repo-root>/.claude/iconize/obsidian-icon-map.json --copy-diverged)`; the verb byte-verifies the target (`failed`, exit 3, is state **failed**). Then remove the stage file, whether the copy landed or failed: `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)`. State: **merged** (annotate count of additions, conflicts-kept-authored, conflicts-took-shipped).
-3. **Target present, `schema_version` (call it `N`) `< SCHEMA_VERSION` and a migration chain `N → N+1 → … → SCHEMA_VERSION` is fully covered by the transforms table below.** A missing `schema_version` is treated as `N=1` (pre-handshake back-compat). The schema transform is a non-contradicting in-place upgrade — **apply it silently**, no prompt. Apply each chain step in order; each step mutates `schema_version` to its target and applies its transform. A step's implementation verb rewrites the file itself; any content the skill computes on top lands through the stage file and `file-sync --copy-diverged`, with the leftover removal before the `Write` and the stage-file removal after the copy, as in case 2. Preserve all keys not touched by any step (registries, stage_colors, matchers' unrelated fields, key order). State: **migrated-v`N`-to-v`SCHEMA_VERSION`** (e.g. `migrated-v1-to-v2`, future `migrated-v2-to-v3`, `migrated-v1-to-v3` for a two-step walk). After migrating, if the file now byte-differs from the current-schema template, run the case-2 three-way merge on top (silent except per-key value conflicts).
+       This is the ONLY prompt this case can raise; when there are no value conflicts the merge is fully silent. Then run the same command again with one `--resolve <path>=<keep-authored|take-shipped>` per answer. A run with no user channel (`lazy-core.autosetup`) asks nothing: the step is `needs-interactive` and nothing is written.
+     - `merged` (exit 0) — the merged icon-map is in the stage file. Land it with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> file-sync --src <repo-root>/.runtime/install-stage/obsidian-icon-map.json --dst <repo-root>/.claude/iconize/obsidian-icon-map.json --copy-diverged)`; the verb byte-verifies the target (`failed`, exit 3, is state **failed**). Then remove the stage file, whether the copy landed or failed: `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)`. State: **merged** (annotate the count of `added`, `kept_authored`, `took_shipped`).
+     - exit 2 — an input is not a JSON object or the stage file cannot be written; the reason is on stderr. State: **failed**.
+3. **Target present, `schema_version` (call it `N`) `< SCHEMA_VERSION` and a migration chain `N → N+1 → … → SCHEMA_VERSION` is fully covered by the transforms table below.** A missing `schema_version` is treated as `N=1` (pre-handshake back-compat). The schema transform is a non-contradicting in-place upgrade — **apply it silently**, no prompt. Apply each chain step in order; each step mutates `schema_version` to its target and applies its transform. A step's implementation verb rewrites the file itself; any content the skill computes on top lands through the stage file and `file-sync --copy-diverged`, a stage file left by an earlier run removed with `Bash(rm <repo-root>/.runtime/install-stage/obsidian-icon-map.json)` before the `Write`, and the stage file removed the same way after the copy, whether it landed or failed. Preserve all keys not touched by any step (registries, stage_colors, matchers' unrelated fields, key order). State: **migrated-v`N`-to-v`SCHEMA_VERSION`** (e.g. `migrated-v1-to-v2`, future `migrated-v2-to-v3`, `migrated-v1-to-v3` for a two-step walk). After migrating, if the file now byte-differs from the current-schema template, run the case-2 three-way merge on top (silent except per-key value conflicts).
 
    #### Transforms table (one row per `N → N+1` step)
 
@@ -231,13 +236,17 @@ the whole runtime.
 Skip the whole step when this repo runs no daemon (`daemon` absent from `lazy.settings.json`).
 Outcome: **no-daemon**.
 
-Register through `lazy-routine.register` in **reconcile mode** — never by hand-editing the
-registry, and never the plain register call, which aborts on a name it already knows and would
-leave a vault registered by an older version of this step on that shape forever:
+Register through the core `reconcile-routine` verb — never by hand-editing the registry, and
+never the plain `routine-register` verb, which aborts on a name it already knows and would leave
+a vault registered by an older version of this step on that shape forever:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-obsidian.repaint cfg=<cfg-json> --managed type,watch,command,git_author")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine lazy-obsidian.repaint --cfg-json '<cfg-json>' --managed type,watch,command,git_author --cwd <repo-root>)
 ```
+
+`<cfg-json>` is the shipped `cfg` below with `<default-branch>` filled. The verb prints
+`{"status": "registered|refreshed|unchanged"}` and exits 0 — that status is the step's outcome —
+or `{"status": "error", "reason": …}` and exits 1, which is the outcome `failed: <reason>`.
 
 The shipped `cfg`:
 
@@ -267,8 +276,8 @@ reads, so a repaint never wakes a sibling coordinator as an operator edit.
 the worker the daemon resolves, the bot identity every authorship check keys on. Those are corrected
 to the shipped value on every run, which is what brings a vault registered by an older version of
 this step current. `interval_sec`, `branch` and `ignore_halt` stay outside the list — the operator
-could reasonably have tuned any of them, and the registrar fills each in only when the recorded
-entry never carried it. Outcome: **registered** / **refreshed** / **unchanged** (the registrar's own
+could reasonably have tuned any of them, and the verb fills each in only when the recorded
+entry never carried it. Outcome: **registered** / **refreshed** / **unchanged** (the verb's own
 word) / **no-daemon**.
 
 Then prune the legacy duplicate of that identity. Earlier releases of this step also wrote the
