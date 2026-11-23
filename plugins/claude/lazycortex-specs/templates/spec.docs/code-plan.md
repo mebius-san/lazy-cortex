@@ -25,7 +25,7 @@ spec_source_docs: []
 <!-- The work, in order, over the product as a whole. One subsection per task, naming the exact files it creates, modifies or deletes before its steps begin, plus a line `Specialist: <role>` when the task's material is the one an entry of `context/specialists.json` makes, naming that entry's role. What proves the work done lives in Verification, and the list of specialists lives in the settings, never in this document. -->
 
 ## Verification
-<!-- The repository's own check and test commands, cited as they exist in the repo. One command per line; the last task runs the whole check sweep and the entire test suite. A command the repository does not ship does not belong here. -->
+<!-- The repository's own check and test commands, cited as they exist in the repo. One command per line; the last task runs the whole check sweep and the entire test suite. A command the repository does not ship does not belong here, and neither does any manual, live, smoke or functional check, which the release's test plan carries. -->
 
 ## Rollback
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. How to back the change out. A revert command for a small commit, or a step-by-step sequence for a migration. What lands lives in Tasks. -->

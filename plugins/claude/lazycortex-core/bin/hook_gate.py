@@ -16,6 +16,11 @@ gate answers False. Two mutually-exclusive modes, keyed on the presence of the
 - variable absent (interactive default) — every hook runs unless its short name is listed in
   `lazy.settings.json[hooks][disabled]` (tracked value with the local overlay merged on top).
 
+A hook that acts on a repository other than the session's (a commit made with `git -C <dir>`) passes
+that repository's directory, so its `hooks.disabled` decides. Such a hook that must read stdin first
+calls `is_admitted(<short-name>)` as its first action — the allow-list half alone, with no settings
+read — and `is_enabled(<short-name>, cwd = <dir>)` once the payload names the directory.
+
 The interactive block-list read fails open: any resolution error resolves to "not disabled", so
 a hook still runs. Silencing a hook is always an explicit act, never an accident of a missing or
 malformed settings file.
@@ -40,28 +45,69 @@ sys.path.insert(0, str(_BIN_DIR))
 from constants import EnvVar, HooksKey, SettingsFile, SettingsKey  # noqa: E402
 
 
-def is_enabled(name: str) -> bool:
+def is_admitted(name: str) -> bool:
+  """
+  Report whether the allow-list regime lets the hook identified by `name` run in the current process.
+
+  Guarantees:
+    - Decides from the process environment alone: it never reads settings, stdin, or git, so a hook can call it
+      before consuming stdin and exit early.
+
+  Args:
+    name: The hook's canonical short name (a `HookName` value, e.g. `git-guard`).
+
+  Returns:
+    False when the allow-list environment variable is set and does not contain `name`; True otherwise,
+    including when the variable is absent.
+  """
+
+  # Contract:
+  # The answer is decided from the process environment alone. It MUST NEVER read settings, stdin, or git,
+  # so a hook can call it before consuming stdin and exit early.
+
+  # the allow-list variable; whether it is set at all selects the regime
+  allow = os.environ.get(EnvVar.HOOKS_ALLOW_LIST)
+
+  # no allow-list: the regime has no say, the block-list in settings decides
+  if allow is None:
+    return True
+
+  # the variable's presence is the signal; only the hooks it names run
+  return name in { item.strip() for item in allow.split(",") if item.strip() }
+
+
+def is_enabled(name: str, *, cwd: Path | None = None) -> bool:
   """
   Report whether the hook identified by `name` should run in the current process.
 
   Guarantees:
     - Any failure to resolve the disabled-hooks list — no repository, no settings file, or an unreadable or
       malformed value — leaves every hook enabled; only an explicit `hooks.disabled` entry can disable one.
+    - When `cwd` is given, only the `hooks.disabled` of the repository holding `cwd` is judged; the process's own
+      working directory is never consulted.
+
+  Notes:
+    - Under the allow-list environment variable the answer comes from the environment alone, with no I/O.
+    - Otherwise it runs a `git` subprocess and reads the repository's settings file on every call; nothing is cached.
 
   Args:
     name: The hook's canonical short name (a `HookName` value, e.g. `git-guard`).
+    cwd: A directory inside the repository whose `hooks.disabled` is read; `None` reads the repository
+      of the process's working directory.
 
   Returns:
     True when the hook should proceed; False when the current context disables it — either the
     allow-list environment variable is set and does not contain `name`, or an interactive session
-    lists `name` under `hooks.disabled`.
+    finds `name` under `hooks.disabled` of that repository.
   """
 
   # Contract:
   # Any failure to resolve the disabled-hooks list (no repository, no settings file, an unreadable or
   # malformed value) MUST leave every hook enabled; only an explicit `hooks.disabled` entry can disable one.
 
-  allow = os.environ.get(EnvVar.HOOKS_ALLOW_LIST)
+  # Contract:
+  # When `cwd` is given, only the `hooks.disabled` of the repository holding `cwd` decides; the process's own
+  # working directory MUST NEVER be consulted.
 
   # Domain(runtime.daemon-loop):
   # # Which hooks a spawn may run
@@ -73,23 +119,29 @@ def is_enabled(name: str) -> bool:
   # runs by default, and only an explicit operator block-list can silence one — an interactive
   # session is presumed to want the full hook set unless told otherwise.
 
-  # Allow-list mode: the variable's presence is the signal, regardless of who set it. Pure
+  # allow-list mode: the variable's presence is the signal, regardless of who set it. Pure
   # in-memory check — the expert-spawn fast path exits here with no I/O.
-  if allow is not None:
-    return name in { item.strip() for item in allow.split(",") if item.strip() }
+  if os.environ.get(EnvVar.HOOKS_ALLOW_LIST) is not None:
+    return is_admitted(name)
 
-  # Interactive default: run unless the operator silenced this hook in settings.
-  return name not in _disabled_hooks()
+  # interactive default: run unless the operator silenced this hook in that repository's settings.
+  return name not in _disabled_hooks(cwd)
 
 
-def _disabled_hooks() -> frozenset[str]:
+def _disabled_hooks(cwd: Path | None) -> frozenset[str]:
   """
   Return the set of hook short names the operator has disabled for interactive sessions.
 
-  Reads the `hooks` section of the current repository's `lazy.settings.json` (tracked value with
+  Reads the `hooks` section of the `lazy.settings.json` of the repository holding `cwd` (tracked value with
   the local overlay merged on top). Fails open — any resolution error (no repository, no settings
   file, or an unreadable or malformed value) yields an empty set, so only an explicit
   `hooks.disabled` entry silences a hook.
+
+  Notes:
+    - Runs a `git` subprocess and reads the settings file from disk on every call.
+
+  Args:
+    cwd: A directory inside the repository to read; `None` means the process's working directory.
 
   Returns:
     The frozenset of disabled hook short names, or an empty frozenset when none are configured or
@@ -104,16 +156,21 @@ def _disabled_hooks() -> frozenset[str]:
   # never fall silent because of a missing or broken settings file; it can only fall silent because
   # someone said so.
 
-  repo = _repo_root()
+  # the repository whose settings hold the block-list
+  repo = _repo_root(cwd)
 
   # guard: not inside a git repository — nothing to disable against
   if repo is None:
     return frozenset()
+
+  # the block-list lives in that repository's own settings, never the session's
   settings_path = repo / SettingsFile.REL
 
   # guard: no settings file for this repository
   if not settings_path.exists():
     return frozenset()
+
+  # load the hooks section; any failure to load it leaves no hook disabled
   # noinspection PyBroadException
   try:
     # waiver: lazy_settings is imported inside this try so any failure to load it leaves no hook disabled;
@@ -123,28 +180,38 @@ def _disabled_hooks() -> frozenset[str]:
     section = lazy_settings.load_section(settings_path, SettingsKey.HOOKS)
   except Exception:
     return frozenset()
+
+  # the operator's block-list, empty when the key is absent
   disabled = section.get(HooksKey.DISABLED) or []
 
   # guard: malformed `disabled` value — treat as no disables
   if not isinstance(disabled, list):
     return frozenset()
+
+  # names compare as text, so a non-string entry still silences the hook it spells
   return frozenset(str(item) for item in disabled)
 
 
-def _repo_root() -> Path | None:
+def _repo_root(cwd: Path | None) -> Path | None:
   """
-  Return the absolute root of the current git repository, or None when unavailable.
+  Return the absolute root of the git repository holding a directory, or None when unavailable.
+
+  Notes:
+    - Runs a `git` subprocess on every call; its error output is discarded.
+
+  Args:
+    cwd: The directory to resolve from; `None` means the process's working directory.
 
   Returns:
-    The repository root as a `Path`, or None when the current directory is not inside a git
-    repository or the `git` binary is missing.
+    The repository root as a `Path`, or None when the directory is missing or not inside a git
+    repository, or the `git` binary is missing.
   """
   # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
   try:
     out = os.fsdecode(subprocess.check_output(
       [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL,
+      stderr = subprocess.DEVNULL, cwd = cwd,
     )).strip()
-  except (subprocess.CalledProcessError, FileNotFoundError):
+  except (subprocess.CalledProcessError, OSError):
     return None
   return Path(out) if out else None

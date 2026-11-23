@@ -114,7 +114,7 @@ A hook that rewrites the working tree or calls git MUST check `LAZYCORTEX_HOOKS_
 
 The variable's *presence* is the signal: the daemon exports it for every routine it dispatches, from that routine's `hooks_enabled`, so anything the daemon spawns runs no lazycortex hook unless the routine opted in. An absent variable means an operator's own session, where the hook behaves as it always has.
 
-- Python hooks call `hook_gate.is_enabled(<short-name>)` as their first action.
+- Python hooks call `hook_gate.is_enabled(<short-name>)` as their first action. A hook that must judge another repository's `hooks.disabled` calls `hook_gate.is_admitted(<short-name>)` first — the allow-list half, environment only — and `hook_gate.is_enabled(<short-name>, cwd = <dir>)` once the payload names the directory.
 - Shell hooks read the variable directly — one string comparison; reaching into the plugin tree from a git hook has no legal path anyway (`${CLAUDE_PLUGIN_ROOT}` is not exported to git hooks).
 
 Why: a developer hook is written for a human at a keyboard. Under the daemon the same hook fires on autonomous commits — one that rewrites files after the commit is assembled leaves a dirty tree, and `runtime_daemon.check_working_tree` halts the whole runtime on it until an operator intervenes.

@@ -279,7 +279,10 @@ def ensure_explainers(
   return "\n".join(lines) + ("\n" if body.endswith("\n") else "")
 
 
-def lang_for_note(note_path: Path) -> str:
+def lang_for_note(note_path: Path,
+                  *,
+                  products: dict | None = None,
+                  catalog_guidelines: dict[str, list[str]] | None = None) -> str:
   """
   Resolve the authoring language for a note through the spec language chain.
 
@@ -289,14 +292,24 @@ def lang_for_note(note_path: Path) -> str:
 
   Args:
     note_path: The note file the language is resolved for.
+    products: An already-loaded products registry the owning product is looked up in; None reads it from the
+      settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the settings file.
 
   Returns:
     The resolved language tag; `en` when no settings root is found above the note.
+
+  Raises:
+    ValueError: If the settings file is read for the products registry or the catalog-wide guidelines and cannot
+      be read, is not valid JSON, not UTF-8 text or not a JSON object.
+    RuntimeError: If the note's own language and its product's yield nothing and the core plugin's CLI cannot be
+      resolved, its language verb exits non-zero, or the verb exits zero but answers nothing.
   """
   # limit: re-resolved per note write (settings walk + config reads); memoise per settings
   # root if vault-wide reconcile passes ever grow slow enough to matter
   vault = spec_paths.find_settings_root(note_path.resolve().parent)
-  return resolve_language.resolve_spec_language(vault, str(note_path.resolve().relative_to(vault)))
+  return resolve_language.resolve_spec_language(vault, str(note_path.resolve().relative_to(vault)),
+                                                products = products, catalog_guidelines = catalog_guidelines)
 
 
 def history_line_for_lang(lang: str, key: str, **fields: str) -> str:
@@ -384,7 +397,11 @@ def history_fragments(key: str, **fields: str) -> list[str]:
   return [ Lockit.text(HISTORY_KEY_PREFIX + key, lang).format(**fields) for lang in LangId ]
 
 
-def heal_note_text(note_path: Path, text: str) -> str:
+def heal_note_text(note_path: Path,
+                   text: str,
+                   *,
+                   products: dict | None = None,
+                   catalog_guidelines: dict[str, list[str]] | None = None) -> str:
   """
   Refresh the explainer lines of a full folder-note text before it is written.
 
@@ -399,9 +416,18 @@ def heal_note_text(note_path: Path, text: str) -> str:
   Args:
     note_path: The note file the text is about to be written to.
     text: The full note text (frontmatter plus body).
+    products: An already-loaded products registry the note's language is resolved in; None reads it from the
+      settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the settings file.
 
   Returns:
     The text with explainer lines in place under every known section heading.
+
+  Raises:
+    ValueError: If the settings file is read for the products registry or the catalog-wide guidelines and cannot
+      be read, is not valid JSON, not UTF-8 text or not a JSON object.
+    RuntimeError: If the note's own language and its product's yield nothing and the core plugin's CLI cannot be
+      resolved, its language verb exits non-zero, or the verb exits zero but answers nothing.
   """
 
   # Contract:
@@ -410,7 +436,8 @@ def heal_note_text(note_path: Path, text: str) -> str:
 
   # split the frontmatter off so heading scans never look inside it
   fm_end = spec_frontmatter.block(text)[1]
-  return text[:fm_end] + ensure_explainers(text[fm_end:], lang_for_note(note_path))
+  return text[:fm_end] + ensure_explainers(
+      text[fm_end:], lang_for_note(note_path, products = products, catalog_guidelines = catalog_guidelines))
 
 
 def gate_helper_text(verb: str, lang: str) -> str | None:

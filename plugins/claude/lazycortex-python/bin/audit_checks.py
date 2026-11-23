@@ -565,7 +565,7 @@ class Check11Venv:
   """
 
   TOOLS: tuple = ("mypy", "pylint", "pytest", "ruff")
-  PLUGINS: tuple = ("pytest_clarity", "pytest_sugar")
+  PLUGINS: tuple = ("pytest_clarity", "pytest_sugar", "xdist")
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir

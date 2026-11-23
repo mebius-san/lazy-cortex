@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-11-13
+last_regen: 2026-11-23
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 160a4d15920ff8818052db1fc5735ae223e3f737
-surface_sha: 91d035f7ce3668cfdfdc960892819969aef2d53c691651e0449e8e8474d92473
+source_sha: 8c75aa4a3cb418ef616578ca49443ce78943e60c
+surface_sha: 818a49715aab16306e7076263c09b431cc17769b64bd7d9710bb7cccc04f89a8
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -129,6 +129,7 @@ After the agent completes, open the test file at the mirrored path. Check:
 - **Assertion messages**: every `assert` statement should carry an f-string message showing both expected and actual values.
 - **Public contract through the public API**: the agent may test a private helper directly, but public and protected behavior is never covered only through private helpers.
 - **Stubs**: a method that is only a placeholder under a `# TODO:` comment has no test asserting its placeholder value; at most an empty test method waits under a `# TODO:` comment naming the stub.
+- **Isolation and cost**: the canonical testing guidelines (which the agent reads in Step 1) require that a test never writes to a resource it does not own — the working tree, your home directory, user caches and config, a real database — and points anything the code resolves from the environment (`HOME`, `XDG_CACHE_HOME`, a connection string) at a test-owned target, usually through `monkeypatch.setenv` or `tmp_path`. Tests share no mutable data and pass in any order, so the suite stays safe to run in parallel. Tests call the code in-process, build expensive shared setup once and clone it, set timeouts and retry delays to their minimum instead of sleeping, and stay under 0.5 s per unit test. A test that breaks one of these is a finding to fix, not to accept.
 
 ### Step 6 — Run the suite yourself
 

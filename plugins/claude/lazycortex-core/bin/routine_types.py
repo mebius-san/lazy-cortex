@@ -89,6 +89,10 @@ RUNTIME_WRITTEN_TREES = ( ".memory", ".state" )
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 WATCH_RUNTIME_TREES_KEY = "watch_runtime_trees"
 
+# the per-routine opt-in that drops renames from the file-level watches instead of splitting them
+# waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+PAIR_RENAMES_KEY = "pair_renames"
+
 # the per-routine opt-out from the md-scan change gate
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 CHANGE_GATE_KEY = "change_gate"
@@ -126,9 +130,10 @@ _PARAGRAPH_BREAK_RE = re.compile(r"\n[ \t]*\n")
 _TRAILER_LINE_RE = re.compile(r"^([A-Za-z0-9-]+)[ \t]*:[ \t]*(.*)$")
 _CONTINUATION = ( " ", "\t" )
 
-# maps a file-level diff status to the `git log --diff-filter=` flag that finds its
-# last-changing commit; "R" (renames) widens to the union of add/modify/delete/rename
-_DIFF_FILTER_FLAGS = { "A": "A", "M": "M", "D": "D", "R": "AMDR" }
+# maps a file-level diff status to the `git log --no-renames --diff-filter=` flag that finds its
+# last-changing commit; a rename item ("R") widens to the union of add/modify/delete, since with
+# rename detection off its new path was added, modified or deleted, never renamed
+_DIFF_FILTER_FLAGS = { "A": "A", "M": "M", "D": "D", "R": "AMD" }
 
 # a `git diff --name-status -z` listing: NUL-separated fields, each path printed as written (never quoted);
 # a rename or copy record carries two paths after its status, every other record one
@@ -163,7 +168,7 @@ SCHEMAS = {
     "optional": {
       "command", "expert", "request", "timeout_sec",
       "repo_dir", "remote", "path_filter", "filter",
-      WATCH_RUNTIME_TREES_KEY, GROUP_KEY,
+      WATCH_RUNTIME_TREES_KEY, PAIR_RENAMES_KEY, GROUP_KEY,
     },
   },
   "md-scan": {
@@ -838,6 +843,12 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
           f"routine '{name}' (type=git): 'path_filter' must be a pathspec string or a "
           f"non-empty list of pathspec strings"
         )
+
+    # guard: the rename-pairing opt-in is a plain boolean
+    if not isinstance(cfg.get(PAIR_RENAMES_KEY, False), bool):
+      raise RoutineConfigError(
+        f"routine '{name}' (type=git): '{PAIR_RENAMES_KEY}' must be a boolean"
+      )
 
     # the unit of work is one key with a closed vocabulary; absent means the whole tick
     group = cfg.get(GROUP_KEY)
@@ -1978,7 +1989,8 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     # the watch mode decides what a single item is (a commit, a path, a rename pair)
     fresh_items = _compute_git_items(
       work_dir, last_seen, head_sha, watch, path_filter,
-      bool(cfg.get(WATCH_RUNTIME_TREES_KEY, False)),
+      watch_runtime_trees = bool(cfg.get(WATCH_RUNTIME_TREES_KEY, False)),
+      pair_renames = bool(cfg.get(PAIR_RENAMES_KEY, False)),
     )
 
     # a commit the author marked with the skip trailer is invisible to the watch: its own items
@@ -2340,9 +2352,14 @@ def _is_ancestor(work_dir: Path, ancestor: str, descendant: str) -> bool:
   return rc.returncode == 0
 
 
-def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str,
+def _compute_git_items(work_dir: Path,
+                       last_seen: str,
+                       head_sha: str,
+                       watch: str,
                        path_filter: str | list[str] | None,
-                       watch_runtime_trees: bool = False) -> list[dict]:
+                       *,
+                       watch_runtime_trees: bool = False,
+                       pair_renames: bool = False) -> list[dict]:
   """
   Enumerate per-watch items between two SHAs.
 
@@ -2361,6 +2378,10 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
     watch_runtime_trees: True lets the watch see the runtime's own tracked trees,
       which are subtracted by default; only a routine whose work really is that
       bookkeeping passes it.
+    pair_renames: True makes the added, changed and deleted file watches drop renamed files, so neither path reaches
+      them, for a routine family that handles renames through its own rename watch; a copy still arrives as an
+      addition. False splits a rename into a deletion of the old path plus an addition of the new one. It has no
+      effect on the commit and rename watches.
 
   Returns:
     A list of item dicts; empty when no items match the watch mode in the range.
@@ -2427,11 +2448,34 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str, watch: str
           })
     return items
 
+  # Domain(runtime.routines):
+  # # A rename is seen as a deletion plus an addition, unless the routine pairs renames
+  # By default the watches for added, changed and deleted files see the range with rename detection
+  # switched off, whatever the repository's own rename-detection setting is. A renamed file, edited or
+  # not, is therefore its old path deleted plus its new path added, and a copied file is an addition of
+  # its new path.
+  # A routine that belongs to a family handling renames through its own rename watch can declare that it
+  # pairs renames. Its added, changed and deleted watches then see the range with rename detection on,
+  # again whatever the repository's setting is, and ignore every rename: neither the old nor the new
+  # path reaches them. In that mode a copy is not detected and still arrives as an addition.
+  # The commit and author an item reports are found with detection off either way.
+
   # file-level watches read a name-status diff instead of the log
   if watch in ("new_files", "changed_files", "deleted_files"):
-    # use diff --name-status for added/modified/deleted classification, NUL-separated so paths come as written
+
+    # Decision: rename detection off by default, not git's default pairing — a routine watching changed or
+    # added files must learn about a document renamed with an edit; the paired record reached none of these
+    # watches and depended on each machine's git config. The opt-in pairing exists because a family with
+    # its own rename watch would otherwise get one rename three times, and an addition handled before the
+    # rename loses what the rename carries over.
+
+    # added/modified/deleted classification, NUL-separated so paths come as written; rename detection
+    # is fixed whatever `diff.renames` says — on when the routine pairs renames (the rename records
+    # are then dropped below), off otherwise, so a rename is a deletion plus an addition
+    # waiver: git CLI flag vocabulary, not a domain constant
     out = subprocess.check_output(
-      [ "git", "diff", "--name-status", "-z", rng, *pathspec ],
+      [ "git", "diff", "--name-status", "--find-renames" if pair_renames else "--no-renames", "-z", rng,
+        *pathspec ],
       cwd = str(work_dir),
     ).decode(
       "utf-8",
@@ -3014,8 +3058,8 @@ def _drop_skipped_commits(work_dir: Path, items: list[dict], rng: str) -> list[d
     try:
       log = subprocess.check_output(
         # the path comes from a diff listing, so git takes it as written, never as a pattern
-        [ "git", "--literal-pathspecs", "log", "--format=%H%x09%an%x09%ae", f"--diff-filter={flag}",
-          rng, "--", str(path) ],
+        [ "git", "--literal-pathspecs", "log", "--format=%H%x09%an%x09%ae", "--no-renames",
+          f"--diff-filter={flag}", rng, "--", str(path) ],
         cwd = str(work_dir), text = True, encoding = "utf-8",
         # waiver: stdlib decode-error mode, not a domain constant
         errors = "replace",
@@ -3045,7 +3089,7 @@ def _query_last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> 
     work_dir: Path-like reference to the git working tree.
     path: Path of the file to look up.
     rng: Commit range expression (e.g. `<base>..<head>`).
-    status: Single-letter diff status (A/M/D) — `R` maps to the union `AMDR`.
+    status: Single-letter diff status (A/M/D) — `R` maps to the union `AMD`; rename detection is off for the lookup.
 
   Returns:
     The matching commit SHA, or the literal string `unknown` when no such
@@ -3058,7 +3102,7 @@ def _query_last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> 
   try:
     out = subprocess.check_output(
       # the path comes from a diff listing, so git takes it as written, never as a pattern
-      [ "git", "--literal-pathspecs", "log", f"--diff-filter={flag}",
+      [ "git", "--literal-pathspecs", "log", "--no-renames", f"--diff-filter={flag}",
         "--format=%H", "-1", rng, "--", path ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
       # waiver: stdlib decode-error mode, not a domain constant
@@ -3079,7 +3123,7 @@ def _query_last_change_author(work_dir: Path, path: str, rng: str, status: str) 
     work_dir: Path-like reference to the git working tree.
     path: Path of the file to look up.
     rng: Commit range expression (e.g. `<base>..<head>`).
-    status: Single-letter diff status (A/M/D) — `R` maps to the union `AMDR`.
+    status: Single-letter diff status (A/M/D) — `R` maps to the union `AMD`; rename detection is off for the lookup.
 
   Returns:
     A tuple `(author_name, author_email)` from the matching commit, or a pair of empty
@@ -3092,7 +3136,7 @@ def _query_last_change_author(work_dir: Path, path: str, rng: str, status: str) 
   try:
     out = subprocess.check_output(
       # the path comes from a diff listing, so git takes it as written, never as a pattern
-      [ "git", "--literal-pathspecs", "log", f"--diff-filter={flag}",
+      [ "git", "--literal-pathspecs", "log", "--no-renames", f"--diff-filter={flag}",
         "--format=%an%x09%ae", "-1", rng, "--", path ],
       cwd = str(work_dir), text = True, encoding = "utf-8",
       # waiver: stdlib decode-error mode, not a domain constant

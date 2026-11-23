@@ -652,7 +652,10 @@ def render_container_stats(container_dir: Path, *, lang: str = LangId.EN) -> str
   return _STATS_LINE_SEPARATOR.join(lines)
 
 
-def apply_container_stats(note_path: Path) -> bool:
+def apply_container_stats(note_path: Path,
+                          *,
+                          products: dict | None = None,
+                          catalog_guidelines: dict[str, list[str]] | None = None) -> bool:
   """
   Rewrite the `spec:stats` region of a container note from its sibling children.
 
@@ -661,9 +664,19 @@ def apply_container_stats(note_path: Path) -> bool:
 
   Args:
     note_path: The container folder-note (e.g. `bugs/bugs.md`).
+    products: An already-loaded products registry the note's language is resolved in; None reads it from the
+      settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the settings file.
 
   Returns:
     True when the file content changed.
+
+  Raises:
+    ValueError: If the note carries the stats markers and the settings file is read for the products registry or
+      the catalog-wide guidelines and cannot be read, is not valid JSON, not UTF-8 text or not a JSON object.
+    RuntimeError: If the note carries the stats markers, its own language and its product's yield nothing, and the
+      core plugin's CLI cannot be resolved, its language verb exits non-zero, or the verb exits zero but answers
+      nothing.
   """
   # the marker pair decides whether this note is a managed container summary
   text = spec_paths.read_text(note_path)
@@ -673,14 +686,15 @@ def apply_container_stats(note_path: Path) -> bool:
     return False
 
   # the freshly rendered stats replace whatever the marker pair held
-  stats = render_container_stats(note_path.parent, lang = note_explainers.lang_for_note(note_path))
+  lang = note_explainers.lang_for_note(note_path, products = products, catalog_guidelines = catalog_guidelines)
+  stats = render_container_stats(note_path.parent, lang = lang)
   new = re.sub(
       re.escape(_STATS_START) + r".*?" + re.escape(_STATS_END), f"{_STATS_START}\n{stats}\n{_STATS_END}",
       text, flags = re.DOTALL,
   )
 
   # every stats refresh also re-heals the note's section explainer lines
-  new = note_explainers.heal_note_text(note_path, new)
+  new = note_explainers.heal_note_text(note_path, new, products = products, catalog_guidelines = catalog_guidelines)
 
   # nothing changed — the note is left unwritten
   if new == text:

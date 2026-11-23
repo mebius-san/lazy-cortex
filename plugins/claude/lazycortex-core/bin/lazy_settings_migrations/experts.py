@@ -23,6 +23,10 @@ still spelled the old key, and the `agent` reference stays on the artifact's own
 namespaced name. A key the operator renamed by hand, and an entry whose address
 is not the pre-canon default, are both left alone. Add
 `4: lambda data: <transformed>` here when a v4 → v5 migration is needed.
+
+`LEGACY_SHAPES` declares the pre-namespace specs agent reference and the pre-canon expert keys as shapes only
+the versions up to v3 hold; `AMBIGUOUS_VALUES` declares the legacy identity email domain, which the v1 → v2
+rung rewrites although a current section may hold it by choice.
 """
 from __future__ import annotations
 
@@ -192,4 +196,18 @@ MIGRATIONS = {
     _PRE_CANON_EXPERT_KEYS.get(name, name): _recanon_identity(name, entry)
     for name, entry in data.items()
   },
+}
+
+# Shapes only an old section holds, keyed by the highest version that still holds each one
+LEGACY_SHAPES = {
+  # a specs agent reference on the pre-namespace prefix exists only before the v2 → v3 step
+  2: lambda data: MIGRATIONS[2](data) != data,
+  # a pre-canon expert key exists only before the v3 → v4 rename
+  3: lambda data: any(name in _PRE_CANON_EXPERT_KEYS for name in data),
+}
+
+# Values a rung rewrites although a current section may hold them, keyed by that rung
+AMBIGUOUS_VALUES = {
+  # a legacy identity domain may still be an address an operator chose by hand
+  1: lambda data: MIGRATIONS[1](data) != data,
 }

@@ -17,9 +17,13 @@ Merge semantics on read mirror Claude Code's stack:
 The `_version` key is owned by tracked and never adopted from local — `migrate_all` walks every
 overlay section through its ladder: a stamped section from its own stamp, an unstamped one from the
 version the tracked file's same section sat on before the run, and it leaves unstamped sections unstamped.
-An unstamped overlay section whose section the tracked file does not carry is walked from the first rung of
-its ladder when the section is replayable (every rung leaves current-shape data unchanged); for any other
-section the absent tracked section counts as current and the overlay section is left alone.
+An unstamped overlay section whose section the tracked file does not carry, or carries as nothing but its
+version stamp, is walked from the first rung of its ladder when the section is replayable (every rung leaves
+current-shape data unchanged). For any other section the version is read from its own data on every run,
+through the retired-shape and ambiguous-value tables of the section's ladder module: with no retired shape it
+is current, and when an ambiguous value lies below the start the version is unknown, so the section stays as
+stored and `read_undetermined_sections` names it. A tracked section with real content gives its version
+to the overlay section.
 
 Writes go to tracked. `save_section` never touches local and stamps a section only with a version the
 file's own section already stands on (the current one for a section the file does not carry yet). Callers that
@@ -50,6 +54,8 @@ import runtime_state  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
+  from types import ModuleType
+
   from collections.abc import Callable
 
 
@@ -128,11 +134,70 @@ def _migrations(section_key: str) -> dict[int, Callable[[dict], dict]]:
     Mapping from source version to migration callable, or an empty dict when no ladder module
     exists for the section.
   """
+  module = _find_ladder_module(section_key)
+  return module.MIGRATIONS if module is not None else {}
+
+
+def _find_ladder_module(section_key: str) -> ModuleType | None:
+  """
+  Import the ladder module of a given section key.
+
+  Args:
+    section_key: Name of the section in lazy.settings.json whose ladder module is requested.
+
+  Returns:
+    The section's module under `lazy_settings_migrations`, or `None` when no ladder module exists for it.
+  """
   mod_name = section_key.replace(".", "_").replace("-", "_")
   try:
-    return import_module(f"lazy_settings_migrations.{mod_name}").MIGRATIONS
+    return import_module(f"lazy_settings_migrations.{mod_name}")
   except ModuleNotFoundError:
-    return {}
+    return None
+
+
+def _find_unstamped_version(
+    section_key: str,
+    section: dict,
+    tracked_versions: dict[str, int | None],
+) -> int | None:
+  """
+  Tell the version an unstamped overlay section sits on.
+
+  Args:
+    section_key: Name of the overlay section.
+    section: The overlay section, without a version stamp.
+    tracked_versions: Mapping from section key to the version the tracked file's section sat on before this run,
+      `None` for a section whose version the tracked file cannot give.
+
+  Returns:
+    The tracked file's version when it gives one. Otherwise the highest version of the oldest retired shape the
+    section holds, or the current version when it holds none; `None` when a step below that version would
+    rewrite a value the section holds that a current section may hold too.
+  """
+
+  # Domain(settings.versioning):
+  # # An overlay section's age is read from its own data
+  # A personal overlay section with no version stamp, whose section the shared file does not carry or carries
+  # as a bare version stub, has no version to inherit, so its age is read from what it holds, on every run.
+  # Each retired shape proves the section was written no later than the last version that still had it,
+  # and the oldest such proof sets where the upgrade starts;
+  # a section holding none is current. A value an upgrade rewrites but an operator may still choose today
+  # proves nothing, so when a step that would rewrite it lies below the start, the age stays unknown:
+  # the section is left as stored until the operator states the version it was written for.
+
+  # the tracked file gives the version when it can — the overlay section then sits on it
+  if (tracked := tracked_versions[section_key]) is not None:
+    return tracked
+
+  # otherwise the oldest retired shape the section holds sets the start; none means current
+  module = _find_ladder_module(section_key)
+  start = min(( version for version, holds in getattr(module, "LEGACY_SHAPES", {}).items() if holds(section) ),
+              default = CURRENT_VERSIONS[section_key])
+
+  # a step below the start that would rewrite a value a current section may hold too leaves the age unknown
+  if any(version < start and holds(section) for version, holds in getattr(module, "AMBIGUOUS_VALUES", {}).items()):
+    return None
+  return start
 
 
 def migrate_root_version_to_section_version(raw: dict) -> dict:
@@ -460,19 +525,26 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   version is walked through its ladder. A stamped overlay section walks from its own stamp, with the
   stamp advanced. An unstamped one is taken to sit on the version the tracked file's same section had
   before this run migrated it (`1` when that section carries no stamp), and stays unstamped. When the
-  tracked file does not carry the section (the section is absent or empty, or the file is missing), a
-  replayable section walks from the first rung of its ladder and any other section counts as current and
-  is left alone. An overlay section whose walk changes nothing is not rewritten.
+  tracked file does not carry the section (the section is absent, empty or holds nothing but its version
+  stamp, or the file is missing), a replayable section walks from the first rung of its ladder, and any other
+  section takes its version from its own data on every run: current when it holds no retired shape, and left
+  as stored when the version cannot be told. An overlay section whose walk changes nothing is not rewritten.
 
   Guarantees:
     - The sibling local overlay is never created by this call.
     - The overlay never gains a section or a version stamp it did not already carry.
     - The overlay is rewritten only when something in it changed.
+    - An unstamped overlay section whose version cannot be told is left exactly as stored, neither migrated nor
+      stamped, and `read_undetermined_sections` names it.
+    - That holds on every run, not only the first: what an earlier run wrote into the tracked file never settles the
+      version of such a section, so it stays left as stored until the overlay stamps it or the tracked file carries
+      real content for the section.
 
   Args:
     path: Path to the tracked settings file. The file may be missing; in that case the overlay is
       still migrated, its unstamped replayable sections are walked from the first rung of their
-      ladders, and the result map holds only the overlay's rewrites.
+      ladders, its other unstamped sections take their version from their own data, and the result map
+      holds only the overlay's rewrites.
 
   Returns:
     Mapping from section key to `(before, after)` version tuples for every section that was upgraded
@@ -495,6 +567,15 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   # Contract:
   # The overlay is rewritten only when something in it changed;
   # an overlay that needs no change is left untouched on disk.
+
+  # Contract:
+  # An unstamped overlay section whose version cannot be told is left exactly as stored:
+  # it is neither migrated nor stamped, and `read_undetermined_sections` names it.
+
+  # Contract:
+  # That holds on every run, not only the first: what an earlier run wrote into the tracked file never
+  # settles the version of such a section, so it stays left as stored until the overlay stamps it
+  # or the tracked file carries real content for the section.
 
   # Domain(settings.versioning):
   # # Settings evolve one section at a time, only when explicitly asked
@@ -563,6 +644,64 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   return { **overlay, **result }
 
 
+def read_undetermined_sections(path: Path | str) -> list[str]:
+  """
+  Name the local overlay sections whose version `migrate_all` cannot tell and so leaves unmigrated.
+
+  Such a section carries no version stamp of its own, the tracked file holds no real content for its section to take
+  one from, and its own data does not settle it: it holds a value an upgrade step would rewrite although a current
+  section may hold the same value. Called before `migrate_all`, the answer is exactly the set that run leaves as
+  stored; the remedy for each is a version stamp in the overlay naming the version the section is written for.
+
+  Guarantees:
+    - Never creates, changes or deletes either settings file.
+    - Called before `migrate_all` on the same files, names exactly the overlay sections that run leaves as stored
+      for want of a version.
+    - Running `migrate_all` never silences the answer: a section stays named on every later call until the overlay
+      stamps it or the tracked file carries real content for the section.
+
+  Args:
+    path: Path to the tracked settings file; the sibling `.local.json` overlay is read. Either file may be missing.
+
+  Returns:
+    The undetermined section keys, in the order of `CURRENT_VERSIONS`; empty when the overlay is missing.
+
+  Raises:
+    ValueError: If the tracked file or the overlay is not valid JSON (a `json.JSONDecodeError`) or its top level is
+      not a JSON object; the message of the latter names the file.
+  """
+
+  # Contract:
+  # This is a pure read: it never creates, changes or deletes either settings file.
+
+  # Contract:
+  # Called before `migrate_all` on the same files, the keys it names are exactly the overlay sections
+  # that run leaves as stored for want of a version.
+
+  # Contract:
+  # Running `migrate_all` never silences the answer: a section stays named on every later call
+  # until the overlay stamps it or the tracked file carries real content for the section.
+
+  path = Path(path)
+  local_path = _local_overlay_path(path)
+
+  # guard: no overlay on disk — nothing in it can stay unmigrated
+  if not local_path.exists():
+    return []
+
+  # the versions the overlay inherits, read from the tracked file as `migrate_all` reads it before moving it
+  tracked = migrate_root_version_to_section_version(_parse_layer(path)) if path.exists() else None
+  tracked_versions = _tracked_versions(tracked)
+  overlay = _parse_layer(local_path)
+
+  # an unstamped overlay section whose version neither the tracked file nor its own data gives is undetermined
+  return [
+    key for key in CURRENT_VERSIONS
+    if isinstance(section := overlay.get(key), dict) and SettingsKey.VERSION not in section
+    and _find_unstamped_version(key, section, tracked_versions) is None
+  ]
+
+
 def _walk_ladder(section_key: str, section: dict, cur: int, target: int) -> dict:
   """
   Walk one section through its migration ladder from `cur` up to `target`.
@@ -593,7 +732,7 @@ def _walk_ladder(section_key: str, section: dict, cur: int, target: int) -> dict
   return section
 
 
-def _tracked_versions(raw: dict | None) -> dict[str, int]:
+def _tracked_versions(raw: dict | None) -> dict[str, int | None]:
   """
   Read the version every declared section of the tracked file sits on.
 
@@ -604,7 +743,8 @@ def _tracked_versions(raw: dict | None) -> dict[str, int]:
   Returns:
     Mapping from every declared section key to its version: the section's own stamp, `1` for a
     section without one. For a section the file does not carry, the first rung of its ladder when
-    the section is replayable, and the current version otherwise.
+    the section is replayable, and `None` otherwise. A section holding nothing but its version stamp
+    counts as not carried, replayable or not, and maps the same way.
   """
 
   # Domain(settings.versioning):
@@ -616,36 +756,51 @@ def _tracked_versions(raw: dict | None) -> dict[str, int]:
   # do. A section whose every step leaves data already in the current shape unchanged is walked
   # through the whole ladder from its first step: old content is upgraded, current content stays as
   # it is. A section whose steps seed defaults or rewrite values a current section may legitimately
-  # hold is left alone, as if it were current, because replaying those steps would alter an overlay
-  # that is already up to date. A walk that changes nothing leaves the overlay file untouched, and an
-  # overlay section never gains a version stamp.
+  # hold is never replayed from the start, because that would alter an overlay that is already up to
+  # date; its version is read from the section's own content instead, and when that cannot be told it
+  # is left as stored and reported for the operator to settle. For every section, replayable or not, a
+  # tracked section holding nothing but its version stamp counts as absent: the explicit migration run
+  # itself writes that bare stub for every section the shared file lacked, so the stamp says nothing
+  # about the overlay. A replayable overlay section under such a stub replays its whole ladder from the
+  # first step; any other has its version read from its own content on every run, and one that still
+  # cannot be told is reported on every run, not once. Only a tracked section with real content gives
+  # its version to the overlay. A walk that changes nothing leaves the overlay file untouched, and an
+  # overlay section never gains a stamp.
 
-  versions = dict(CURRENT_VERSIONS)
+  versions: dict[str, int | None] = {}
 
-  # a section the file carries sits on its own stamp, or on 1 when it has none, as the tracked walk assumes; one
-  # the file does not carry tells nothing about the overlay, which then starts from the first rung when its whole
-  # ladder is safe to replay
+  # a section with content sits on its own stamp, or on 1 when it has none, as the tracked walk assumes; one the
+  # file does not carry, or carries as a bare version stub, tells nothing about the overlay, which then starts from
+  # the first rung when its whole ladder is safe to replay, and otherwise has its version read from its own data
   for key, current in CURRENT_VERSIONS.items():
     section = raw.get(key) if raw is not None else None
-    if isinstance(section, dict) and section:
+    if isinstance(section, dict) and section.keys() - { SettingsKey.VERSION }:
       versions[key] = section.get(SettingsKey.VERSION, 1)
     elif key in _REPLAYABLE_SECTIONS:
       versions[key] = min(_migrations(key), default = current)
+    else:
+      versions[key] = None
   return versions
 
 
-def _migrate_local_overlay(local_path: Path, tracked_versions: dict[str, int]) -> dict[str, tuple[int, int]]:
+def _migrate_local_overlay(
+    local_path: Path,
+    tracked_versions: dict[str, int | None],
+) -> dict[str, tuple[int, int]]:
   """
   Drop the retired sections from the local overlay and walk its sections forward through their ladders.
 
-  A stamped section walks from its own stamp, with the stamp advanced. An unstamped section walks from
-  the tracked file's version of the same section and stays unstamped. The overlay is rewritten only when
-  a section's content changed.
+  A stamped section walks from its own stamp, with the stamp advanced. An unstamped section stays unstamped
+  and walks from the tracked file's version of the same section; when the tracked file gives none, the start
+  comes from the overlay section's own data. A section whose version cannot be told stays as stored. The
+  overlay is rewritten only when a section's content changed.
 
   Args:
     local_path: Path to the local overlay file. The file may be missing.
     tracked_versions: Mapping from section key to the version the tracked file's section sat on before
-      this run migrated it; it gives the starting version of each unstamped overlay section.
+      this run migrated it, or `None` when the tracked file cannot give one, as for a section it does not carry
+      or carries as nothing but its version stamp; an unstamped overlay section starts from the version given
+      here, or from the version its own data shows when this gives `None`.
 
   Returns:
     Mapping from section key to `(before, after)` version tuples for every overlay section that was
@@ -680,10 +835,10 @@ def _migrate_local_overlay(local_path: Path, tracked_versions: dict[str, int]) -
     if not isinstance(section, dict):
       continue
     stamped = SettingsKey.VERSION in section
-    cur = section[SettingsKey.VERSION] if stamped else tracked_versions[key]
+    cur = section[SettingsKey.VERSION] if stamped else _find_unstamped_version(key, section, tracked_versions)
 
-    # guard: section already at or beyond the current version — nothing to walk
-    if cur >= target:
+    # guard: version unknown, or already at or beyond the current one — the section stays as stored
+    if cur is None or cur >= target:
       continue
     walked = _walk_ladder(key, copy.deepcopy(section), cur, target)
 
@@ -824,7 +979,9 @@ def _cli() -> None:
 
   Brings the settings file, which defaults to `.claude/lazy.settings.json`, and its local overlay to the current
   section versions. Prints a one-line summary on stdout, followed by one line per section that moved when anything
-  moved; overlay-only rewrites count as moved.
+  moved; overlay-only rewrites count as moved. After the summary, prints one line per overlay section left
+  unmigrated for want of a version, naming the section and the version stamp to add; those sections are found
+  before the run moves anything and are not counted as up to date.
 
   Raises:
     SystemExit: With code 2 after a usage line on stderr when the subcommand is missing or is not `migrate`, or
@@ -845,9 +1002,14 @@ def _cli() -> None:
     print(f"lazy_settings.py: {target} is a directory, not a settings file", file = sys.stderr)
     sys.exit(2)
 
+  # the overlay sections this run cannot place are named before it moves the tracked versions they inherit
+  undetermined = read_undetermined_sections(target)
+
   # every ladder runs against the file, and the sections it moved are counted
   upgraded = migrate_all(target)
-  up_to_date = len(CURRENT_VERSIONS) - len(upgraded)
+
+  # a section left unmigrated in the overlay is not up to date, even when its tracked side moved
+  up_to_date = len(CURRENT_VERSIONS) - len(upgraded.keys() | set(undetermined))
 
   # one-line summary for the operator, with a per-section breakdown only when something moved
   if not upgraded:
@@ -856,6 +1018,15 @@ def _cli() -> None:
     print(f"migrated: {len(upgraded)} sections ({up_to_date} up-to-date)")
     for key, (old, new) in upgraded.items():
       print(f"  {key}: v{old} -> v{new}")
+
+  # each section left unmigrated for want of a version gets its own line naming the fix
+  for key in undetermined:
+    print(
+        f"  unmigrated: {key} in {_local_overlay_path(target)} — it has no _version, the tracked file gives none "
+        f"(its {key} section is absent or holds only a _version), and its data does not tell the version; add "
+        f"\"_version\": <the version it is written for, {CURRENT_VERSIONS[key]} if current> to it and run migrate "
+        f"again",
+    )
 
 
 if __name__ == "__main__":

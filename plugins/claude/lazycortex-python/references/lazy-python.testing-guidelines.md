@@ -134,6 +134,25 @@ with pytest.raises(ValueError, match = "Matrix must be square"):
 - Never assert a default or a tuning value. A test that checks a field's default, a `_def_*` class constant, or a number read from a config restates the data instead of proving behaviour; it breaks on every tuning change and catches nothing. Feed the value under test in through the data or a loaded config and assert what the code does with it.
 - Never test a stub. A method whose body is a placeholder under a `# TODO:` comment has no behaviour to prove; a test asserting its placeholder value restates the stub, contradicts the documented result and has to be rewritten the day the method is implemented. Write no test for a stub. When a test method must exist anyway, it stays empty under a `# TODO:` comment naming the stub it waits for.
 
+## Isolation and Cost
+
+The requirements fall into three groups by what they protect. Safety and cost apply to every suite. Parallel safety applies where the suite runs in parallel, and costs nothing to follow where it does not.
+
+### Safety — every test, every run
+- A test never writes to a resource it does not own: the working tree, the home directory, the user's caches and config (`~/.cache`, `~/.config`, a tool's own cache such as mypy's), or a real database or service the machine uses for anything else. A test that breaks this damages the developer's environment even when the suite runs one test at a time.
+- Code under test often resolves such a resource from the environment — `HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, a connection string, a service URL. The test points every one it reaches at a test-owned target, usually through `monkeypatch.setenv` or the config the code reads. A tool the test runs for real (a linter, a type checker) gets its cache pointed into `tmp_path` the same way.
+
+### Parallel safety — where the suite runs in parallel
+- Tests share no mutable data. Sharing a store is allowed: one test database for the session, one common scratch directory. What makes it safe is that each test creates its own records under unique keys or names and reads, asserts and removes only those. A test that counts a whole table, truncates it, rewrites every row, or looks a record up by a fixed id collides with any other test running at the same time.
+- Every test passes in any order. A test that passes only after another one ran is broken already; parallel runs merely make the order random.
+- Global state — environment variables, module-level values, the current directory — is changed only through a mechanism that restores it, `monkeypatch` or its equivalent, so a change in one test never leaks into the next one in the same process.
+
+### Cost — every test
+- In-process over out-of-process. Starting a process, opening a network connection or calling a real service costs tens to hundreds of milliseconds per call, and a suite that does it in every test spends most of its time waiting. A test calls the code under test directly. A subprocess, a network call or a real service belongs only in the tests whose subject is that boundary itself — argument parsing, exit codes, the wire format of a response — and a handful of such tests per boundary is enough.
+- Expensive setup shared by many tests is built once and reused. A repository with an initial commit, a database schema, a seeded object graph is prepared once per session and then copied, cloned, or wrapped in a transaction rolled back after each test. Rebuilding it from scratch in every test multiplies its cost by the number of tests. The shared copy is never modified in place; each test works on its own clone or inside its own transaction.
+- No real waits. A test of a timeout, a poll interval, a retry delay or a lock wait sets that window to zero or its minimum through the config or the environment variable the code reads. It never sleeps through the production default; when the code offers no way to shorten the window, that missing knob is the defect to fix.
+- A unit test slower than 0.5 s is a finding. The suite prints its slowest tests through pytest's `--durations`; a test that shows up there has one of the causes above, and the cause is fixed rather than accepted.
+
 ## Rule Waivers in Tests
 - A test may break a coding rule under two conditions that must hold together. First, the violation serves the check itself: the test needs a private helper, a protected member, an internal state, or a submodule path that no public surface reaches. Second, the only alternative is production code that would exist for the test alone — a public re-export, an accessor, a hook that no caller needs. A violation that merely saves effort, or one that a legitimate public surface avoids, is not covered and is fixed like any other.
 - Every such violation carries a `# waiver:` comment on the line above naming the rule the test breaks and why the test needs it; the checker suppression the violation requires sits on the violating line itself, never file-wide.

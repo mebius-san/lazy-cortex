@@ -117,6 +117,13 @@ MIGRATIONS = {}  # {from_version: callable}
 
 When a migration exists, the callable receives the current section dict and returns the updated dict. The helper increments `_version` after each step and writes back atomically. If no migrations are needed yet, `MIGRATIONS = {}` is the correct empty declaration.
 
+**Local-overlay sections without a stamp.** A section of `lazy.settings.local.json` without its own `_version` takes the version of the tracked file's same section. A tracked section that is a bare `{"_version": N}` stub with no other key — `migrate_all` itself writes one for every section the file lacked — gives no version to the overlay and counts as not carried. When the tracked file does not carry that section, a module may declare two optional tables that let the ladder read the version from the data itself:
+
+- `LEGACY_SHAPES = {N: predicate}` — the section holds a shape (a retired key, name or reference) that only versions up to `N` hold. The oldest shape found sets the version the overlay section is walked from; none found means current.
+- `AMBIGUOUS_VALUES = {N: predicate}` — step `N` rewrites a value a current section may legitimately hold too (an old seeded default). When such a step lies below the start version and the section holds the value, the version is unknown: the section is left as stored, and `lazy_settings.py migrate` prints an `unmigrated: <section> …` line asking for a `_version` stamp in the overlay, on every run until the stamp is there.
+
+`daemon`, `wiki`, `routines`, `review` and `experts` declare both. `terms`, `products`, `spec` and `agent_models` need neither: every step of theirs leaves current data unchanged, so such a section is walked from the first step, a bare stub in the tracked file included.
+
 The helper discovers migration modules via `importlib.import_module`. A `ModuleNotFoundError` is treated as an empty ladder (no migrations defined), so new plugins do not need a migrations file until they have their first schema change.
 
 ---

@@ -70,6 +70,19 @@ Watches local `HEAD` and dispatches one job per item per `watch`. Closed enum + 
 | `deleted_files` | `{path}`, `{paths}`, `{status}`=D, `{sha}`, `{author_name}`, `{author_email}` |
 | `renamed_files` | `{old_path}`, `{new_path}`, `{paths}`, `{old_paths}`, `{sha}`, `{author_name}`, `{author_email}` |
 
+`new_files`, `changed_files` and `deleted_files` read the range with rename detection off,
+whatever the repository's `diff.renames` setting: a renamed file, edited or not, is its old
+path in `deleted_files` and its new path (`A`) in `new_files` and `changed_files`, and a
+copied file is its new path (`A`). Only `renamed_files` pairs the two paths of a rename, so a
+routine that watches it beside one of the other three sees the same rename from both sides.
+
+`pair_renames` (optional boolean, default `false`) is for a routine family that handles renames
+through its own `renamed_files` routine. Set to `true` on a `new_files`, `changed_files` or
+`deleted_files` routine, it reads the range with git's rename detection on, whatever
+`diff.renames` says, and drops every rename: neither path of a renamed file reaches that routine.
+Copies are not detected in this mode, so a copied file still arrives as its new path (`A`). The
+key has no effect on `new_commits` and `renamed_files`.
+
 Every file-level watch exposes `{paths}` — the same list a grouped item carries, holding the
 one path when nothing was grouped. A rename exposes `{old_paths}` beside it, each old path at
 its new path's index. Writing a request against `{paths}` therefore serves every `group` mode

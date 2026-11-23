@@ -228,16 +228,30 @@ def _render_include_link(repo: Path, note: Path) -> str:
   return f"{release_delta.WIKILINK_OPEN}{rel[: -len(_MD_SUFFIX)]}{release_delta.WIKILINK_CLOSE}"
 
 
-def _update_in_release_state(notes: list[Path]) -> list[Path]:
+def _update_in_release_state(notes: list[Path],
+                             *,
+                             products: dict | None = None,
+                             catalog_guidelines: dict[str, list[str]] | None = None) -> list[Path]:
   """
   Paint each included asset's note `in-release`, so the folder colour changes before the asset's own next wake, and
   recount every container above a repainted asset.
 
   Args:
     notes: The included assets' status notes.
+    products: An already-loaded products registry the container notes' language is resolved in; None reads it from
+      the settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the settings file.
 
   Returns:
     The container notes whose stats region changed, each once, in the order first met.
+
+  Raises:
+    ValueError: If a container note carries the stats markers and the settings file is read for the products
+      registry or the catalog-wide guidelines and cannot be read, is not valid JSON, not UTF-8 text or not a JSON
+      object.
+    RuntimeError: If a container note carries the stats markers, its own language and its product's yield nothing,
+      and the core plugin's CLI cannot be resolved, its language verb exits non-zero, or the verb exits zero but
+      answers nothing.
   """
 
   # Domain(spec.lifecycle):
@@ -256,7 +270,7 @@ def _update_in_release_state(notes: list[Path]) -> list[Path]:
   changed: list[Path] = []
   above = ( container for note in notes for container in flip_gate.containers_above(note.parent) )
   for container in dict.fromkeys(above):
-    if summary_render.apply_container_stats(container):
+    if summary_render.apply_container_stats(container, products = products, catalog_guidelines = catalog_guidelines):
       changed.append(container)
   return changed
 
@@ -330,6 +344,8 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   Raises:
     ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
       when no core CLI resolves.
+    RuntimeError: If a note's own language and its product's yield nothing and the core plugin's CLI cannot be
+      resolved, its language verb exits non-zero, or the verb exits zero but answers nothing.
     subprocess.CalledProcessError: If staging or committing the release fails.
     OSError: If a note cannot be read or written, or a closed release folder cannot be moved into the archive for a
       filesystem reason other than a taken or doubly claimed slot.
@@ -419,7 +435,8 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
   release_version.set_release_version(note, version)
 
   # the members read in-release from now on, and the containers above them count them so
-  recounted = _update_in_release_state([ entry.note for entry in included ])
+  recounted = _update_in_release_state([ entry.note for entry in included ], products = registry,
+                                       catalog_guidelines = catalog)
 
   # the closed releases beside the new one move into the archive here; the paths written so far are the release
   # note, the repainted members, the containers recounted above them and every path the move touched
@@ -436,15 +453,17 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
     seeded = not archive_note.exists()
     owner_record = resolve_product.effective_record(repo, owner, products = registry, catalog_guidelines = catalog)
     scaffold_asset.ensure_group_note(repo, archive_note.parent, asset_type = ReleaseKey.ASSET_TYPE,
-                                     owner_key = owner, owner_record = owner_record, products = registry)
-    if summary_render.apply_container_stats(archive_note) or seeded:
+                                     owner_key = owner, owner_record = owner_record, products = registry,
+                                     catalog_guidelines = catalog)
+    if summary_render.apply_container_stats(archive_note, products = registry,
+                                            catalog_guidelines = catalog) or seeded:
       written.append(archive_note)
 
   # the releases group note counts the release just created; it joins the written paths when the
   # scaffold created it or when its stats region moved
   group_note = releases_dir / f"{ReleaseKey.FOLDER}{_MD_SUFFIX}"
   if group_note.is_file():
-    stats_moved = summary_render.apply_container_stats(group_note)
+    stats_moved = summary_render.apply_container_stats(group_note, products = registry, catalog_guidelines = catalog)
     if (stats_moved or created.get(_GROUP_NOTE)) and group_note not in written:
       written.append(group_note)
 
@@ -541,7 +560,8 @@ def refresh_includes(repo: Path, release_note: Path, *, waived: bool = False) ->
   if added:
     links = existing + [ _render_include_link(repo, entry.note) for entry in added ]
     spec_paths.write_text_atomic(release_note, spec_frontmatter.write_list(text, ReleaseKey.INCLUDES, links))
-    recounted = _update_in_release_state([ entry.note for entry in added ])
+    recounted = _update_in_release_state([ entry.note for entry in added ], products = registry,
+                                         catalog_guidelines = catalog)
     release_version.commit_paths(
         repo, [ release_note, *( entry.note for entry in added ), *recounted ], author = SCAFFOLD_NAME,
         subject = f"{SCAFFOLD_NAME}: {len(added)} new member(s) in {release_note.parent.name}")

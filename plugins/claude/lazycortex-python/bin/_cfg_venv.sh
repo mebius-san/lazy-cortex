@@ -14,7 +14,7 @@
 #     `requires-python` / `.python-version`; an existing venv whose interpreter does not
 #     satisfy them is recreated (`uv venv --clear`), otherwise it is updated in place;
 #   - packages: `[project].dependencies`, every extra, every `[dependency-groups]` group,
-#     plus the checker tools (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar);
+#     plus the checker tools (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar/pytest-xdist);
 #     the argument list comes from `venv_spec.py install-args`.
 # A successful configure records a digest of exactly those inputs in
 # `<venv>/.lazy-python-cfg` (`venv_spec.py stamp`). The venv is fresh iff it carries the
@@ -66,7 +66,7 @@ _venv_exe() {
 }
 
 # Check whether a candidate venv is complete: the four required bins (mypy, pylint,
-# pytest, ruff) AND the two pytest plugins (pytest-clarity, pytest-sugar) importable.
+# pytest, ruff) AND the three pytest plugins (pytest-clarity, pytest-sugar, pytest-xdist) importable.
 _venv_has_tools() {
   local venv="$1"
   local tool python
@@ -75,7 +75,7 @@ _venv_has_tools() {
   done
   # guard: pytest plugins ship no bin — verify they import in the venv's interpreter
   python="$(_venv_exe "${venv}" python)" || return 1
-  "${python}" -c "import pytest_clarity, pytest_sugar" >/dev/null 2>&1 || return 1
+  "${python}" -c "import pytest_clarity, pytest_sugar, xdist" >/dev/null 2>&1 || return 1
   return 0
 }
 

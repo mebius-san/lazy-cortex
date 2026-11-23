@@ -1138,6 +1138,10 @@ class JobMarker:
     JOB_DONE: The `PENDING_WAKE` value a cleared `ACTIVE_JOB` raises.
     DECLINED: A wake the busy-guard declined while a coordinator job was running; redeemed by
       re-resolving triggers against the asset's current state once the job frees.
+    TICK_PENDING: The `PENDING_WAKE` value a retired coordinator job raises when the note it leaves still holds a
+      ticked launch row; redeemed by re-resolving triggers against the asset's current state, falling back to the
+      `tick-pending` trigger when nothing more specific resolves. The postman sweep delivers it like `JOB_DONE`,
+      and any dispatch of the asset consumes it, like `DECLINED`.
     CHECKBOX: The checkbox-label field in the active-job dict.
     TRIGGER: The wake-trigger-token field in the coordinator-job dict — the `CHECKBOX` analogue,
       naming what woke the coordinator (operator edit, command, question answer, routing)
@@ -1171,6 +1175,11 @@ class JobMarker:
   # A wake the busy-guard declined while a coordinator job was running; redeemed by re-resolving triggers against the
   # asset's current state once the job frees.
   DECLINED = "declined"
+  # The `PENDING_WAKE` value a retired coordinator job raises when the note it leaves still holds a ticked launch row;
+  # redeemed by re-resolving triggers against the asset's current state, falling back to the `tick-pending` trigger
+  # when nothing more specific resolves. The postman sweep delivers it like `JOB_DONE`, and any dispatch of the asset
+  # consumes it, like `DECLINED`.
+  TICK_PENDING = "tick-pending"
   # The checkbox-label field in the active-job dict.
   CHECKBOX = "checkbox"
   # The wake-trigger-token field in the coordinator-job dict — the `CHECKBOX` analogue, naming what woke the
@@ -1289,6 +1298,9 @@ class CoordinatorTrigger:
       the commit's author.
     RELEASE_MEMBER: A release painted the asset `in-release`, `awaiting-release` or done; raised on the asset's
       status note after the release's own commit landed. Synthetic, never derived from `item`.
+    TICK_PENDING: A retired coordinator job left a ticked launch row standing on the note and a
+      `JobMarker.PENDING_WAKE` of `tick-pending` was raised; the fallback trigger when redeeming that flag resolves
+      nothing more specific. A job carrying it never raises the flag again on its own retirement.
   """
 
   # A non-`@bot.`-authored commit that changed the asset note, or — on a grouped tick — a sibling doc not carrying
@@ -1335,6 +1347,10 @@ class CoordinatorTrigger:
   # after the release's own scaffold, refresh or publish commit landed, so the asset brings its own summary up to
   # date. Synthetic, never derived from `item`; it creates and launches nothing.
   RELEASE_MEMBER = "release-member"
+  # A retired coordinator job left a ticked launch row standing on the note and a `JobMarker.PENDING_WAKE` of
+  # `tick-pending` was raised; the fallback trigger when redeeming that flag resolves nothing more specific. A job
+  # carrying it never raises the flag again on its own retirement.
+  TICK_PENDING = "tick-pending"
 
 
 # ----------------------------------------------------------------------------------------

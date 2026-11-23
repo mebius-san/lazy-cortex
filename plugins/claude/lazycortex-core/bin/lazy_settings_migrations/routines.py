@@ -48,6 +48,12 @@ itself now decides which stages it admits. The routine's other predicates stay, 
 with no predicates keeps its empty `frontmatter` block. A reshaped stage predicate, routines of
 other plugins, and routines without a filter pass through unchanged. Add
 `8: lambda data: <transformed>` here when a v8 → v9 migration is needed.
+
+`LEGACY_SHAPES` declares the retired keys, routines and references the rungs up to v6 rewrite or drop (the
+flat `frontmatter_filter`, the `spec.import-pull` routine, the pre-namespace specs routines and the pre-canon
+`expert:` references) as shapes only the versions up to those rungs hold; `AMBIGUOUS_VALUES` declares the
+`changed_files` structure-scan watch and the seeded deferred-stage predicate, which the v6 → v7 and
+v7 → v8 rungs rewrite although a current section may hold them by choice.
 """
 from __future__ import annotations
 
@@ -281,4 +287,25 @@ MIGRATIONS = {
     rk: _drop_wiki_deferred_predicate(rv) if rk.startswith(_WIKI_ROUTINE_PREFIX) else rv
     for rk, rv in data.items()
   },
+}
+
+# Shapes only an old section holds, keyed by the highest version that still holds each one; each of these rungs
+# rewrites a retired key, field or reference no current section carries, so a change proves the old shape
+LEGACY_SHAPES = {
+  # a flat `frontmatter_filter` exists only before the v1 → v2 rewrite
+  1: lambda data: MIGRATIONS[1](data) != data,
+  # the retired `spec.import-pull` routine exists only before the v2 → v3 drop
+  2: lambda data: MIGRATIONS[2](data) != data,
+  # the pre-namespace specs routine keys and protocol references exist only before the v4 → v5 move
+  4: lambda data: MIGRATIONS[4](data) != data,
+  # an `expert:` reference to a pre-canon key exists only before the v5 → v6 step
+  5: lambda data: MIGRATIONS[5](data) != data,
+}
+
+# Values a rung rewrites although a current section may hold them, keyed by that rung
+AMBIGUOUS_VALUES = {
+  # a `changed_files` structure-scan watch may be an operator's override today
+  6: lambda data: MIGRATIONS[6](data) != data,
+  # the seeded deferred-stage predicate may be one an operator wrote back by hand
+  7: lambda data: MIGRATIONS[7](data) != data,
 }

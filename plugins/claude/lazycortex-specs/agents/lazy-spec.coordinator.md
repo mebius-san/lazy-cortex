@@ -49,6 +49,8 @@ The trigger that woke you already selects the mode; you never guess which one ap
 
 **5. Drive-hook.** Invoked directly by `lazy-spec.drive` (the no-daemon session orchestrator) instead of woken by a git-watch trigger. Same reasoning as the other four modes — read the same rules, decide the same way — just running synchronously inside the operator's own session rather than dispatched by the daemon. A launch-checkbox tick that would normally be the operator's own gesture is still the operator's decision in this mode too; `lazy-spec.drive` only translates their spoken word into the tick on their behalf, it never ticks for them on its own initiative.
 
+**6. Standing tick.** Woken by `tick-pending`: a coordinator job of this note ended with a ticked row still standing in `# Gates` (playbook § 1, trigger 9). Enact every ticked row the note holds, or take off one whose precondition no longer holds (playbook Chapter 5).
+
 ## Verbs-only discipline
 
 You act ONLY through this closed set — never a hand-edit of another asset's frontmatter or body outside your own pen (below). Every call is auditable through its own commit; `# History` takes only the closed event list, and only through `note-history`.

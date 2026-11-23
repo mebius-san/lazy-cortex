@@ -198,6 +198,12 @@ _WAKE_INCIDENT_PREFIX = "spec-wake:"
 # `<expert>/<job_id>`
 _CANCEL_INCIDENT_PREFIX = "spec-job-cancel:"
 
+# The raised wakes a tick with no trigger of its own redeems against the asset's current state
+_REDEEMED_WAKES = frozenset({ JobMarker.JOB_DONE, JobMarker.DECLINED, JobMarker.TICK_PENDING })
+# The raised wakes any dispatch of the asset consumes, whichever trigger won, since none waits for a trigger of its
+# own
+_ANY_DISPATCH_WAKES = frozenset({ JobMarker.DECLINED, JobMarker.TICK_PENDING })
+
 # Settings-section keys for the vault-wide coordination-rules doc (`lazy-spec.config-protocol.md`).
 _SPEC_SECTION = "spec"
 _COORD_RULES_KEY = "coordination_rules"
@@ -2374,7 +2380,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
                          release_start: bool = False,
                          release_published: bool = False,
                          release_member: bool = False,
-                         job_done: bool = False) -> dict:
+                         swept_wake: bool = False) -> dict:
   """
   Detect operator activity on one coordinated folder-note and dispatch its expert when it wakes.
 
@@ -2398,7 +2404,11 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   A finished job found on arrival is retired first: a dead job's warning line is committed on its own, unless
   the note's `# History` section already carries that line for that job in any language the plugin writes in, and
   then nothing is written and only the marker is cleared. The job stays tracked until that commit and, for a job
-  that completed, the stage-lag commit have landed.
+  that completed, the stage-lag commit have landed. A retired job whose note still holds a ticked launch row raises
+  the `tick-pending` wake flag in the write that clears its marker, replacing a raised `declined` wake flag, and the
+  same call redeems it, unless a `job-done` wake is already raised, a launch job is in flight, the note is halted
+  or cancelled, or the retired job was itself woken by `tick-pending`. Any dispatch consumes a raised
+  `tick-pending` flag.
 
   When `sibling_doc` is given, this is a sibling-item tick: the wake is decided by the sibling's
   own `review_result` changing rather than by `item`'s commit against `asset_note`, honoring the
@@ -2425,7 +2435,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       raises with the gate crossing unrecorded (no ready-state or doc-state stamp, no commit of it) and the
       tick's job unqueued, so a retry observes the same crossing. What the call already did to retire a finished
       coordinator job (the commit of its dead-job warning line or stage-lag note, its cleared tracking marker, its
-      retired bundle, a wake flag or stage-lag record the stage-lag step wrote) may stand.
+      retired bundle, a wake flag or stage-lag record the stage-lag step wrote, the `tick-pending` wake flag raised
+      as the job was let go) may stand.
     - A finished coordinator job's tracking marker is cleared only after every commit of its retirement (the
       dead-job warning line, or the stage-lag note of a finished job) has succeeded; when such a commit fails the
       call raises and the job stays tracked, so the next tick finds it again. The note is back to the text it had;
@@ -2529,10 +2540,10 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       nor a level note — any other note refuses it; trigger resolution short-circuits to the `release-member`
       trigger (honoring the halt override), and a member busy with a job keeps the wake as a declined one; `item`
       is `{}` on this path.
-    job_done: True when this call is the postman sweep's direct wake after a launch-checkbox job finished,
-      with no commit behind it. The trigger is resolved from the note's current state and its raised
-      `job-done` flag alone, the way a remembered wake is redeemed; with no flag raised the call does
-      nothing. `item` is `{}` on this path.
+    swept_wake: True when this call is the postman sweep's direct wake after a launch-checkbox job finished, or
+      after a retired coordinator job left a ticked launch row standing, with no commit behind it. The trigger is
+      resolved from the note's current state and its raised `job-done` or `tick-pending` flag alone, the way a
+      remembered wake is redeemed; with no flag raised the call does nothing. `item` is `{}` on this path.
 
   Returns:
     `{"action": "refused", "reason"}` when `release_start` names a note that is not a release, or
@@ -2557,7 +2568,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       rewritten note; the note is put back when that succeeds and otherwise keeps the uncommitted text, and a
       finished job whose warning line or stage-lag note failed stays tracked. On the rewritten note, whose job
       was already queued, the cancel is attempted as for a failed commit and the error is re-raised. After a
-      commit that landed: when the busy guard's clearing of the job marker, or the stage-lag
+      commit that landed: when the busy guard's clearing of the job marker, the sidecar or note read that decides
+      its `tick-pending` wake flag, or the stage-lag
       step's own sidecar writes after its commit, fails, the committed dead-job warning line or stage-lag note
       stands and the job stays tracked, and the retry does not write the dead-job warning line again; when the
       note cannot be re-read once the job is let go, the marker is already cleared. The runtime record that follows
@@ -2645,12 +2657,13 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   # single flag, since acting on it immediately could mean rewriting the asset's own record out
   # from under the action already in flight. Once free, that flag makes the coordinator look at
   # the asset's current state fresh rather than replay the original reason, since real time has
-  # passed and something more specific may already have happened. A flag raised because the
-  # running action itself just finished survives a wake that gets preempted by something more
-  # urgent, so its result is still revisited later; a flag raised for any other reason is
-  # cleared the moment any wake at all is acted on for the asset, because whatever runs next
-  # already accounts for it. Pausing the asset holds either flag untouched until the pause is
-  # lifted, rather than resolving it into a generic catch-up the operator never asked for.
+  # passed and something more specific may already have happened. A flag raised because a launched
+  # step just finished survives a wake that gets preempted by something more urgent, so its result
+  # is still revisited later; a flag raised for any other reason, including the one a finished
+  # coordinator action raises for a launch order it left standing, is cleared the moment any wake
+  # at all is acted on for the asset, because whatever runs next already accounts for it. Pausing
+  # the asset holds every such flag untouched until the pause is lifted, rather than resolving it
+  # into a generic catch-up the operator never asked for.
   # An action that is still waiting its turn has not looked at anything yet: it reads the asset
   # only when it actually starts, so a reason arriving before that is already covered by it and
   # is neither flagged nor replayed — flagging it would make the coordinator act twice on the
@@ -2756,6 +2769,11 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     # the job go, or because the failed record could not be taken back, the next pass does not record it again
     # and only lets the job go. Only the history itself is looked at: another job's warning never counts, and
     # neither do the same words standing anywhere else in the note.
+    # A launch row the asset still holds ticked when the job is let go is an order that job left undone: it
+    # wakes the coordinator once more, at once, even when the new reason alone would wake nobody. It takes the
+    # place of a wake turned away while the job ran. No such wake is owed while the wake of a finished launch step
+    # already waits, while a launch job is still running, on a halted or cancelled asset, or when the job was
+    # itself such a wake.
 
     # the bundle finished since the last tick — retire it now so a trigger firing this
     # same tick dispatches immediately instead of first colliding with the old dedup key (M1)
@@ -2799,8 +2817,12 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
     )
 
     # the marker is cleared last, once every commit of the job's retirement is in: a commit that
-    # failed above raised with the job still tracked
-    markers = spec_job_markers.update(repo_root, asset_note, { JobMarker.COORDINATOR_JOB: None })
+    # failed above raised with the job still tracked. A ticked launch row the job left standing raises
+    # its wake in the same write, for the redemption below to carry out
+    retire: dict[str, str | None] = { JobMarker.COORDINATOR_JOB: None }
+    if gate_tick.is_tick_pending(asset_note, repo_root, coordinator_job[JobMarker.TRIGGER]):
+      retire[JobMarker.PENDING_WAKE] = JobMarker.TICK_PENDING
+    markers = spec_job_markers.update(repo_root, asset_note, retire)
 
     # the retirement committed the note itself, so every branch below decides off the state it left
     if marker == gate_tick.JOB_MARKER_DEAD or lagged:
@@ -2845,7 +2867,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   elif release_member:
     # halt silences the release's member wake the same way; `item` is empty on this synthetic path
     trigger = None if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) else CoordinatorTrigger.RELEASE_MEMBER
-  elif job_done:
+  elif swept_wake:
     # the postman's direct wake carries no git item, so nothing here may read as an operator edit: the
     # raised flag alone decides, through the same redemption a remembered wake takes below
     trigger = None
@@ -2873,17 +2895,17 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   else:
     trigger = resolve_wake_trigger(repo_root, frontmatter, body, item, markers, cursor)
 
-  # nothing else claimed this tick — a wake the busy-guard declined (or a legacy install's
-  # pending-note key) redeems by re-resolving triggers against the asset's CURRENT on-disk
-  # state, since the flag alone doesn't say what specifically changed while the job was busy;
+  # nothing else claimed this tick — a raised `job-done`, `declined` or `tick-pending` wake (or a
+  # legacy install's pending-note key) redeems by re-resolving triggers against the asset's CURRENT
+  # on-disk state, since the flag alone doesn't say what specifically changed meanwhile;
   # unlike the shape-specific branches above, this always scans every sibling doc in the asset
   # directory rather than only the member(s) this tick's own item happened to name
   # snapshotted once, up front, and never reset below — the ORIGINAL flag value must survive
   # even when a normal-ladder trigger (COMMAND/ANSWER/DOC_TRANSITION/OPERATOR_EDIT)
   # resolves before this block ever runs, so the consumption check further down can still tell a
-  # declined wake was riding along on whichever trigger actually won
+  # `declined` or `tick-pending` wake was riding along on whichever trigger actually won
   redeemed_wake = markers.get(JobMarker.PENDING_WAKE)
-  if trigger is None and (redeemed_wake in (JobMarker.JOB_DONE, JobMarker.DECLINED) or legacy_pending):
+  if trigger is None and (redeemed_wake in _REDEEMED_WAKES or legacy_pending):
     redeem_members = sorted(
         entry for entry in asset_dir.iterdir() if spec_doc_types.is_ladder_document(entry, doc_basenames)
     )
@@ -2907,6 +2929,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       if not flip_gate.is_true(frontmatter, SpecHaltKey.HALTED):
         trigger = (
             CoordinatorTrigger.JOB_DONE if redeemed_wake == JobMarker.JOB_DONE
+            else CoordinatorTrigger.TICK_PENDING if redeemed_wake == JobMarker.TICK_PENDING
             else CoordinatorTrigger.OPERATOR_EDIT
         )
     elif trigger == CoordinatorTrigger.DOC_TRANSITION:
@@ -2978,7 +3001,8 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
   # raises with the gate crossing unrecorded (no ready-state or doc-state stamp, no commit of it) and the tick's
   # job unqueued, so a retry observes the same crossing. What the call already did to retire a finished
   # coordinator job (the commit of its dead-job warning line or stage-lag note, its cleared tracking marker, its
-  # retired bundle, a wake flag or stage-lag record the stage-lag step wrote) may stand.
+  # retired bundle, a wake flag or stage-lag record the stage-lag step wrote, the `tick-pending` wake flag raised as
+  # the job was let go) may stand.
 
   # whom a crossing has to tell is worked out here, before the crossing is recorded or anything is queued: a
   # lookup that raises leaves the tick with nothing written, so the retry observes the same crossing again,
@@ -3265,18 +3289,19 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
       gate_dispatch.consume_stale_job(repo_root, expert, job_id)
 
     # a fresh dispatch is tracked so the active-job guard blocks a second concurrent one; the wake
-    # that carried this tick is consumed so it cannot fire a second coordinator. The two flag
-    # values consume on different terms: `job-done` only when it actually won resolution
-    # (`trigger == JOB_DONE`) — a wake this tick preempted (a command, an answer) keeps its flag
-    # and fires on a later tick. `declined` is consumed on ANY dispatch of this asset, whichever
-    # trigger won, because it carries no trigger identity of its own to wait for; leaving it set
-    # past a dispatch that already covers the same wake would just re-redeem it next tick
+    # that carried this tick is consumed so it cannot fire a second coordinator. The flag values
+    # consume on two terms: `job-done` only when it actually won resolution (`trigger == JOB_DONE`)
+    # — a wake this tick preempted (a command, an answer) keeps its flag and fires on a later tick.
+    # `declined` and `tick-pending` are consumed on ANY dispatch of this asset, whichever trigger
+    # won: `declined` carries no trigger identity of its own to wait for, and every coordinator job
+    # is owed every ticked launch row, so leaving either set past a dispatch that already covers it
+    # would just re-redeem it next tick
     changes: dict[str, dict | list | str | None] = {}
     if not stale:
       changes[JobMarker.COORDINATOR_JOB] = {
           JobMarker.TRIGGER: trigger, JobMarker.EXPERT: expert, JobMarker.JOB_ID: job_id,
       }
-    if trigger == CoordinatorTrigger.JOB_DONE or redeemed_wake == JobMarker.DECLINED:
+    if trigger == CoordinatorTrigger.JOB_DONE or redeemed_wake in _ANY_DISPATCH_WAKES:
       changes[JobMarker.PENDING_WAKE] = None
     if changes:
       spec_job_markers.update(repo_root, asset_note, changes)

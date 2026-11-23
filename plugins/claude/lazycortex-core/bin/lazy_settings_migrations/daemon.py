@@ -18,6 +18,10 @@ legitimately stay silent for minutes while thinking, and the 90-second watchdog 
 killing live processes. Only the exact old seeded literal migrates; any other value is
 the operator's own choice and passes through untouched, as does a section without the
 key (the raised code default covers it).
+
+`LEGACY_SHAPES` declares the `git.branch` field as the shape only versions up to v1 hold;
+`AMBIGUOUS_VALUES` declares the seeded `90` stream-idle timeout, which the v3 → v4 rung raises although a
+current section may hold it by choice.
 Add `4: lambda data: <transformed>` here when a v4 → v5 migration is needed.
 """
 from __future__ import annotations
@@ -71,4 +75,16 @@ MIGRATIONS = {
     isinstance(data.get(DaemonKey.STREAM_IDLE_TIMEOUT_SEC), int)
     and data.get(DaemonKey.STREAM_IDLE_TIMEOUT_SEC) == 90
   ) else data,
+}
+
+# Shapes only an old section holds, keyed by the highest version that still holds each one
+LEGACY_SHAPES = {
+  # the `git.branch` field exists only before the v1 → v2 rename
+  1: lambda data: isinstance(data.get("git"), dict) and "branch" in data["git"],
+}
+
+# Values a rung rewrites although a current section may hold them, keyed by that rung
+AMBIGUOUS_VALUES = {
+  # 90 is both the old seeded stream-idle default and a timeout an operator may choose today
+  3: lambda data: MIGRATIONS[3](data) != data,
 }

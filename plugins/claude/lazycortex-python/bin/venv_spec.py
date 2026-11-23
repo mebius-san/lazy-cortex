@@ -32,7 +32,7 @@ class VenvSpec:
     data: Parsed `pyproject.toml` content.
   """
 
-  TOOLS: tuple[str, ...] = ("mypy", "pylint", "pytest", "pytest-clarity", "pytest-sugar", "ruff")
+  TOOLS: tuple[str, ...] = ("mypy", "pylint", "pytest", "pytest-clarity", "pytest-sugar", "pytest-xdist", "ruff")
   STAMP_NAME = ".lazy-python-cfg"
 
   def __init__(self, *, project_dir: Path) -> None:

@@ -55,13 +55,15 @@ The script prints one summary line, optionally followed by per-section upgrade l
 
 - `migrated: 0 sections (6 up-to-date)` — no migrations needed (also the result when the settings file is absent — every section starts at its current version).
 - `migrated: 2 sections (4 up-to-date)` followed by `  review: v1 -> v2` etc. — ladder applied.
+- `  unmigrated: <section> in <overlay path> — …` — a section of `.claude/lazy.settings.local.json` with no `_version`, no same-named section with content in the tracked file (a section holding only its `_version` does not count), and data that does not tell its version; the ladder left it as stored and names it again on every run until it is stamped. The line names the fix: stamp `_version` in that overlay section and run the migration again.
 
-Capture the summary line (and any per-section lines) for the Step 6 report.
+Capture the summary line, any per-section lines and every `unmigrated:` line for the Step 6 report.
 
 Outcome:
 
 - `up-to-date` if zero sections were migrated.
 - `migrated: N sections (M up-to-date)` if any section was upgraded.
+- Either outcome carries every `unmigrated:` line verbatim beneath it; Step 6 prints them under the Step 0 line.
 - `failed: <stderr>` if the CLI exits non-zero — stop the run, surface the failure in Step 6, and skip Steps 1–5 with outcome `aborted-by-migration-failure`.
 
 ## Step 1: Discover

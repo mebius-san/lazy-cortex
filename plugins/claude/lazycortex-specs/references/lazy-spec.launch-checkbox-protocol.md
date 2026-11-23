@@ -97,4 +97,6 @@ Four wakes travel between notes, each one hop, each raised after the raising not
 - `release-published` — `release-publish` waking the level note of the product that owns the release once, after the publish commit; a failed production deploy raises nothing, and a failed wake never fails the publish. It only re-hangs rows.
 - `release-member` — a release waking the status note of each member it repainted, after its scaffold, refresh, publish, cancel or un-cancel commit landed; a release or a level note refuses it, and a member busy with a job keeps it as a declined wake. The member re-reads its state, rewrites `# Status brief` and `spec_state`, and dispatches nothing.
 
+What each hop "dispatches nothing" or "only re-hangs" names is the hop's own work. A ticked row on the woken note is enacted on that wake all the same, as on every wake (`lazy-spec.coordination-playbook.md` Chapter 5).
+
 `asset-approved`, `release-start` and `release-member` are raised by `coordinator_dispatch.py`.

@@ -23,3 +23,24 @@ Full categories (Paranoid Testing Strategy — 9 mandatory test types, the last 
 - **A regression test is written before the fix, never after.** A test added once the bug is already fixed proves nothing — it never ran red. Run it against the unchanged code first and watch it fail for the cause the report describes. It lands as one more method in the existing `tests/<module>/…/test_<source>.py` for the file that carried the defect, named for the behaviour it pins — never a `test_bug_<id>.py` or a regression directory. Full policy: the canon's *Fixing a Bug* section.
 - **Never change what an existing test asserts, and never bend code to an outdated test, without the user's "yes".** The full policy — judging which side is wrong, what counts as a behaviour change, what is free, and the ban on excluding a test from the run — is the `lazy-python.failing-tests` rule.
 - **Never test a stub** — a method whose body is a placeholder under `# TODO:` gets no test; a test method that must exist stays empty under a `# TODO:` naming the stub it waits for.
+
+## Isolation and cost
+
+Full text with the reasons and the ways to comply: the canon's *Isolation and Cost* section.
+
+### Safety — every test, every run
+
+- **A test never writes to a resource it does not own** — the working tree, the home directory, the user's caches and config, or a real database or service the machine uses for anything else. When the code under test resolves such a resource from the environment, the test points it at a test-owned one.
+
+### Parallel safety — where the suite runs in parallel
+
+- **Tests share no mutable data.** A shared test store (a test database, a common scratch directory) is fine when each test creates its own records under unique keys or names and reads, asserts and removes only those; a test never counts, truncates or rewrites a whole collection and never relies on a fixed id.
+- **Every test passes in any order.** No test depends on what an earlier test left behind.
+- **Global state is changed only through a mechanism that restores it** — environment variables and module-level values go through `monkeypatch` or its equivalent.
+
+### Cost — every test
+
+- **In-process over out-of-process.** A test calls the code under test directly; a subprocess, a network call or a real service is used only where that boundary itself is what the test proves.
+- **Expensive setup shared by many tests is built once and reused.** A repository, a database schema, a seeded object graph is prepared once per session and copied, cloned or rolled back for each test, never rebuilt from scratch in every one.
+- **No real waits.** A test of a timeout, poll or retry window sets that window to zero or its minimum through config or env; it never sleeps through a production default.
+- **A unit test slower than 0.5 s is a finding.** Its cause is one of the above and is fixed rather than accepted.

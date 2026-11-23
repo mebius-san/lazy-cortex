@@ -55,7 +55,7 @@ Every one of them is derived: the coordinator flips it itself with `flip-gate --
 
 ## 3. The launch checkboxes
 
-Checkboxes live in the level note's `# Gates` section as rows of `[!gate]` callouts. Reconcile the set on every relevant wake — hang a row the moment its precondition starts holding, remove an un-ticked one the moment it stops holding — and never tick one: ticking is the operator's gesture. The callout shape and the way a row is hung and taken down are the asset coordinator's (`lazy-spec.coordination-playbook.md` Chapter 5): one callout per verb, its checkbox lines right under the head line, then a blank quoted line (`>`) before the one footer — a footer glued to a checkbox is its continuation and disappears in Obsidian's reading view; a row carries no hint of its own.
+Checkboxes live in the level note's `# Gates` section as rows of `[!gate]` callouts. Reconcile the set on every relevant wake — hang a row the moment its precondition starts holding, remove an un-ticked one the moment it stops holding — and never tick one: ticking is the operator's gesture. Enact every ticked row on every wake, whatever woke the note: an `asset-approved` or `release-published` wake that "launches nothing" still enacts a tick it finds (`lazy-spec.coordination-playbook.md` Chapter 5). The callout shape and the way a row is hung and taken down are the asset coordinator's (`lazy-spec.coordination-playbook.md` Chapter 5): one callout per verb, its checkbox lines right under the head line, then a blank quoted line (`>`) before the one footer — a footer glued to a checkbox is its continuation and disappears in Obsidian's reading view; a row carries no hint of its own.
 
 | Checkbox | Appears when | On tick |
 |---|---|---|

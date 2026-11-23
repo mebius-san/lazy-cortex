@@ -97,6 +97,9 @@ import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import review_rows  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import set_stage  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -114,6 +117,7 @@ import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-impo
 # sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     LEVEL_ROLES,
+    CoordinatorTrigger,
     Gate,
     HaltReason,
     HistoryEvent,
@@ -122,6 +126,7 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     PluginErrorCause,
     Section,
     SpecCoordinatorDocStateKey,
+    SpecHaltKey,
     SpecKey,
     SpecTargetsKey,
     TickAction,
@@ -133,6 +138,9 @@ _DECODE_ERRORS = "replace"
 
 # How a top-level heading line opens; such a line bounds a note's sections.
 _H1_PREFIX = "# "
+
+# The `pending_wake` values a tick-pending wake may stand in place of: none raised, or a wake the busy guard declined
+_REPLACEABLE_WAKES = frozenset({ None, JobMarker.DECLINED })
 
 # Regex template for locating a frontmatter key's line, shared by `set_fm_json` / `del_fm_key`.
 _FM_KEY_RE_TEMPLATE = r"(?m)^{key}\s*:.*$"
@@ -1292,6 +1300,67 @@ def recorded_coherence_count(body: str, doc: str, job_id: str, dropped: int | No
   return None
 
 
+def is_tick_pending(asset_note: Path, repo_root: Path, trigger: str) -> bool:
+  """
+  Tell whether a retiring coordinator job leaves a ticked launch row standing that nothing will enact.
+
+  Args:
+    asset_note: The status folder-note path.
+    repo_root: The repository root holding the job-marker sidecar.
+    trigger: The wake-trigger token of the coordinator job being retired.
+
+  Returns:
+    True when the note's current `# Gates` section holds a ticked launch row, no wake other than a `declined` one
+    is raised (the `tick-pending` wake replaces a raised `declined`), no launch job is in flight, the note is
+    neither halted nor cancelled, and the job was not itself woken by such a row.
+
+  Raises:
+    OSError: If the job-marker sidecar or the folder-note cannot be read. Nothing is written.
+  """
+
+  # Domain(spec.lifecycle):
+  # # A ticked launch row outlives no coordinator job
+  # A ticked launch row is the operator's order to start a step, and only the coordinator carries it out. A
+  # coordinator job woken for another reason can end without enacting the order, and then nothing would wake the
+  # coordinator again. So when its job is let go, the note as that job left it is read: a launch row still ticked
+  # there wakes the coordinator once more. A wake that was turned away while the job ran is replaced by this one:
+  # both make the coordinator read the asset afresh and both end with whatever it does next, but only this one
+  # reaches the coordinator without a further change to the note. No such wake is raised while the wake of a
+  # finished launch step already waits, while a launch job is still running, or on a halted or cancelled asset,
+  # and a job that was itself such a wake never orders another, so an order the coordinator cannot carry out does
+  # not loop.
+
+  # a wake raised by this very rule never orders another
+  if trigger == CoordinatorTrigger.TICK_PENDING:
+    return False
+
+  # the job markers read fresh, since the stage-lag step may have just raised its own wake
+  markers = spec_job_markers.read(repo_root, asset_note)
+
+  # a raised job-done wake already brings the coordinator back, and a running launch job wakes it when it ends; a
+  # declined wake is replaced, since nothing delivers it without a further commit
+  if markers.get(JobMarker.PENDING_WAKE) not in _REPLACEABLE_WAKES or markers.get(JobMarker.ACTIVE_JOB) is not None:
+    return False
+
+  # the note as the retired job left it, re-read since the stage-lag step may have just rewritten it
+  text = spec_paths.read_text(asset_note)
+  frontmatter, fm_end = flip_gate.parse_frontmatter(text)
+
+  # a halted or cancelled asset launches nothing
+  if flip_gate.is_true(frontmatter, SpecHaltKey.HALTED) or flip_gate.is_true(frontmatter, Gate.SPEC_CANCELLED):
+    return False
+
+  # the body's lines, where the `# Gates` section is looked for
+  lines = text[fm_end:].split("\n")
+
+  # guard: a note without a `# Gates` section holds no launch row
+  if (span := review_rows.find_gates_span(lines)) is None:
+    return False
+
+  # any ticked launch row still standing is an order nobody enacted
+  return any(row.ticked for row in review_rows.parse_gate_rows(lines[span[0]:span[1]]))
+
+
 def _apply_coordinator_job_marker(
     asset_note: Path, text: str, fm_end: int, *,
     body: str, asset_dir: Path, repo_root: Path, marker: str, job_info: dict, today_str: str,
@@ -1307,7 +1376,11 @@ def _apply_coordinator_job_marker(
   approved document at `draft` additionally raises a stage-lag wake or warning for that document; the retry of the
   same job after a failed marker clear neither wakes that lag again nor warns.
   Any wake flag raised while the swept job ran survives for the next genuine wake to redeem, unless a fresh
-  stage lag replaces it with the declined-wake flag. The `coordinator_job` marker is cleared last, once the
+  stage lag replaces it with the declined-wake flag. A job that leaves a ticked launch row standing raises the
+  `tick-pending` wake flag in the same sidecar write that clears the marker, replacing a raised `declined` wake
+  flag, unless a `job-done` wake is already raised, a launch job is in flight, the note is halted or cancelled, or
+  the swept job was itself woken by `tick-pending`.
+  The `coordinator_job` marker is cleared last, once the
   `DEAD` warning line and, for a `DONE` job, the stage-lag step are committed, so a failed commit of either
   leaves the job tracked, with the folder-note put back to its text when putting it back succeeds.
 
@@ -1333,8 +1406,10 @@ def _apply_coordinator_job_marker(
       stage-lag step of a `DONE` job. Nothing of that write has reached the note, no wake flag is raised and the
       stage-lag record is unchanged; the marker stays set, so the job stays tracked and the retry tries again.
     OSError: Covers the note write and the commit of the `DEAD` warning line, the note write, the commit, the
-      wake-flag write and the stage-lag record write of the stage-lag step of a `DONE` job, and the final clear of
-      the `coordinator_job` marker. The marker stays set in every case, so the job stays tracked. A failed note
+      wake-flag write and the stage-lag record write of the stage-lag step of a `DONE` job, the reads of the
+      sidecar and the note that decide the `tick-pending` wake flag, and the final write that clears the
+      `coordinator_job` marker and raises that flag. The marker stays set in every case, so the job stays tracked,
+      and a failed final write raises no `tick-pending` flag either. A failed note
       write commits nothing. A failed commit puts the note back to its previous text when that succeeds, otherwise
       the note keeps the uncommitted text, and no wake flag is raised and the stage-lag record is unchanged. After
       a committed stage-lag note a failed wake-flag write leaves no flag raised and the record unchanged, and a
@@ -1363,6 +1438,11 @@ def _apply_coordinator_job_marker(
   # that text as the note's own. A warning already in the asset's history for that very job, in any language the
   # plugin writes in, is not recorded a second time: the retry only lets the job go. Only the history itself is
   # looked at: another job's warning never counts, and neither do the same words standing anywhere else in the note.
+  # However the job ended, a launch row its asset still holds ticked when it is let go wakes the coordinator once
+  # more, raised together with letting the job go, so the job is never let go without the wake it owes. It takes
+  # the place of a wake turned away while the job ran. No such wake is owed while the wake of a finished launch
+  # step already waits, while a launch job is still running, on a halted or cancelled asset, or when the job was
+  # itself such a wake.
 
   # the job's identity, read before the coordinator-job marker it came from is cleared
   trigger = job_info[JobMarker.TRIGGER]
@@ -1402,8 +1482,12 @@ def _apply_coordinator_job_marker(
 
   # the marker is cleared last, once every commit of the job's retirement is in: a WARNING line or a
   # stage-lag note that could not be committed leaves the job tracked, so the next tick finds its
-  # finished bundle again and retries
-  spec_job_markers.update(repo_root, asset_note, { JobMarker.COORDINATOR_JOB: None })
+  # finished bundle again and retries. A ticked launch row the job left standing raises its wake in the
+  # same write, so the job is never let go without the wake it owes
+  changes: dict[str, str | None] = { JobMarker.COORDINATOR_JOB: None }
+  if is_tick_pending(asset_note, repo_root, trigger):
+    changes[JobMarker.PENDING_WAKE] = JobMarker.TICK_PENDING
+  spec_job_markers.update(repo_root, asset_note, changes)
 
   # the applied marker's action plus the job identity it acted on, for every branch above
   result = {
@@ -1876,7 +1960,8 @@ def _poll_jobs(asset_note: Path, repo_root: Path, today_str: str) -> dict:
     RuntimeError: Propagated from `history_journal.append` when the core verb refuses or cannot
       be resolved while recording a finished job.
     OSError: If a folder-note write fails or its commit raises it, for a halt, the coordinator job's warning line
-      or stage-lag note, or a job-marker or stage-lag sidecar write fails.
+      or stage-lag note, or a job-marker or stage-lag sidecar write fails, or the sidecar or note read that
+      decides a retired coordinator job's `tick-pending` wake flag fails.
     subprocess.CalledProcessError: Propagated from `commit_note_change` when committing the
       rewritten folder-note exits non-zero, or when committing the coordinator job's warning line or
       stage-lag note does.
@@ -1905,7 +1990,8 @@ def _poll_jobs(asset_note: Path, repo_root: Path, today_str: str) -> dict:
   # the coordinator is woken about it, only after the halt of the asset, when one is owed, is safely
   # recorded; a finished step of a cancelled asset wakes nobody. The coordinator's own background job is let
   # go only after the warning about its death is recorded in the asset's history or, for one that finished,
-  # after the stage-lag step its ending owes the asset is in; letting it go wakes nobody by itself. If recording
+  # after the stage-lag step its ending owes the asset is in; letting it go wakes nobody by itself, unless the
+  # asset still holds a ticked launch row the coordinator has to carry out. If recording
   # fails, the job stays tracked and the next pass tries again, and the asset's note is put back as it was;
   # putting it back can fail too, and then the note keeps the unrecorded text, the failure is reported, and the
   # next pass reads that text as the note's own.

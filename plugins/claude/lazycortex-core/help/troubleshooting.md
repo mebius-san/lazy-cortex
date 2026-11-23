@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-22
+last_regen: 2026-11-23
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -42,8 +42,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
-surface_sha: 125e7ed94be40355e5e09c9f2898ff56f1228022c0814565e4450c11b65b1366
+source_sha: b785ead983e783438c9627a7cc18079ea8723947
+surface_sha: 69537c992b232f494551211bb83970672ce455d0f264f7d0218cf696f3af988f
 ---
 # Troubleshooting
 
@@ -408,6 +408,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `lazy_settings.py migrate` exited non-zero before any installer had a chance to read or write `.claude/lazy.settings.json`. This typically means a migration ladder file under `lazy_settings_migrations/` has a malformed `MIGRATIONS` callable, or the settings file itself is so corrupted that the ladder cannot parse it.
 
 **Fix**: Read the captured stderr in the Step 6 report to identify which migration module or settings section is at fault. If the settings file is corrupt, inspect `.claude/lazy.settings.json` and fix the JSON syntax. If the error names a specific migration module, reinstall `lazycortex-core` via `/plugin update lazycortex-core@lazycortex` to restore the migration ladder, then re-run `/lazy-core.setup`.
+
+---
+
+## `/lazy-core.setup` Step 0 prints an `unmigrated:` line and repeats it on every run
+
+**Symptom**: Under the Step 0 line, `/lazy-core.setup` prints one or more lines like `unmigrated: <section> in <overlay path> — …`, and the Step 6 report repeats them beneath Step 0. The run itself continues and the other sections still migrate; the same line comes back every time you run `/lazy-core.setup` again.
+
+**Likely cause**: A section of your gitignored `.claude/lazy.settings.local.json` carries no `_version`, the tracked `.claude/lazy.settings.json` has no same-named section with content (a section holding only its `_version` does not count), and the stored data does not reveal which version of the section it is. The migration ladder cannot tell which rungs to apply, so it leaves the section exactly as stored and names it again on every run until it is stamped.
+
+**Fix**: Follow the remedy the `unmigrated:` line itself names — stamp `_version` in that overlay section of the file the line points at — then re-run `/lazy-core.setup`. Once the section carries a version, the line disappears and the ladder treats the section like any other.
 
 ---
 

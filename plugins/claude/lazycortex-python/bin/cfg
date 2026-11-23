@@ -4,7 +4,7 @@
 # Creates AND updates the project venv to the project's requirements, all read from
 # pyproject.toml (+ .python-version): the interpreter from `requires-python`, every
 # `[project].dependencies` entry, every extra, every `[dependency-groups]` group, plus the
-# plugin's checker tools (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar) on top.
+# plugin's checker tools (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar/pytest-xdist) on top.
 # An existing venv whose interpreter does not satisfy the project's Python requirement is
 # recreated; otherwise its packages are updated in place. The target venv is
 # `[tool.lazy-python].venv` when set, else <project>/.venv. The logic is shared with

@@ -145,7 +145,11 @@ def resolve_repo_language(vault: Path) -> str:
   return proc.stdout.removesuffix("\n")
 
 
-def resolve_spec_language(vault: Path, doc_path: str) -> str:
+def resolve_spec_language(vault: Path,
+                          doc_path: str,
+                          *,
+                          products: dict | None = None,
+                          catalog_guidelines: dict[str, list[str]] | None = None) -> str:
   """
   Resolve the effective language for a spec doc via the fallback chain.
 
@@ -159,11 +163,16 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
   Args:
     vault: Vault root directory containing the doc.
     doc_path: Doc path relative to `vault`.
+    products: An already-loaded products registry the owning product is looked up in; None reads it from the
+      settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the settings file.
 
   Returns:
     The resolved language tag; never empty (falls back to `en`).
 
   Raises:
+    ValueError: If the settings file is read for the products registry or the catalog-wide guidelines and cannot
+      be read, is not valid JSON, not UTF-8 text or not a JSON object.
     RuntimeError: If the doc and product rungs yield nothing and the core plugin's CLI cannot be resolved, its
       language verb exits non-zero, or the verb exits zero but answers nothing.
   """
@@ -193,7 +202,8 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
       return doc_lang
 
   # 2. Owning product's language.
-  _, record = resolve_product.effective_record_by_path(vault, doc_path)
+  _, record = resolve_product.effective_record_by_path(vault, doc_path, products = products,
+                                                      catalog_guidelines = catalog_guidelines)
   if isinstance(record, dict):
     product_lang = record.get(_PRODUCT_LANGUAGE_KEY)
 

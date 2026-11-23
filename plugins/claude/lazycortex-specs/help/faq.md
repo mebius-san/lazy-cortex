@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, assets, vision/design docs, gates, release specialists, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-11-22
+last_regen: 2026-11-23
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
-surface_sha: 175ad1a7f7a538315aca79441d813ca75ce76b5dbf662045a974b1e5617d7ba9
+source_sha: 2653a5426b5529f470a56e14491a26e6ce85968a
+surface_sha: e02ad133bc669575f2d64d52d71a5fa3b4c43a8d36f32c0a01e1b8c0f272f0b1
 ---
 # Frequently asked questions
 

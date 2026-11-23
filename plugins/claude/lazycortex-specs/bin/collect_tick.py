@@ -6,9 +6,9 @@ A finished expert job leaves its terminal marker (`DONE` / `DEAD` / `CANCELLED`)
 note's folder is untouched when a job finishes. This worker is the delivery channel, the specs-side
 analog of `lazycortex-review`'s `collect-tick`: each tick it reads the sidecar rows
 (`spec_job_markers.entries`) and runs the same per-note `gate_tick` poll in-process for every note
-still carrying a marker or a pending wake. A note whose poll leaves a `job-done` wake raised gets
-the coordinator dispatched on it directly, with no git item — a finished job commits nothing to its
-note, so no commit could carry that wake. This sweep commits nothing itself.
+still carrying a marker or a pending wake. A note whose poll leaves a `job-done` or `tick-pending` wake
+raised gets the coordinator dispatched on it directly, with no git item — no commit carries either wake, so
+nothing else would deliver it. This sweep commits nothing itself.
 
 A row whose note file no longer exists is stale runtime scratch and is skipped silently. One note's
 failing poll is logged to stderr and folded into the summary's `error` field without stopping the
@@ -50,11 +50,13 @@ _NOTES_KEY = "notes"
 _TICKED_KEY = "ticked"
 _DISPATCHED_KEY = "dispatched"
 _ERROR_KEY = "error"
+# The raised wakes no commit carries, so this sweep delivers them itself
+_SWEEP_WAKES = frozenset({ JobMarker.JOB_DONE, JobMarker.TICK_PENDING })
 
 
 def collect_tick(repo: Path) -> dict:
   """
-  Poll every sidecar-recorded note once, wake the coordinator on every raised `job-done`, and report the counts.
+  Poll every recorded note once, wake the coordinator on a raised `job-done` or `tick-pending`, and report counts.
 
   Guarantees:
     - A poll failure on one note never aborts the sweep; every other recorded note is still
@@ -66,7 +68,7 @@ def collect_tick(repo: Path) -> dict:
   Returns:
     `{"notes": N, "ticked": M, "dispatched": D}` — N is the number of rows whose note existed and
     whose poll completed, M is how many of those polls reported a non-noop action, D is how many
-    notes had their coordinator dispatched on a raised `job-done` wake. Carries an additional
+    notes had their coordinator dispatched on a raised `job-done` or `tick-pending` wake. Carries an additional
     `"error"` field summarizing the failures when one or more polls, sidecar re-reads or dispatches raised.
 
   Raises:
@@ -103,12 +105,13 @@ def collect_tick(repo: Path) -> dict:
     if result.get(TickAction.ACTION) != TickAction.NOOP:
       ticked += 1
 
-    # a finished job commits nothing to its note, so the sweep wakes the coordinator itself
+    # no commit carries a job-done or tick-pending wake, so the sweep wakes the coordinator itself
     try:
-      # guard: only a raised job-done wake is this sweep's to deliver; every other wake rides a commit
-      if spec_job_markers.read(repo, note).get(JobMarker.PENDING_WAKE) != JobMarker.JOB_DONE:
+      # guard: only a raised job-done or tick-pending wake is this sweep's to deliver; a declined wake rides a
+      # commit, or turns into tick-pending when the retired coordinator job left a ticked launch row
+      if spec_job_markers.read(repo, note).get(JobMarker.PENDING_WAKE) not in _SWEEP_WAKES:
         continue
-      woken = coordinator_dispatch.coordinator_dispatch(note, {}, job_done = True)
+      woken = coordinator_dispatch.coordinator_dispatch(note, {}, swept_wake = True)
     # waiver: this sweep's per-note error boundary — one failed wake must not stop the rest
     except Exception as error:
       sys.stderr.write(f"collect-tick: {key}: {error}\n")

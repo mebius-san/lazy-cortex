@@ -980,7 +980,8 @@ def ensure_group_note(repo: Path,
                       owner_record: dict,
                       alias_base: str = "",
                       tokens: dict | None = None,
-                      products: dict | None = None) -> Path | None:
+                      products: dict | None = None,
+                      catalog_guidelines: dict[str, list[str]] | None = None) -> Path | None:
   """
   Return a folder's same-named group note, writing it first when the folder has none.
 
@@ -1002,7 +1003,9 @@ def ensure_group_note(repo: Path,
     owner_record: The owning product's effective record.
     alias_base: Base context when `asset_type` is an alias, or empty.
     tokens: Template tokens to substitute, or none.
-    products: The products registry the template chain's ancestors are read from; None reads the tracked settings
+    products: The products registry the template chain's ancestors and the note's language are read from; None reads
+      the tracked settings file.
+    catalog_guidelines: The catalog-wide `spec.guidelines` already read; None reads them from the tracked settings
       file.
 
   Returns:
@@ -1011,9 +1014,14 @@ def ensure_group_note(repo: Path,
 
   Raises:
     ValueError: When `group_dir` lies outside the owning product's tree, whether or not a note exists there; this
-      is checked before anything else.
+      is checked before anything else. When a note is about to be written and the settings file is read for the
+      products registry or the catalog-wide guidelines and cannot be read, is not valid JSON, not UTF-8 text or
+      not a JSON object.
     ScaffoldRefusal: When a note is about to be written and no group-note template resolves for the type; never
       raised when a note already exists or the folder is the product's own root.
+    RuntimeError: When a note is about to be written, its own language and its product's yield nothing, and the
+      core plugin's CLI cannot be resolved, its language verb exits non-zero, or the verb exits zero but answers
+      nothing.
     OSError: When the group-note template cannot be read or the note cannot be written.
   """
 
@@ -1074,8 +1082,9 @@ def ensure_group_note(repo: Path,
     group_text = inject_iconize(group_text, home_paint[0], "")
 
   # the note lands healed, its stats region counted from the folder as it stands
-  spec_paths.write_text_atomic(group_note, note_explainers.heal_note_text(group_note, group_text))
-  summary_render.apply_container_stats(group_note)
+  spec_paths.write_text_atomic(group_note, note_explainers.heal_note_text(
+      group_note, group_text, products = products, catalog_guidelines = catalog_guidelines))
+  summary_render.apply_container_stats(group_note, products = products, catalog_guidelines = catalog_guidelines)
   return group_note
 
 
@@ -1127,6 +1136,8 @@ def scaffold(repo: Path,
     ValueError: When a registry is handed in without `catalog_guidelines` and the tracked settings file exists but
       cannot be read, is not UTF-8 text, is not valid JSON or is not a JSON object; with `catalog_guidelines` handed
       in, the tracked file is not read for the catalog-wide guidelines.
+    RuntimeError: When a seeded note's own language and its product's yield nothing and the core plugin's CLI
+      cannot be resolved, its language verb exits non-zero, or the verb exits zero but answers nothing.
   """
 
   # Contract:
@@ -1183,7 +1194,8 @@ def scaffold(repo: Path,
 
   # the folder-note lands on disk, healed
   note_path = target_folder / f"{slug}.md"
-  spec_paths.write_text_atomic(note_path, note_explainers.heal_note_text(note_path, note_text))
+  spec_paths.write_text_atomic(note_path, note_explainers.heal_note_text(
+      note_path, note_text, products = products, catalog_guidelines = catalog_guidelines))
 
   # Contract:
   # Every seeded document's source-docs citations and `## Docs` projection come from the scaffold
@@ -1215,7 +1227,7 @@ def scaffold(repo: Path,
   existed = ( group_dir / f"{group_dir.name}.md" ).exists()
   group_note = ensure_group_note(repo, group_dir, asset_type = asset_type, owner_key = owner_key,
                                  owner_record = owner_record, alias_base = alias_base, tokens = tokens,
-                                 products = products)
+                                 products = products, catalog_guidelines = catalog_guidelines)
 
   # the result names the group note only when this scaffold wrote it
   seeded_group = str(group_note.relative_to(repo)) if group_note and not existed else ""

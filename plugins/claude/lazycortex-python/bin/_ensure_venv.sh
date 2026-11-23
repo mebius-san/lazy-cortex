@@ -57,7 +57,7 @@ if [ "$(_read_pyproject_key bootstrap-fallback)" = "false" ]; then
   echo "[lazy-python] the project venv at ${_venv_dir} is missing or stale and bootstrap-fallback = false" >&2
   echo "[lazy-python] options:" >&2
   echo "  - run cfg-py to create / update it from pyproject.toml" >&2
-  echo "  - activate a venv with mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar (sets \$VIRTUAL_ENV)" >&2
+  echo "  - activate a venv with mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar/pytest-xdist (sets \$VIRTUAL_ENV)" >&2
   return 1 2>/dev/null || exit 1
 fi
 

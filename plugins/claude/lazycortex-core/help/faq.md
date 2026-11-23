@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, daemon setup, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-11-22
+last_regen: 2026-11-23
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -45,8 +45,8 @@ source_skills:
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
-source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
-surface_sha: 5032e6f1a743b4995fbf6f635e137f2cd9f2ad22527f4953d98604fe8405476a
+source_sha: b785ead983e783438c9627a7cc18079ea8723947
+surface_sha: bdcf3e075c02e39cb33e68d34d9270f98a20f10b89ccc8d93d3187c0d32a0d67
 ---
 # FAQ
 
@@ -62,7 +62,9 @@ Use `/lazy-core.install` directly when you want to re-sync just the core plugin 
 
 ## Do I need to migrate `lazy.settings.json` by hand after a plugin update?
 
-No. `/lazy-core.setup` runs a settings migration as its first step (Step 0) before any plugin installer touches the file, and ends with `/lazy-core.migrate`, which repairs the other state an update can leave behind (see the next question). The migration ladder upgrades each section of `.claude/lazy.settings.json` to the current schema automatically. The step is transparent: if nothing needs to change, it prints `migrated: 0 sections (N up-to-date)` and continues; if sections are upgraded, it lists each one in the Step 6 report. Only if the migration itself errors (a malformed ladder entry) does setup stop and ask you to investigate.
+Almost never. `/lazy-core.setup` runs a settings migration as its first step (Step 0) before any plugin installer touches the file, and ends with `/lazy-core.migrate`, which repairs the other state an update can leave behind (see the next question). The migration ladder upgrades each section of `.claude/lazy.settings.json` to the current schema automatically. The step is transparent: if nothing needs to change, it prints `migrated: 0 sections (N up-to-date)` and continues; if sections are upgraded, it lists each one in the Step 6 report. Only if the migration itself errors (a malformed ladder entry) does setup stop and ask you to investigate.
+
+The one case that needs you is an `unmigrated: <section> in <overlay path>` line, printed beneath the Step 0 result and repeated in the Step 6 report. It means a section of your local overlay, `.claude/lazy.settings.local.json`, carries no `_version`, has no same-named section with content in the tracked file, and holds data that does not reveal which schema version it follows — so the ladder left it exactly as stored rather than guess. The line itself names the fix: stamp `_version` in that overlay section, then run `/lazy-core.setup` again so the migration can pick it up. Until you do, the line reappears on every run; nothing else is blocked and the run is not aborted.
 
 ---
 

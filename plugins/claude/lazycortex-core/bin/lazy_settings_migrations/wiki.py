@@ -18,6 +18,10 @@ stages, and the same scope gains an `index_badges` list naming the stage so the 
 each document's stage beside its entry. A predicate the operator reshaped, a scope with no stage
 predicate, and an `index_badges` value already present are left exactly as found; re-running the
 step changes nothing.
+
+`LEGACY_SHAPES` declares scopes that own their axes with no section-level vocabulary as the shape only v1
+holds; `AMBIGUOUS_VALUES` declares the approved-only stage predicate, which the v2 → v3 rung widens although
+a current section may hold it by choice.
 """
 from __future__ import annotations
 
@@ -213,4 +217,16 @@ def _migrate_admit_draft_stages(data: dict) -> dict:
 MIGRATIONS = {
   1: _migrate_hoist_axes,
   2: _migrate_admit_draft_stages,
+}
+
+# Shapes only an old section holds, keyed by the highest version that still holds each one
+LEGACY_SHAPES = {
+  # scope axes with no section vocabulary to narrow are the v1 shape, where each scope owned its axes
+  1: lambda data: not isinstance(data.get(_TAG_AXES_KEY), list) and bool(_hoisted_axes(data)),
+}
+
+# Values a rung rewrites although a current section may hold them, keyed by that rung
+AMBIGUOUS_VALUES = {
+  # the approved-only stage predicate may be one an operator chose today
+  2: lambda data: MIGRATIONS[2](data) != data,
 }

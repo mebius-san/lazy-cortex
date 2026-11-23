@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 12.0.4 — 2026-11-23 UTC
+
+- The commit recorder now journals each commit in the repository that actually received it. It follows a `git -C` option, a preceding `cd`, or the repository an MCP commit call names, and that repository's own `hooks.disabled` decides whether it records. A commit whose repository can't be read leaves a one-line diagnostic instead of vanishing.
+- A renamed or copied file now reaches routines that watch added, changed or deleted files. A rename arrives as a deletion of the old path plus an addition of the new one. A routine that handles renames through its own rename watch can opt out with the new `pair_renames` key.
+- A settings section kept only in `lazy.settings.local.json` is now brought to the current format, even when the shared file has no such section or only a version stub. When the section's age can't be told from its data, `/lazy-core.setup` names it on every run and says which `_version` to add, instead of silently leaving it unread.
+
 ### 12.0.3 — 2026-11-22 UTC
 
 - Jobs that run in an isolated worktree can now reuse the project's Python virtualenv. A new `daemon.git.worktree_links` setting lists checkout paths to carry into the worktree, so `chk-py` and `tst-py` no longer break there. `lazy-core.audit` notes an expert that has neither links nor a bootstrap command.
@@ -856,6 +862,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-log.audit` verifies the logging rule is installed and coherent.
 
 ## lazycortex-specs
+
+### 15.0.1 — 2026-11-23 UTC
+
+- A launch-row tick is no longer lost when it lands while a coordinator job woken for another reason (such as `release-start`) is queued or running. The coordinator now enacts every ticked row on each wake, and a job that ends with a ticked row still standing triggers another wake.
+- A code plan's `Verification` section now excludes manual, live, smoke and functional checks. Those belong to the release's test plan, so the planner no longer hands post-merge checks to a human.
 
 ### 15.0.0 — 2026-11-22 UTC
 
@@ -2235,6 +2246,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 2.0.3 — 2026-11-23 UTC
+
+- The software-product aspect still asks that a behavior change be verifiable in its released form (smoke check, version output, telemetry). It now places that check in the project's test plan, and an implementation plan no longer carries it as a manual step.
+
 ### 2.0.2 — 2026-11-22 UTC
 
 - The developer expert reports only real departures from the plan as deviations in its build journal. It now fixes, or waives where the language canon allows, the guideline reviewer's WARN findings on code it wrote in the same task, instead of leaving them for you at acceptance.
@@ -2487,6 +2502,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.17.0 — 2026-11-23 UTC
+
+- The project test rule and testing guidelines now require test isolation and bounded test cost. Tests must never write to resources they don't own, must be safe to run in parallel and in any order, and must stay cheap: in-process calls, expensive setup built once, no real waits, and 0.5 s per unit test.
+- The project virtual environment now includes `pytest-xdist`, so test suites can run in parallel.
 
 ### 4.16.0 — 2026-11-22 UTC
 
@@ -2802,6 +2822,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 4.1.0 — 2026-11-23 UTC
+
+- Renaming or moving a file no longer also triggers added-file and deleted-file jobs for the project structure map. The rename job now runs alone, so a moved directory keeps its description instead of being re-entered from scratch. `/lazy-wiki.install` brings existing registrations current.
+- `/lazy-wiki.configure structure` now resets the `protocols` on the structure-scan routines to the shipped value on every run. A protocol you attached by hand to those routines no longer survives a re-run.
 
 ### 4.0.3 — 2026-11-22 UTC
 

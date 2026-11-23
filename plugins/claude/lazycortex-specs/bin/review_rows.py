@@ -714,7 +714,7 @@ def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) 
   return laid
 
 
-def _find_gates_span(lines: list[str]) -> tuple[int, int] | None:
+def find_gates_span(lines: list[str]) -> tuple[int, int] | None:
   """
   Locate the `# Gates` section of a note body.
 
@@ -761,7 +761,7 @@ def layout_body(body: str, stages: dict[str, str], lang: str) -> str:
   lines = body.split(_LF)
 
   # guard: without the section there is nothing to lay out
-  if (span := _find_gates_span(lines)) is None:
+  if (span := find_gates_span(lines)) is None:
     raise ValueError(f"the note body has no {Section.GATES} section")
 
   # only the section's lines are laid out; the head and the rest are re-joined untouched
@@ -883,7 +883,7 @@ def reconcile(body: str, wanted: list[str], lang: str, *,
   lines = body.split(_LF)
 
   # guard: without the section there is nowhere to hang a row
-  if (span := _find_gates_span(lines)) is None:
+  if (span := find_gates_span(lines)) is None:
     raise ValueError(f"the note body has no {Section.GATES} section")
 
   # the section runs from its heading to the next H1, or to the end of the body

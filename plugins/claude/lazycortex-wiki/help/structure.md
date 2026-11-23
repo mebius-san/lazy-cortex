@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep one repo-wide map, docs/structure.md, current — rebuild it wholesale, query a slice of it, or let git-watch routines patch it per commit.
-last_regen: 2026-11-22
+last_regen: 2026-11-23
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram of the structure block: (1) /lazy-wiki.configure structure sets depth_profiles + exclude and registers three git-watch routines (structure-scan for new files, structure-scan-deletes for deleted files, structure-scan-renames for renamed files); (2) each routine collects every path its tick observed into one batch and dispatches lazy-wiki.structure-curator once per tick with kind=curate or kind=rename; (3) the curator judges the whole batch against one reading of the tree, edits docs/structure.md, and commits once for the batch; (4) separately, an operator or agent runs /lazy-wiki.structure rebuild for a wholesale resync (walks git ls-files, classifies by depth_profiles, fans out to Explore subagents on a large tree, writes and commits the whole map), or /lazy-wiki.structure query [<path>] to read back just one slice without loading the whole file. Show rebuild and the curator's incremental path as two ways of reaching the same file, and query as the read-only path that never touches routines."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-wiki.structure
   - lazy-wiki.structure-curator
   - lazy-wiki.configure
-source_sha: c8db3a16da37483d17108e3fb748f277fb0691b5
-surface_sha: c5c1ea73b66b769453e29a872232486cb56530d08eb7ec6191f77d8e978ec8d6
+source_sha: af2cec610e67efd656786250852436704318a125
+surface_sha: b3b8c0d89502c3ddd0fca786f9cc153e6851ca9ecb96a72efa7966322a701e8c
 ---
 # Structure
 

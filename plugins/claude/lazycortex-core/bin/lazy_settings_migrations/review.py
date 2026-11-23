@@ -99,6 +99,12 @@ optional `autorun_max_cycles` key that replaces it is not seeded — its
 default applies while it is absent. Every other key, class, and entry is
 preserved. Idempotent: a second run finds no key to drop. Add `13: lambda
 data: <transformed>` here when a v13 → v14 migration is needed.
+
+`LEGACY_SHAPES` declares the legacy `plan` class, routing through the retired request router, the
+pre-namespace specs protocol references, the pre-rename code classes and the per-class concerns threshold as
+shapes only the versions up to those rungs hold; `AMBIGUOUS_VALUES` declares the `test-plan` main copied from
+`dev-plan` and the `dev-plan` main on the implementer, which the v2 → v3 and v3 → v4 rungs rewrite although a
+current section may hold them by choice. Both tables skip a section whose class list is malformed.
 """
 from __future__ import annotations
 
@@ -831,6 +837,20 @@ def _migrate_drop_concerns_threshold(data: dict) -> dict:
   return { **data, ReviewClassKey.CLASSES: classes }
 
 
+def _is_well_formed(data: dict) -> bool:
+  """
+  Tell whether a `review` section's class list has the shape the ladder's steps can read.
+
+  Args:
+    data: The `review` section content.
+
+  Returns:
+    `True` when `classes` is a list whose every entry is a dict, `False` otherwise.
+  """
+  classes = data.get(ReviewClassKey.CLASSES)
+  return isinstance(classes, list) and all(isinstance(entry, dict) for entry in classes)
+
+
 MIGRATIONS = {
   1: _migrate_plan_classes,
   2: _migrate_test_plan_main_to_tester,
@@ -844,4 +864,30 @@ MIGRATIONS = {
   10: _migrate_vision_and_use_cases,
   11: _migrate_tech_height_protocol,
   12: _migrate_drop_concerns_threshold,
+}
+
+# Shapes only an old section holds, keyed by the highest version that still holds each one; each of these rungs
+# rewrites or drops a retired class, expert, reference or key no current section carries, so a change proves the
+# old shape
+LEGACY_SHAPES = {
+  # the legacy `plan` class exists only before the v1 → v2 rename
+  1: lambda data: _is_well_formed(data)
+    and _rename_plan_to_dev_plan(data[ReviewClassKey.CLASSES]) != data[ReviewClassKey.CLASSES],
+  # routing through the retired request router exists only before the v5 → v6 step
+  5: lambda data: _is_well_formed(data) and _migrate_routing_to_coordinator(data) != data,
+  # a specs protocol reference on the pre-namespace prefix exists only before the v7 → v8 step
+  7: lambda data: _is_well_formed(data) and _migrate_spec_protocol_refs(data) != data,
+  # the `dev-plan` / `dev-report` names and the retired historian exist only before the v8 → v9 step
+  8: lambda data: _is_well_formed(data) and _migrate_code_classes(data) != data,
+  # the per-class concerns threshold exists only before the v12 → v13 drop
+  12: lambda data: _is_well_formed(data) and _migrate_drop_concerns_threshold(data) != data,
+}
+
+# Values a rung rewrites although a current section may hold them, keyed by that rung
+AMBIGUOUS_VALUES = {
+  # a `test-plan` main equal to `dev-plan`'s may be the copied seed or an operator's choice
+  2: lambda data: _is_well_formed(data) and _migrate_test_plan_main_to_tester(data) != data,
+  # a `dev-plan` main on the implementer may be the old seed or an operator's choice
+  3: lambda data: _is_well_formed(data)
+    and _rewrite_dev_plan_main(data[ReviewClassKey.CLASSES]) != data[ReviewClassKey.CLASSES],
 }
