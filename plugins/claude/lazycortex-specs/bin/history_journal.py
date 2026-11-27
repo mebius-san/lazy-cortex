@@ -27,6 +27,9 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -74,13 +77,13 @@ def _core_argv(repo: Path | None, *tail: str) -> list[str]:
 
   Args:
     repo: The repository root the core-CLI resolver's dev fallback is tried against; `None`
-      means the current working directory.
+      means the root resolved from `$LAZY_REPO_ROOT`, else the current working directory.
     tail: The verb's own arguments.
 
   Returns:
     The full argv list, interpreter first.
   """
-  cli = spec_paths.resolve_core_cli(repo or Path.cwd())
+  cli = spec_paths.resolve_core_cli(repo or spec_locator.query_repo_root())
   return [sys.executable, str(cli), _Wire.VERB, *tail]
 
 

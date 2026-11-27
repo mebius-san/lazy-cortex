@@ -5,9 +5,9 @@ This module backs the `external-dirs` subcommand family — `check`, `apply`, `s
 `fix-ignore`, and `set-root` — over the `external_dirs` module and the local-only settings
 overlay. Every verb prints JSON to stdout except `status`, whose single token is meant to be
 branched on directly; `in-place` names the checkout that holds every declared path as a real
-directory and so is the source the other checkouts link from. The repository root follows the convention every other subcommand
-uses: the `LAZY_REPO_ROOT` env var, falling back to the process working directory,
-overridable per-call with `--cwd`.
+directory and so is the source the other checkouts link from. The repository root is the toplevel of the
+checkout that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself
+outside git), whose settings the daemon reads; the declared paths are relative to it.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import os
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import ExternalDirsKey, SettingsFile, SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from external_dirs import (  # pylint: disable=import-error
   append_ignore_lines,
@@ -186,7 +186,7 @@ def cmd_external_dirs(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   verbs.add_parser(_VERB_SET_ROOT).add_argument("root")
   args = parser.parse_args(argv)
-  repo = resolve_repo_root(args.cwd)
+  repo = query_repo_root(args.cwd)
 
   # `status` prints a bare token so a shell can branch on it; every other verb prints JSON
   if args.verb == _VERB_STATUS:

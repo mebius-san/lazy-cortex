@@ -32,15 +32,23 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_decisions  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -79,13 +87,12 @@ class Keys:
     PATHS: Result-dict key listing the documents written, or due to be written.
     MD_SUFFIX: Markdown file extension, used to filter the content-root walk.
     ENCODING: File encoding used throughout this module.
-    ARG_CWD: CLI flag overriding the repository root.
+    ARG_CWD: CLI flag naming a directory inside the repository whose nearest settings root is used.
     ARG_CWD_HELP: CLI help text for `--cwd`.
     ARG_CHECK: CLI flag that reports without writing and answers through the exit code.
     ARG_CHECK_HELP: CLI help text for `--check`.
     EXIT_FAILED: Exit code of a failed run, told apart from both `--check` answers.
     PROG: CLI program name shown in `--help` output.
-    ENV_REPO_ROOT: Env var naming the repository root, read when `--cwd` is not passed.
   """
 
   # Frontmatter key naming a doc's role.
@@ -108,10 +115,10 @@ class Keys:
   MD_SUFFIX = ".md"
   # File encoding used throughout this module.
   ENCODING = "utf-8"
-  # CLI flag overriding the repository root.
+  # CLI flag naming a directory inside the repository whose nearest settings root is used.
   ARG_CWD = "--cwd"
   # CLI help text for `--cwd`.
-  ARG_CWD_HELP = "Repository root (defaults to $LAZY_REPO_ROOT or cwd)."
+  ARG_CWD_HELP = "Directory inside the repository (defaults to $LAZY_REPO_ROOT, then the cwd)."
   # CLI flag that reports without writing and answers through the exit code.
   ARG_CHECK = "--check"
   # CLI help text for `--check`.
@@ -120,8 +127,6 @@ class Keys:
   EXIT_FAILED = 2
   # CLI program name shown in `--help` output.
   PROG = "lazycortex-specs pins"
-  # Env var naming the repository root, read when `--cwd` is not passed.
-  ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 
 def _pin_block(role: str, product: str | None, category: str | None) -> str:
@@ -355,13 +360,9 @@ def main(argv: list[str]) -> int:
   parser.add_argument(Keys.ARG_CHECK, action = "store_true", help = Keys.ARG_CHECK_HELP)
   args = parser.parse_args(argv)
 
-  # resolve the repo the same way every other lazycortex-specs subcommand does: explicit flag,
-  # then the daemon-exported env var, then cwd
-  repo_raw = args.cwd or os.environ.get(Keys.ENV_REPO_ROOT) or os.getcwd()
-
   # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
   try:
-    result = backfill(Path(repo_raw).resolve(), dry_run = args.check)
+    result = backfill(spec_locator.query_settings_root(args.cwd), dry_run = args.check)
   # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught

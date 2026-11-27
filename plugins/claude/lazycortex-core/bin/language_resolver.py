@@ -13,12 +13,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import sys
 from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_settings_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
@@ -102,7 +111,7 @@ def main(argv: list[str]) -> int:
       # waiver: argparse CLI signature -- option flag + repo-root default
       "--cwd", type = Path, default = None,
       # waiver: one-off human-facing message -- argparse help text
-      help = "repo root holding .claude/lazy.settings.json (default: $LAZY_REPO_ROOT or cwd)",
+      help = "directory inside the repo holding .claude/lazy.settings.json (default: $LAZY_REPO_ROOT, then cwd)",
   )
   parser.add_argument(
       # waiver: argparse CLI signature -- option flag naming the caller's own settings section
@@ -111,6 +120,5 @@ def main(argv: list[str]) -> int:
       help = "settings section whose own `language` key overrides the top-level one",
   )
   args = parser.parse_args(argv)
-  repo: Path = (args.cwd or Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))).resolve()
-  print(resolve_language(repo, section = args.section))
+  print(resolve_language(query_settings_root(args.cwd), section = args.section))
   return 0

@@ -19,7 +19,7 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import DaemonKey, SettingsFile, SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root, query_settings_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_install_phases import (  # pylint: disable=import-error
   bootstrap_daemon_git,
@@ -27,12 +27,16 @@ from lazy_install_phases import (  # pylint: disable=import-error
   bootstrap_lazyignore,
   bootstrap_logs_dir,
   bootstrap_memory_dir,
+  ensure_expert_permissions,
   ensure_gitattributes_lf,
   ensure_gitignore_lines,
   has_index_crlf,
   migrate_log_hooks,
   record_python_env,
+  PermissionOutcome,
+  PermissionReportKey,
   resolve_unit_interpreter,
+  SETTINGS_LOCAL_JSON_REL,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section, load_tracked_section, save_section  # pylint: disable=import-error
@@ -111,7 +115,7 @@ def _run_phase_log_hooks(root: Path) -> None:
   Run the log-hooks phase: strip retired log-hook commands from project and user settings.
 
   Args:
-    root: Repository root whose `.claude/` settings are migrated alongside the user's.
+    root: Settings root whose `.claude/` settings files are migrated alongside the user's.
   """
   # both scopes are migrated — the retired hooks were installed at whichever scope the plugin was
   for rel in _LOG_HOOK_SETTINGS:
@@ -172,9 +176,13 @@ def _run_phase_daemon_defaults(root: Path) -> None:
     print("routines: already-present")
 
 
-def _compute_repo_id(root: Path) -> str:
+def compute_repo_id(root: Path) -> str:
   """
   Derive the supervisor unit's repo id from the checkout's absolute path.
+
+  Guarantees:
+    - The id of a checkout at a given absolute path never changes between runs or versions: installed unit names
+      and launchd labels are built from it, and a different id would orphan every unit already installed.
 
   Args:
     root: Repository root the id names.
@@ -182,6 +190,11 @@ def _compute_repo_id(root: Path) -> str:
   Returns:
     The root's basename joined to the first eight hex digits of the path's SHA-256.
   """
+
+  # Contract:
+  # The id of a checkout at a given absolute path never changes between runs or versions: installed unit names and
+  # launchd labels are built from it, and a different id would orphan every unit already installed.
+
   # the basename keeps the unit name readable; the hash keeps two same-named checkouts apart
   absolute = os.path.abspath(root)
   return os.path.basename(absolute) + "-" + hashlib.sha256(absolute.encode()).hexdigest()[:_REPO_ID_HASH_LEN]
@@ -197,33 +210,81 @@ _PHASES: dict[str, Callable[[Path, Path], None]] = {
   "memory-dir": lambda root, _template: print(bootstrap_memory_dir(root)),
   "daemon-defaults": lambda root, _template: _run_phase_daemon_defaults(root),
   "daemon-git": lambda root, _template: print(bootstrap_daemon_git(root)),
-  "repo-id": lambda root, _template: print(_compute_repo_id(root)),
+  "repo-id": lambda root, _template: print(compute_repo_id(root)),
   "interpreter": lambda root, _template: print(resolve_unit_interpreter(root)),
 }
+# waiver: phase names are the install-phase verb's own vocabulary
+# The phases whose root is the nearest directory holding the settings files they read or write, not the checkout's
+# root; the daemon's own settings, permissions and interpreter stay at the checkout's root, where the daemon reads them
+_SETTINGS_PHASES = frozenset({ "log-hooks" })
 
 # waiver: phase name is the install-phase verb's own vocabulary; kept out of `_PHASES` because it takes `--command`
 _PYTHON_ENV_PHASE = "python-env"
+# waiver: phase name is the install-phase verb's own vocabulary; kept out of `_PHASES` because it sets the exit code
+_PERMISSIONS_PHASE = "permissions"
+
+
+def _run_phase_permissions(root: Path) -> int:
+  """
+  Run the permissions install phase and report its outcome as one JSON line.
+
+  Notes:
+    - Prints the reconciliation report to standard output on success, or a `perms-failed` report carrying the
+      settings file path and the reason on failure.
+
+  Args:
+    root: Checkout whose `.claude/settings.local.json` receives the block.
+
+  Returns:
+    Process exit code: 0 when the block is current, 1 when the settings file could not be read or written.
+  """
+  # the phase brings the permission block current and keeps its report for the output
+  try:
+    report = ensure_expert_permissions(root)
+  # an unreadable or unwritable settings file fails the phase with the reason, never a silent skip
+  except OSError as error:
+    print(json.dumps({
+      PermissionReportKey.OUTCOME: PermissionOutcome.FAILED,
+      PermissionReportKey.PATH: str(root / SETTINGS_LOCAL_JSON_REL),
+      PermissionReportKey.MESSAGE: f"cannot update the permission file: {error}",
+    }))
+    return 1
+
+  # the phase's report is the verb's whole output
+  print(json.dumps(report))
+  return 0
 
 
 def cmd_install_phase(argv: list[str]) -> int:
   """
   Run the `install-phase` subcommand: execute one named bootstrap phase and print its outcome.
 
+  Guarantees:
+    - The `permissions` phase prints exactly one JSON line; when the settings file cannot be read or written it
+      exits 1 and that line carries `outcome` set to `perms-failed`, `path` and `message`.
+
   Args:
     argv: Argument vector after the subcommand name (phase name, optional `--template`, `--cwd`).
 
   Returns:
-    Process exit code: 0 on success.
+    Process exit code: 0 on success; 1 when the `permissions` phase cannot read or write the settings file,
+    after printing a one-line JSON failure report.
 
   Raises:
     SystemExit: On an argument error, with exit code 2, raised by the argument parser.
     json.JSONDecodeError: If the tracked settings file, or for `interpreter` the local one, is not valid JSON.
   """
+
+  # Contract:
+  # The `permissions` phase prints exactly one JSON line to standard output. When the settings file cannot be read
+  # or written, the verb exits 1 and that line carries `outcome` set to `perms-failed`, `path` and `message`;
+  # the install skill branches on that outcome.
+
   # the verb's command line: the phase name, the template override, and the repo-root override
   # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core install-phase")
   # waiver: argparse CLI signature — phase names are this verb's own vocabulary
-  parser.add_argument("phase", choices = [ *_PHASES, _PYTHON_ENV_PHASE ])
+  parser.add_argument("phase", choices = [ *_PHASES, _PYTHON_ENV_PHASE, _PERMISSIONS_PHASE ])
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--template", default = None, help = "Path to the .lazyignore template (logs phase)")
   # waiver: argparse CLI signature, not a domain key
@@ -239,11 +300,18 @@ def cmd_install_phase(argv: list[str]) -> int:
       # waiver: argparse-style usage error wording, not a domain key
       parser.error("python-env requires --command")
     # waiver: outcome-line label read by the install skill, not a reusable domain key
-    print("python-env:", record_python_env(resolve_repo_root(args.cwd), args.command, sys.executable))
+    print("python-env:", record_python_env(query_settings_root(args.cwd), args.command, sys.executable))
     return 0
 
-  # the named phase runs against the repository root and prints its outcome word for the skill to read
-  _PHASES[args.phase](resolve_repo_root(args.cwd), Path(args.template) if args.template else _LAZYIGNORE_TEMPLATE)
+  # the permissions phase reports as JSON and fails the verb when its write does not land; the permissions are the
+  # daemon's, so they live at the checkout's root
+  if args.phase == _PERMISSIONS_PHASE:
+    return _run_phase_permissions(query_repo_root(args.cwd))
+
+  # the named phase runs against the nearest settings root when it rewrites the session's settings files, else the
+  # repository root, and prints its outcome word for the skill to read
+  root = query_settings_root(args.cwd) if args.phase in _SETTINGS_PHASES else query_repo_root(args.cwd)
+  _PHASES[args.phase](root, Path(args.template) if args.template else _LAZYIGNORE_TEMPLATE)
   return 0
 
 
@@ -409,7 +477,7 @@ def cmd_daemon_run_here(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--json", dest = "json", action = "store_true", help = "Print the verdict as JSON (check)")
   args = parser.parse_args(argv)
-  root = resolve_repo_root(args.cwd)
+  root = query_repo_root(args.cwd)
 
   # `check` prints the verdict and never writes; as JSON it also names the gate entry the verdict rests on
   # waiver: action name is this verb's own vocabulary, matched against the argparse choices above
@@ -453,7 +521,7 @@ def cmd_gitignore_ensure(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
-  root = resolve_repo_root(args.cwd)
+  root = query_repo_root(args.cwd)
 
   # the line lands through the one ignore-file writer; a file absent before the call is reported as created
   # waiver: filesystem filename idiom, not a domain constant

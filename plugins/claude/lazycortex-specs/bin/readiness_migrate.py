@@ -25,11 +25,17 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
     BOOL_FALSE, BOOL_TRUE, AssetTypeKey, Gate, ReleaseKey, SpecKey, SpecMomentKey, SpecValue,
@@ -44,7 +50,6 @@ _RELEASED_AT = f"{Gate.RELEASED}{SpecMomentKey.AT_SUFFIX}"
 _BUILT_AT = f"{Gate.BUILT}{SpecMomentKey.AT_SUFFIX}"
 
 _MD_SUFFIX = ".md"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # waiver: the result's own wire-shape keys, read by the install skill and the tests
 _DRY_RUN_KEY = "dry_run"
@@ -267,8 +272,9 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Command-line arguments, excluding the program name; `--dry-run` reports without writing, `--cwd` names
-      the repository root (falling back to the `LAZY_REPO_ROOT` environment variable, then the process working
-      directory).
+      a directory inside the repository (falling back to the `LAZY_REPO_ROOT` environment variable, then the process
+      working directory); the run works in the nearest directory at or above it, within its checkout, that holds
+      `.claude/lazy.settings.json`, else the checkout's root.
 
   Returns:
     Exit code: 1 when a note could not be classified, 0 otherwise.
@@ -282,8 +288,7 @@ def main(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # the result goes to stdout whole; an unclassified note turns the exit code red
-  repo_raw = args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
-  result = migrate(Path(repo_raw).resolve(), dry_run = args.dry_run)
+  result = migrate(spec_locator.query_settings_root(args.cwd), dry_run = args.dry_run)
   print(json.dumps(result))
   return 1 if result[_UNCLASSIFIED_KEY] else 0
 

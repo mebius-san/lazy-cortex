@@ -110,7 +110,7 @@ Read the canonical guidelines from the plugin (always — never skip on the assu
 
 Then read the project overlay if it exists (overlay overrides canon on conflict):
 
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md`
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/documenting_guidelines.md`
 
 Then read the consumer's `${CLAUDE_PROJECT_DIR}/CLAUDE.md` `## Documenting` section if present — this is the third overlay layer for project-wide notes that don't belong to a single topic.
 

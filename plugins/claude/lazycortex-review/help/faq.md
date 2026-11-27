@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-11-21
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,8 +12,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: b403457ed42fde9355061d986acfe473dbe7423628d0d170441889a6c18f72a0
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: ac7e379cb71cc709d4570a769b8347451975ed75be0e5b26938fac345ee7671f
 ---
 # Frequently asked questions
 
@@ -56,7 +56,7 @@ When install runs through a path with no operator to ask — an unattended rollo
 
 ## What does `/lazy-review.configure` actually ask me?
 
-The wizard collects the things the plugin cannot derive on its own: which file globs belong to this review class and the short identity token that names it (e.g. `design`, `request`), which experts act as main writers, which additional sections (validation or terminal) to add and who owns them, and which edit-marker style to use (`simple`, `diff`, `criticmarkup`, or `html`). Every value already persisted in `lazy.settings.json` is reused silently — re-running the wizard on a fully-configured class re-validates without asking a single question. A class may also carry a `protocols` list attached automatically by the plugin that owns the document kind; the wizard never asks about it and always preserves whatever is on record.
+The wizard collects the things the plugin cannot derive on its own: which file globs belong to this review class and the short identity token that names it (e.g. `design`, `request`), which experts act as main writers, which additional sections (validation or terminal) to add and who owns them, and which edit-marker style to use (`simple`, `diff`, `criticmarkup`, or `html`). Every value already persisted in `lazy.settings.json` is reused silently — re-running the wizard on a fully-configured class re-validates without asking a single question. A class may also carry a `protocols` list attached automatically by the plugin that owns the document kind; the wizard never asks about it and always preserves whatever is on record. The same goes for a class's `report` key: a class marked `report: true` reviews reports on finished work as a discussion that closes on an `accept` or `fix` decision rather than an approve. The plugin that owns the document kind seeds it, and re-running the wizard on that class keeps it.
 
 ---
 
@@ -70,9 +70,9 @@ Yes. A token of the form `<type>@<product>` (e.g. `design@my-widget`) scopes a c
 
 `/lazy-review.start` opens the document and sends it through the full loop beginning with the main-writer round. Use it when you want the expert to draft the first pass.
 
-`/lazy-review.submit` opens the document and skips the main-writer round, landing it directly on the operator's Ready banner. Use it when the document already has your edits in place and you want the review to assess the current text rather than re-draft it. The optional `--expert` flag pins a per-document main-writer override for the submit path.
+`/lazy-review.submit` opens the document and skips the main-writer round, landing it directly on the operator's Ready banner (two exceptions below). Use it when the document already has your edits in place and you want the review to assess the current text rather than re-draft it. The optional `--expert` flag pins a per-document main-writer override for the submit path.
 
-Submitting starts a new review cycle: `review_approved` is reset to `false` whatever a stopped cycle left behind, and the commit carries a `Doc-Review-Phase: initial` trailer. One exception to "straight to Ready": if the document carries a non-empty `[!todo] #review/command` callout when you submit it, the command is treated as the opening round's input, so the document enters in the writer state (`Waiting: writer` banner) and the coordinator carries the command out first. You never see the Ready banner while a writer round is still owed.
+Submitting starts a new review cycle: `review_approved` is reset to `false` whatever a stopped cycle left behind, and the commit carries a `Doc-Review-Phase: initial` trailer. Two exceptions to "straight to Ready". First, if the document carries a non-empty `[!todo] #review/command` callout when you submit it, the command is treated as the opening round's input, so the document enters in the writer state (`Waiting: writer` banner) and the coordinator carries the command out first. Second, a document of a report class (a class marked `report: true`) also enters the writer state: its banner reads "Waiting for the implementer's answer" with no decision box, any verdict recorded earlier (a stopped cycle's included) is cleared, and the implementer is dispatched to read the report and record its verdict. The two decision boxes, `accept` and `fix`, appear only once that verdict is recorded. You never see the Ready banner while a writer round is still owed.
 
 Both operations are idempotent — re-running on an already-opted-in document is a no-op.
 

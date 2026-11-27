@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-11-21
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-wiki.audit
@@ -45,6 +45,8 @@ Separately, every configured wiki scope is checked for a state where its own `ex
 **Phase 3 — presentation.** Every finding from both phases is summarised: per-scope counts by severity — `PASS`, `INFO`, `WARN`, `FAIL`, and no other word — plus check name, affected node or entry, and message — with the findings `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor --apply` repairs called out separately from the ones needing a hand repair, and a named repair route for every class.
 
 **Applying the repairs.** The audit stops at its report. To repair the index/link findings, run `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> doctor <scope-id> --apply` yourself — index rebuild, See-also path rewrite, broken-line drop, gloss refresh, left uncommitted in the worktree for you to inspect. The daily `lazy-wiki.doctor-apply` routine already runs the same command with `--commit` across every scope, so on a checkout with a running daemon these usually clear on their own. Terms findings are never decided for you — which side is "right", the document's wording or the dictionary's, is a judgment call, and the audit reports both sides for you to settle. Once you have settled a `divergence` in the dictionary's favour, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-apply <document> --from "<the document's word>" --to "<the dictionary's term>"` carries out that substitution: whole-word, prose only, with the frontmatter, code fences, inline code spans, link targets and the `# See also` block left exactly as they are, the rewrite left uncommitted in your worktree, and a flat refusal (exit 1, reason on stderr) on a document carrying `review_active: true` or living inside a scope's mirror tree. Re-running it after it has applied reports `noop` and rewrites nothing. Every other terms finding — and the other side of a divergence, where the dictionary's term is the one that changes — stays a hand edit.
+
+If you want a guided fix-or-waive loop over these findings rather than a single report, `/lazy-core.doctor` delegates to this audit and drives that loop; the audit itself only measures.
 
 Applying a fix only touches the lines that need it — the rest of a node's See-also section, or the rest of the topic index, is left exactly as it was. An applied `index-stale` finding is the same: only the topics index is rewritten, the unlinked node file itself is never touched.
 

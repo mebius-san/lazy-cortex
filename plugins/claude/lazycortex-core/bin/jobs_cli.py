@@ -4,8 +4,9 @@ Job-queue and routine-registry verbs for the `lazycortex-core` CLI.
 This module backs `list-jobs`, the JSON listing the `lazy-expert.list-jobs` skill renders,
 and `routines-bootstrap`, the install-time call that registers the built-in routines. Each
 listed job is stamped with its age in seconds before the listing is printed. The repository
-root follows the dispatcher convention — `LAZY_REPO_ROOT`, then the process working
-directory, overridable per call with `--cwd`.
+root is the toplevel of the checkout that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory
+sits in (the directory itself outside git); the routines are registered in that toplevel's
+`.claude/lazy.settings.json`, where the daemon reads them.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from constants import JobCollectKey, JobMarker  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from expert_runtime import bootstrap_default_routines, list_jobs  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ def cmd_list_jobs(argv: list[str]) -> int:
 
   # the queue is read once, narrowed by whichever filters were given
   entries = list_jobs(
-    resolve_repo_root(args.cwd), expert = args.expert or None, status = args.status or None,
+    query_repo_root(args.cwd), expert = args.expert or None, status = args.status or None,
     with_dedup_key = args.with_dedup_key,
   )
 
@@ -130,7 +131,7 @@ def cmd_routines_bootstrap(argv: list[str]) -> int:
 
   # an unreadable or unwritable settings file is reported as one line, never as a traceback
   try:
-    outcome = bootstrap_default_routines(resolve_repo_root(args.cwd))
+    outcome = bootstrap_default_routines(query_repo_root(args.cwd))
   except (OSError, json.JSONDecodeError) as error:
     print(f"error: {error}")
     return 1

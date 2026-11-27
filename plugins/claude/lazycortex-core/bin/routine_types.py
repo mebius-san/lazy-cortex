@@ -54,24 +54,24 @@ if TYPE_CHECKING:
 
 VALID_TYPES = { "subprocess", "inbox", "schedule", "git", "md-scan" }
 
-# default per-routine subprocess timeout; overridable per-routine via routines[<name>].timeout_sec
+# Default per-routine subprocess timeout; overridable per-routine via routines[<name>].timeout_sec
 DEFAULT_TIMEOUT_SEC = 300
 
 # (routine name, flag) pairs whose retired-key warning already went out this process — the
 # registry is re-validated every daemon iteration, so the warning must not repeat per pass
 # waiver: module-level mutable state, one per process by design — it must outlive every validation pass of the daemon
 _RETIRED_FLAGS_WARNED: set[tuple[str, str]] = set()
-# stderr warning for a retired routine key, filled with the routine name and the flag
+# Stderr warning for a retired routine key, filled with the routine name and the flag
 RETIRED_FLAG_WARNING_TEMPLATE = (
   "routine '{name}': '{flag}' is retired and ignored — remove it "
   "(lazy-core.doctor offers the prune)\n"
 )
 
-# how long a transient-error inbox bundle stays parked before it is retired for a retry —
+# How long a transient-error inbox bundle stays parked before it is retired for a retry —
 # matches the doctor's dead-job takeover threshold so both retry paths age out together
 TRANSIENT_RETRY_AGE_SEC = 3600.0
 
-# default window a deferred inbox bundle stays parked before its input is re-dispatched.
+# Default window a deferred inbox bundle stays parked before its input is re-dispatched.
 # A deferral waits on the world changing by hand (an operator creating the record the
 # import needs), so the default is a day rather than the transient path's hour; a routine
 # overrides it with `deferred_retry_sec`.
@@ -82,40 +82,40 @@ VALID_GIT_WATCH = {
   "new_commits", "new_files", "changed_files", "deleted_files", "renamed_files",
 }
 
-# the repository-relative trees the runtime writes and commits on its own behalf
+# The repository-relative trees the runtime writes and commits on its own behalf
 RUNTIME_WRITTEN_TREES = ( ".memory", ".state" )
 
-# the per-routine opt-out from the subtraction above
+# The per-routine opt-out from the subtraction above
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 WATCH_RUNTIME_TREES_KEY = "watch_runtime_trees"
 
-# the per-routine opt-in that drops renames from the file-level watches instead of splitting them
+# The per-routine opt-in that drops renames from the file-level watches instead of splitting them
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 PAIR_RENAMES_KEY = "pair_renames"
 
-# the per-routine opt-out from the md-scan change gate
+# The per-routine opt-out from the md-scan change gate
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 CHANGE_GATE_KEY = "change_gate"
 
-# the per-routine unit-of-work mode of a file-level git watch
+# The per-routine unit-of-work mode of a file-level git watch
 # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
 GROUP_KEY = "group"
 
-# the three named `group` modes; a list value names directory globs instead
+# The three named `group` modes; a list value names directory globs instead
 GROUP_ALL = "all"
 GROUP_FILE = "file"
 GROUP_DIR = "dir"
 
-# the `dir` a whole-tick unit carries: the repository root
+# The `dir` a whole-tick unit carries: the repository root
 GROUP_ROOT_DIR = "."
 
-# the retired directory-glob key — named in the migration error, rewritten by `routine-migrate`
+# The retired directory-glob key — named in the migration error, rewritten by `routine-migrate`
 LEGACY_GROUP_GLOBS_KEY = "group_globs"
 
-# the stdout key a command worker names its unhandled paths under, narrowing the retry unit
+# The stdout key a command worker names its unhandled paths under, narrowing the retry unit
 FAILED_PATHS_KEY = "failed_paths"
 
-# the commit-message trailer that hides a commit from every git watch: `Lazy-Watch: skip`
+# The commit-message trailer that hides a commit from every git watch: `Lazy-Watch: skip`
 SKIP_TRAILER_KEY = "Lazy-Watch"
 SKIP_TRAILER_VALUE = "skip"
 
@@ -130,17 +130,17 @@ _PARAGRAPH_BREAK_RE = re.compile(r"\n[ \t]*\n")
 _TRAILER_LINE_RE = re.compile(r"^([A-Za-z0-9-]+)[ \t]*:[ \t]*(.*)$")
 _CONTINUATION = ( " ", "\t" )
 
-# maps a file-level diff status to the `git log --no-renames --diff-filter=` flag that finds its
+# Maps a file-level diff status to the `git log --no-renames --diff-filter=` flag that finds its
 # last-changing commit; a rename item ("R") widens to the union of add/modify/delete, since with
 # rename detection off its new path was added, modified or deleted, never renamed
 _DIFF_FILTER_FLAGS = { "A": "A", "M": "M", "D": "D", "R": "AMD" }
 
-# a `git diff --name-status -z` listing: NUL-separated fields, each path printed as written (never quoted);
+# A `git diff --name-status -z` listing: NUL-separated fields, each path printed as written (never quoted);
 # a rename or copy record carries two paths after its status, every other record one
 _NUL = "\0"
 _TWO_PATH_STATUSES = ( "R", "C" )
 
-# the per-path pathspec magic that makes git take one path as written, never as a pattern
+# The per-path pathspec magic that makes git take one path as written, never as a pattern
 _LITERAL_MAGIC = ":(literal)"
 
 # Per-type schemas. `command`, `expert`, `request` are all optional in every
@@ -943,7 +943,7 @@ def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
 
   # a command routine resolves its binary through the plugin-dir registry and blocks on it
   try:
-    argv = plugin_dirs.resolve_routine_command(cfg[RoutineKey.COMMAND])
+    argv = plugin_dirs.resolve_routine_command(cfg[RoutineKey.COMMAND], repo_root)
     subprocess_env = { **os.environ, **build_routine_subprocess_env(cfg) }
     proc = subprocess.run(
       argv, cwd = repo_root, timeout = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC),
@@ -1466,7 +1466,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   if use_command:
     timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
     try:
-      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
+      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND]), repo))
     except Exception as error:
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,
@@ -2055,7 +2055,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   if RoutineKey.COMMAND in cfg:
     timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
     try:
-      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
+      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND]), repo))
     except Exception as error:
       # waiver: one-off routine-outcome note/reason token, not an internal key
       return _err(name, started, "command_resolution_failed", str(error))
@@ -3520,7 +3520,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     # uses. Without this, `subprocess.run` tries to find the plugin name
     # on `$PATH` and fails with `No such file or directory`.
     try:
-      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND])))
+      resolved_cmd = list(plugin_dirs.resolve_routine_command(list(cfg[RoutineKey.COMMAND]), repo))
     except Exception as error:
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,

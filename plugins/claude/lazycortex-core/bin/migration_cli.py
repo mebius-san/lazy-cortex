@@ -21,13 +21,13 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import lazy_setup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import migration_steps  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import MigrationFile, MigrationKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from frontmatter_parser import parse_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from repo_root import resolve_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from runtime_state import atomic_write_text  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -163,7 +163,7 @@ def cmd_migrate_plan(argv: list[str]) -> int:
   # waiver: argparse CLI signature and help strings, not domain keys
   parser.add_argument("--check", default = None, help = "Check one step file instead of planning")
   args = parser.parse_args(argv)
-  repo = resolve_repo_root(args.repo)
+  repo = plugin_locator.query_repo_root(args.repo)
 
   # a check judges one file on its own
   if args.check is not None:
@@ -177,12 +177,11 @@ def cmd_migrate_plan(argv: list[str]) -> int:
   home = Path(args.home) if args.home is not None else Path.home()
   roots = {}
   for name in lazy_setup.discover(repo, home)[_ReportProp.PLUGINS]:
-    resolved = lazy_setup.plugin_root(name, repo, home)
-
-    # guard: a plugin this machine cannot resolve has no migrations to read
-    if resolved is None:
+    # guard: a plugin this repo cannot resolve has no migrations to read
+    try:
+      roots[name] = Path(lazy_setup.plugin_root(name, repo, home)[_ROOT])
+    except plugin_locator.PluginNotFoundError:
       continue
-    roots[name] = Path(resolved[_ROOT])
 
   # the plan, narrowed to the named plugins when any are named, each plugin's report extended with the
   # version its root records
@@ -226,7 +225,7 @@ def cmd_migrate_stamp(argv: list[str]) -> int:
 
   # the stamp is written whole; a refused name or version writes nothing
   try:
-    path = migration_steps.write_stamp(resolve_repo_root(args.repo), args.plugin, args.version)
+    path = migration_steps.write_stamp(plugin_locator.query_repo_root(args.repo), args.plugin, args.version)
   except (OSError, ValueError) as error:
     return _refuse(str(error))
 

@@ -43,6 +43,10 @@ STATUS_APPLIED, STATUS_NO_VAULT, STATUS_REFUSED = "applied", "no-vault", "refuse
 UNPARSEABLE_REASON = "{path} does not parse as JSON; left untouched"
 NOT_OBJECT_REASON = "{path} is not a JSON object; left untouched"
 NOT_ARRAY_REASON = "{path}: `enabledCssSnippets` is not a JSON array; left untouched"
+CHECKOUT_ROOT_REASON = "{path} is a git working-tree root, not an Obsidian config directory; pass {expected}"
+
+# The entry that marks a directory as a git working-tree root, a directory or a file alike
+GIT_ENTRY = ".git"
 
 # Exit code of a refused run
 EXIT_REFUSED = 1
@@ -136,7 +140,8 @@ def enable(vault: Path, names: list[str]) -> EnableResult:
     The per-snippet outcomes and the vault-relative paths written.
 
   Raises:
-    SnippetEnableRefusedError: If the settings file cannot be edited safely; nothing is written.
+    SnippetEnableRefusedError: If the vault is a git working-tree root instead of the Obsidian config directory, or
+      the settings file cannot be edited safely; nothing is written.
   """
 
   # Contract:
@@ -146,6 +151,10 @@ def enable(vault: Path, names: list[str]) -> EnableResult:
   # Contract:
   # The settings file is written only when at least one snippet was newly enabled,
   # and then exactly once; a run that enables nothing leaves the file untouched.
+
+  # guard: a checkout root passed for its config directory would get the settings written beside the sources
+  if (vault / GIT_ENTRY).exists():
+    raise SnippetEnableRefusedError(CHECKOUT_ROOT_REASON.format(path = vault, expected = vault / VaultPath.OBSIDIAN))
 
   # read the current list the run appends to
   config = vault / VaultPath.APPEARANCE

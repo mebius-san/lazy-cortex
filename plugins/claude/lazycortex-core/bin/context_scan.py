@@ -14,7 +14,7 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 # waiver: the memory store's own note reader, private by name but shared by every memory primitive (reindex, write)
 # pylint: disable-next=import-error
 from memory_runtime import _read_note_frontmatter as read_note_frontmatter
@@ -602,5 +602,5 @@ def cmd_context_scan(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # the section's measurements are the verb's whole output
-  print(json.dumps(scan(args.section, cwd = resolve_repo_root(args.cwd), home = Path.home())))
+  print(json.dumps(scan(args.section, cwd = query_repo_root(args.cwd), home = Path.home())))
   return 0

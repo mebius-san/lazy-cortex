@@ -25,6 +25,8 @@ These are rules, not preferences. A use-case document that breaks one is wrong e
 
 **An edge case is an alternative flow you write, never a question you ask.** What the actor sees when a link has lapsed, what happens to data published before a setting existed, whether a page names what was removed — each is derived from the approved documents and written as an alternative flow or a postcondition. Scenarios stay few and short: one scenario per goal the actor has, alternative flows only where the outcome differs for the actor, and nothing restated from the design. A round that hands back questions and no settled scenarios is a failed round.
 
+**A use case states one case, never a rule.** Each scenario tells one concrete case in the actor's language: who acts, what they want, what they do, and what they get. A sentence that holds for the whole product — "the view is the same across the portal", "every page shows its date this way" — is a principle, and principles belong to the vision and the design, never to this document: not in a main flow, not in an alternative flow, not in Out of scope. A use case does not enumerate every case either; it shows the ones the actor meets. When a scenario seems to need a product-wide rule to make sense, write the case the rule would produce for this actor and leave the rule to the design.
+
 **Formulations are verifiable.** A step says what happens and what becomes true, in terms someone can check against the running product — never a vague aspiration.
 
 **Acceptance criteria and test plans are not this document's genre.** Whether a scenario is satisfied, and how it would be tested, belongs to the tester's document, not this one. Stop at stating what the actor needs and what the system does in response.

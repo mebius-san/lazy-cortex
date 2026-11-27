@@ -64,6 +64,8 @@ import error_ledger  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import plugin_locator  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookKey, HookName, IncidentKey, IncidentKind, IncidentPhase  # noqa: E402
 
 # Pick the platform's file-lock module: fcntl does not exist on Windows, msvcrt exists only there.
@@ -135,19 +137,17 @@ def read_commit_info(repo_dir: Path) -> dict | None:
     repo_dir: A directory inside the repository whose `HEAD` is read.
 
   Returns:
-    A mapping with the repository root and the commit's identity, message, changed files and change counts.
+    A mapping with the checkout's root and the commit's identity, message, changed files and change counts.
     Changed files carry their names as git holds them, with a replacement character in place of any byte
     that is no text; a rename or copy is recorded as `old => new` with both full paths. The root keeps such
     bytes undecoded. `None` when `repo_dir` is missing or not inside a git repository, when no commit exists
     yet, or when `git` is not on the executable search path.
   """
-  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
-  try:
-    root = os.fsdecode(subprocess.check_output(
-      [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, cwd = repo_dir,
-    )).strip()
-  except (subprocess.CalledProcessError, OSError):
+  # the checkout's root, resolved, with an undecodable byte of its path kept as a surrogate escape
+  top = plugin_locator.find_checkout_toplevel(repo_dir)
+
+  # guard: no checkout around the directory, or no git binary — nothing to read
+  if top is None:
     return None
 
   # sha, iso-date, author, subject — joined by NUL so subjects containing tabs survive intact
@@ -229,7 +229,7 @@ def read_commit_info(repo_dir: Path) -> dict | None:
 
   # one flat record per commit — the shape the ledger line is serialised from
   return {
-    "root": root,
+    "root": str(top),
     "sha": sha,
     "date": date,
     "author": author,
@@ -655,14 +655,7 @@ def _is_inside_repo(directory: Path) -> bool:
   Returns:
     True when git finds a working tree around `directory`; False otherwise, including when `git` is missing.
   """
-  try:
-    subprocess.check_output(
-      [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, cwd = directory,
-    )
-  except (subprocess.CalledProcessError, OSError):
-    return False
-  return True
+  return plugin_locator.find_checkout_toplevel(directory) is not None
 
 
 def _replay_commit_dir(payload: dict, session_dir: Path) -> Path:

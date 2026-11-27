@@ -13,6 +13,59 @@ if TYPE_CHECKING:
   pass
 
 
+# The inputs that decide what the venv must carry, each with the plain words an operator reads when it changed
+INPUT_LABELS: dict[str, str] = {
+  "requires-python": "the Python requirement (requires-python)",
+  "python-version": "the pinned Python version (.python-version)",
+  "dependencies": "the project dependencies",
+  "optional-dependencies": "the optional extras",
+  "dependency-groups": "the dependency groups",
+  "tools": "the checker tool list",
+}
+# The interpreter a venv carries, by layout: bin/ on macOS and Linux, Scripts/ with an .exe name on Windows
+_INTERPRETERS = ( Path("bin") / "python", Path("Scripts") / "python.exe" )
+
+
+# ----------------------------------------------------------------------------------------
+class Diagnosis:
+  """
+  The texts that tell why a venv cannot be used and what happens next, filled in with the venv path.
+
+  Attributes:
+    MISSING: The venv has no interpreter, so it does not exist as a venv.
+    TOOL: The venv lacks one of the checker tools, named by `tool`.
+    NO_STAMP: The venv carries no record of the requirements it was configured against.
+    STAMP: The venv was configured against other requirements; `changed` names the inputs that changed.
+    STAMP_UNKNOWN: The venv was configured against other requirements, and it does not record which inputs.
+    INTERPRETER: The venv's interpreter does not satisfy the project's Python requirement.
+    STOP: What happens next: the job stops, the operator brings the environment up to date, then continues or
+      rebuilds.
+  """
+
+  # The venv has no interpreter, so it does not exist as a venv.
+  MISSING = "[lazy-python] the project venv at {venv} does not exist"
+  # The venv lacks one of the checker tools.
+  TOOL = "[lazy-python] the project venv at {venv} lacks {tool}"
+  # The venv carries no record of the requirements it was configured against.
+  NO_STAMP = ("[lazy-python] the project venv at {venv} was never set up by cfg-py, so it is not known to match the "
+              "project")
+  # The venv was configured against other requirements; the inputs that changed are named.
+  STAMP = "[lazy-python] the project venv at {venv} is out of date: {changed} changed since it was set up"
+  # The venv was configured against other requirements, and it does not record which inputs.
+  STAMP_UNKNOWN = ("[lazy-python] the project venv at {venv} is out of date: the project's requirements changed "
+                   "since it was set up")
+  # The venv's interpreter does not satisfy the project's Python requirement.
+  INTERPRETER = ("[lazy-python] the Python in {venv} does not match the Python version the project asks for "
+                 "(requires-python or .python-version)")
+  # What happens next.
+  STOP: tuple[str, ...] = (
+    "[lazy-python] The job stops here. It does not repair or set up the environment itself.",
+    "[lazy-python] Ask the operator to bring the environment up to date: run /lazy-python.install, or cfg-py in a "
+    "console.",
+    "[lazy-python] Then the operator continues the job or rebuilds it.",
+  )
+
+
 # ----------------------------------------------------------------------------------------
 class VenvSpec:
   """
@@ -22,11 +75,16 @@ class VenvSpec:
     - Name the project's dependency groups and the package-installer arguments that bring a venv to
       the project's requirements plus the checker tools.
     - Fingerprint the requirement inputs and record or compare that fingerprint inside a venv.
+    - Explain why a venv cannot be used as it stands, naming the requirement inputs that changed when it can.
 
   Guarantees:
     - A project without `pyproject.toml` reads as one declaring no requirements.
 
   Attributes:
+    TOOLS: Names of the checker tools every venv must carry on top of the project's requirements.
+    STAMP_NAME: File name inside a venv that holds the requirement fingerprint.
+    INPUTS_NAME: File name inside a venv that holds the fingerprint of each requirement input.
+
     project_dir: Root directory of the project.
     pyproject: Path of the project's `pyproject.toml`.
     data: Parsed `pyproject.toml` content.
@@ -34,6 +92,8 @@ class VenvSpec:
 
   TOOLS: tuple[str, ...] = ("mypy", "pylint", "pytest", "pytest-clarity", "pytest-sugar", "pytest-xdist", "ruff")
   STAMP_NAME = ".lazy-python-cfg"
+  # The record, beside the stamp, of each requirement input's fingerprint, from which a mismatch names what changed
+  INPUTS_NAME = ".lazy-python-cfg-inputs.json"
 
   def __init__(self, *, project_dir: Path) -> None:
     """
@@ -182,9 +242,19 @@ class VenvSpec:
     # build configuration — leaves the environment current, so it is never rebuilt for a change
     # that cannot alter what it holds.
 
+    # one fingerprint over every input together
+    return self._hash(self._read_inputs())
+
+  def _read_inputs(self) -> dict[str, object]:
+    """
+    Read the inputs that decide what the venv must carry.
+
+    Returns:
+      Each input of `INPUT_LABELS` by its key.
+    """
     project = self.project or {}
     version_file = self.project_dir / ".python-version"
-    inputs = {
+    return {
       "requires-python": project.get("requires-python"),
       "dependencies": project.get("dependencies", []),
       "optional-dependencies": project.get("optional-dependencies", {}),
@@ -193,9 +263,87 @@ class VenvSpec:
       "tools": list(self.TOOLS),
     }
 
-    # a canonical serialisation, so equal inputs always hash alike
-    canonical = json.dumps(inputs, sort_keys = True, separators = (",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+  @staticmethod
+  def _hash(value: object) -> str:
+    """
+    Fingerprint a JSON-serialisable value so that equal values always hash alike.
+
+    Args:
+      value: The value to fingerprint.
+
+    Returns:
+      The hex SHA-256 of the value's canonical JSON form.
+    """
+    return hashlib.sha256(json.dumps(value, sort_keys = True, separators = (",", ":")).encode("utf-8")).hexdigest()
+
+  def read_changed_inputs(self, venv: Path) -> list[str] | None:
+    """
+    Name the requirement inputs that changed since the venv was configured.
+
+    Args:
+      venv: Root directory of the venv.
+
+    Returns:
+      The changed input keys in `INPUT_LABELS` order, empty when none changed; `None` when the venv carries no
+      readable record of its inputs.
+    """
+    # guard: a venv configured before the record existed, or one whose record is unreadable, cannot tell
+    try:
+      recorded = json.loads((venv / self.INPUTS_NAME).read_text(encoding = "utf-8"))
+    except (OSError, ValueError):
+      return None
+
+    # guard: a record that is not an object holds no fingerprints to compare
+    if not isinstance(recorded, dict):
+      return None
+
+    # every input whose fingerprint no longer matches the record
+    current = self._read_inputs()
+    return [ key for key in INPUT_LABELS if recorded.get(key) != self._hash(current[key]) ]
+
+  def read_diagnosis(self, venv: Path, *, missing_tool: str | None = None,
+                     interpreter_mismatch: bool = False) -> list[str]:
+    """
+    Explain why a venv cannot be used as it stands, and what happens next.
+
+    Args:
+      venv: Root directory of the venv.
+      missing_tool: The checker tool the venv lacks, when the caller found one missing.
+      interpreter_mismatch: Whether the caller found the venv's interpreter not satisfying the Python requirement.
+
+    Returns:
+      The lines to show the operator: the one-line cause, the interpreter line when `interpreter_mismatch` is set
+      and the venv has an interpreter, then every `Diagnosis.STOP` line.
+    """
+
+    # Domain(install.reconciliation):
+    # # Why an environment cannot be used
+    # An unusable environment is explained by one cause only, the most basic one that holds, because each later
+    # cause is a consequence of an earlier one: with no interpreter nothing else in it can be judged, and a missing
+    # checker tool or a missing record of what it was set up against says more than a changed requirement does.
+    # The order is: no environment at all, a checker tool absent, no record of its setup, then a record that no
+    # longer matches the project, naming the changed requirements when the record can tell and saying only that
+    # they changed when it cannot. A Python version that does not fit the project's requirement is judged apart
+    # from these and added as a further line. Every explanation ends with the same instruction: the job stops, and
+    # the operator brings the environment up to date and then continues or rebuilds the job.
+
+    # a venv without an interpreter has nothing else to judge, the interpreter included
+    if not any((venv / rel).exists() for rel in _INTERPRETERS):
+      return [ Diagnosis.MISSING.format(venv = venv), *Diagnosis.STOP ]
+
+    # the first cause that holds, from a missing tool to a record that no longer matches
+    if missing_tool:
+      cause = Diagnosis.TOOL.format(venv = venv, tool = missing_tool)
+    elif not (venv / self.STAMP_NAME).is_file():
+      cause = Diagnosis.NO_STAMP.format(venv = venv)
+    elif (changed := self.read_changed_inputs(venv)) is None:
+      cause = Diagnosis.STAMP_UNKNOWN.format(venv = venv)
+    else:
+      cause = Diagnosis.STAMP.format(venv = venv, changed = ", ".join(INPUT_LABELS[key] for key in changed))
+
+    # the interpreter verdict is the caller's, since only the installer can judge it
+    return [ cause, *( [ Diagnosis.INTERPRETER.format(venv = venv) ] if interpreter_mismatch else [] ),
+             *Diagnosis.STOP ]
 
   def is_fresh(self, venv: Path) -> bool:
     """
@@ -217,15 +365,20 @@ class VenvSpec:
 
   def write_stamp(self, venv: Path) -> None:
     """
-    Record the current requirement fingerprint inside a venv.
+    Record the current requirement fingerprint, and the fingerprint of each input, inside a venv.
 
     Notes:
-      - Replaces any fingerprint the venv already carries.
+      - Replaces any fingerprint and per-input record the venv already carries.
+      - The per-input record lets a later mismatch name the inputs that changed.
 
     Args:
       venv: Root directory of the venv.
     """
     (venv / self.STAMP_NAME).write_text(self.digest() + "\n", encoding = "utf-8")
+
+    # one fingerprint per input beside the stamp, so a later mismatch can name what changed
+    inputs = { key: self._hash(value) for key, value in self._read_inputs().items() }
+    (venv / self.INPUTS_NAME).write_text(json.dumps(inputs, indent = 2, sort_keys = True) + "\n", encoding = "utf-8")
 
 
 def _print_worktree_reach(spec: VenvSpec) -> None:
@@ -284,9 +437,11 @@ def main() -> int:
 
   Notes:
     - `install-args` prints one installer argument per line, `fresh` prints `fresh` or `stale`, `stamp` prints
-      nothing, and `worktree-link` prints one line naming the venv path a job worktree must carry, or why none can
-      be.
-    - `fresh` and `stamp` require the venv directory argument; `worktree-link` takes none.
+      nothing, `worktree-link` prints one line naming the venv path a job worktree must carry, or why none can
+      be, and `diagnose` prints the lines explaining why the venv cannot be used and what happens next.
+    - `fresh`, `stamp` and `diagnose` require the venv directory argument; `worktree-link` takes none.
+    - `diagnose` accepts `--missing-tool` naming a checker tool the venv lacks, and `--interpreter-mismatch` flagging
+      an interpreter that does not satisfy the Python requirement.
     - When `pyproject.toml` does not parse, `worktree-link` prints `worktree-link-failed: ...` on stdout, while the
       other commands print their message on stderr; both exit 1.
 
@@ -304,13 +459,18 @@ def main() -> int:
 
   # the command line: one command, the project root, and the venv for the venv-bound commands
   parser = argparse.ArgumentParser(description = "Read a project's venv requirements from pyproject.toml.")
-  parser.add_argument("command", choices = ("install-args", "fresh", "stamp", "worktree-link"))
+  parser.add_argument("command", choices = ("install-args", "fresh", "stamp", "worktree-link", "diagnose"))
   parser.add_argument("project_dir", type = Path)
   parser.add_argument("venv", type = Path, nargs = "?")
+
+  # what the caller already found about the venv, for the diagnosis
+  parser.add_argument("--missing-tool", default = None, help = "diagnose: the checker tool the venv lacks")
+  parser.add_argument("--interpreter-mismatch", action = "store_true",
+                      help = "diagnose: the venv's interpreter does not satisfy the Python requirement")
   options = parser.parse_args()
 
   # guard: the venv-bound commands cannot run without a venv to read or write
-  if options.command in ( "fresh", "stamp" ) and options.venv is None:
+  if options.command in ( "fresh", "stamp", "diagnose" ) and options.venv is None:
     parser.error(f"{options.command} needs a venv directory")
 
   # guard: an unreadable pyproject.toml must stop the run, never read as one without requirements
@@ -331,6 +491,10 @@ def main() -> int:
     print("fresh" if spec.is_fresh(options.venv) else "stale")
   elif options.command == "worktree-link":
     _print_worktree_reach(spec)
+  elif options.command == "diagnose":
+    lines = spec.read_diagnosis(options.venv, missing_tool = options.missing_tool,
+                                  interpreter_mismatch = options.interpreter_mismatch)
+    print("\n".join(lines))
   else:
     spec.write_stamp(options.venv)
   return 0

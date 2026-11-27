@@ -6,9 +6,9 @@ This module backs the `routine-validate` / `routine-register` / `routine-unregis
 `lazy-core.doctor` skills call instead of embedding Python. Validation reads the merged
 settings view (tracked plus local overlay) because a broken local entry breaks the daemon just
 as a tracked one does; registration and removal go through `expert_runtime`, which writes the
-tracked layer only. The repository root follows the dispatcher convention: the
-`LAZY_REPO_ROOT` env var, falling back to the process working directory, overridable per-call
-with `--cwd`.
+tracked layer only. The routines live in the `.claude/lazy.settings.json` at the toplevel of the checkout
+that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself outside
+git), where the daemon reads them.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from expert_runtime import register_routine, unregister_routine  # pylint: disab
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section, load_tracked_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from routine_types import (  # pylint: disable=import-error
   GROUP_DIR, GROUP_FILE, GROUP_KEY, LEGACY_GROUP_GLOBS_KEY, RoutineConfigError, validate_routine_entry,
@@ -74,7 +74,7 @@ def cmd_routine_validate(argv: list[str]) -> int:
   """
   # waiver: CLI verb name, not a domain key
   args = _build_parser("routine-validate", with_name = False).parse_args(argv)
-  routines = load_section(resolve_repo_root(args.cwd) / SettingsFile.REL, SettingsKey.ROUTINES)
+  routines = load_section(query_repo_root(args.cwd) / SettingsFile.REL, SettingsKey.ROUTINES)
   # waiver: the section-version stamp is lazy_settings' own field, not a routine
   routines.pop("_version", None)
 
@@ -139,7 +139,7 @@ def cmd_routine_register(argv: list[str]) -> int:
 
   # the registry validates the entry itself and reports a rejection as one line
   try:
-    register_routine(resolve_repo_root(args.cwd), args.name, cfg)
+    register_routine(query_repo_root(args.cwd), args.name, cfg)
   except RoutineConfigError as error:
     print(str(error))
     return 1
@@ -171,7 +171,7 @@ def cmd_routine_unregister(argv: list[str]) -> int:
   # a protected built-in refuses removal, and a settings file that is not JSON cannot be read;
   # either is reported as one line
   try:
-    unregister_routine(resolve_repo_root(args.cwd), args.name)
+    unregister_routine(query_repo_root(args.cwd), args.name)
   except ValueError as error:
     print(str(error))
     return 1
@@ -198,7 +198,7 @@ def cmd_routine_show(argv: list[str]) -> int:
   """
   # waiver: CLI verb name, not a domain key
   args = _build_parser("routine-show", with_name = True).parse_args(argv)
-  routines = load_section(resolve_repo_root(args.cwd) / SettingsFile.REL, SettingsKey.ROUTINES)
+  routines = load_section(query_repo_root(args.cwd) / SettingsFile.REL, SettingsKey.ROUTINES)
 
   # an absent routine prints the outcome word alone
   if args.name not in routines:
@@ -282,12 +282,12 @@ def cmd_routine_migrate(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--apply", action = "store_true", help = "Write the rewritten entries; default is a dry run")
   args = parser.parse_args(argv)
-  repo = resolve_repo_root(args.cwd)
+  root = query_repo_root(args.cwd)
 
   # only the tracked layer is rewritten — a local-overlay entry is the operator's own file
   rewritten = 0
   invalid = 0
-  for name, cfg in sorted(load_tracked_section(repo / SettingsFile.REL, SettingsKey.ROUTINES).items()):
+  for name, cfg in sorted(load_tracked_section(root / SettingsFile.REL, SettingsKey.ROUTINES).items()):
     # guard: only a git routine ever carried the grouping keys — the section's version marker,
     # a malformed entry and every other routine type are skipped
     # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
@@ -316,7 +316,7 @@ def cmd_routine_migrate(argv: list[str]) -> int:
     # a valid rewrite counts, and lands on disk only under --apply
     rewritten += 1
     if args.apply:
-      register_routine(repo, name, migrated)
+      register_routine(root, name, migrated)
 
   # the closing line the calling skill reads
   # waiver: CLI outcome tokens read by the calling skill, not reusable domain keys

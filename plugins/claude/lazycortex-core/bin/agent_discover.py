@@ -20,6 +20,8 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import lazy_setup  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import plugin_locator  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
@@ -35,11 +37,10 @@ _GROUP_BUILTIN = "_builtin"
 _GROUP_USER = "_user"
 _GROUP_PROJECT = "_project"
 
-# Where agents, settings, the install registry and the marketplace catalogs live under a repo or a home directory.
+# Where agents, settings and the marketplace catalogs live under a repo or a home directory.
 _AGENTS_REL = Path(".claude") / "agents"
 _PLUGIN_AGENTS_DIR = "agents"
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
-_REGISTRY_REL = Path(".claude") / "plugins" / "installed_plugins.json"
 _MARKETPLACES_REL = Path(".claude") / "plugins" / "marketplaces"
 _CATALOG_REL = Path(".claude-plugin") / "marketplace.json"
 
@@ -47,14 +48,10 @@ _CATALOG_REL = Path(".claude-plugin") / "marketplace.json"
 _AGENT_PATTERN = "*.md"
 _AGENT_SUFFIX = ".md"
 _DISPATCH_SEP = ":"
-_MARKETPLACE_SEP = "@"
 _GROUP_SEP = "-"
 
-# The settings section compared against, and the fields of a registry record and of a catalog.
+# The settings section compared against, the two scopes a configured key is reported under, and the catalog fields.
 _SECTION = "agent_models"
-_REGISTRY_PLUGINS = "plugins"
-_RECORD_SCOPE = "scope"
-_RECORD_PROJECT = "projectPath"
 _SCOPE_USER = "user"
 _SCOPE_PROJECT = "project"
 _CATALOG_PLUGINS = "plugins"
@@ -73,9 +70,6 @@ _SOURCE_KEY = "source"
 _SCOPE_KEY = "scope"
 _PROOF_KEY = "proof"
 
-# The environment variable naming the repository root.
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
-
 
 # ----------------------------------------------------------------------------------------
 class StaleProof(StrEnum):
@@ -84,30 +78,13 @@ class StaleProof(StrEnum):
 
   Attributes:
     AGENT_DELETED: The plugin is still here and no longer ships the agent.
-    PLUGIN_RETIRED: The plugin is gone from the machine and from every marketplace.
+    PLUGIN_RETIRED: The plugin is installed neither for this repo nor for the user, and gone from every marketplace.
   """
 
   # The plugin is still here and no longer ships the agent.
   AGENT_DELETED = "agent-deleted"
-  # The plugin is gone from the machine and from every marketplace.
+  # The plugin is installed neither for this repo nor for the user, and gone from every marketplace.
   PLUGIN_RETIRED = "plugin-retired"
-
-
-def _read_json(path: Path) -> dict:
-  """
-  Read a JSON object from disk, an absent or unparseable file reading as empty.
-
-  Args:
-    path: The file to read.
-
-  Returns:
-    The parsed object, or an empty dict.
-  """
-  try:
-    data = json.loads(path.read_text(encoding = _ENCODING))
-  except (OSError, ValueError):
-    return {}
-  return data if isinstance(data, dict) else {}
 
 
 def _find_all_stems(directory: Path) -> list[str]:
@@ -167,55 +144,6 @@ def plugin_group(name: str) -> str:
   return name.split(_GROUP_SEP, 1)[0]
 
 
-def read_registry(home: Path) -> dict[str, list[dict]]:
-  """
-  Read the machine's install registry, its records pooled by bare plugin name.
-
-  Args:
-    home: Home directory holding the registry.
-
-  Returns:
-    Bare plugin name to its install records.
-  """
-  data = _read_json(home / _REGISTRY_REL)
-  plugins = data.get(_REGISTRY_PLUGINS, data)
-
-  # one plugin installed from two marketplaces has two keys, so records are pooled by bare name
-  pooled: dict[str, list[dict]] = {}
-  for key, records in (plugins.items() if isinstance(plugins, dict) else []):
-    pooled.setdefault(key.split(_MARKETPLACE_SEP, 1)[0], []).extend(
-        record for record in (records if isinstance(records, list) else []) if isinstance(record, dict))
-  return pooled
-
-
-def is_installed_here(records: list[dict], repo: Path) -> bool:
-  """
-  Check whether a plugin's install records reach this repo.
-
-  Args:
-    records: The plugin's install records.
-    repo: The repo root.
-
-  Returns:
-    True when a record is at user scope, or at project scope for this very repo.
-  """
-
-  # Domain(runtime.agent-models):
-  # # A plugin installed into another project is not this repo's
-  # The install registry is shared by every project on the machine. A plugin installed for the whole user reaches
-  # every repo; one installed into a single project reaches only that project. A plugin installed only into some
-  # other project is invisible to this repo, so its agents are never offered here for a model tier.
-
-  # a user-scope record reaches every repo, a project-scope one only its own
-  resolved = repo.resolve()
-  return any(
-      record.get(_RECORD_SCOPE) == _SCOPE_USER
-      or (record.get(_RECORD_SCOPE) == _SCOPE_PROJECT
-          and Path(str(record.get(_RECORD_PROJECT, ""))).resolve() == resolved)
-      for record in records
-  )
-
-
 def read_catalog_names(home: Path) -> set[str] | None:
   """
   Read the plugin names every registered marketplace catalog lists.
@@ -255,25 +183,32 @@ def _plugin_root(name: str, repo: Path, home: Path) -> Path | None:
   """
   Resolve the source root of a plugin.
 
+  An installed copy counts only when it was made for the repo's main checkout or for the whole user.
+
   Args:
     name: Bare plugin name.
     repo: The repo root.
-    home: The home directory.
+    home: The home directory whose plugin registry resolves the installed copy.
 
   Returns:
     The plugin root, or None when no stage resolves it.
   """
-  report = lazy_setup.plugin_root(name, repo, home)
-  return Path(report[_ROOT_KEY]) if report is not None else None
+  # a plugin no stage resolves has no sources to read agents from
+  try:
+    return Path(lazy_setup.plugin_root(name, repo, home)[_ROOT_KEY])
+  except plugin_locator.PluginNotFoundError:
+    return None
 
 
-def find_all_agents(repo: Path, home: Path) -> list[dict]:
+def find_all_agents(repo: Path, home: Path, *, settings_root: Path | None = None) -> list[dict]:
   """
   Enumerate every agent this repo can dispatch.
 
   Args:
     repo: The repo root.
     home: The home directory.
+    settings_root: Directory whose `.claude/settings.json` and `.claude/settings.local.json` say which plugins are
+      enabled; None for the repo root.
 
   Returns:
     One record per dispatch string, sorted by it.
@@ -284,8 +219,9 @@ def find_all_agents(repo: Path, home: Path) -> list[dict]:
   # Agents come from four sources: the subagents the harness always offers, the user's own agents, the repo's own
   # agents, and the agents shipped by plugins. A plugin's agents are offered only when the plugin both reaches this
   # repo (installed for the user, installed into this project, or authored in it) and is enabled in this repo. A
-  # plugin installed on the machine but switched off here ships nothing to dispatch here, so no tier is asked for its
-  # agents. Where one dispatch name turns up twice, the first discovery stands.
+  # plugin installed only into some other project is invisible to this repo, and one installed but switched off here
+  # ships nothing to dispatch here, so no tier is asked for its agents. Where one dispatch name turns up twice, the
+  # first discovery stands.
 
   # the harness's own subagents are always offered
   found = [ _build_agent(name, _GROUP_BUILTIN, None, None) for name in BUILTINS ]
@@ -296,15 +232,15 @@ def find_all_agents(repo: Path, home: Path) -> list[dict]:
     found.extend(
         _build_agent(stem, group, None, directory / f"{stem}{_AGENT_SUFFIX}") for stem in _find_all_stems(directory))
 
-  # the agents of every plugin installed for this repo, or authored by it, and enabled here
-  registry = read_registry(home)
+  # the agents of every plugin installed for this repo or the user, or authored by it, and enabled here
+  installed = plugin_locator.installed_plugin_roots(repo, home)
   authored = lazy_setup.find_dev_plugins(repo)
-  enabled = lazy_setup.read_enabled_plugins(repo)
-  for name in sorted(set(registry) | set(authored)):
+  enabled = lazy_setup.read_enabled_plugins(settings_root or repo)
+  for name in sorted(set(installed) | set(authored)):
     root = _plugin_root(name, repo, home)
 
-    # guard: a plugin this repo does not reach, does not enable, or whose sources resolve nowhere ships nothing here
-    if (name not in authored and not is_installed_here(registry[name], repo)) or name not in enabled or root is None:
+    # guard: a plugin this repo does not enable, or whose sources resolve nowhere, ships nothing here
+    if name not in enabled or root is None:
       continue
     directory = root / _PLUGIN_AGENTS_DIR
     found.extend(
@@ -353,7 +289,7 @@ def find_all_stale(repo: Path, home: Path) -> list[dict]:
   List the configured plugin keys whose agent or plugin no longer exists.
 
   Args:
-    repo: The repo root.
+    repo: The repo root, whose `.claude/lazy.settings.json` holds the project-scope keys.
     home: The home directory.
 
   Returns:
@@ -366,15 +302,16 @@ def find_all_stale(repo: Path, home: Path) -> list[dict]:
 
   # Domain(runtime.agent-models):
   # # When a configured agent tier is provably dead
-  # A model tier configured for a plugin's agent is retired only on proof. Either the plugin is still installed on
-  # this machine or authored here and no longer ships an agent of that name, or the plugin is gone from the machine
-  # and from every marketplace, so it can never be installed again. A plugin that was merely uninstalled still stands
-  # in its marketplace, and its tiers are left alone; a key that names no plugin can never be proven absent.
+  # A model tier configured for a plugin's agent is retired only on proof. Either the plugin is still installed for
+  # this repo or the user, or authored here, and no longer ships an agent of that name, or the plugin is installed
+  # neither for this repo nor for the user and is gone from every marketplace, so it can never be installed again.
+  # A plugin that was merely uninstalled still stands in its marketplace, and its tiers are left alone; a key that
+  # names no plugin can never be proven absent.
   # A marketplace whose list cannot be read could still be offering the plugin, so while any list is unreadable no
   # plugin counts as gone from every marketplace.
 
-  # the install registry, the authored plugins and the marketplace catalogs are what the proofs rest on
-  registry = read_registry(home)
+  # the installs this repo may use, the authored plugins and the marketplace catalogs are what the proofs rest on
+  installed = plugin_locator.installed_plugin_roots(repo, home)
   authored = lazy_setup.find_dev_plugins(repo)
   catalog = read_catalog_names(home)
 
@@ -390,7 +327,7 @@ def find_all_stale(repo: Path, home: Path) -> list[dict]:
 
       # the two proofs, the deleted agent first
       proof: StaleProof | None = None
-      if plugin in registry or plugin in authored:
+      if plugin in installed or plugin in authored:
         root = _plugin_root(plugin, repo, home)
         if root is not None and not (root / _PLUGIN_AGENTS_DIR / f"{stem}{_AGENT_SUFFIX}").is_file():
           proof = StaleProof.AGENT_DELETED
@@ -401,13 +338,16 @@ def find_all_stale(repo: Path, home: Path) -> list[dict]:
   return sorted(stale, key = lambda entry: ( entry[_SCOPE_KEY], entry[_DISPATCH_KEY] ))
 
 
-def discover(repo: Path, home: Path) -> dict:
+def discover(repo: Path, home: Path, *, settings_root: Path | None = None) -> dict:
   """
   Build the whole answer of the `agent-discover` verb.
 
   Args:
     repo: The repo root.
     home: The home directory.
+    settings_root: Directory whose `.claude/settings.json` and `.claude/settings.local.json` say which plugins are
+      enabled; None for the repo root. The project-scope `agent_models` section is read at the repo root, where the
+      daemon reads it.
 
   Returns:
     The discovered `agents`, the `missing` dispatch strings no section configures, and the `stale` keys.
@@ -416,7 +356,7 @@ def discover(repo: Path, home: Path) -> dict:
     ValueError: If a settings file is not valid JSON or not a JSON object.
     OSError: If a settings file exists but cannot be opened.
   """
-  agents = find_all_agents(repo, home)
+  agents = find_all_agents(repo, home, settings_root = settings_root)
   configured = { **read_configured(home), **read_configured(repo) }
   return {
       _AGENTS_KEY: agents,
@@ -443,12 +383,12 @@ def cmd_agent_discover(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + default
   parser.add_argument("--home", default = None)
   args = parser.parse_args(argv)
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
   home = Path(args.home).resolve() if args.home else Path.home()
 
   # a settings file that cannot be read is refused, never read as configuring nothing
   try:
-    answer = discover(repo, home)
+    answer = discover(plugin_locator.query_repo_root(args.cwd), home,
+                      settings_root = plugin_locator.query_settings_root(args.cwd))
   except (ValueError, OSError) as error:
     sys.stderr.write(f"agent-discover: {error}\n")
     return 2

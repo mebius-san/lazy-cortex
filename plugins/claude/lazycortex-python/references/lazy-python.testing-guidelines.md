@@ -44,7 +44,7 @@ for Python projects that adopt these conventions.
 ### General Rules
 - Always start with `test_`.
 - Do **not** repeat the production class name — it is already present in the test class.
-- Keep names under 35 characters.
+- Keep names at most 37 characters long.
 - Use double underscores `__` only to separate feature from variation.
 - Use docstrings for detail, not long method names.
 

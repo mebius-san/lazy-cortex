@@ -19,10 +19,13 @@ import threading
 import time
 import traceback
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import error_ledger  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import commit_guard  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -36,7 +39,7 @@ from runtime_daemon import UNREADABLE_TREE_LINE, check_working_tree, record_halt
 from plugin_dirs import is_cache_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable-next=import-error
-from job_response import classify_response, is_job_bundle, outcome_tokens, read_response
+from job_response import classify_response, is_job_bundle, is_success, outcome_tokens, read_response
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from worktree_tasks import WorktreeStartError, WorktreeTaskManager  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -76,6 +79,15 @@ _UNCLOSABLE_CAUSE = "job_unclosable"
 # The text an isolated job's work-tree check returns when the tree itself could not be read, so its state is
 # unknown; the per-job run tells it from a broken commit obligation by this exact text.
 _TREE_CHECK_FAILED = "the worktree could not be read after the run: `git status` exited non-zero"
+# The text an isolated job's work-tree check opens with when the run left uncommitted changes; the listing follows.
+_DIRTY_TREE_FAILURE = "isolated job left the worktree dirty"
+# The text an isolated job's work-tree check returns when a clean run left its branch where the spawn found it.
+_NO_NEW_COMMITS_FAILURE = "isolated job finished with no new commits and a clean tree"
+# The failure text a job is closed with once it was found to have committed although barred from committing.
+_FORBIDDEN_COMMIT_FAILURE = (
+  "job barred from committing in the repository committed (see the forbidden_commit halt); it never runs again — "
+  "re-dispatch the work as a new job"
+)
 # The temp file a claim's copy record is written into before it is renamed over the record itself.
 _CLAIM_COPIES_TMP = f"{JobArtifact.CLAIM_COPIES}.tmp"
 
@@ -103,6 +115,18 @@ _DEAD_GRACE_SEC = 60.0
 # failed for good. One corrective re-spawn separates a slip of a single run from a fault
 # baked into the expert's protocol, which no number of re-spawns would fix.
 _ENVELOPE_RETRY_LIMIT = 1
+# Sentence added to a continuation's isolation paragraph when its dispatcher allowed a commitless finish, so the
+# expert neither forces an empty commit nor reads an unchanged tree as a failure.
+_COMMITLESS_CONTINUATION_NOTE = (
+  "If this round needs no change to any file, commit nothing and still report success in "
+  "response.json — never make an empty commit just to move the branch."
+)
+# Warnings for a payload branch and a workspace setting that disagree: a main-workspace expert handed a branch, and a
+# branch-workspace expert handed none. Either way the job runs on the current checkout.
+_PAYLOAD_BRANCH_IGNORED = ("workspace: {expert!r} is workspace:{workspace!r} — ignoring payload branch {branch!r}, "
+                           "job runs on the current checkout\n")
+_PAYLOAD_BRANCH_MISSING = ("workspace: {expert!r} is workspace:branch but this job carries no payload branch — "
+                           "job runs on the current checkout\n")
 # Rejection text handed back to the expert on its corrective re-spawn and recorded as the
 # incident detail when the retry budget is spent.
 _ENVELOPE_VIOLATION_MESSAGE = (
@@ -110,8 +134,8 @@ _ENVELOPE_VIOLATION_MESSAGE = (
   "`result`) belongs to the expert-runtime contract; a protocol may add fields and define "
   "the values `outcome` takes, but never replace it with a status field of its own."
 )
-# Stderr warning for a completed subscription run that carried no rate-limit frame; filled with
-# the expert name, the job id and the process exit code.
+# Stderr warning for a subscription run that did not stall, a failed one included, and carried no rate-limit
+# frame; filled with the expert name, the job id and the process exit code.
 RATE_LIMIT_BLIND_TEMPLATE = (
   "rate-limit guard: no rate_limit_event frame in {expert}/{job} "
   "(exit={exit}) — guard blind for this run\n"
@@ -155,32 +179,25 @@ _ENVELOPE_RULE = (
 _CORRECTION_MARKER = "CORRECTION"
 
 
-def _pid_alive(pid: int) -> bool:
+
+# ----------------------------------------------------------------------------------------
+class _BranchOriginKind(StrEnum):
   """
-  Return whether the given process is currently alive.
+  The answers a job's branch-origin record holds.
 
-  Args:
-    pid: Numeric OS process identifier to probe.
-
-  Returns:
-    True if a process with that PID exists (or the caller lacks permission to signal it),
-    False if the PID is invalid (non-positive or too large for the OS) or the process is gone.
+  Attributes:
+    EXISTED: The branch existed before the job's first attempt.
+    CREATED: The job's first attempt created the branch.
   """
-  # guard: non-positive PID is never a real process
-  if pid <= 0:
-    return False
-  try:
-    os.kill(pid, 0)
-  except ProcessLookupError:
-    return False
-  except PermissionError:
-    return True
-  except (OSError, OverflowError):
-    # a number no process table can hold is as invalid as a non-positive one
-    return False
-  return True
+
+  # The branch existed before the job's first attempt.
+  EXISTED = "existed"
+  # The job's first attempt created the branch.
+  CREATED = "created"
 
 
+
+# ----------------------------------------------------------------------------------------
 def _marker_mtime(jdir: Path, marker: str) -> float | None:
   """
   Read the modification time of a job marker, or report its absence.
@@ -399,6 +416,11 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0, failures: list[str]
       to `failures`, and the scan goes on to the next bundle.
     - An expert queue folder that cannot be listed is named on stderr, appended to `failures`, and stepped over,
       so it never stops the scan of the other experts' queues.
+    - A reconciled job barred from committing whose claimant died is judged the same way when it is finalized or
+      buried: a found commit closes it as a logical error instead and the `forbidden_commit` halt is raised, an
+      unverifiable one raises the halt and leaves the reconciliation as it was.
+    - A barred orphan whose spawn is not proven gone is left for a later scan instead of being finalized or buried;
+      the spawns of a barred orphan that already answered are stopped first.
     - Records a `job_dead` incident in the error ledger for each job newly marked dead.
     - Tears down (signals) any process still naming a job directory before marking that job dead, and may
       block for up to two kill grace windows per such process.
@@ -459,6 +481,13 @@ def _reconcile_claimed_job(repo: Path, expert: str, jdir: Path, grace_sec: float
   """
   Reconcile one job bundle against its claimant, burying it when the claimant is gone for good.
 
+  Notes:
+    - A job barred from committing whose claimant died is judged the same way when it is finalized or buried: a
+      found commit closes it as a logical error instead and the `forbidden_commit` halt is raised, an
+      unverifiable one raises the halt and leaves the reconciliation as it was.
+    - A barred orphan whose spawn is not proven gone is left for a later scan instead of being finalized or buried;
+      the spawns of a barred orphan that already answered are stopped first.
+
   Args:
     repo: Repository root containing the expert job tree.
     expert: Name of the expert whose queue holds the bundle.
@@ -505,7 +534,7 @@ def _reconcile_claimed_job(repo: Path, expert: str, jdir: Path, grace_sec: float
 
   # an unreadable or garbled PID marker reads the same as a claimant that is gone
   try:
-    alive = _pid_alive(int((jdir / JobMarker.PID).read_text(encoding = "utf-8").strip()))
+    alive = commit_guard.is_pid_alive(int((jdir / JobMarker.PID).read_text(encoding = "utf-8").strip()))
   except (OSError, ValueError):
     alive = False
 
@@ -528,8 +557,15 @@ def _reconcile_claimed_job(repo: Path, expert: str, jdir: Path, grace_sec: float
     candidate.unlink(missing_ok = True)
     return 0
 
-  # claimant died after the expert finished — finalize instead of marking dead
+  # claimant died after the expert finished — finalize instead of marking dead, unless the run committed
+  # although barred, which closes the job as failed
   if (jdir / JobFile.RESPONSE).exists():
+    # guard: a barred job's spawn not yet proven gone could still commit, so the job waits for a later scan
+    if not _settle_orphan(repo, jdir):
+      return 0
+    if _judge_orphan(repo, expert, jdir):
+      _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
+      return 0
     _finalize_orphaned_job(jdir)
     _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
     return 0
@@ -546,8 +582,14 @@ def _reconcile_claimed_job(repo: Path, expert: str, jdir: Path, grace_sec: float
   # the dead record is composed before the last-moment response check below
   blob = _build_dead_json(jdir, expert, jdir.name, time.time())
 
-  # response landed during this scan — finalize instead of marking dead
+  # response landed during this scan — finalize instead of marking dead, unless the run committed although barred
   if (jdir / JobFile.RESPONSE).exists():
+    # guard: a barred job's spawn not yet proven gone could still commit, so the job waits for a later scan
+    if not _settle_orphan(repo, jdir):
+      return 0
+    if _judge_orphan(repo, expert, jdir):
+      _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
+      return 0
     _finalize_orphaned_job(jdir)
     _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
     return 0
@@ -558,15 +600,95 @@ def _reconcile_claimed_job(repo: Path, expert: str, jdir: Path, grace_sec: float
   # daemon restart or a routine-timeout kill of the pump therefore takes down only the pump's group,
   # while the spawn keeps running on its own, for days if nothing stops it. So a job declared dead after
   # its grace window first has every process still naming its job directory torn down, and only then is
-  # it buried. Burying a job never leaves a live session working on it behind.
+  # it buried, as far as the host's process table can be read. A job barred from committing waits
+  # until its spawn is proven gone, since a surviving spawn could still commit; any other job is
+  # buried after the teardown attempt even when a spawn could not be found or stopped, as on a host
+  # with no process table.
 
   # a spawn that outlived its pump (a daemon restart, a routine-timeout kill) sits in its
   # own session and would run on for days; it is torn down before the job is buried
   if _kill_orphaned_spawns(jdir):
     sys.stderr.write(f"dead-scan: killed orphaned spawn of {expert}/{jdir.name}\n")
+
+  # guard: a barred job's spawn not yet proven gone could still commit after the burial, so the job waits
+  if not _settle_orphan(repo, jdir):
+    return 0
+
+  # with no spawn left to commit, a barred job that committed is closed as failed rather than buried
+  if _judge_orphan(repo, expert, jdir):
+    _append_jobs_log(repo, expert, jdir.name, _classify_finished(jdir))
+    return 0
   return _mark_dead(repo, expert, jdir, blob)
 
 
+def _settle_orphan(repo: Path, jdir: Path) -> bool:
+  """
+  Stop every spawn still running for a barred job whose claimant is gone, and report whether none is left.
+
+  Notes:
+    - Signals the process groups of the job's spawns and may block for up to two kill grace windows per group.
+    - Once no spawn is left, records that proof for the job, which ends any overlap with a later claim and lifts the
+      job's hold on the daemon's publish.
+
+  Args:
+    repo: Repository root whose error ledger and job tree the proof is recorded in.
+    jdir: The job's bundle directory.
+
+  Returns:
+    True when the job is not barred, or no spawn of it is left running; False when one survived or the process
+    table could not be read.
+  """
+  # guard: only a barred job's late commit matters here
+  if commit_guard.read_barred_identity(jdir) is None:
+    return True
+
+  # every spawn found is stopped, then the table is read again for proof
+  for pid in commit_guard.find_spawn_pids(jdir) or []:
+    _kill_pid_group(pid)
+
+  # guard: a spawn survived, or the table cannot be read
+  if commit_guard.find_spawn_pids(jdir) != []:
+    return False
+
+  # the proof is kept: it ends any overlap with a later claim and lifts the job's hold on the publish
+  commit_guard.note_spawns_gone(repo, jdir)
+  return True
+
+
+def _judge_orphan(repo: Path, expert: str, jdir: Path) -> bool:
+  """
+  Hold a job whose claimant is gone to its bar on committing, as a finished run is held to it.
+
+  Notes:
+    - Records the commits the job made since it was last judged and raises the `forbidden_commit` halt over them.
+    - When the job committed although barred, now or in an earlier sweep, closes it as a logical failure.
+    - When its commits could not be listed and none was found before, raises the same halt and leaves the job as it
+      stands.
+
+  Args:
+    repo: Repository root the job ran on.
+    expert: Name of the expert whose queue holds the job.
+    jdir: The job's bundle directory.
+
+  Returns:
+    True when the job committed although barred and was closed; False otherwise.
+  """
+  # what the job committed since it was last judged is recorded; an unverifiable listing only halts
+  verdict = commit_guard.judge(repo, jdir)
+  if verdict is not None:
+    commit_guard.record(repo, expert, jdir, verdict, triggered_by = _PUMP_ROUTINE, on_halt = record_halt)
+
+  # a job that never committed although barred, now or by an earlier sweep's finding, is reconciled as usual
+  if not commit_guard.is_tainted(jdir):
+    return False
+
+  # a job that committed although barred is failed, never finalized as a success nor buried
+  _write_error(jdir, JobErrorCategory.LOGICAL, _FORBIDDEN_COMMIT_FAILURE)
+  return True
+
+
+
+# ----------------------------------------------------------------------------------------
 class _ExpertDirtyTreeError(Exception):
   """
   Signals that a successful expert run left uncommitted changes behind.
@@ -599,6 +721,38 @@ class _ExpertDirtyTreeError(Exception):
     self.dirty_paths = dirty_paths
 
 
+
+# ----------------------------------------------------------------------------------------
+class _ExpertForbiddenCommitError(Exception):
+  """
+  Failure of a job barred from committing in the repository that moved the shared checkout's branch.
+
+  Caught at the pump level to abort processing of any further READY jobs on the current tick, since the
+  daemon-wide halt block has already been written.
+
+  Attributes:
+    expert: Name of the expert whose run was responsible.
+    job_id: Identifier of the job that committed.
+  """
+
+  def __init__(self, expert: str, job_id: str):
+    """
+    Initialize the exception with the offending job's attribution.
+
+    Args:
+      expert: Name of the expert whose run committed.
+      job_id: Identifier of the job that committed.
+    """
+    # the exception's message names the expert and the job
+    super().__init__(f"expert {expert!r} committed in the repository at job {job_id!r}")
+
+    # the attribution the pump's halt summary reads
+    self.expert = expert
+    self.job_id = job_id
+
+
+
+# ----------------------------------------------------------------------------------------
 class _PumpEnvironmentError(Exception):
   """
   Failure of the checkout itself rather than of the job being processed.
@@ -625,6 +779,9 @@ class _PumpEnvironmentError(Exception):
     # the entries the call could not close, for the caller to report
     self.unclosable: list[str] = list(unclosable or [])
 
+
+
+# ----------------------------------------------------------------------------------------
 
 # Decision: kept, not retired, even though `Agent` being a mandatory `tools:` member on every
 # canon-conformant agent (`Agent` is itself excluded from `_READ_ONLY_TOOLS` since a dispatched
@@ -973,6 +1130,58 @@ def _record_claim_head(jdir: Path, work_root: Path) -> str | None:
   return head
 
 
+def _ensure_branch_origin(jdir: Path, *, branch_created: bool) -> bool:
+  """
+  Ensure, once per job, the record of whether an isolated job's branch existed before the job's first attempt.
+
+  Notes:
+    - At a job's first attempt it writes one record file into the bundle; later attempts only read it.
+
+  Args:
+    jdir: Job bundle directory holding the record.
+    branch_created: Whether this attempt's worktree creation created the branch.
+
+  Returns:
+    True only when the record says the branch existed before the first attempt. A job with earlier attempts and no
+    record, or with an unreadable attempt counter, yields False.
+
+  Raises:
+    OSError: When the record exists but cannot be read, or when the first attempt cannot write it into the bundle.
+  """
+
+  # Domain(runtime.job-execution):
+  # # Whether a job continues earlier work is fixed at its first attempt
+  # A job's branch can come into being during the job itself: a first run that fails and is
+  # retried finds on its retry the branch its own failed attempt created. Whether the job
+  # continues work that was already there is therefore decided once, at the job's first attempt,
+  # and kept with the job; every later attempt reads that answer instead of looking at the branch
+  # again. A job that already ran before such an answer was kept has none, and is judged as a
+  # first run — the strict side of the commit obligation.
+
+  record = jdir / JobArtifact.CLAIM_BRANCH_ORIGIN
+
+  # a later attempt reads the answer its first attempt kept
+  if record.exists():
+    return record.read_text(encoding = "utf-8").strip() == _BranchOriginKind.EXISTED
+
+  # no counter means no earlier attempt; a counter that cannot be read may hide one, so it counts as one
+  try:
+    earlier_attempts = int((jdir / JobArtifact.ATTEMPTS).read_text(encoding = "utf-8").strip())
+  except FileNotFoundError:
+    earlier_attempts = 0
+  except (OSError, ValueError):
+    earlier_attempts = 1
+
+  # guard: a job that already ran before the answer was kept has none — judged as a first run
+  if earlier_attempts > 0:
+    return False
+
+  # the first attempt keeps its answer for every later one
+  origin = _BranchOriginKind.CREATED if branch_created else _BranchOriginKind.EXISTED
+  record.write_text(f"{origin}\n", encoding = "utf-8")
+  return origin == _BranchOriginKind.EXISTED
+
+
 def _isolation_git_env(worktree: Path, base: Mapping[str, str]) -> dict[str, str]:
   """
   Return a copy of an environment under which git in an isolated job's worktree ignores the recorded byproducts.
@@ -1005,9 +1214,9 @@ def _isolation_git_env(worktree: Path, base: Mapping[str, str]) -> dict[str, str
   return env
 
 
-def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | None:
+def _verify_isolated_job(worktree: Path, pre_spawn_tip: str | None, *, unmoved_ok: bool) -> str | None:
   """
-  Check an isolated job's worktree after a clean spawn: a dirty tree, an unmoved branch or a check that fails it.
+  Check an isolated job's worktree after a clean spawn for a dirty tree, a failed check or an unmoved branch.
 
   A job failure, never a daemon halt — the primary checkout was untouched throughout, so the
   daemon-wide dirty-tree halt's rationale does not apply here. A `git status` that fails is reported as a
@@ -1015,15 +1224,23 @@ def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | No
   (a link from `daemon.git.worktree_links`) or of its bootstrap is not dirt, whether git already ignores it
   through the recorded excludes file or lists it anyway; any other untracked path and every tracked change is.
   The unmoved-branch check compares against the tip captured before the spawn, so a continuation round that
-  produced nothing is caught even though the branch already carried earlier rounds' commits.
+  produced nothing is caught even though the branch already carried earlier rounds' commits. A dirty tree is a
+  failure whatever the caller allows.
 
   Args:
     worktree: Path to the job's worktree directory.
     pre_spawn_tip: The branch tip captured before the spawn, or None when it was unresolvable.
+    unmoved_ok: When true, a clean tree whose branch did not move is not a failure.
 
   Returns:
-    None when the worktree is clean and the branch moved, else a one-line failure text that names a failed
-    work-tree check, a dirty tree or a branch that did not move.
+    None when the worktree is clean and the branch moved (or did not move while `unmoved_ok` is true), else a
+    one-line failure text that names a failed work-tree check, a dirty tree or a branch that did not move.
+
+  Raises:
+    OSError: When git cannot be run in the worktree, for example a `FileNotFoundError` for a missing `git`
+      executable or worktree directory.
+    ValueError: When the process environment's `GIT_CONFIG_COUNT` is not an integer while the worktree has
+      recorded byproducts.
   """
 
   # Domain(runtime.job-execution):
@@ -1034,7 +1251,14 @@ def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | No
   # obligation outright; a run that leaves the tree clean but never advanced the branch beyond
   # where it started is equally a failure, since it produced nothing durable either way — a
   # continuation is judged the same way, against the tip the branch already carried before
-  # this run, not against where it started overall.
+  # this run, not against where it started overall. One exception is granted by whoever queued
+  # the run, never assumed: a continuation whose durable output already sits on the branch, and
+  # whose only remaining work may produce nothing to commit (re-running a check that did not run),
+  # may finish with the branch unmoved, provided it reports its work as done. A first run on a
+  # fresh branch keeps its obligation even when so marked, a run reporting failure or deferred
+  # work still fails, and a dirty tree breaks the obligation as before. A run whose agent lists
+  # exclusively known read-only tools is not held to the obligation at all, since it cannot commit;
+  # an absent, empty or unparsable tools list, or any write-capable tool, keeps the obligation.
 
   status = subprocess.run(
     # waiver: git CLI vocabulary, not a domain constant
@@ -1083,38 +1307,45 @@ def _isolated_job_failure(worktree: Path, pre_spawn_tip: str | None) -> str | No
       # waiver: stdlib decode-error mode, not a domain constant
       errors = "replace",
     )
-    return f"isolated job left the worktree dirty: {listing}"
+    return f"{_DIRTY_TREE_FAILURE}: {listing}"
 
-  # a clean tree with the tip exactly where the spawn found it means nothing durable landed
-  if pre_spawn_tip is not None and _worktree_head(worktree) == pre_spawn_tip:
-    # waiver: one-off human-facing message
-    return "isolated job finished with no new commits and a clean tree"
+  # a clean tree with the tip exactly where the spawn found it means nothing durable landed, unless the
+  # dispatcher allowed a commitless finish for this run and the run reported success
+  if not unmoved_ok and pre_spawn_tip is not None and _worktree_head(worktree) == pre_spawn_tip:
+    return _NO_NEW_COMMITS_FAILURE
   return None
 
 
-def _isolation_prompt(branch: str, branch_created: bool) -> str:
+def _format_isolation_prompt(branch: str, *, is_fresh: bool, commitless_ok: bool) -> str:
   """
   Compose the commit-obligation paragraph for a spawn running in an isolated worktree.
 
   Args:
     branch: The job's branch, named so the agent knows where its work lands.
-    branch_created: Whether this dispatch created the branch (fresh) or reuses it (resume).
+    is_fresh: Whether this attempt created the branch. When false, the branch already exists at this attempt,
+      whatever its origin, and the paragraph tells the expert to build on its commits and never rewrite them.
+    commitless_ok: Whether a round needing no file change may finish without a commit. It adds to the
+      continuation paragraph only the note that such a round commits nothing and still reports success, never
+      making an empty commit to move the branch; it has no effect when `is_fresh` is true.
 
   Returns:
     The paragraph to append to the user prompt.
   """
-  if branch_created:
+  if is_fresh:
     return (
       f"You are working in an isolated git worktree on branch `{branch}`. Commit ALL your work "
       "to this branch before writing response.json — the worktree is removed after the job, and "
       "only committed work survives. An uncommitted or empty result fails the job."
     )
-  return (
+
+  # a continuation builds on the branch's earlier rounds; a dispatcher-allowed commitless finish is said outright
+  continuation = (
     f"You are working in an isolated git worktree on branch `{branch}`, which already carries "
     "commits from an earlier round of this job — this is a continuation. Build on them, never "
     "reset or rewrite them. Commit ALL new work before writing response.json — the worktree is "
     "removed after the job, and only committed work survives."
   )
+  return f"{continuation} {_COMMITLESS_CONTINUATION_NOTE}" if commitless_ok else continuation
 
 
 def pump(repo: Path) -> dict:
@@ -1134,6 +1365,12 @@ def pump(repo: Path) -> dict:
       its claimant's liveness or how long it has sat unclaimed.
     - A run is exempt from the post-run dirty-tree check only when its agent's `tools:` field lists exclusively
       known read-only tools; an absent, empty or unparsable field, or any write-capable tool, keeps the check.
+    - An isolated job whose run leaves its worktree clean and its branch tip where the spawn found it is closed as
+      a logical failure, unless its branch existed before the job's first attempt, its `config.json` carries
+      `allow_no_commit: true`, and its `response.json` carries an outcome none of whose tokens is `error` or
+      `deferred`; such a job reaches `DONE` with its response intact. A first run on a freshly created branch (its
+      retries included), a job that ran before its first attempt's answer was kept, a dirty
+      worktree whatever its config says, and a config without the key are all held to the commit obligation.
     - A job's `source/` and `context/` buckets only ever receive entries from inside the work tree; an entry
       resolving outside it is refused and the job fails logically.
     - A directory entry of those buckets lands under `<parent-directory-name>-<directory-name>`, never under its
@@ -1159,9 +1396,11 @@ def pump(repo: Path) -> dict:
       reconcile, those jobs are named on the raised error, in its message and on its `unclosable` attribute.
     - When the subscription window is closed and the call would defer, it raises for those jobs and folders at once
       and spawns nothing.
-    - On the two `halted` returns (a dirty-tree halt, a rate-limit halt raised during the run) the halt summary is
-      returned so the daemon can act on the halt; each such job or folder is named on stderr and recorded in the
-      error ledger as an opened `job_error` incident with cause `job_unclosable`, keyed on the job.
+    - On the three `halted` returns (a dirty-tree halt, a rate-limit halt, a forbidden-commit halt, each raised
+      during the run) the halt summary is returned so the daemon can act on the halt; a forbidden-commit check
+      that could not be made during the run returns it too, the summary then carrying
+      `halt_reason: forbidden_commit`. Each such job or folder is named on stderr and recorded in the error
+      ledger as an opened `job_error` incident with cause `job_unclosable`, keyed on the job.
 
   Notes:
     - When a tick buries a dead job whose spawn outlived its pump, it signals process groups outside this
@@ -1209,6 +1448,14 @@ def pump(repo: Path) -> dict:
   # An expert run MUST be exempt from the post-run dirty-tree check only when its agent's `tools:` field
   # lists exclusively known read-only tools; an absent, empty or unparsable field, or any write-capable
   # tool, MUST leave the check applied.
+
+  # Contract:
+  # An isolated job whose run leaves its worktree clean and its branch tip where the spawn found it MUST
+  # be closed as a logical failure, unless its branch existed before the job's first attempt, its `config.json`
+  # carries `allow_no_commit: true`, and its `response.json` carries an outcome none of whose tokens is `error`
+  # or `deferred`; such a job reaches `DONE` with its response intact. A first run on a freshly created branch
+  # (its retries included), a job that ran before its first attempt's answer was kept, a dirty worktree whatever
+  # the config says, and a config without the key MUST all be held to the commit obligation.
 
   # Contract:
   # A job's `source/` and `context/` buckets MUST only ever receive entries from inside the work tree;
@@ -1263,10 +1510,12 @@ def pump(repo: Path) -> dict:
 
   # Contract:
   # When the subscription window is closed and the call would defer, it raises for those jobs and
-  # folders at once and spawns nothing. The two `halted` returns, a dirty-tree halt and a rate-limit
-  # halt raised during the run, are the exception: the halt summary is returned so the daemon can act
-  # on the halt, and each such job or folder is named on stderr and recorded in the error ledger as
-  # an opened `job_error` incident with cause `job_unclosable`, keyed on the job.
+  # folders at once and spawns nothing. The three `halted` returns, a dirty-tree halt, a rate-limit
+  # halt and a forbidden-commit halt raised during the run, are the exception: the halt summary is
+  # returned so the daemon can act on the halt, a forbidden-commit check that could not be made during
+  # the run returns it too, the summary then carrying `halt_reason: forbidden_commit`, and each such
+  # job or folder is named on stderr and recorded in the error ledger as an opened `job_error`
+  # incident with cause `job_unclosable`, keyed on the job.
 
   repo = Path(repo)
   daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
@@ -1373,7 +1622,7 @@ def pump(repo: Path) -> dict:
       started = time.monotonic()
       try:
         _process_one(repo, name, jdir)
-      except _ExpertDirtyTreeError as error:
+      except (_ExpertDirtyTreeError, _ExpertForbiddenCommitError) as error:
         processed = 1
         _log_job_attempt(repo, name, jdir, started)
 
@@ -1426,6 +1675,17 @@ def pump(repo: Path) -> dict:
       _log_job_attempt(repo, name, jdir, started)
       served = ( name, jdir )
       break
+
+    # a forbidden-commit check that could not be made after the run halted the daemon without ending the job's
+    # own classification; the halt summary goes back like the dirty-tree one
+    if served is not None and commit_guard.is_recorded(repo, served[1].name):
+      _record_unclosable(repo, unclosable)
+      # waiver: pump-summary subkeys, mirroring the sibling dirty-tree halt summary above
+      return {
+        "experts": expert_count, "processed": processed,
+        "detected_dead": detected_dead, "halted": True, "halt_reason": HaltReason.FORBIDDEN_COMMIT,
+        "halt_expert": served[0], "halt_job_id": served[1].name,
+      }
 
     # the pre-spawn check found the flag clear, so a flag up now went up during this run — by this
     # run's own frames or a concurrent writer on the host; either way the window is closed. Halt
@@ -2133,6 +2393,13 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   job is closed as a logical error, never as a transient one. A successful run that leaves
   the working tree dirty raises `_ExpertDirtyTreeError` so the pump halts the queue.
 
+  A job run on the shared checkout (no isolated worktree) whose config bars committing in the repository is held
+  to that bar whatever the run's exit, a non-zero exit or a stall included. A barred job that committed is failed
+  as a logical error and the daemon halts naming it. A check that could not be made halts the daemon the same
+  way without changing how the job itself is classified. A job once found committing is failed without running
+  again. Once a job on the shared checkout is claimed, the barred orphans of its identity whose spawn still runs
+  are recorded against it, so their commits are told apart from the job's own.
+
   When the job carries a resolved provider, the spawn's environment is remapped to that
   provider's endpoint — tier aliases, `ANTHROPIC_BASE_URL`, and `ANTHROPIC_AUTH_TOKEN` are
   overridden, and `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, the variable named by
@@ -2152,6 +2419,8 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
   Raises:
     _ExpertDirtyTreeError: When the expert exited cleanly but left uncommitted changes.
+    _ExpertForbiddenCommitError: When a job barred from committing in the repository committed on the shared
+      checkout; the job has been closed as a logical error and the daemon-wide halt has been raised.
     _PumpEnvironmentError: When the daemon stream settings are not numbers or the checkout's settings files,
       including `.claude/settings.local.json`, cannot be prepared (both before anything of the job is read), or
       when the expert binary is missing from PATH at spawn time, in which case the claim is undone; in all three
@@ -2160,6 +2429,9 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       queued. Also when the work-tree check after a finished run could not be made, in which case
       the job keeps its own finished response, which is left as it is.
     OSError: When the expert process cannot be started although the binary is on PATH; it is the job's own failure.
+      Also when an isolated job's bundle cannot hold the branch-origin record written right after its worktree is
+      created, or holds a record that cannot be read; in both cases the worktree is removed before the error
+      propagates. Also when the job tree cannot be read while the claim records the orphans it overlaps.
   """
   # the idle-watchdog settings are read per job, a cheap single-file read that keeps each spawn on the live config
   daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
@@ -2219,6 +2491,11 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     _write_error(jdir, JobErrorCategory.LOGICAL, "config.json: missing agent")
     return
 
+  # guard: a job once found to have committed although barred is failed for good and never runs again
+  if commit_guard.is_tainted(jdir):
+    _write_error(jdir, JobErrorCategory.LOGICAL, _FORBIDDEN_COMMIT_FAILURE)
+    return
+
   # empty protocols + empty aspects is a valid config. Specific-domain
   # agents (test-designer, lazy-review.doc_doctor, …) are
   # self-contained — the .md frontmatter + body IS the full instruction.
@@ -2258,33 +2535,39 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   # best-effort — dispatch_job always writes valid JSON, so an unreadable request.json is
   # not this branch-capability check's problem to diagnose; it just reads as "no branch"
   try:
-    job_branch = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8")).get(JobRequestKey.BRANCH)
+    request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
+    job_branch = request.get(JobRequestKey.BRANCH)
+    # the optional named fork point of a fresh job branch; absent means the base
+    branch_from = request.get(JobRequestKey.BRANCH_FROM) or None
   except (OSError, json.JSONDecodeError):
     job_branch = None
+    branch_from = None
 
   # a workspace:main (or absent) expert never branches — a payload naming one anyway (the
   # same expert also dispatched for review rewrites) is ignored, not refused
   if workspace != WorkspaceMode.BRANCH and job_branch:
-    sys.stderr.write(
-      f"workspace: {expert_name!r} is workspace:{workspace!r} — ignoring payload branch "
-      f"{job_branch!r}, job runs on the current checkout\n"
-    )
+    sys.stderr.write(_PAYLOAD_BRANCH_IGNORED.format(expert = expert_name, workspace = workspace,
+                                                    branch = job_branch))
   # the reverse mismatch: a workspace:branch expert dispatched with no payload branch (an
   # ordinary review-rewrite sharing the expert) runs on the current checkout too — logged for
   # the same observability the reverse case above gets, since it is the same capability-not-
   # mandate shape from the other side
   elif workspace == WorkspaceMode.BRANCH and not job_branch:
-    sys.stderr.write(
-      f"workspace: {expert_name!r} is workspace:branch but this job carries no payload "
-      f"branch — job runs on the current checkout\n"
-    )
+    sys.stderr.write(_PAYLOAD_BRANCH_MISSING.format(expert = expert_name))
 
   # `branch` present AND this expert opted in — activate the capability for this dispatch;
   # any other combination leaves worktree_dir None and the job runs on the current checkout
   branch_created = False
+  branch_preexisted = False
   mgr: WorktreeTaskManager | None = None
   pre_spawn_tip: str | None = None
   if workspace == WorkspaceMode.BRANCH and job_branch:
+    # guard: a start point that is not a string cannot name a branch — refuse rather than hand it to git
+    if branch_from is not None and not isinstance(branch_from, str):
+      # waiver: one-off human-facing message
+      _write_error(jdir, JobErrorCategory.LOGICAL, f"workspace: branch_from {branch_from!r} is not a branch name")
+      return
+
     # the base branch is the fork point for a fresh job branch — without it there is nothing
     # to fork from
     base_branch = _resolve_base_branch(repo)
@@ -2304,10 +2587,18 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
       worktree_links = git_cfg.get(GitConfigKey.WORKTREE_LINKS) or (),
     )
     try:
-      worktree_dir, branch_created = mgr.create(jdir.name, job_branch)
+      worktree_dir, branch_created = mgr.create(jdir.name, job_branch, start_point = branch_from)
     except WorktreeStartError as error:
       _write_error(jdir, JobErrorCategory.LOGICAL, f"workspace: branch worktree failed: {error}")
       return
+
+    # whether the job continues earlier work is fixed at its first attempt, before anything can fail it; the
+    # worktree already exists, so a bundle that cannot hold the record must not leave it behind
+    try:
+      branch_preexisted = _ensure_branch_origin(jdir, branch_created = branch_created)
+    except OSError:
+      mgr.remove(worktree_dir)
+      raise
 
     # rebuild the gitignored execution environment the worktree does not materialise
     bootstrap_error = mgr.bootstrap(worktree_dir, git_cfg.get(GitConfigKey.WORKTREE_BOOTSTRAP_CMD))
@@ -2321,6 +2612,10 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # the tip before the spawn anchors the did-anything-land check — on a continuation the
     # branch already carries earlier rounds' commits, so "commits over base" would not do
     pre_spawn_tip = _worktree_head(worktree_dir)
+
+  # a commitless finish is open only to a continuation of a branch that existed before the job's first attempt,
+  # in a bundle its dispatcher marked — a first run keeps its commit obligation, retried or not
+  commitless_ok = branch_preexisted and bool(cfg.get(JobConfigKey.ALLOW_NO_COMMIT, False))
 
   # Decision: remove the job's worktree unconditionally, not keep a dirty one for inspection — the
   # branch survives as the only durable product; an agent's uncommitted dirt disappears with the
@@ -2353,6 +2648,16 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
     # pin it on this spawn's own env
     env[EnvVar.MAX_SUBAGENT_SPAWN_DEPTH] = EnvVar.SUBAGENT_SPAWN_DEPTH_PIN
+
+    # Domain(runtime.job-execution):
+    # # A job never repairs its own environment
+    # An expert job works with the environment it was given. Every job runs the plugins' tools in a protected mode,
+    # however the daemon itself is run, and in that mode a tool that finds the environment missing or out of date
+    # fails with the cause and the job stops; it never installs, recreates or reconfigures anything itself. The
+    # operator brings the environment up to date and then continues or rebuilds the job.
+
+    # every spawn runs the plugins' tools in protected mode, whatever the daemon's own environment says
+    env[EnvVar.PROTECTED] = EnvVar.PROTECTED_ON
 
     # Domain(runtime.protocols):
     # # Protocol inheritance along a job chain
@@ -2398,10 +2703,14 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # the spawn's user prompt names every resolved protocol, aspect and argument the job carries
     prompt = _compose_user_prompt(jdir, protocols = protocol_paths, aspects = aspect_paths, arguments = arguments)
 
-    # an isolated job carries its commit obligation in the prompt — the protocol files under the
-    # job dir are reached by absolute paths, so the worktree cwd changes nothing else
+    # an isolated job carries its commit obligation in the prompt, worded by the branch as this attempt finds it —
+    # an existing branch's commits are built on, never rewritten — while the commitless note follows the
+    # first-attempt answer; the protocol files under the job dir are reached by absolute paths, so the worktree
+    # cwd changes nothing else
     if worktree_dir is not None and job_branch:
-      prompt += "\n\n" + _isolation_prompt(job_branch, branch_created)
+      prompt += "\n\n" + _format_isolation_prompt(
+        job_branch, is_fresh = branch_created, commitless_ok = commitless_ok,
+      )
 
     # the runtime contract the spawn is pointed at
     # waiver: filesystem path idiom, not a domain constant
@@ -2421,6 +2730,11 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     except OSError as error:
       (jdir / JobMarker.PID).unlink(missing_ok = True)
       raise _PumpEnvironmentError(f"the work tree's HEAD could not be read: {error}") from error
+
+    # a barred orphan of the same identity whose spawn still runs beside this job makes their commits ambiguous;
+    # the claim records it, so the orphan's judgement can tell
+    if worktree_dir is None:
+      commit_guard.note_claim_overlaps(repo, jdir)
 
     # bump attempts counter — persists across pump kills + recovery cycles.
     # Recovery routine reads this to decide retry vs. permanent-fail.
@@ -2502,6 +2816,21 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
         f"attempt {stall_attempt + 1}/{max_stall_retries + 1}\n"
       )
 
+    # a job barred from committing is held to it whatever the run's outcome, since a commit lands before the exit
+    # code says anything; an isolated job commits only on its own branch, never on the shared checkout
+    verdict = commit_guard.judge(repo, jdir) if worktree_dir is None else None
+
+    # a found commit fails the job, its transcript kept for whoever asks why; a check that could not be made
+    # halts the daemon too, but leaves the run to be classified as it would be otherwise
+    if verdict is not None:
+      if verdict[1] is None:
+        _persist_transcript(jdir, stdout)
+        _write_error(jdir, JobErrorCategory.LOGICAL,
+                     f"job barred from committing in the repository committed: {'; '.join(verdict[0])}")
+      commit_guard.record(repo, expert_name, jdir, verdict, triggered_by = _PUMP_ROUTINE, on_halt = record_halt)
+      if verdict[1] is None:
+        raise _ExpertForbiddenCommitError(expert_name, jdir.name)
+
     # guard: every re-spawn stalled — record a transient error; the next tick re-dispatches
     if stalled:
       _write_error(
@@ -2512,25 +2841,29 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
     # Domain(runtime.job-execution):
     # # Rate-limit guard blind-spot signal
-    # A completed run against the operator's own subscription always carries at least one
+    # A run against the operator's own subscription is expected to carry at least one
     # rate-limit signal frame, however far from any limit it stayed. A run reporting none of
     # them does not mean the account is healthy — it means the signal the guard relies on to
     # notice trouble has stopped arriving, which is itself worth flagging separately from an
-    # actually raised limit. This blind-spot check does not apply to a run against a foreign
-    # provider endpoint, which never emits such frames in the first place.
+    # actually raised limit. The check covers every run that was not abandoned as stalled, a
+    # run that failed included, and it holds even where the guard is switched off for the
+    # repository. The one other exception is a run of a job barred from committing in the
+    # repository that committed anyway: that run is stopped as a violation before the check
+    # is reached, so it leaves no blind-spot line. The signal is a warning line on the
+    # diagnostic stream only: it changes neither the job's outcome nor any rate-limit record.
+    # A run against a foreign provider endpoint is exempt, since such an endpoint never emits
+    # these frames in the first place.
 
     # silence must not read as "all clear": the provider emits a rate-limit frame in every run,
-    # so a completed run carrying none means the signal the guard depends on has degraded.
+    # so a run that did not stall, a failed one included, carrying none means the signal the guard depends on
+    # has degraded. A run stopped for a commit it was barred from never reaches this check.
     # A provider-bound run is exempt — a foreign endpoint sends no such frames, so silence there
     # is expected, not a blind spot.
     if seen_frames == 0 and not provider:
       sys.stderr.write(RATE_LIMIT_BLIND_TEMPLATE.format(expert = expert_name, job = jdir.name, exit = returncode))
 
     # persist the transcript — best-effort, never block DONE on a write failure.
-    try:
-      (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "", encoding = "utf-8")
-    except Exception as error:  # pragma: no cover — defensive
-      sys.stderr.write(f"transcript write failed: {error}\n")
+    _persist_transcript(jdir, stdout)
 
     # a clean exit still needs a usable response.json before this job can reach DONE
     if returncode == 0:
@@ -2559,16 +2892,20 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
       # post-spawn verification splits by isolation: an isolated job is judged inside its own
       # worktree (dirty tree OR an unmoved branch = job failure, never a daemon halt — the
-      # primary checkout was untouched throughout); a non-isolated job keeps the daemon-wide
+      # primary checkout was untouched throughout; an unmoved branch is accepted only when the
+      # dispatcher allowed a commitless finish and the run reports success); a non-isolated job keeps the daemon-wide
       # dirty-tree halt, whose rationale is exactly that it shares the operator's tree. A
       # read-only agent never writes or commits, so it is exempt on both arms — an isolated
       # read-only job would otherwise always fail the unmoved-branch check.
       if not _agent_is_read_only(agent_path):
         if worktree_dir is not None:
+          # an unmoved branch is excused only where a commitless finish is open and the run reports success
+          allow_unmoved = commitless_ok and is_success(read_response(jdir))
+
           # the run is finished and its response is on disk — a failure of the tree check itself is the
           # checkout's, and must not be charged to the job by overwriting that response
           try:
-            failure = _isolated_job_failure(worktree_dir, pre_spawn_tip)
+            failure = _verify_isolated_job(worktree_dir, pre_spawn_tip, unmoved_ok = allow_unmoved)
           # waiver: whatever the tree check raises is re-labelled, so the pump's per-job boundary
           # leaves the finished job's response alone
           except Exception as error:  # pylint: disable=broad-exception-caught
@@ -2609,6 +2946,20 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # is the durable product, uncommitted dirt goes with the directory (operator decision)
     if mgr is not None and worktree_dir is not None:
       mgr.remove(worktree_dir)
+
+
+def _persist_transcript(jdir: Path, stdout: str) -> None:
+  """
+  Write a run's transcript into its job bundle, reporting a failed write on stderr instead of raising.
+
+  Args:
+    jdir: Job bundle directory the transcript is written into.
+    stdout: The run's captured stream-json output.
+  """
+  try:
+    (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "", encoding = "utf-8")
+  except Exception as error:  # pragma: no cover — defensive
+    sys.stderr.write(f"transcript write failed: {error}\n")
 
 
 def _pipe_reader(stream: IO[str], tag: str, out_q: queue.Queue) -> None:
@@ -2669,6 +3020,8 @@ def _kill_pid_group(pid: int) -> bool:
   """
   Terminate the process group of a process this pump did not spawn, escalating SIGTERM to SIGKILL.
 
+  A group the system refuses to signal, because it holds only an exited process, ends the escalation.
+
   Notes:
     - Signals a process group outside this process and never the caller's own group.
     - Blocks for up to two grace windows, one after SIGTERM and one after SIGKILL.
@@ -2693,10 +3046,11 @@ def _kill_pid_group(pid: int) -> bool:
   # each signal gets the grace window to take effect before the next one is sent
   signalled = False
   for sig in (signal.SIGTERM, signal.SIGKILL):
-    # guard: the group vanished between signals — nothing left to escalate to
+    # guard: the group vanished between signals, or holds only an exited process the system refuses to signal —
+    # nothing left to escalate to
     try:
       os.killpg(pgid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
       return signalled
     signalled = True
 
@@ -2704,7 +3058,7 @@ def _kill_pid_group(pid: int) -> bool:
     deadline = time.monotonic() + _KILL_GRACE_SEC
     while time.monotonic() < deadline:
       # the process is gone — the signal did its job
-      if not _pid_alive(pid):
+      if not commit_guard.is_pid_alive(pid):
         return True
       # waiver: 0.05s is the liveness poll cadence, same floor the watchdog read loop uses
       time.sleep(0.05)
@@ -2726,26 +3080,10 @@ def _kill_orphaned_spawns(jdir: Path) -> int:
   Returns:
     The number of processes signalled; zero when none names the directory or `ps` is unavailable.
   """
-  # guard: without `ps` no spawn can be found, so none is signalled
-  try:
-    listing = subprocess.run(
-      [ "ps", "-ax", "-o", "pid=,command=" ],
-      capture_output = True, text = True, check = False, encoding = "utf-8",
-      # waiver: stdlib decode-error mode, not a domain constant
-      errors = "replace",
-    ).stdout
-  except OSError:
-    return 0
-
-  # every process naming the job dir on its command line is one of its spawns, never the pump itself
-  needle = str(jdir)
+  # every other process naming the job dir on its command line is one of its spawns; none is found without `ps`
   killed = 0
-  for line in listing.splitlines():
-    pid_text, _, command = line.strip().partition(" ")
-    # only a parseable pid whose command line carries the job dir is a spawn of this job
-    if not pid_text.isdigit() or needle not in command or int(pid_text) == os.getpid():
-      continue
-    if _kill_pid_group(int(pid_text)):
+  for pid in commit_guard.find_spawn_pids(jdir) or []:
+    if _kill_pid_group(pid):
       killed += 1
   return killed
 

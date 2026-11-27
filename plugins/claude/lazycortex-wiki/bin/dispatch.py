@@ -69,6 +69,10 @@ class CoreDispatch:
       call of its job committed.
     INCIDENT_TERMS_BATCH_PREFIX: Prefix of that report's incident key, followed by the terms scope id, a colon and
       the repo-relative path of a document of the job.
+    CAUSE_TERMS_LEGACY_UNSETTLED: Stable cause reported for every term line of an old terms section that a
+      terms-write call leaves standing in a document of its job.
+    INCIDENT_TERMS_LEGACY_PREFIX: Prefix of that report's incident key, followed by the terms scope id, a colon and
+      the repo-relative path of the document the line stands in.
     CAUSE_DOMAIN_CODE_UNREADABLE: Stable cause reported while a domain tick's scan meets code files it cannot read.
     INCIDENT_DOMAIN_CODE: The one incident key that report folds under.
     CAUSE_DOMAIN_DICTIONARY_UNREADABLE: Stable cause reported while a domain tick finds the group dictionary absent
@@ -209,6 +213,11 @@ class CoreDispatch:
   CAUSE_TERMS_BATCH_REFUSED   = "terms-batch-refused"
   INCIDENT_TERMS_BATCH_PREFIX = "wiki-terms-batch:"
 
+  # Stable cause a term line of an old terms section left standing after a terms-write call reports, and the
+  # incident-key prefix it folds under, followed by the terms scope and the document the line stands in.
+  CAUSE_TERMS_LEGACY_UNSETTLED = "terms-legacy-line-unsettled"
+  INCIDENT_TERMS_LEGACY_PREFIX = "wiki-terms-legacy:"
+
   # The key of one `source` / `context` / `result` entry of a dispatch bundle that names its path, and the
   # bucket a result entry's path sits under.
   _ENTRY_PATH    = "path"
@@ -264,14 +273,17 @@ class CoreDispatch:
   _ANCHOR_COUNT          = "count"
   _ANCHOR_EXAMPLES       = "examples"
 
-  def __init__(self) -> None:
+  def __init__(self, *, repo: Path) -> None:
     """
     Resolve the `lazycortex-core` CLI binary on construction.
+
+    Args:
+      repo: Repository root the dispatcher works for; the core plugin is looked up for it.
 
     Raises:
       RuntimeError: When no lookup stage finds a usable `lazycortex-core` binary.
     """
-    self._cli = _axes.resolve_core_cli()
+    self._cli = _axes.resolve_core_cli(repo)
 
   # ------------------------------------------------------------------
   @property
@@ -346,13 +358,15 @@ class CoreDispatch:
 
     # Domain(runtime.jobs):
     # # Collapsing repeated requests in the queue
-    # A request for expert work carries a deduplication key: while an identical request is still waiting
-    # in the queue, a repeat one is not created — the new ask joins the one already standing. The key is
-    # built from the kind of work and the target it applies to, so different kinds of work on one target
-    # stay independent requests. Were the kind of work left out of the key, an already-finished but not
-    # yet collected request would swallow the request of another kind that it spawned itself. The target
-    # is reduced to one canonical written form, otherwise the same target named two ways yields two keys
-    # and two requests instead of one.
+    # A request for expert work carries a deduplication key: a repeat is absorbed by any request under the same
+    # key that is still active — waiting, running, or finished but not yet collected by its caller. Before
+    # dispatching, the caller tries to release its finished requests under the key, so an earlier finished
+    # request normally does not block a new one, while a waiting or running one absorbs the repeat. When the
+    # release fails, the ask still goes out and the old finished request absorbs it. The key is built from the
+    # kind of work and the target it applies to, so different kinds of work on one target stay independent
+    # requests. Were the kind of work left out of the key, an already-finished but not yet collected request
+    # would swallow the request of another kind that it spawned itself. The target is reduced to one canonical
+    # written form, otherwise the same target named two ways yields two keys and two requests instead of one.
 
     # the absolute form of the node, the one its dedup key is built from
     abs_node = self._resolve_node(repo, node_path)

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to existing code, generate vision/design/tech docs from source, then gap-scan for anything missed.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce vision + design + tech docs (and scaffold any candidate features), then runs lazy-spec.coverage to gap-scan the code against the spec tree and materialize anything missed; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -83,7 +83,7 @@ When the wizard finishes, the skill writes the product record into settings, cre
 
 ### Step 3 — Generate the spec from code with `/lazy-spec.create-from-code`
 
-Run `/lazy-spec.create-from-code <compound-key>` where `<compound-key>` is the product key the previous step just wrote (e.g. `backend-api-gateway`).
+Run `/lazy-spec.create-from-code <compound-key>` where `<compound-key>` is the product key the previous step just wrote (e.g. `backend-api-gateway`). The product must be registered and code-bound: for an unregistered key the skill refuses and points you back to `/lazy-spec.product-config`, and for a design-only product (no source paths) it does nothing and tells you to add source paths through `/lazy-spec.product-config` first.
 
 The skill resolves your product's source binding, then fans out four parallel Explore agents to scan the codebase:
 
@@ -152,6 +152,7 @@ For each remaining gap, one `AskUserQuestion` at a time offers:
 The product is registered and its initial spec is live. From here:
 
 - **Find more gaps** — re-run `/lazy-spec.coverage <compound-key>` whenever the codebase grows; it re-scans the current code state against whatever is already documented and only proposes what's still missing. Re-running `/lazy-spec.create-from-code <compound-key>` also re-surfaces Agent D's current candidate list from Step 3, in case a sub-area you skipped earlier now looks more feature-shaped.
+- **Get richer gap-scan signal** — if the coverage report says `structure-absent` or `domains-not-configured`, the gap-scan fell back to a raw scan of your source paths. Build the project-structure map with `/lazy-wiki.structure rebuild`, or configure and sync the domain groups through `/lazy-wiki.configure` and `/lazy-wiki.domain-sync`, then re-run `/lazy-spec.coverage <compound-key>`. A design-only product has no code side, so coverage reports "no code binding — nothing to gap-scan" until you add source paths through `/lazy-spec.product-config`.
 - **Keep docs in sync with code** — when source changes land, run `/lazy-spec.sync-with-code <compound-key>` to surface behavior changes for the design doc and propose gate/stage corrections (e.g. flipping an open release's `spec_develop_done`) grounded in what actually shipped — always with your confirmation before anything is written.
 - **Drive assets through their gates** — a feature's own ladder is `spec_design_done`, closed by `spec.coordinator` once its `design.md` is approved (or by you via `/lazy-spec.flip-gate`), then `spec_released`, set when a release that carries it is published. Implementation, plans and tests run in a release: tick `Start release` on the product's folder-note when approved assets are waiting, then `Publish` on the release note once its build and tests are done (the `lazy-spec.gate-tick` routine itself only polls jobs and checks note structure).
 - **Write the product's shared UI look** — once `vision.md` approves, tick the `Write ui-design` checkbox on the product's folder-note if your product needs one place for its design system, recurring screen patterns, and navigation skeleton; each asset's own `ui-design.md` then refines that shared look rather than inventing its own.

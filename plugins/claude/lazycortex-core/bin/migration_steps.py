@@ -22,6 +22,8 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import lazy_setup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from constants import (  # noqa: E402
   MigrationFile, MigrationKey, MigrationTerritory, SettingsFile, SettingsKey,
@@ -751,11 +753,14 @@ def _run_verb(argv: list[str], repo: Path, home: Path) -> tuple[bool, str]:
       it could not judge.
   """
   plugin, verb, *args = argv
-  resolved = lazy_setup.plugin_root(plugin, repo, home)
 
-  # guard: the plugin is not on this machine
-  if resolved is None:
+  # guard: no stage resolves the plugin
+  try:
+    resolved = lazy_setup.plugin_root(plugin, repo, home)
+  except plugin_locator.PluginNotFoundError:
     return False, _ReasonKind.PLUGIN_MISSING
+
+  # the plugin's CLI is named after the plugin's short name, in the found root's bin directory
   short = plugin.split("@", 1)[0].removeprefix(_PLUGIN_PREFIX)
   cli = Path(resolved["root"]) / _BIN_DIR / f"{_PLUGIN_PREFIX}{short}"
 
@@ -1109,8 +1114,9 @@ def _is_in_territory(glob: str, spec_root: str | None, terms: tuple[str, ...] | 
 
   # Domain(install.reconciliation):
   # # A migration step writes only what the plugins own in a consumer repository
-  # A step may touch the Claude configuration tree, the generated domain-document tree, the tracked state
-  # corner, the project's Python tool configuration file, and the spec catalog. Through the terms token only,
+  # A step may touch the Claude configuration tree, the generated domain-document tree, the project guideline
+  # tree whose files the plugins' installs scaffold, the tracked state corner, the project's Python tool
+  # configuration file, and the spec catalog. Through the terms token only,
   # it may also touch each terms scope's dictionary: its legacy dictionary file, the term files in its
   # dictionary directory, and the documents the scope serves. A path written literally that names a
   # dictionary is still outside. Anything else, the consumer's own code above all, is outside; so is any

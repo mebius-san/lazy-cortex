@@ -48,10 +48,10 @@ import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import review_rows  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
-import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
-import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -59,6 +59,9 @@ import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-pos
 # sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import ConflictCallout, ConflictKey, Gate, Section, SpecMomentKey  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from spec_lockit import Lockit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _ENCODING = "utf-8"
@@ -67,8 +70,6 @@ _QUOTE = ">"
 _MD_SUFFIX = ".md"
 _H1_PREFIX = "# "
 _GIT_DIR = ".git"
-# The env var the daemon exports for every subprocess it spawns
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # The bot identity the three verbs commit under
 BOT_NAME = "lazy-spec.coherence"
@@ -105,6 +106,14 @@ _DISMISS_TICKED_RE = re.compile(rf"^{_QUOTE}\s*-\s*\[[xX]\]\s*{re.escape(Conflic
 _RESOLVE_TICKED_RE = re.compile(rf"^{_QUOTE}\s*-\s*\[[xX]\]\s*{re.escape(ConflictCallout.RESOLVE)}\s*$")
 # The refusal reason when the document's callouts carry no ticked `Not a conflict` box
 NOTHING_TICKED = "nothing-ticked"
+# The lockit key of the line written into a callout whose two boxes were both ticked and are cleared
+BOTH_TICKED_KEY = "coherence.both-ticked"
+# The summary key counting the callouts whose two boxes were both ticked
+_BOTH_TICKED = "both_ticked"
+# A ticked box of a callout, captured up to the tick so the tick alone is replaced
+_TICKED_BOX_RE = re.compile(rf"^({_QUOTE}\s*-\s*\[)[xX](\])")
+# What `_TICKED_BOX_RE` puts back: the box with a space where its tick stood
+_UNTICKED_BOX = r"\1 \2"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1146,6 +1155,7 @@ class _TakeDown:
     picked: The ticked callouts' blocks, in note order.
     selected: The ticked callouts' conflicts, in note order.
     others: The documents the ticked callouts list, in first-listed order.
+    both_ticked: How many of the document's callouts had both boxes ticked, so were kept with both cleared.
   """
 
   # The note and the mirror notes, keyed by path
@@ -1166,10 +1176,16 @@ class _TakeDown:
   # The documents the ticked callouts list, in first-listed order
   others: list[str]
 
+  # How many of the document's callouts had both boxes ticked, so were kept with both cleared
+  both_ticked: int = 0
+
 
 def _take_down(repo: Path, note: Path, doc: str, ticked: re.Pattern[str]) -> _TakeDown:
   """
   Take a document's ticked callouts out of a note, in memory, with the notes of the documents they list loaded.
+
+  A callout with both its boxes ticked is not taken down: it stays in the note, with both boxes unticked and one
+  line telling the operator that neither verb fired, and its mirrors stay as they are.
 
   Args:
     repo: The repository root.
@@ -1178,12 +1194,13 @@ def _take_down(repo: Path, note: Path, doc: str, ticked: re.Pattern[str]) -> _Ta
     ticked: The pattern of the ticked box that picks a callout.
 
   Returns:
-    The notes with the ticked callouts taken down, the mirrors not yet touched and nothing written.
+    The notes with the callouts ticked once for the verb taken down, the mirrors not yet touched and nothing
+    written; the count of callouts kept with both boxes cleared is in `both_ticked`.
 
   Raises:
     ValueError: If the note does not exist, has no `# Gates` section, or holds no callout for the document, a
-      mirror note has no `# Gates` section, or none of the document's callouts has the box ticked (reason
-      `nothing-ticked`).
+      mirror note has no `# Gates` section, or no callout of the document has the verb's box ticked and none has
+      both boxes ticked (reason `nothing-ticked`).
   """
   states = { note: _load_note(repo, note) }
   own = states[note]
@@ -1193,11 +1210,22 @@ def _take_down(repo: Path, note: Path, doc: str, ticked: re.Pattern[str]) -> _Ta
   if not candidates:
     raise ValueError(f"no conflict callout for {doc} in {_rel(repo, note)}")
 
-  # only the callouts whose box the operator ticked are taken down
-  picked = [ block for block in candidates if any(ticked.match(line) for line in block[0]) ]
+  # Domain(spec.coherence):
+  # # Both boxes of a conflict ticked at once fire neither
+  # Sending a conflict back to be resolved and declaring it no conflict contradict each other, so a conflict whose
+  # two boxes the operator ticked at once is neither resolved nor dismissed: it stays in place on every note, both
+  # boxes are cleared, and a line in it tells the operator that neither fired and to tick one. The document's other
+  # conflicts, each ticked once, are carried out as usual.
+
+  # a callout with both boxes ticked is set apart, and only the callouts ticked once for this verb are taken down
+  both = [ block for block in candidates if _is_both_ticked(block[0]) ]
+  picked = [
+      block for block in candidates
+      if not any(block is both_block for both_block in both) and any(ticked.match(line) for line in block[0])
+  ]
 
   # guard: without a ticked box the operator asked for nothing, and nothing is taken down
-  if not picked:
+  if not picked and not both:
     raise ValueError(NOTHING_TICKED)
   selected = [ conflict for _lines, conflict in picked if conflict is not None ]
 
@@ -1209,10 +1237,49 @@ def _take_down(repo: Path, note: Path, doc: str, ticked: re.Pattern[str]) -> _Ta
       states[path] = state
   originals = _snapshot(states)
 
-  # the ticked callouts go from this note
-  own.blocks = [ block for block in own.blocks if not any(block is chosen for chosen in picked) ]
+  # the ticked callouts go from this note, and a callout ticked both ways stays with its boxes cleared
+  notice = Lockit.text(BOTH_TICKED_KEY, note_explainers.lang_for_note(note))
+  own.blocks = [
+      ( _clear_both(block[0], notice), block[1] ) if any(block is both_block for both_block in both) else block
+      for block in own.blocks if not any(block is chosen for chosen in picked)
+  ]
   return _TakeDown(states = states, originals = originals, own = own, picked = picked, selected = selected,
-                   others = others)
+                   others = others, both_ticked = len(both))
+
+
+def _is_both_ticked(lines: list[str]) -> bool:
+  """
+  Judge whether both boxes of a conflict callout are ticked.
+
+  Args:
+    lines: The callout's lines, title first.
+
+  Returns:
+    `True` when the `Resolve here` box and the `Not a conflict` box are both ticked.
+  """
+  return (
+      any(_RESOLVE_TICKED_RE.match(line) for line in lines) and any(_DISMISS_TICKED_RE.match(line) for line in lines)
+  )
+
+
+def _clear_both(lines: list[str], notice: str) -> list[str]:
+  """
+  Untick both boxes of a conflict callout and write the both-ticked line under its last box.
+
+  Args:
+    lines: The callout's lines, title first.
+    notice: The both-ticked line, in the note's language.
+
+  Returns:
+    The callout's lines with no box ticked and `notice` under the last box, never twice.
+  """
+  cleared = [ _TICKED_BOX_RE.sub(_UNTICKED_BOX, line, count = 1) for line in lines ]
+
+  # guard: a callout that already says it keeps one line
+  if f"{_QUOTE} {notice}" in cleared:
+    return cleared
+  last_box = max(index for index, line in enumerate(cleared) if _BOX_RE.match(line))
+  return [ *cleared[:last_box + 1], f"{_QUOTE} {notice}", *cleared[last_box + 1:] ]
 
 
 def _mirror(repo: Path, down: _TakeDown, other: str) -> _NoteState | None:
@@ -1254,18 +1321,22 @@ def dismiss(repo: Path, note: Path, doc: str) -> dict:
   documents stay in both notes. The pair is nevertheless recorded as no conflict on both notes, so it is not raised
   again until either document is approved again. A mirror note that does not exist is skipped.
 
+  A callout with both its `Resolve here` and `Not a conflict` boxes ticked is dismissed neither way: it stays, with
+  both boxes unticked and a line saying to tick one, and no pair is recorded for it.
+
   Args:
     repo: The repository root.
     note: The folder-note holding the callouts.
     doc: The repo-relative inner document of the callouts.
 
   Returns:
-    `{"notes"}`: the repo-relative notes rewritten, in sorted order.
+    `{"notes", "both_ticked"}`: the repo-relative notes rewritten, in sorted order, and how many callouts were kept
+    with both boxes cleared.
 
   Raises:
     ValueError: If the note does not exist, has no `# Gates` section, or holds no callout for the document, a
-      mirror note has no `# Gates` section, none of the document's callouts has its `Not a conflict` box ticked
-      (reason `nothing-ticked`), or the commit failed; nothing is written then.
+      mirror note has no `# Gates` section, no callout of the document has its `Not a conflict` box ticked and none
+      has both boxes ticked (reason `nothing-ticked`), or the commit failed; nothing is written then.
   """
   down = _take_down(repo, note, doc, _DISMISS_TICKED_RE)
 
@@ -1292,7 +1363,7 @@ def dismiss(repo: Path, note: Path, doc: str) -> dict:
 
   # every changed note on disk, then one commit for all of them
   touched = _write_and_commit(repo, down.states, down.originals, f"{BOT_NAME}: dismiss conflicts of {doc}")
-  return { _NOTES: sorted(_rel(repo, path) for path in touched) }
+  return { _NOTES: sorted(_rel(repo, path) for path in touched), _BOTH_TICKED: down.both_ticked }
 
 
 def resolve(repo: Path, note: Path, doc: str) -> dict:
@@ -1303,19 +1374,22 @@ def resolve(repo: Path, note: Path, doc: str) -> dict:
   conflict. A mirror loses the document only from the callouts stating the picked essence, and a mirror note that
   does not exist is skipped.
 
+  A callout with both its `Resolve here` and `Not a conflict` boxes ticked is not sent for resolution: it stays,
+  with both boxes unticked and a line saying to tick one.
+
   Args:
     repo: The repository root.
     note: The folder-note holding the callout.
     doc: The repo-relative inner document of the callout.
 
   Returns:
-    `{"doc", "conflicts"}`: the document and, per callout taken down in note order, its `essence` and the
-    repo-relative documents it listed under `with`.
+    `{"doc", "conflicts", "both_ticked"}`: the document, per callout taken down in note order its `essence` and the
+    repo-relative documents it listed under `with`, and how many callouts were kept with both boxes cleared.
 
   Raises:
     ValueError: If the note does not exist, has no `# Gates` section, or holds no callout for the document, a
-      mirror note has no `# Gates` section, none of the document's callouts has its `Resolve here` box ticked
-      (reason `nothing-ticked`), or the commit failed; nothing is written then.
+      mirror note has no `# Gates` section, no callout of the document has its `Resolve here` box ticked and none
+      has both boxes ticked (reason `nothing-ticked`), or the commit failed; nothing is written then.
   """
 
   # Domain(spec.coherence):
@@ -1336,7 +1410,7 @@ def resolve(repo: Path, note: Path, doc: str) -> dict:
   # every changed note on disk, then one commit for all of them
   _write_and_commit(repo, down.states, down.originals, f"{BOT_NAME}: resolve conflicts of {doc}")
   return { _DOC: doc, _CONFLICTS: [ { _ESSENCE: conflict.essence, _WITH: list(conflict.with_docs) }
-                                    for conflict in down.selected ] }
+                                    for conflict in down.selected ], _BOTH_TICKED: down.both_ticked }
 
 
 def _refuse(reason: str) -> int:
@@ -1351,16 +1425,6 @@ def _refuse(reason: str) -> int:
   """
   print(json.dumps({ _STATUS: _STATUS_REFUSED, _REASON: reason }))
   return 1
-
-
-def repo_root() -> Path:
-  """
-  Resolve the repository root from `LAZY_REPO_ROOT`, falling back to the process working directory.
-
-  Returns:
-    The repository root.
-  """
-  return scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
 
 
 def main_apply(argv: list[str]) -> int:
@@ -1390,7 +1454,9 @@ def main_apply(argv: list[str]) -> int:
   parser.add_argument(gate_tick.COHERENCE_HISTORY_LINE_FLAG, default = None)
   parser.add_argument(gate_tick.COHERENCE_HISTORY_DATE_FLAG, default = None)
   args = parser.parse_args(argv)
-  repo = repo_root()
+
+  # the job directory, relative to the root of the checkout the run works in unless it is absolute
+  repo = spec_locator.query_repo_root()
   job_dir = Path(args.job_dir) if Path(args.job_dir).is_absolute() else repo / args.job_dir
 
   # the note the check's History line goes into, when the caller names one
@@ -1415,9 +1481,10 @@ def main_dismiss(argv: list[str]) -> int:
   Notes:
     - Only the ticked callouts and the mirror callouts stating the same essence go; the other callouts of the pair
       stay in both notes, while the pair is recorded as no conflict on both.
-    - Prints `{"notes"}` on stdout, or `{"status": "refused", "reason"}` when the note or the callout is missing,
-      none of the document's callouts is ticked (reason `nothing-ticked`), a note it reaches has no `# Gates`
-      section or the commit failed, in which case nothing is written.
+    - A callout with both boxes ticked is kept, with both boxes cleared and a line saying to tick one.
+    - Prints `{"notes", "both_ticked"}` on stdout, or `{"status": "refused", "reason"}` when the note or the callout
+      is missing, no callout is ticked for the verb and none has both boxes ticked (reason `nothing-ticked`), a note
+      it reaches has no `# Gates` section or the commit failed, in which case nothing is written.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -1432,7 +1499,7 @@ def main_dismiss(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("doc")
   args = parser.parse_args(argv)
-  repo = repo_root()
+  repo = spec_locator.query_repo_root()
   note = Path(args.note) if Path(args.note).is_absolute() else repo / args.note
 
   # the whole dismissal, refused as one when the note, the callout or a mirror note is unusable
@@ -1450,9 +1517,11 @@ def main_resolve(argv: list[str]) -> int:
 
   Notes:
     - Callouts of the document whose `Resolve here` box is not ticked stay in the note.
-    - Prints `{"doc", "conflicts"}` on stdout, or `{"status": "refused", "reason"}` when the note or the callout is
-      missing, none of the document's callouts is ticked (reason `nothing-ticked`), a note it reaches has no
-      `# Gates` section or the commit failed, in which case nothing is written.
+    - A callout with both boxes ticked is kept, with both boxes cleared and a line saying to tick one.
+    - Prints `{"doc", "conflicts", "both_ticked"}` on stdout, or `{"status": "refused", "reason"}` when the note or
+      the callout is missing, no callout is ticked for the verb and none has both boxes ticked (reason
+      `nothing-ticked`), a note it reaches has no `# Gates` section or the commit failed, in which case nothing is
+      written.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -1467,7 +1536,7 @@ def main_resolve(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("doc")
   args = parser.parse_args(argv)
-  repo = repo_root()
+  repo = spec_locator.query_repo_root()
   note = Path(args.note) if Path(args.note).is_absolute() else repo / args.note
 
   # the whole resolution, refused as one when the note, the callout or a mirror note is unusable

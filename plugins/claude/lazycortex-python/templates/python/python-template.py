@@ -1,4 +1,4 @@
-# This template encodes coding_guidelines.md § Module Structure + § Import Organization.
+# This template encodes lazy-python.coding-guidelines.md § Module Structure + § Import Organization.
 # A file that defines classes carries NO module docstring — each class documents itself.
 # A file that defines none (a CLI entry point, a worker script) may open with one, placed
 # where this comment block sits; __init__.py always carries one (scaffolded from

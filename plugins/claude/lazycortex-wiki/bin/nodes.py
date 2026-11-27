@@ -22,21 +22,33 @@ import hashlib
 import json
 import os
 import re
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import axes as _axes  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from markers import Markers  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from term_link_syntax import TermLink  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from textfile import TextFile  # pylint: disable=import-error
+import sys
+from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from pathlib import Path
-
   from collections.abc import Sequence
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import wiki_locator as _wiki_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from markers import Markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from term_link_syntax import TermLink  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from textfile import TextFile  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -82,9 +94,6 @@ _MIN_QUOTED_LEN = 2
 # inner text) and code nodes (individual `<wiki>` see-also entries).
 _SEE_ALSO_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
-# Directory whose presence marks a repository root.
-_GIT_DIR = ".git"
-
 # Plain scalars YAML would read as a number, a timestamp, or a special float rather than a string.
 _YAML_RETYPED_RE = re.compile(
   r"^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
@@ -127,21 +136,18 @@ _COMMENT_CHAR = "#"
 _LINE_BREAK_ESCAPES = { "\n": "\\n", "\r": "\\r", "\x85": "\\N", "\u2028": "\\L", "\u2029": "\\P" }
 
 
-def _repo_root_for(node_path: Path) -> Path | None:
+def _find_repo_root_for(node_path: Path) -> Path | None:
   """
-  Return the nearest ancestor directory of `node_path` that holds a `.git` entry.
+  Return the root of the git checkout a node sits in.
 
   Args:
     node_path: Absolute path to a node file.
 
   Returns:
-    The repository root, or `None` when no ancestor carries `.git`.
+    The checkout root, a linked worktree's own root inside one, or `None` when the node is not inside a git
+    repository.
   """
-  for parent in node_path.resolve().parents:
-    # this ancestor is the repository root sought
-    if (parent / _GIT_DIR).exists():
-      return parent
-  return None
+  return _wiki_locator.find_checkout_toplevel(node_path.resolve().parent)
 
 
 def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
@@ -189,7 +195,7 @@ def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
   # of its target within the repository — the same string no matter which node states the link.
 
   # every base is bounded by the repository, so a node outside one has nothing to resolve against
-  repo = _repo_root_for(node_path)
+  repo = _find_repo_root_for(node_path)
 
   # guard: node lives outside any repository — no base to try
   if repo is None:
@@ -312,7 +318,7 @@ def repo_relative_see_also_target(target: str, node_path: Path) -> str:
   # guard: unresolvable — nothing to express
   if abs_target is None:
     return target
-  repo = _repo_root_for(node_path)
+  repo = _find_repo_root_for(node_path)
 
   # guard: no repository root to anchor against
   if repo is None:
@@ -1651,13 +1657,15 @@ class MarkdownNode:
     Return the terms dictionary directories whose links the source hash reads as their words.
 
     Returns:
-      The directories of the repository the file lives in; empty when the file lies in no repository.
+      The dictionary directories declared by the nearest settings root the file sits under; empty when the file
+      lies in no repository.
     """
-    # the repository the file lives in, if any
-    root = _repo_root_for(self._path)
+    # guard: a file outside every repository has no settings to name dictionary directories
+    if _find_repo_root_for(self._path) is None:
+      return ()
 
-    # the repository's directories come from the settings read every caller of the process shares
-    return () if root is None else tuple(_axes.DictionaryDirs.read(root))
+    # the directories come from the nearest settings the file sits under, the root the wiki verbs read scopes from
+    return tuple(_axes.DictionaryDirs.read(_wiki_locator.query_settings_root(self._path.resolve().parent)))
 
 
 # ────────────────────────────────────────────────────────────────────────────

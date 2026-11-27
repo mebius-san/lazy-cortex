@@ -21,9 +21,6 @@ coordinator lands such a cascade fold through the `--target` call. A `--target` 
 
 `gate_tick.py` calls this on a job's `DONE`, before the coordinator opens review with the
 review system's `submit` verb — so the document the coordinator submits is already tracked.
-The path checks are mirrored file-wise from `lazycortex-review`'s own `payload.py` rather
-than imported: a cross-plugin Python import would break in a consumer install where the two
-plugins live at unrelated cache paths (`dev.plugin-boundaries.md` § 2a).
 """
 from __future__ import annotations
 
@@ -86,6 +83,7 @@ _OUTCOME_KEY = "outcome"
 _OUTCOME_EDITED = "edited"
 _OUTCOME_ERROR = "error"
 _OUTCOME_DEFERRED = "deferred"
+_OUTCOME_SEPARATOR = ","
 _RESULT_KEY = "result"
 _PATH_KEY = "path"
 
@@ -301,29 +299,36 @@ def _select_entries(job_dir: Path, target_doc: Path) -> list[object]:
   """
   Select the `result` entries one finished job's outcome entitles it to land.
 
+  Notes:
+    - An outcome read as an edit, with no `error` or `deferred` token, whose tokens are not exactly `edited` is
+      reported on stderr in one line naming it.
+
   Args:
     job_dir: The job-bundle directory.
     target_doc: The path the job's result document takes.
 
   Returns:
-    The response's `result` array when the job finished with an edit, or with an error against
-    a report journal; empty when the response declares no files, the work was deferred, or the
-    job failed against any other document.
+    The response's `result` array when the outcome names at least one word and none of its tokens is `error` or
+    `deferred`, and when a token is `error` against a report journal; empty when the response declares no files,
+    when the tokens include `deferred` without `error`, or when they include `error` against any other document.
 
   Raises:
-    LandResultError: If the response is unreadable, or declares files under an outcome that is
-      neither an edit nor an error.
+    LandResultError: If the response is unreadable, or declares files under an outcome naming no word.
   """
 
   # Domain(spec.lifecycle):
   # # What a job's outcome entitles it to deliver
-  # A job delivers files only by saying it finished its edit. A job that says it failed delivers
+  # A job delivers files by saying it finished its edit. A job that says it failed delivers
   # nothing, with one exception: a report journal records every run, the failed one included, so
   # the journal of a failed run is delivered like any other and the operator reads the failure
   # where the successes are. A job that deferred its work, or declared no files, delivers
-  # nothing and that is an ordinary ending. A job that declares files under any other word has
-  # produced work the system cannot place: that is a failure of the delivery, reported as one,
-  # never an empty ending.
+  # nothing and that is an ordinary ending. A job that declares files under any named word other
+  # than `error` and `deferred` is delivered as a finished edit. The off-protocol word is noted
+  # where the operator can see it, and the delivery still has to name its own document first. A
+  # job that declares files without naming any word at all has broken the response envelope:
+  # that is a failure of the delivery, reported as one, never an empty ending. An outcome may
+  # name several words at once; it is read as that set of words, and a failure among them
+  # outweighs a deferral, so a failed run's journal is still delivered.
 
   response = _read_response(job_dir)
 
@@ -333,19 +338,35 @@ def _select_entries(job_dir: Path, target_doc: Path) -> list[object]:
   entries = _declared_entries(response)
   outcome = response.get(_OUTCOME_KEY)
 
-  # guard: nothing declared, or the work was deliberately not done — an ordinary empty ending
-  if not entries or outcome == _OUTCOME_DEFERRED:
+  # the outcome is a comma-separated token list: each part stripped, blank parts dropped, a non-string has none
+  tokens = { token.strip() for token in outcome.split(_OUTCOME_SEPARATOR) if token.strip() } \
+      if isinstance(outcome, str) else set()
+
+  # guard: nothing declared — an ordinary empty ending
+  if not entries:
     return []
 
-  # a failed job lands only the journal that records the failure
-  if outcome == _OUTCOME_ERROR:
+  # a failed job lands only the journal that records the failure; a failure outweighs a deferral
+  if _OUTCOME_ERROR in tokens:
     return entries if target_doc.name in _JOURNAL_DOCS else []
 
-  # guard: files declared under a word that is not the success value cannot be placed
-  if outcome != _OUTCOME_EDITED:
+  # a job that deliberately did not do its work delivers nothing — an ordinary empty ending
+  if _OUTCOME_DEFERRED in tokens:
+    return []
+
+  # guard: files declared under no named word at all are a broken envelope, never an edit
+  if not tokens:
     raise LandResultError(
-        f"outcome {outcome!r} is not {_OUTCOME_EDITED!r}, yet the response declares "
-        f"{len(entries)} result file(s)")
+        f"outcome {outcome!r} names no word, yet the response declares {len(entries)} result file(s)")
+
+  # Decision: land an off-protocol word as an edit, not refuse it — the word is the writer's choice, not a verdict
+  # on the work, and every landed document still goes to the operator's review before anything closes, so an
+  # unexpected word never lets an unchecked result through.
+
+  # any other word lands as an edit; one that is not the success value is noted, never refused
+  if tokens != { _OUTCOME_EDITED }:
+    sys.stderr.write(
+        f"land-result: {job_dir.name}: outcome {outcome!r} is not {_OUTCOME_EDITED!r}; read as an edit\n")
   return entries
 
 
@@ -378,7 +399,7 @@ def _is_inside(path: Path, root: Path) -> bool:
   return path.is_relative_to(root.resolve())
 
 
-def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
+def find_document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   """
   Name the path one dispatched job's result document takes, as the dispatch declared it.
 
@@ -411,7 +432,7 @@ def document_target(job_dir: Path, asset_dir: Path) -> Path | None:
   return target
 
 
-def foreign_target(job_dir: Path, asset_dir: Path) -> Path | None:
+def find_foreign_target(job_dir: Path, asset_dir: Path) -> Path | None:
   """
   Name the catalog path a dispatched job's document takes when it lies outside the job's own asset folder.
 
@@ -480,8 +501,8 @@ def _resolve_target(job_dir: Path, asset_dir: Path) -> tuple[Path | None, str]:
   # guard: a dispatch payload that cannot be read names no target at all
   try:
     request = json.loads((job_dir / _REQUEST_FILE).read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError) as exc:
-    return None, f"unreadable {_REQUEST_FILE}: {exc}"
+  except (OSError, json.JSONDecodeError) as error:
+    return None, f"unreadable {_REQUEST_FILE}: {error}"
   raw = request.get(_TARGET_DOC_KEY) if isinstance(request, dict) else None
 
   # guard: a job that declared no target has nowhere to put its document
@@ -575,10 +596,13 @@ def _compose_document(repo: Path, target_doc: Path, body: str) -> str:
   # # A landed journal keeps or gains the spec keys
   # A report journal is returned whole by the job that ran, and on the first run the job writes it from nothing,
   # without the keys every spec document carries: its role, its type, its product tag, its topic pins and its icon.
-  # A journal that brings them along lands as it came. A journal already on disk with them keeps the ones it has when
-  # the job returned the text without them, so no job can strip them. A journal landing for the first time beside its
-  # asset's note gets exactly the keys a fresh seed of that journal beside that note would carry. Only a journal with
-  # no keys of its own, no keyed copy on disk and no note to seed from lands as the job returned it.
+  # A journal is taken as keyed by its role key alone. A journal returned with its role lands as it came. A journal
+  # returned without its role, whose copy on disk carries the role, lands under the whole frontmatter of the copy on
+  # disk, which replaces whatever frontmatter the job returned, so no job can strip them. A journal landing for the
+  # first time beside its asset's note is seeded: the seed adds the keys a fresh seed of that journal beside that
+  # note would carry, while every key the returned journal already has keeps its own value. A journal returned
+  # without its role, with no copy on disk carrying the role and no note beside it to seed from, lands exactly as
+  # the job returned it, whatever other keys it carries.
 
   values, body_end = flip_gate.parse_frontmatter(body)
 
@@ -623,7 +647,7 @@ def _commit(repo: Path, paths: list[str]) -> None:
   )
 
 
-def _snapshot(destinations: list[Path]) -> dict[Path, bytes | None]:
+def _read_snapshot(destinations: list[Path]) -> dict[Path, bytes | None]:
   """
   Record what each destination holds before the landing writes a byte.
 
@@ -636,7 +660,7 @@ def _snapshot(destinations: list[Path]) -> dict[Path, bytes | None]:
   return {dest: dest.read_bytes() if dest.is_file() else None for dest in destinations}
 
 
-def _indexed(repo: Path, paths: list[str]) -> set[str]:
+def _query_indexed_paths(repo: Path, paths: list[str]) -> set[str]:
   """
   Select the paths the shared git index already carries.
 
@@ -688,10 +712,10 @@ def _unstage(repo: Path, paths: list[str]) -> None:
 
 def _restore(snapshot: dict[Path, bytes | None]) -> None:
   """
-  Put every destination back to what `_snapshot` found there.
+  Put every destination back to what `_read_snapshot` found there.
 
   Args:
-    snapshot: The mapping `_snapshot` returned before the landing's first write.
+    snapshot: The mapping `_read_snapshot` returned before the landing's first write.
   """
   for dest, before in snapshot.items():
     # a destination the landing itself created is removed, not left behind empty
@@ -707,18 +731,20 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
 
   Guarantees:
     - Writes nothing and commits nothing when the job has nothing to deliver — the response
-      declares no files, the work was deferred, or the job ended in error against a document
-      that is not a report journal — and reports `empty`.
+      declares no files, the outcome's tokens include `deferred` but not `error`, or they include `error`
+      against a document that is not a report journal — and reports `empty`.
     - Writes nothing and commits nothing when the landing is refused, and reports `refused` with
       a one-line reason, which the gate tick turns into a halted asset. A landing
-      is refused when `response.json` is unreadable, when files are declared under an outcome
-      that is neither `edited` nor `error`, when an entry is not a plain filename under
+      is refused when `response.json` is unreadable, when the response declares files under an outcome
+      that names no word, when an entry is not a plain filename under
       `result/`, when the bundle file is a symlink or absent, when the document's basename is
       not the target's, or when an attachment's destination is a symlink, the result document,
-      or a spec catalog's own note, or when the frontmatter a report journal needs cannot be seeded — no template
-      fits it, or the settings the seed depends on cannot be read.
-    - A job that ended in `error` against `code-report.md` or `test-report.md` lands its files
-      like one that ended with an edit.
+      or a spec catalog's own note, or when the frontmatter a report journal needs cannot be
+      seeded — no template fits it, or the settings the seed depends on cannot be read.
+    - A job whose outcome's tokens include `error` against `code-report.md` or `test-report.md` lands its
+      files like one that ended with an edit.
+    - A response declaring files under an outcome with at least one token, and neither `error` nor `deferred`
+      among its tokens, lands like `edited`.
     - A report journal (`code-report.md` or `test-report.md`) whose returned body carries no `spec_role` frontmatter
       lands keeping the existing target's frontmatter when that carries `spec_role`. Otherwise, when the journal's
       folder-note exists beside it, it lands with the frontmatter a fresh `seed-doc` of that journal beside that note
@@ -734,6 +760,13 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
       the landing — one the landing created is removed — takes back only the intent-to-add
       registrations the landing made, so the operator's staged entries survive, and re-raises
       the failure.
+
+  Notes:
+    - Writes a one-line reason to stderr on every refusal.
+    - Writes one line to stderr per link to a missing neighbour and per attachment no link references.
+    - Writes one line to stderr when the outcome is read as an edit although its tokens are not exactly `edited`;
+      the line is written when the outcome is read, before the entry checks, so it also appears for a landing
+      refused later.
 
   Args:
     job_dir: The finished job's bundle directory.
@@ -773,6 +806,12 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
   # not make is reported `refused`, with a one-line reason. A refusal is never reported as
   # `empty`, because the caller halts the asset on `refused` and retires the job on `empty`.
 
+  # Contract:
+  # Declared files land under any named word other than `error` and `deferred` — every outcome with at least one
+  # token and neither of those two among them — exactly as under `edited`; such an outcome is never by itself a
+  # reason to refuse. Declared files under an outcome that names no word — absent, empty, or not a string — are
+  # refused.
+
   try:
     entries = _select_entries(job_dir, target_doc)
 
@@ -790,8 +829,8 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
     for index, name in enumerate(names):
       _require_entry_lands(job_dir / _RESULT_DIR / name,
                            None if index == 0 else target_doc.parent / name, target_doc)
-  except LandResultError as exc:
-    return _refuse_landing(job_dir, str(exc))
+  except LandResultError as error:
+    return _refuse_landing(job_dir, str(error))
 
   # the document text as it lands, built before anything is written so a journal that cannot be given its spec
   # keys lands nothing at all
@@ -804,8 +843,8 @@ def land_result(job_dir: Path, target_doc: Path) -> dict:
 
   # what every destination holds right now, so a failed commit can undo the whole landing
   destinations = [target_doc, *(target_doc.parent / name for name in names[1:])]
-  before = _snapshot(destinations)
-  indexed = _indexed(repo, [str(dest.resolve().relative_to(repo.resolve())) for dest in destinations])
+  before = _read_snapshot(destinations)
+  indexed = _query_indexed_paths(repo, [str(dest.resolve().relative_to(repo.resolve())) for dest in destinations])
   landed: list[str] = []
 
   # write and commit as one step: whatever the folder held comes back if the commit does not land

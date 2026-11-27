@@ -50,7 +50,7 @@ Read the canonical guidelines from the plugin:
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md`
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.checking-guidelines.md`
 
-Then read the project overlay files of the same topics under `${CLAUDE_PROJECT_DIR}/docs/guidelines/` where they exist; the overlay overrides the canon on conflict.
+Then read the project overlay files of the same topics under `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/` where they exist; the overlay overrides the canon on conflict.
 
 Outcome: `guidelines-loaded`.
 

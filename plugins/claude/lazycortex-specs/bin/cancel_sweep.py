@@ -29,16 +29,21 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_uncancel  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import FlipResult  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _MD_SUFFIX = ".md"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # waiver: the result's own wire-shape keys, read by the migration step and the tests
 _PENDING_KEY = "pending"
@@ -169,9 +174,10 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Command-line arguments, excluding the program name; `--dry-run` lists without writing, `--check` lists
-      without writing and answers through the exit code whether an asset is left behind, `--cwd` names the
-      repository root (falling back to the `LAZY_REPO_ROOT` environment variable, then the process working
-      directory).
+      without writing and answers through the exit code whether an asset is left behind, `--cwd` names a
+      directory inside the repository (falling back to the `LAZY_REPO_ROOT` environment variable, then the process
+      working directory); the run works in the nearest directory at or above it, within its checkout, that holds
+      `.claude/lazy.settings.json`, else the checkout's root.
 
   Returns:
     Exit code: with `--check`, 0 when an asset is left behind and 1 when none is; otherwise 2 when any asset's sweep
@@ -208,12 +214,9 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--cwd", default = None)
   args = parser.parse_args(argv)
 
-  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
   # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
   try:
-    result = sweep(repo, dry_run = args.dry_run or args.check)
+    result = sweep(spec_locator.query_settings_root(args.cwd), dry_run = args.dry_run or args.check)
   # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught

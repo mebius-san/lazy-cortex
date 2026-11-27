@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.domain-sync
 description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. An optional group key limits the run to one group; reading the tree is `/lazy-wiki.domains`."
-allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent
+allowed-tools: Read, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(date -u *), Bash(git *), Bash(wc *), Bash(mkdir -p *), Bash(rm *), Write, Agent
 ---
 # lazy-wiki.domain-sync
 
@@ -28,10 +28,10 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Compute the domain plan
 
-Compute `<repo-root>` via `Bash(git rev-parse --show-toplevel)`, then run — with `--group <group-key>` appended when the invocation named one:
+Compute `<settings-root>`, the directory whose settings declare the domain tree, via `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root)` — the nearest directory holding `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer; the domain tree, its documents and every `--repo` below hang off it. Compute `<repo-root>`, the checkout's root that holds the run's scratch under `.runtime/`, via `Bash(git rev-parse --show-toplevel)`. Then run — with `--group <group-key>` appended when the invocation named one:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-plan --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-plan --repo <settings-root>)
 ```
 
 A non-zero exit means `wiki.domains` is not configured — surface the message, point at `/lazy-wiki.configure domains`, and stop.
@@ -49,20 +49,20 @@ Outcome: `planned: changed=<n> orphaned=<m> unknown=<k> untitled=<u>`.
 For each entry in `changed_groups`, write its payload to the gitignored runtime area:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-payload --group <group> --out <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/payload.json --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-payload --group <group> --out <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/payload.json --repo <settings-root>)
 ```
 
 It prints `{"payload": <path>, "files": [<names>]}` — `files` are the file names the writer must return: the folder note's first, then every stale doc's. Create the writer's output directory with `Bash(mkdir -p <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out)`, then dispatch the writer synchronously — **no job dir**:
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.domain-spec-writer",
-      prompt: "kind=domain-spec, tail=false. repo_root=<repo-root>, payload_path=<the printed payload path>, output_dir=<repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out. Write every file named here into output_dir: <the printed files>. Never write into the working tree and never run git. Report the files written and every discrepancy between the comments and the code.")
+      prompt: "kind=domain-spec, tail=false. repo_root=<settings-root>, payload_path=<the printed payload path>, output_dir=<repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out. Write every file named here into output_dir: <the printed files>. Never write into the working tree and never run git. Report the files written and every discrepancy between the comments and the code.")
 ```
 
-Before landing anything, confirm that every name in `files` exists in the output directory and is not empty (`Bash(test -s <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out/<name>)` per name). When any is missing or empty, land none of the group's files: surface the reason, skip the group, and continue — a half-landed group would carry a folder note describing documents that were not rewritten. Then land every returned file. Each name in `files` lands at the path the plan gives it — the entry's `folder_note_path` for the first name, the matching `docs[].doc_path` for the rest:
+Before landing anything, confirm that every name in `files` exists in the output directory and is not empty (`Bash(wc -c <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out/<name>)` per name: the file is missing when the command fails with "No such file or directory", empty when it prints a count of 0). When any is missing or empty, land none of the group's files: surface the reason, skip the group, and continue — a half-landed group would carry a folder note describing documents that were not rewritten. Then land every returned file. Each name in `files` lands at the path the plan gives it — the entry's `folder_note_path` for the first name, the matching `docs[].doc_path` for the rest:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-land <path> --from <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out/<name> --payload <the printed payload path> --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-land <path> --from <repo-root>/.runtime/lazy-wiki.domain-sync/<group>/out/<name> --payload <the printed payload path> --repo <settings-root>)
 ```
 
 `domain-land` writes only a doc inside a group folder of the output tree, and stamps the doc's `domain_hash` from the payload and the explainer line under its H1; it refuses (exit 1, reason on stderr) an empty return, a return without a `domain_hash` frontmatter key or an H1, a path the payload names no digest for, or a path outside the tree, and writes nothing then. When the writer reports an error, surface it and skip the group. When a landing still refuses after the check above, surface the reason, restore every file of that group this step already landed with `Bash(git restore --worktree -- <path>)` (or `Bash(rm <path>)` for a path that did not exist before), and continue; the group is re-detected on the next run. Track every landed path for the Step 6 commit, and register each path that did not exist before with `Bash(git add -N <path>)` so the commit pathspec can see it. Carry the discrepancies each writer reported to the Report step.
@@ -74,10 +74,10 @@ Outcome: `written:<n groups>/<m files>` (or `empty-set`).
 For each path in `orphaned_docs`, the doc is deleted — the tree is a derivative of the code and the dictionary:
 
 ```
-Bash(rm <repo-root>/<orphaned-doc-path>)
+Bash(rm <settings-root>/<orphaned-doc-path>)
 ```
 
-Plain `rm`, never `git rm` (auto-stages, violating the pathspec discipline). When a deletion leaves its group folder empty, remove the folder with `Bash(rm -d <repo-root>/<folder>)`. Track each removed path for the Step 6 commit.
+Plain `rm`, never `git rm` (auto-stages, violating the pathspec discipline). When a deletion leaves its group folder empty, remove the folder with `Bash(rm -d <settings-root>/<folder>)`. Track each removed path for the Step 6 commit.
 
 Outcome: `dropped:<n>` (or `empty-set`); when `unlisted_docs` is non-empty, append `unlisted:<m>`.
 
@@ -86,7 +86,7 @@ Outcome: `dropped:<n>` (or `empty-set`); when `unlisted_docs` is non-empty, appe
 After the landings and removals, repair what needs no writer: contract anchors whose file moved, `## Related` lines whose target no longer exists, and `## Contracts` bullets citing a guarantee no attributed contract accounts for:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-repair --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-repair --repo <settings-root>)
 ```
 
 It prints `{"docs": [<paths>]}`; track each for the Step 6 commit.
@@ -96,7 +96,7 @@ Outcome: `repaired:<n>` (or `unchanged`).
 ## Step 5 — Rebuild the index
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-apply-index --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" domain-apply-index --repo <settings-root>)
 ```
 
 Parse `{index, updated, sections}`; track the index path for the commit when `updated` is true, and every path in `sections`. The index lists every group whose folder note exists and, under `## Discrepancies`, every doc that has a `## Discrepancies` section. `sections` names the notes the engine wrote for folders above the groups that are not groups themselves (`pytool/pytool.md` above `pytool.code-discipline`), each listing the groups and sections directly inside it.

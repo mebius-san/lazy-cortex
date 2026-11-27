@@ -19,7 +19,11 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from keys import JobKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -58,6 +62,9 @@ _BAD_SECTION_EXPERTS = "`section_experts` must map `<umbrella>/<section-id>` to 
 _EDIT_MARKER_STYLE = "edit_marker_style"
 _PROTOCOLS = "protocols"
 _ROUTINES = "routines"
+
+# The class keys a plugin's install seeds and the wizard never asks for, kept from the recorded entry on a replace.
+_KEPT_CLASS_KEYS = (_PROTOCOLS, JobKey.REPORT)
 _WATCH_ROUTINE = "lazy-review.coordinator-watch"
 _PATH_FILTER = "path_filter"
 _REPO_ROOT_WATCH = "."
@@ -125,8 +132,9 @@ def _merge_class(classes: list, class_entry: dict, section_experts: dict[str, di
   """
   Put a class entry, with its section writers, into the class list in place.
 
-  An entry with the same class token is replaced where it stands and keeps a recorded `protocols` list
-  that the new entry lacks; an entry with a new token is appended.
+  An entry with the same class token is replaced where it stands and keeps the recorded `protocols` list and
+  `report` flag when the new entry does not state them; a key the new entry states wins. An entry with a new
+  token is appended.
 
   Args:
     classes: The `review.classes` list, mutated in place.
@@ -139,8 +147,9 @@ def _merge_class(classes: list, class_entry: dict, section_experts: dict[str, di
   # # Merging a review class into the configured class list
   # A review class is identified by its class token, and the configuration holds at most one entry per token.
   # Applying a class whose token is already configured replaces that entry where it stands, so the order of
-  # the classes never shifts. The replacement keeps the protocol list recorded on the old entry when the new
-  # one does not state its own, so reapplying a class never silently drops protocols chosen earlier.
+  # the classes never shifts. The replacement keeps the protocol list and the report flag recorded on the old
+  # entry when the new one does not state its own: both are seeded by the plugin that owns the document kind,
+  # never asked for, so reapplying a class never silently drops them.
   # A class with a new token is appended to the end of the list.
   # Section writers are addressed as an umbrella and a section id; each is filed in the class's experts under
   # its umbrella, so a class carries all writers of one umbrella together.
@@ -153,11 +162,12 @@ def _merge_class(classes: list, class_entry: dict, section_experts: dict[str, di
     umbrella, _, section_id = ref.partition("/")
     entry.setdefault(JobKey.EXPERTS, {}).setdefault(umbrella, {})[section_id] = copy.deepcopy(writer)
 
-  # an entry with the same token is replaced in place and keeps a recorded protocol list the input omits
+  # an entry with the same token is replaced in place and keeps the recorded seeded keys the input omits
   for idx, cls in enumerate(classes):
     if isinstance(cls, dict) and cls.get(JobKey.CLASS) == entry.get(JobKey.CLASS):
-      if _PROTOCOLS not in entry and _PROTOCOLS in cls:
-        entry[_PROTOCOLS] = cls[_PROTOCOLS]
+      for key in _KEPT_CLASS_KEYS:
+        if key not in entry and key in cls:
+          entry[key] = cls[key]
       classes[idx] = entry
       return
 
@@ -165,7 +175,7 @@ def _merge_class(classes: list, class_entry: dict, section_experts: dict[str, di
   classes.append(entry)
 
 
-def apply_class(repo: Path,
+def apply_class(settings_root: Path,
                 class_entry: dict,
                 *,
                 edit_marker_style: str | None,
@@ -179,9 +189,11 @@ def apply_class(repo: Path,
 
   Notes:
     - Runs the install bootstrap, which widens `review.watch_root` and re-derives the watch's path mask.
+    - Core routes each section: the daemon-read sections, such as `experts` and `routines`, resolve in the
+      checkout toplevel's settings, and `review` in the nearest settings root `settings_root`.
 
   Args:
-    repo: Repository root whose settings file is updated.
+    settings_root: The nearest settings root, possibly a nested project, whose `review` section is updated.
     class_entry: The review class entry to add or replace.
     edit_marker_style: Edit marker style to record; ignored when one is already recorded, and `None` skips it.
     section_experts: Section writers keyed `<umbrella>/<section-id>`, merged into the class entry's experts.
@@ -203,12 +215,12 @@ def apply_class(repo: Path,
   # The result reports the watch root and path mask as they stand on disk after the install bootstrap,
   # never the values from before it.
 
-  repo = repo.resolve()
+  settings_root = settings_root.resolve()
   install = _load_install_module()
-  cli = install.resolve_core_cli()
+  cli = install.resolve_core_cli(settings_root)
 
   # the review section as the file carries it; the wizard runs only after the install seeded it
-  recorded = install.read_section(cli, repo, JobKey.REVIEW)
+  recorded = install.read_section(cli, settings_root, JobKey.REVIEW)
   review = copy.deepcopy(recorded) if isinstance(recorded, dict) else {}
 
   # the recorded class list the new entry merges into
@@ -229,15 +241,15 @@ def apply_class(repo: Path,
   # the section is written back only when this call changed it
   written: list[str] = []
   if review != recorded:
-    install.write_section(cli, repo, JobKey.REVIEW, value = review)
+    install.write_section(cli, settings_root, JobKey.REVIEW, value = review)
     written.append(JobKey.REVIEW)
 
   # the install bootstrap widens the watch root and re-derives the watch's path mask from it
-  install.install(repo)
+  install.install(settings_root)
 
   # the result reports the scope as the bootstrap left it on disk
-  after = install.read_section(cli, repo, JobKey.REVIEW) or {}
-  watch = (install.read_section(cli, repo, _ROUTINES) or {}).get(_WATCH_ROUTINE)
+  after = install.read_section(cli, settings_root, JobKey.REVIEW) or {}
+  watch = (install.read_section(cli, settings_root, _ROUTINES) or {}).get(_WATCH_ROUTINE)
   return ApplyResult(
       status = "written" if written else "unchanged",
       class_token = str(class_entry.get(JobKey.CLASS)),
@@ -270,8 +282,10 @@ def main(argv: list[str]) -> int:
   reconcile prints `{"status": "refused", "reason": ...}` instead of the result.
 
   Args:
-    argv: Command-line arguments, excluding the program name: `--repo` and optionally one of `--payload` or
-      `--payload-file`.
+    argv: Command-line arguments, excluding the program name: `--repo` (a directory inside the repository; default:
+      `$LAZY_REPO_ROOT`, then the working directory; the settings written are the nearest
+      `.claude/lazy.settings.json` from it upward within its checkout, the checkout's root when none is nearer) and
+      optionally one of `--payload` or `--payload-file`.
 
   Returns:
     Exit code 0 on success and 1 when refused. An argument error, including `--payload` given together with
@@ -280,9 +294,11 @@ def main(argv: list[str]) -> int:
   Raises:
     RuntimeError: When the sibling install module cannot be loaded.
   """
-  # the verb's arguments: the repo root and at most one of the inline class document or the file holding it
+  # the verb's arguments: the directory inside the repository to work in
   parser = argparse.ArgumentParser(prog = _PROG)
-  parser.add_argument(_ARG_REPO, default = ".")
+  parser.add_argument(_ARG_REPO, default = None)
+
+  # the class document arrives inline or in a file, never both
   source = parser.add_mutually_exclusive_group()
   source.add_argument(_ARG_PAYLOAD, default = None, help = _PAYLOAD_HELP)
   source.add_argument(_ARG_PAYLOAD_FILE, default = None, help = _PAYLOAD_FILE_HELP)
@@ -323,7 +339,7 @@ def main(argv: list[str]) -> int:
   # cannot be resolved or a refused routine reconcile ends it as a refusal carrying the failure text
   try:
     result = apply_class(
-        Path(args.repo), payload[_IN_CLASS],
+        _review_locator.query_settings_root(args.repo), payload[_IN_CLASS],
         edit_marker_style = payload.get(_IN_EDIT_MARKER_STYLE), section_experts = section_experts,
     )
   except _load_install_module().SettingsRefusedError as refusal:

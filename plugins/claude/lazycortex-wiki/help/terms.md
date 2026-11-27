@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: One agreed dictionary per scope, consulted at write-time, linked into documents by a curator, and kept honest by an audit, so a concept never grows a second name.
-last_regen: 2026-11-21
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram with three legs sharing one dictionary file. Leg 1 (write-time): a writing expert calls lazy-wiki.terms mid-document, in lookup mode or check-a-candidate-word mode; the skill reads the dictionary and returns matching definitions, never writes. Leg 2 (curate, git-watch): a document commit triggers the terms-scan routine, which dispatches lazy-wiki.terms-curator in curate mode with every document of one directory that changed in the same wave as its batch; the curator reads the batch as one body of text plus the dictionary headings, decides add / extend / rename / split per candidate concept (a concept spanning several of the batch's documents becomes one candidate, not one per file), edits the dictionary, and commits once for the whole batch. Leg 3 (audit): the terms section of /lazy-wiki.audit checks format and scope configuration by reading, then dispatches lazy-wiki.terms-curator in report mode for meaning checks (divergence, missing, duplicate, dead); /lazy-core.doctor presents each finding to the operator one at a time via AskUserQuestion and applies only what they choose. Show all three legs converging on the one dictionary file, and that report mode writes nothing itself."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.terms-curator
   - lazy-wiki.audit
-source_sha: cd5be25450dbd5c7ade3e7cc1ecf31d707a2f132
-surface_sha: 21ef702edafdea4c2691ecd1d80c4a618c44fd975c432c97863f59174b4c0dd9
+source_sha: 59c95b44485db368e77ae48304a1141a1cdde0d4
+surface_sha: dbe791faf0092c23c9a1d4a5494878b612a0384f9fd62c08ea2bfb2a8867134f
 ---
 # Terms
 
@@ -67,7 +67,7 @@ The curator writes definitions in the vault's configured language. At the start 
 
 **Audit, on demand.** The terms section of `/lazy-wiki.audit` runs for every scope whenever the audit runs, alongside the rest of the wiki audit; with no terms scopes configured it says so and moves on. It checks format and configuration itself, by reading:
 
-- `config` — the scope's directory does not exist yet (informational: the dictionary is empty, and the directory appears with the first term); the scope still carries its old single-file dictionary and so is served nothing until it is migrated; two scopes' `paths` overlap, since one document must belong to one dictionary; the scope's `lazy-wiki.terms-scan-<id>` routine is absent, or its `path_filter` no longer matches the scope's `paths`.
+- `config` — the scope's directory does not exist yet (informational: the dictionary is empty, and the directory appears with the first term); the scope names no directory at all, so the wiki code serves nothing from it; the scope still carries its old single-file dictionary and so is served nothing until it is migrated; two scopes' `paths` overlap, since one document must belong to one dictionary; the scope's `lazy-wiki.terms-scan-<id>` routine is absent, or its `path_filter` no longer matches the scope's `paths`.
 - `format` — a term file whose name is not the stem its title gives (links are built from the title, so such a file is never found); two term files whose names differ only in letter case; a definition longer than three physical lines; a definition made of two paragraphs, which the curator is to rewrite into one.
 - `legacy` — a document in a migrated scope still carries a `## Terms` heading. Its lines go once the curator has passed the document, so the route is one curator job for it; a document waiting on an open review round is passed after the round ends, and a document the scope excludes as a term source is reported informationally, with a migration verb that removes such a section whole.
 

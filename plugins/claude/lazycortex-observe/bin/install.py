@@ -35,6 +35,14 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import observe_locator as _plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 XDG_CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
 XDG_DATA_HOME = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local/share"))
 XDG_STATE_HOME = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local/state"))
@@ -61,21 +69,6 @@ NON_ITERABLE_ERROR = "non-iterable in for: {seq!r}"
 UNSUPPORTED_PLATFORM_ERROR = "unsupported platform: {platform!r}"
 # Headline of the error the core-CLI resolver raises when no discovery stage finds the binary
 CORE_CLI_NOT_FOUND = "lazycortex-core CLI not found"
-# Placeholder the not-found error names as the searched plugin-dirs stage when the env carries no entry
-UNSET_PLUGIN_DIRS = "<unset>"
-# Clause of the not-found error naming the install-registry stage that found no record
-NO_REGISTERED_INSTALL = "no registered install"
-# Full not-found error, formatted with the `headline`, the binary `name`, the `searched` dirs, the probed
-# `sibling`, the registry `clause`, and the registry `place`
-_CORE_CLI_NOT_FOUND_ERROR = (
-  "{headline}: no bin/{name} under any directory named by "
-  "$LAZYCORTEX_PLUGIN_DIRS (searched: {searched}), no dev-vault sibling at '{sibling}', "
-  "and {clause}{place}"
-)
-# Registry place of the not-found error when an install root is recorded, formatted with the `root`
-_REGISTRY_ROOT_PLACE = " under {root}"
-# Registry place of the not-found error when no install root is recorded, formatted with the registry `rel` path
-_REGISTRY_FILE_PLACE = " in ~/{rel}"
 # Error text for a core-CLI verb that exits non-zero, formatted with the `verb` and its `stderr` excerpt
 CORE_CLI_FAILED_ERROR = "lazycortex-core {verb} failed: {stderr}"
 # Error text for a core-CLI verb whose stdout is not JSON, formatted with the `verb` and the decode `error`
@@ -107,14 +100,14 @@ _AGENT_BINARY_CANDIDATES = {
 
 # Sibling plugin CLI binary name — the § 1c boundary contract
 _CORE_CLI_NAME = "lazycortex-core"
+# The directory holding this plugin's own tree, where a development checkout keeps the neighbouring plugins
+_SIBLING_BASE = Path(__file__).resolve().parents[2]
 # Core-CLI verb that lists the host's registered daemons
 # waiver: external core-CLI subcommand, not an internal key
 _DAEMON_LIST_VERB = "daemon-list"
 # Core-CLI verb that writes the scrape-target file
 # waiver: external core-CLI subcommand, not an internal key
 _SCRAPE_FILE_VERB = "metrics-scrape-file"
-# waiver: external Claude Code registry path, not an internal key
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 # Subprocess wall-clock cap in seconds for the registry call
 _CORE_CLI_TIMEOUT_SEC = 30
 # Number of leading stderr characters a failed core-CLI call carries into its error message
@@ -836,62 +829,7 @@ def check_local_metrics(scrape_target: str, *, timeout: float = 5.0) -> bool:
 
 # ----------------------------------------------------------------------------------------
 # multi-daemon support: the core-CLI boundary and the coverage pre-flight
-def _compute_version_key(name: str) -> tuple[int, ...]:
-  """
-  Compute a numeric sort key for a plugin version string.
-
-  Args:
-    name: Version string as the plugin registry records it.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(char for char in part if char.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
-def installed_plugin_root(name: str) -> Path | None:
-  """
-  Resolve a plugin's installed source root from Claude Code's plugin registry.
-
-  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
-  version that installed the plugin, each naming its `installPath`; the highest recorded version
-  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
-  across it returns copies the registry no longer names.
-
-  Args:
-    name: Plugin name without its `@<marketplace>` suffix.
-
-  Returns:
-    The recorded install root when it exists on disk, else None.
-  """
-  registry = Path.home() / _INSTALLED_PLUGINS_REL
-  try:
-    data = json.loads(registry.read_text(encoding = "utf-8"))
-  except (OSError, ValueError):
-    return None
-  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
-  # waiver: external Claude Code registry key, not an internal key
-  plugins = data.get("plugins", data) if isinstance(data, dict) else {}
-  records = [
-    rec
-    for key, entries in plugins.items() if key.split("@", 1)[0] == name
-    # waiver: external Claude Code registry key, not an internal key
-    for rec in (entries or []) if isinstance(rec, dict) and rec.get("installPath")
-  ]
-  # guard: the plugin was never installed on this machine
-  if not records:
-    return None
-  # waiver: external Claude Code registry key, not an internal key
-  best = max(records, key = lambda rec: _compute_version_key(str(rec.get("version", ""))))
-  root = Path(str(best["installPath"]))
-  return root if root.is_dir() else None
-
-
-def resolve_core_cli() -> Path:
+def resolve_core_cli(start: Path) -> Path:
   """
   Locate the `lazycortex-core` CLI binary this installer drives across the plugin boundary.
 
@@ -899,75 +837,53 @@ def resolve_core_cli() -> Path:
   needs to know which discovery location produced it.
 
   Guarantees:
-    - The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then the dev-vault
-      sibling layout, then the install registry's record — and the first location that carries
-      the binary always wins, independent of unrelated environment state.
+    - Discovery runs in a fixed order and the first hit wins: the plugin directories exported in
+      `$LAZYCORTEX_PLUGIN_DIRS`, the source tree beside this plugin, the current checkout's own plugin tree, then the
+      install registry record for this repository or the user, never another project's.
+    - A miss raises `RuntimeError` naming every stage searched, and a found root without the CLI binary raises too;
+      no fallback path is ever returned.
+
+  Args:
+    start: Any directory inside the repository the installer runs for, or a plain directory outside git.
 
   Returns:
     Absolute path to the CLI binary.
 
   Raises:
-    RuntimeError: If the binary is not found anywhere.
+    RuntimeError: If no discovery stage finds `lazycortex-core`, the message naming every stage searched, or the
+      found plugin root carries no CLI binary.
   """
-
-  # Contract:
-  # The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then the dev-vault
-  # sibling layout, then the install registry's record — and the first location that carries
-  # the binary always wins, independent of unrelated environment state.
 
   # Domain(plugin.boundaries):
   # # A shipper reaches its sibling plugin only through its published command line
   # This installer never imports another plugin's code directly; wherever it needs functionality that
   # another plugin owns, such as reading the host's daemon registry, it locates and runs that plugin's
-  # own published command-line program instead and reads back its answer. The search for that program
-  # follows a fixed order of decreasing certainty: first every directory a runtime-launched process is
-  # explicitly told the enabled plugins live in, then the layout of a development checkout where every
-  # plugin's sources sit side by side, and as a last resort the record the host's plugin registry keeps
-  # of where the sibling's highest installed version lives. The cache of installed copies is never
-  # walked: it keeps every version ever installed, and the registry alone says which one is current.
-  # The general command search path is never consulted: the program is a plain script file, not an
-  # installed executable. Nothing found by any of the three means the run cannot reach its sibling at
-  # all, and that failure is reported rather than papered over with a guess.
+  # own published command-line program instead and reads back its answer. The program is looked for the way
+  # every plugin looks for a neighbour. The general command search path is never consulted: the program is a
+  # plain script file, not an installed executable. Nothing found anywhere means the run cannot reach its sibling
+  # at all, and that failure is reported rather than papered over with a guess.
 
-  # walk the discovery order and return the first location that actually carries the binary
-  # waiver: external env-var name of the plugin-dirs boundary contract
-  env_dirs = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep)
-  for entry in env_dirs:
-    # guard: empty path-list entries are skipped
-    if not entry:
-      continue
+  # Contract:
+  # Discovery runs in a fixed order and the first hit wins: the plugin directories exported in
+  # `$LAZYCORTEX_PLUGIN_DIRS`, the source tree beside this plugin, the current checkout's own plugin tree, then the
+  # install registry record for this repository or the user, never another project's. A miss MUST raise
+  # `RuntimeError` naming every stage searched, and a found root without the CLI binary MUST raise too; no fallback
+  # path is ever returned.
 
-    # the binary's expected location inside this plugin-dir entry
-    # waiver: plugin-tree layout directory name, not an internal key
-    candidate = Path(entry) / "bin" / _CORE_CLI_NAME
+  # the shared lookup names every stage it searched when none finds core
+  try:
+    root, _stage = _plugin_locator.plugin_root(_CORE_CLI_NAME, start, sibling_base = _SIBLING_BASE)
+  except _plugin_locator.PluginNotFoundError as error:
+    raise RuntimeError(f"{CORE_CLI_NOT_FOUND}: {error}") from error
 
-    # the first plugin-dir entry that carries the binary is the answer
-    if candidate.is_file():
-      return candidate
-
-  # the dev-vault sibling checkout is the second source
+  # the binary sits in the found root's bin directory
   # waiver: plugin-tree layout directory name, not an internal key
-  if (sibling := Path(__file__).resolve().parents[2] / _CORE_CLI_NAME / "bin" / _CORE_CLI_NAME).is_file():
-    return sibling
+  cli = root / "bin" / _CORE_CLI_NAME
 
-  # the registry's install record is the last source — the consumer-install fallback with no daemon export
-  registered_root = installed_plugin_root(_CORE_CLI_NAME)
-  # waiver: plugin-tree layout directory name, not an internal key
-  if registered_root is not None and (registered := registered_root / "bin" / _CORE_CLI_NAME).is_file():
-    return registered
-
-  # nothing found by any of the three means the sibling is unreachable from here; name every stage searched
-  searched = [ entry for entry in env_dirs if entry ] or [ UNSET_PLUGIN_DIRS ]
-  raise RuntimeError(
-    _CORE_CLI_NOT_FOUND_ERROR.format(
-      headline = CORE_CLI_NOT_FOUND, name = _CORE_CLI_NAME, searched = ", ".join(searched), sibling = sibling,
-      clause = NO_REGISTERED_INSTALL,
-      place = (
-        _REGISTRY_ROOT_PLACE.format(root = registered_root) if registered_root is not None
-        else _REGISTRY_FILE_PLACE.format(rel = _INSTALLED_PLUGINS_REL)
-      ),
-    )
-  )
+  # guard: a found plugin root without its CLI binary cannot be driven
+  if not cli.is_file():
+    raise RuntimeError(f"{CORE_CLI_NOT_FOUND}: {root} carries no bin/{_CORE_CLI_NAME}")
+  return cli
 
 
 def read_local_scrape_targets() -> list[dict[str, object]]:
@@ -981,6 +897,8 @@ def read_local_scrape_targets() -> list[dict[str, object]]:
   Notes:
     - Runs the sibling core CLI's `daemon-list` as a subprocess; the daemon registry and its
       settings semantics stay owned by lazycortex-core.
+    - The core CLI is looked up for the checkout the run works in (`$LAZY_REPO_ROOT`, else the current working
+      directory, taken to its checkout root), so the result depends on where the caller runs.
 
   Returns:
     The `daemons` rows from the core CLI with `metrics_enabled` true; each carries
@@ -998,7 +916,7 @@ def read_local_scrape_targets() -> list[dict[str, object]]:
   # ask the core registry for every daemon it knows about
   # waiver: external core-CLI subcommand and flag, not internal keys
   proc = subprocess.run(
-    [ sys.executable, str(resolve_core_cli()), _DAEMON_LIST_VERB, "--json" ],
+    [ sys.executable, str(resolve_core_cli(_plugin_locator.query_repo_root())), _DAEMON_LIST_VERB, "--json" ],
     capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC, encoding = "utf-8",
   )
 
@@ -1211,6 +1129,10 @@ def write_scrape_file_via_core(*, out: Path | None = None) -> dict[str, object]:
   """
   Regenerate the host's Prometheus file_sd scrape-targets file through the core CLI.
 
+  Notes:
+    - The core CLI is looked up for the checkout the run works in (`$LAZY_REPO_ROOT`, else the current working
+      directory, taken to its checkout root), so the result depends on where the caller runs.
+
   Args:
     out: Optional output-path override forwarded to the CLI.
 
@@ -1223,7 +1145,10 @@ def write_scrape_file_via_core(*, out: Path | None = None) -> dict[str, object]:
   """
   # hand the write to the core CLI, forwarding the output override when one was given
   # waiver: external core-CLI subcommand and flag, not internal keys
-  argv = [ sys.executable, str(resolve_core_cli()), _SCRAPE_FILE_VERB ] +([ "--out", str(out) ] if out else [])
+  argv = [
+    sys.executable, str(resolve_core_cli(_plugin_locator.query_repo_root())), _SCRAPE_FILE_VERB,
+    *([ "--out", str(out) ] if out else []),
+  ]
   proc = subprocess.run(
     argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC, encoding = "utf-8",
   )
@@ -1551,13 +1476,13 @@ class _Template:
       during `{% for %}` expansion and removed again afterwards.
   """
 
-  # directive keyword that opens a conditional frame; its length strips the keyword off the test text
+  # Directive keyword that opens a conditional frame; its length strips the keyword off the test text
   _IF_PREFIX = "if "
 
-  # directive keyword that re-tests an open frame; its length strips the keyword off the test text
+  # Directive keyword that re-tests an open frame; its length strips the keyword off the test text
   _ELIF_PREFIX = "elif "
 
-  # one token per substitution or directive: group 1 is a `{{ }}` expression, group 2 a `{% %}` directive
+  # One token per substitution or directive: group 1 is a `{{ }}` expression, group 2 a `{% %}` directive
   _RE = re.compile(
     r"\{\{\s*(.+?)\s*\}\}"        # {{ var }}
     r"|\{%\s*(.+?)\s*%\}",        # {% directive %}

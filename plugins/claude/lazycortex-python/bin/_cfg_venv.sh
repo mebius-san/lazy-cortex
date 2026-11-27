@@ -33,13 +33,19 @@
 # Directory holding this file (and venv_spec.py): BASH_SOURCE under bash, $0 under zsh.
 _lazy_py_bin="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# Resolve the project root: CLAUDE_PROJECT_DIR when set (Claude Code points it at
-# the repo root), else the git top-level, else PWD as a last resort. Keying the
-# fallback on the git root (not bare PWD) stops a stray `.venv` from being created
-# in a subdirectory when chk/tst is run from somewhere below the repo root.
-_project_dir="${CLAUDE_PROJECT_DIR:-}"
-if [ -z "${_project_dir}" ]; then
-  _project_dir="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "${PWD}")"
+# Resolve the project root: the toplevel of the checkout CLAUDE_PROJECT_DIR names
+# when set (Claude Code points it at the session's project), else of the checkout
+# the shell runs in ($LAZY_REPO_ROOT first, then PWD), as the plugin locator's
+# `toplevel` verb prints it; outside git the start directory itself. Keying it on
+# the checkout root (not bare PWD) stops a stray `.venv` from being created in a
+# subdirectory when chk/tst is run from somewhere below the repo root. A locator
+# that cannot run (no interpreter, a broken copy) leaves the start directory in charge.
+if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+  _project_dir="$("${LAZYCORTEX_PYTHON:-python3}" "${_lazy_py_bin}/python_locator.py" toplevel \
+    --start "${CLAUDE_PROJECT_DIR}" 2>/dev/null || printf '%s' "${CLAUDE_PROJECT_DIR}")"
+else
+  _project_dir="$("${LAZYCORTEX_PYTHON:-python3}" "${_lazy_py_bin}/python_locator.py" toplevel 2>/dev/null \
+    || printf '%s' "${PWD}")"
 fi
 
 # Print a venv's executables directory: bin/ (macOS / Linux) or Scripts/ (Windows).
@@ -65,18 +71,42 @@ _venv_exe() {
   fi
 }
 
-# Check whether a candidate venv is complete: the four required bins (mypy, pylint,
-# pytest, ruff) AND the three pytest plugins (pytest-clarity, pytest-sugar, pytest-xdist) importable.
-_venv_has_tools() {
+# Name the first piece a candidate venv lacks: one of the four required bins (mypy, pylint,
+# pytest, ruff), its python, or one of the three pytest plugins (pytest-clarity, pytest-sugar,
+# pytest-xdist), which ship no bin and are checked by importing them in the venv's interpreter.
+# Prints the name and succeeds when something is missing; prints nothing and fails when the
+# venv is complete.
+_venv_missing_tool() {
   local venv="$1"
-  local tool python
+  local tool python module
   for tool in mypy pylint pytest ruff; do
-    _venv_exe "${venv}" "${tool}" >/dev/null || return 1
+    if ! _venv_exe "${venv}" "${tool}" >/dev/null; then
+      printf '%s' "${tool}"
+      return 0
+    fi
   done
-  # guard: pytest plugins ship no bin — verify they import in the venv's interpreter
-  python="$(_venv_exe "${venv}" python)" || return 1
-  "${python}" -c "import pytest_clarity, pytest_sugar, xdist" >/dev/null 2>&1 || return 1
+  if ! python="$(_venv_exe "${venv}" python)"; then
+    printf '%s' "python"
+    return 0
+  fi
+  # the three plugins import together in a complete venv; only a failure probes them one by one
+  if "${python}" -c "import pytest_clarity, pytest_sugar, xdist" >/dev/null 2>&1; then
+    return 1
+  fi
+  for module in pytest_clarity:pytest-clarity pytest_sugar:pytest-sugar xdist:pytest-xdist; do
+    if ! "${python}" -c "import ${module%%:*}" >/dev/null 2>&1; then
+      printf '%s' "${module#*:}"
+      return 0
+    fi
+  done
+  # the combined import failed though each plugin imports alone: name the set
+  printf '%s' "pytest-clarity, pytest-sugar or pytest-xdist"
   return 0
+}
+
+# Check whether a candidate venv is complete: every piece `_venv_missing_tool` checks is there.
+_venv_has_tools() {
+  ! _venv_missing_tool "$1" >/dev/null
 }
 
 # Read a `[tool.lazy-python].<key>` value from <project>/pyproject.toml.
@@ -138,13 +168,24 @@ _venv_is_fresh() {
   [ "${verdict}" = "fresh" ]
 }
 
-# Succeed when the venv's interpreter satisfies the project's Python requirement:
-# with VIRTUAL_ENV pointing at it, `uv python find` reports the venv's own python only
-# when it satisfies requires-python / .python-version. Directories are compared after
-# resolving symlinks (the venv's python is itself a symlink to its base interpreter).
+# Judge the venv's interpreter against the project's Python requirement: with VIRTUAL_ENV
+# pointing at it, `uv python find` reports the venv's own python only when it satisfies
+# requires-python / .python-version. Directories are compared after resolving symlinks (the
+# venv's python is itself a symlink to its base interpreter).
+# Returns 0 when it satisfies, 1 when uv names another interpreter, 2 when `uv python find`
+# itself fails — then uv's own stderr is printed verbatim on stderr.
 _venv_interpreter_ok() {
-  local venv="$1" found found_dir venv_dir
-  found="$(VIRTUAL_ENV="${venv}" uv python find --directory "${_project_dir}" 2>/dev/null)" || return 1
+  local venv="$1" found found_dir venv_dir err_file uv_status
+  err_file="$(mktemp)"
+  uv_status=0
+  found="$(VIRTUAL_ENV="${venv}" uv python find --directory "${_project_dir}" 2>"${err_file}")" || uv_status=$?
+  # guard: a uv failure is uv's to explain, never read as a mismatch
+  if [ "${uv_status}" -ne 0 ]; then
+    cat "${err_file}" >&2
+    rm -f "${err_file}"
+    return 2
+  fi
+  rm -f "${err_file}"
   found_dir="$(cd "$(dirname "${found}")" 2>/dev/null && pwd -P)" || return 1
   venv_dir="$(cd "$(_venv_bin_dir "${venv}")" 2>/dev/null && pwd -P)" || return 1
   [ "${found_dir}" = "${venv_dir}" ]
@@ -153,7 +194,7 @@ _venv_interpreter_ok() {
 # Create or update <venv> to the project's requirements plus the checker tools, then
 # record the requirement stamp. Refuses in protected mode; never runs without uv.
 _cfg_venv() {
-  local venv="$1" python args_text arg
+  local venv="$1" python args_text arg verdict
   local -a install_args
 
   # guard: protected mode installs nothing, whoever asks
@@ -169,13 +210,22 @@ _cfg_venv() {
     return 1
   fi
 
-  # interpreter: create when missing, recreate when it does not satisfy the project, else keep
+  # interpreter: create when missing, recreate when it does not satisfy the project, else keep;
+  # a uv failure while judging it stops here and leaves the venv as it is
   if ! _venv_exe "${venv}" python >/dev/null; then
     echo "[lazy-python] creating project venv at ${venv}..." >&2
     uv venv --directory "${_project_dir}" "${venv}" >&2 || return 1
-  elif ! _venv_interpreter_ok "${venv}"; then
-    echo "[lazy-python] recreating ${venv}: its interpreter does not satisfy the project's Python requirement..." >&2
-    uv venv --directory "${_project_dir}" --clear "${venv}" >&2 || return 1
+  else
+    verdict=0
+    _venv_interpreter_ok "${venv}" || verdict=$?
+    if [ "${verdict}" -eq 2 ]; then
+      echo "[lazy-python] uv python find failed (its output is above); ${venv} is left as it is" >&2
+      return 1
+    elif [ "${verdict}" -ne 0 ]; then
+      echo "[lazy-python] recreating ${venv}: its interpreter does not satisfy the project's" \
+        "Python requirement..." >&2
+      uv venv --directory "${_project_dir}" --clear "${venv}" >&2 || return 1
+    fi
   fi
   python="$(_venv_exe "${venv}" python)" || return 1
 

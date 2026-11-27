@@ -36,8 +36,19 @@ import tempfile
 import time
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from expert_pump import (  # pylint: disable=import-error
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from expert_pump import (  # noqa: E402
   build_expert_argv,
   filter_tcc_protected,
   get_additional_dirs,
@@ -45,23 +56,40 @@ from expert_pump import (  # pylint: disable=import-error
   normalize_setting_sources,
   VALID_SETTING_SOURCES,
 )
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from expert_runtime import resolve_agent_model  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_settings import load_section, resolve_agent_model_tier  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from plugin_dirs_cli import derive_plugin_dirs  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from provider_env import (  # pylint: disable=import-error
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from expert_runtime import resolve_agent_model  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from lazy_settings import load_section, resolve_agent_model_tier  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from plugin_dirs_cli import derive_plugin_dirs  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from plugin_locator import query_repo_root  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from provider_env import (  # noqa: E402
   ProviderConfigError, ProviderKey, apply_spawn_env, resolve_provider, resolve_token, validate_expert_model,
 )
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import rate_limit_flag  # pylint: disable=import-error
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import rate_limit_flag  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from reference_resolver import resolve, ReferenceError  # pylint: disable=import-error,redefined-builtin
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import (  # pylint: disable=import-error
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position,redefined-builtin
+from reference_resolver import resolve, ReferenceError  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from constants import (  # noqa: E402
   ClaudeSettingsFile,
   DaemonKey,
   HaltReason,
@@ -75,16 +103,18 @@ from constants import (  # pylint: disable=import-error
   SettingsFile,
   SettingsKey,
 )
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from external_dirs import is_declared  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from inbox_guard import check_inbox_collision  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from sandbox_scope import audit  # pylint: disable=import-error
-
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-  pass
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from external_dirs import is_declared  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from inbox_guard import check_inbox_collision  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from sandbox_scope import audit  # noqa: E402
 
 
 # Routine types whose `expert` key names an expert this preflight validates.
@@ -1647,9 +1677,8 @@ def _cli(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # resolve the repo root, run the preflight, and emit the verdict document as JSON
-  # waiver: LAZY_REPO_ROOT is the dispatcher's env contract, not a domain key
-  repo = Path(args.cwd) if args.cwd else Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
-  print(json.dumps(preflight(repo, expert = args.expert, probe = not args.no_probe), indent = 2))
+  verdict = preflight(query_repo_root(args.cwd), expert = args.expert, probe = not args.no_probe)
+  print(json.dumps(verdict, indent = 2))
 
   # Contract:
   # The process always exits 0 for a completed run; a non-zero exit is reserved for an

@@ -1,5 +1,5 @@
 ---
-version: 3.0.0
+version: 3.2.0
 description: Universal contract loaded into every expert run by lazycortex-core's expert pump. Read alongside your expert-specific protocol.
 ---
 # Expert Runtime Contract
@@ -30,7 +30,7 @@ The `git add -N` line registers a file your job created and is skipped for a fil
 
 **If you produced no tracked-file mutations, exit with a clean tree.** Do NOT make a commit "to signal completion". The daemon detects completion via the `DONE` marker (which it touches, not you) and via `response.json` (which is gitignored — see above). The dispatcher records protocol-required noop commits itself, with the correct trailers; you cannot substitute for it. Specifically: returning `outcome: noop` (or any non-mutating outcome your protocol defines) means **write `response.json` and exit, no commit at all**.
 
-Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git reset`, `git rebase`, or anything else that rewrites history or moves HEAD. The daemon owns those operations. Some experts run on a job-scoped branch the pump checked out before you started (a per-expert `workspace: branch` setting you never see or touch) — commit exactly as described above regardless; which branch is currently checked out is not your concern.
+Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git reset`, `git rebase`, or anything else that rewrites history or moves HEAD. The daemon owns those operations. Some experts run on a job-scoped branch the pump checked out before you started (a per-expert `workspace: branch` setting you never see or touch) — commit exactly as described above regardless; which branch is currently checked out is not your concern. On such a branch a run that leaves it where it found it fails the job, unless the dispatcher marked the job as one that may finish with nothing to commit (`allow_no_commit` in its `config.json`, which you never see or touch); such a job, when it continues an earlier round on the same branch, is accepted with a clean tree and a success `outcome`, never with `error` or `deferred`. Either way, never make a commit only to move the branch.
 
 **Sub-skills count as your writes.** When you invoke a sub-skill (via the `Skill` tool or by running a CLI verb in `Bash`) that modifies tracked files — `lazy-review.start`, `lazy-spec.set-stage`, any helper that flips frontmatter or writes content — those writes are part of YOUR work. Two ways to keep the tree clean:
 
@@ -41,9 +41,17 @@ A sub-skill that writes to disk and leaves `git status --porcelain` non-empty af
 
 Before exiting, your final `git status --porcelain` MUST be empty. If you exit with uncommitted changes in tracked files, the daemon halts the entire runtime and the operator must run `/lazy-runtime.recover` to restart it. The halt (`reason: uncommitted_changes`) names your expert and job id and opens the `halt:<repo>` incident in the error ledger; your `response.json` is kept exactly as you wrote it and your job is marked `DONE`, so its result is collected once the halt lifts. (Files under your job dir don't trigger this — they're gitignored and don't show in `--porcelain`.)
 
+**A job without the commit right commits nothing on the checkout.** When your prompt carries the no-commit clause (your job's `config.json` has `can_commit_in_repo: false`, which you never see or touch) and you run on the shared checkout, the daemon compares the branch after your run with the commit it stood at when your job was claimed. A commit authored under your identity in between — your own, or one a sub-skill made under your identity — fails your job, whatever your `response.json` says, and halts the entire runtime (`reason: forbidden_commit`) naming your expert, your job id and the commits. Nothing is reverted for you; the operator decides. Commits by your memory-write skill, which commits under its own memory identity, are not counted.
+
 ## Where your files live
 
 The user message you receive lists the concrete paths for this job: the protocol(s), the aspect(s) (zero or more behavior layers your expert opts into via its entry in `lazy.settings.json[experts]`), the literal argument values your expert was registered with, `request.json`, `source/`, `context/`, `result/`, and `response.json`. Use those paths verbatim — do not look up environment variables. Read every protocol and aspect before acting.
+
+## The environment you are given
+
+**You work only in the environment your job was given.** You never change settings: you set no environment variable — `VIRTUAL_ENV`, `LAZYCORTEX_PLUGIN_DIRS` or any other —, you use no other virtual environment and no other plugin version, and you edit no checker configuration. A plugin, a path or a virtual environment that cannot be found stops the work: you report its error verbatim.
+
+**A check that fails or cannot run fails the job.** A check here is whatever verifies the work your job produced — a checker, a validator, a test run over what you changed. Such a check that fails or cannot run ends the job with `outcome: "error"` and the exact error text in `error.message`; a job with a failed check never ends in a success outcome. A check wrapper that cannot create its virtual environment inside the job's sandbox is such a check. A run whose outcome is itself the deliverable — a test of the deployed product a tester reports on — records a red result in its report, as its protocol says. A settings problem is fixed by the operator or by the plugin, never by you.
 
 ## Attachments
 
@@ -101,4 +109,4 @@ Write artifact files into the `result/` directory inside your job dir. The dispa
 - Other experts' job dirs (`.experts/.jobs/<other-expert>/...`).
 - Branches other than the daemon's base branch (`daemon.git.base_branch`, the operator's branch the daemon rides).
 - The runtime's state file (`.runtime/state.json`).
-- The input file, until your work has succeeded. The input handed to you (`source/*` and any external paths passed as input) may be moved, deleted, or filed away — but only as the **last action once your result is ready and you return a success outcome**. While `outcome: "error"` is still possible, leave the original in place: on failure it is the only copy left to reprocess. (Leaving it untouched is equally fine — the dispatcher removes it on `outcome: "done"`.)
+- The input file, until your work has succeeded. The input handed to you (`source/*` and any external paths passed as input) may be moved, deleted, or filed away — but only as the **last action once your result is ready and you return a success outcome**. While `outcome: "error"` is still possible, leave the original in place: on failure it is the only copy left to reprocess. (Leaving it untouched is equally fine — the dispatcher removes it on a success outcome.)

@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.diagram-install
 description: "Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or reports that clicking a mermaid diagram doesn't zoom. Not for overflowing, white-boxed or clipped diagrams — those fit-CSS snippets come from `/lazy-obsidian.install`."
-allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
+allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(ls *), Bash(date *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Agent
 argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---
 # Install diagram render glue (Obsidian)
@@ -59,7 +59,7 @@ Outcome: state tuple or `failed:<reason>`.
 
 Vaults that previously used the spec-system's `spec.draw-diagram` skill may carry `<vault>/snippets/mermaid-no-bg.css`. The new engine's theme directive (`background:transparent`) makes that snippet redundant — keeping it does no harm but it's dead config.
 
-1. `test -f <vault>/snippets/mermaid-no-bg.css`. If absent → state **absent**, no prompt.
+1. `Bash(ls -d <vault>/snippets/mermaid-no-bg.css)` — present when the command lists it, absent when it fails with "No such file or directory". If absent → state **absent**, no prompt.
 2. If present → leave it in place silently. State **kept-orphan**. Orphans are never deleted: the user may have customized the file or still reference it, and we can't prove it's safe to remove. No prompt.
 
 The report (Step 4) notes the legacy snippet is present and redundant so the user can remove it manually if they wish. The skill never deletes it.

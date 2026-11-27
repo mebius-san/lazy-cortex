@@ -145,6 +145,7 @@ State blocks the dispatcher repaints on every wake; never authored by a writer.
 |---|---|---|---|
 | Operator question with answer options | `[!question] #review/question` | expert | at least one `- [ ]` option row |
 | Non-system commentary | `[!note]`, `[!info]` | expert | — |
+| Discussion block of a report; removed when the report's review closes | H1 section, `#review/discussion` its first non-empty line | main writer of a report class | heading in the document's language, block at the end of the report |
 
 There is no concern callout. A validator's findings are plain prose in its own section, never operator-facing markup, and the main writer turns them into questions with options; a `[!attention]` carrying a `#review/concern` tag is outside the closed `#review/*` set and fails the review audit.
 

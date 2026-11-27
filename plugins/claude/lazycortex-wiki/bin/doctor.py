@@ -38,6 +38,8 @@ import mirror as _mirror  # noqa: E402  # pylint: disable=import-error,wrong-imp
 import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import wiki_locator as _wiki_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -2117,7 +2119,7 @@ class DomainDoctor:
     Returns:
       The registered domain-routine names, in canonical order.
     """
-    routines = self._read_settings().get(_ROUTINES_KEY) or {}
+    routines = self._read_daemon_settings().get(_ROUTINES_KEY) or {}
     return [ name for name in _DOMAIN_ROUTINES if name in routines ]
 
   def _is_daemon_enabled(self) -> bool:
@@ -2127,17 +2129,18 @@ class DomainDoctor:
     Returns:
       True when `daemon.enabled` is true in the settings; False otherwise.
     """
-    daemon = self._read_settings().get(_DAEMON_KEY) or {}
+    daemon = self._read_daemon_settings().get(_DAEMON_KEY) or {}
     return bool(daemon.get(_DAEMON_ENABLED_KEY))
 
-  def _read_settings(self) -> dict:
+  def _read_daemon_settings(self) -> dict:
     """
-    Read the repo's settings file as a dict.
+    Read the settings file that holds the daemon's sections, at the toplevel of the checkout the repo sits in.
 
     Returns:
       Parsed settings, or an empty dict when the file is absent or invalid.
     """
-    settings_file = self._repo / _SETTINGS_PATH
+    # the daemon's routines and switch live in the checkout toplevel's settings, even for a nested project
+    settings_file = _wiki_locator.query_repo_root(self._repo) / _SETTINGS_PATH
 
     # guard: settings file does not exist
     if not settings_file.is_file():

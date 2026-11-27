@@ -6,9 +6,9 @@ need the `LAZYCORTEX_PLUGIN_DIRS` value the runtime daemon exports to its subpro
 neither runs under the daemon, so the value is rebuilt in the daemon's shape: every dev-vault
 plugin source under `<repo>/plugins/claude/*/` that carries a manifest, and nothing else — an
 installed plugin is never listed, because every consumer resolves it through the install registry
-(`~/.claude/plugins/installed_plugins.json`) itself at call time. The repository root follows the
-dispatcher convention — `LAZY_REPO_ROOT`, then the process working directory, overridable per call
-with `--cwd`.
+(`~/.claude/plugins/installed_plugins.json`) itself at call time. The repository root is the
+toplevel of the checkout that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits in (the
+directory itself outside git).
 """
 from __future__ import annotations
 
@@ -17,9 +17,7 @@ import os
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from plugin_dirs import read_installed_plugin_roots  # pylint: disable=import-error
+from plugin_locator import installed_plugin_roots, query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -41,13 +39,13 @@ def derive_plugin_dirs(repo: Path, *, home: Path | None = None) -> tuple[str, bo
 
   Args:
     repo: Repository root whose in-repo plugin sources are scanned.
-    home: Home directory whose plugin registry is probed for the found flag; the current user's
+    home: Home directory whose plugin registry is probed for the found flag; the default registry
       when omitted.
 
   Returns:
     A tuple of the `os.pathsep`-joined plugin-dir string (possibly empty) and a flag that is
-    True when an in-repo plugin source or any installed plugin was found; False tells the caller
-    the value is best-effort only.
+    True when an in-repo plugin source or a plugin installed for this repo or the user was found;
+    False tells the caller the value is best-effort only.
   """
   dirs: list[str] = []
 
@@ -66,9 +64,9 @@ def derive_plugin_dirs(repo: Path, *, home: Path | None = None) -> tuple[str, bo
       if (entry / _MANIFEST_REL).is_file():
         dirs.append(str(entry.resolve()))
 
-  # the joined value, and whether any plugin is reachable at all — an installed plugin still counts
-  registry_home = Path.home() if home is None else home
-  return os.pathsep.join(dirs), bool(dirs) or bool(read_installed_plugin_roots(registry_home))
+  # the joined value, and whether any plugin is reachable at all — a plugin installed for this repo or the user
+  # still counts
+  return os.pathsep.join(dirs), bool(dirs) or bool(installed_plugin_roots(Path(repo), home))
 
 
 def cmd_plugin_dirs(argv: list[str]) -> int:
@@ -92,5 +90,5 @@ def cmd_plugin_dirs(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # the derived value alone is printed; the best-effort flag is the preflight's concern
-  print(derive_plugin_dirs(resolve_repo_root(args.cwd))[0])
+  print(derive_plugin_dirs(query_repo_root(args.cwd))[0])
   return 0

@@ -18,10 +18,12 @@ either verb to one nested value inside the section. `--verbatim` makes `settings
 tracked section exactly as stored (`null` when the file does not carry it, no stub, no overlay) and
 `settings-set` write the whole tracked section without any version stamp; it takes neither `--key`
 nor another `--scope`.
-The settings file is resolved as `<cwd>/.claude/lazy.settings.json`, where `<cwd>`
-follows the same convention every other subcommand uses: the `LAZY_REPO_ROOT` env var,
-falling back to the process working directory, overridable per-call with `--cwd`;
-`--home` swaps the repo file for the user-scope `~/.claude/lazy.settings.json`.
+The settings file is resolved as `<root>/.claude/lazy.settings.json`, where `<root>` is
+the nearest directory from `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory, upward
+that holds the file, never above its checkout's toplevel, and that toplevel when none does (the
+directory itself outside git). A section the runtime daemon reads is resolved at that toplevel
+instead, where the daemon reads it; `--home` swaps the repo file for the user-scope
+`~/.claude/lazy.settings.json`.
 """
 from __future__ import annotations
 
@@ -31,14 +33,14 @@ import sys
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import SettingsFile  # pylint: disable=import-error
+from constants import SettingsFile, SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import (  # pylint: disable=import-error
   load_local_only_section, load_section, load_tracked_section, load_verbatim_tracked_section, save_local_section,
   save_section,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root, query_settings_root  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from runtime_state import atomic_write_text  # pylint: disable=import-error
 
@@ -121,22 +123,58 @@ class Outcome:
 
 
 # ----------------------------------------------------------------------------------------
-def resolve_settings_path(cwd: Path | str | None, *, home: bool = False) -> Path:
+def resolve_settings_path(cwd: Path | str | None, *, home: bool = False, section: str | None = None) -> Path:
   """
-  Resolve the tracked settings-file path from an optional explicit working directory.
+  Resolve the tracked settings-file path that holds a section for the repository checkout a call works in.
+
+  Guarantees:
+    - A section the runtime daemon reads always resolves to the settings file at the root of the checkout, for
+      reading and for writing alike, so the daemon finds what a command writes.
+    - Every other section, and a call naming no section, resolves to the nearest settings file within the checkout.
+    - A call for the user scope resolves to the user-scope file whatever the section.
 
   Args:
-    cwd: Explicit repository root, or `None` to fall back to the `LAZY_REPO_ROOT`
-      environment variable and then the process working directory.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory.
     home: When true, target the user-scope file under `~/.claude/` and ignore `cwd`.
+    section: Top-level section the caller reads or writes, or `None` when the file is not read for one section.
 
   Returns:
-    Path to `<cwd>/.claude/lazy.settings.json` under the resolved working directory, or
-    `~/.claude/lazy.settings.json` when `home` is set.
+    Path to `~/.claude/lazy.settings.json` when `home` is set; for a section the runtime daemon reads, the
+    `.claude/lazy.settings.json` at the root of the checkout that directory sits in (the directory itself outside
+    git); otherwise the one under the nearest directory from that directory upward holding it, never above the
+    checkout's root, else under that root.
   """
-  # the file sits at its canonical place under the root: --home wins, then the dispatcher's --cwd /
-  # LAZY_REPO_ROOT / cwd convention
-  return (Path.home() if home else resolve_repo_root(cwd)) / SettingsFile.REL
+
+  # Contract:
+  # A section the runtime daemon reads (any member of `SettingsKey.DAEMON_SECTIONS`) MUST always resolve to the
+  # settings file at the root of the checkout, whatever directory the caller works in, so a command run in a nested
+  # project never leaves such a section where the daemon does not look.
+
+  # Contract:
+  # Every section outside `SettingsKey.DAEMON_SECTIONS`, and a call naming no section, MUST resolve to the nearest
+  # settings file within the checkout, never above the checkout's root.
+
+  # Contract:
+  # A call for the user scope (`home=True`) MUST resolve to the user-scope settings file whatever the section,
+  # ignoring the checkout.
+
+  # Domain(repo.checkout-resolution):
+  # # The settings file a section is read from and written to
+  # The user's own settings file is a scope of its own and is chosen only when asked for. For a project, the file
+  # depends on who reads the section. The sections the background daemon reads are its own configuration, routines,
+  # experts, agent model tiers, providers, sandbox, external directories and the git staging section. They are
+  # always read and written in the settings of the checkout's root, because one daemon serves the whole checkout, so
+  # a command started in a nested project never leaves such a section where the daemon will not look. Every other
+  # section follows the nearest settings file within the checkout. The permissions the daemon's jobs run with are
+  # not such a section: they go through the install permissions phase into Claude Code's own settings files at the
+  # checkout's root.
+
+  # the file sits at its canonical place: --home wins; a daemon-read section lives at the checkout root, where the
+  # daemon reads it; any other section comes from the nearest settings file within the checkout
+  if home:
+    return Path.home() / SettingsFile.REL
+  root = query_repo_root(cwd) if section in SettingsKey.DAEMON_SECTIONS else query_settings_root(cwd)
+  return root / SettingsFile.REL
 
 
 def _find_nested_value(section: dict[str, object], key: str) -> object:
@@ -224,7 +262,9 @@ def load_settings_section(section: str, *,
 
   Args:
     section: Name of the top-level section to read.
-    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      settings file is the one at the checkout's root for a section the daemon reads, else the nearest
+      `.claude/lazy.settings.json` from that directory upward within its checkout, else the one at its root.
     home: Read the user-scope `~/.claude/lazy.settings.json` instead of the repo file.
     scope: Layer to read — `tracked` (default), `local` (overlay only), or `merged`.
 
@@ -254,7 +294,7 @@ def load_settings_section(section: str, *,
   # machine is never silently overridden by a section another plugin wrote.
 
   # the requested layer's reader answers straight from the resolved file
-  return _READERS[scope](resolve_settings_path(cwd, home = home), section)
+  return _READERS[scope](resolve_settings_path(cwd, home = home, section = section), section)
 
 
 def load_verbatim_section(section: str, *, cwd: Path | str | None = None, home: bool = False) -> dict | None:
@@ -266,7 +306,9 @@ def load_verbatim_section(section: str, *, cwd: Path | str | None = None, home: 
 
   Args:
     section: Name of the top-level section to read.
-    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      settings file is the one at the checkout's root for a section the daemon reads, else the nearest
+      `.claude/lazy.settings.json` from that directory upward within its checkout, else the one at its root.
     home: Read the user-scope `~/.claude/lazy.settings.json` instead of the repo file.
 
   Returns:
@@ -277,7 +319,7 @@ def load_verbatim_section(section: str, *, cwd: Path | str | None = None, home: 
       object.
   """
   # the tracked file answers as stored: no stub, no overlay
-  return load_verbatim_tracked_section(resolve_settings_path(cwd, home = home), section)
+  return load_verbatim_tracked_section(resolve_settings_path(cwd, home = home, section = section), section)
 
 
 def settings_set(section: str,
@@ -304,7 +346,9 @@ def settings_set(section: str,
     section: Name of the top-level section to store under.
     value: Section content (must be a JSON object) or, with `key`, the nested value to
       store; ignored when `delete` is set.
-    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      settings file is the one at the checkout's root for a section the daemon reads, else the nearest
+      `.claude/lazy.settings.json` from that directory upward within its checkout, else the one at its root.
     home: Write the user-scope `~/.claude/lazy.settings.json` instead of the repo file.
     scope: Layer to write — `tracked` (default) or `local` (the gitignored overlay).
     key: Slash-separated key path inside the section; `None` replaces the whole section.
@@ -329,7 +373,7 @@ def settings_set(section: str,
   # is preserved untouched and the other layer's file is never written.
 
   # the file and the writer are fixed by the target scope before either branch touches them
-  path = resolve_settings_path(cwd, home = home)
+  path = resolve_settings_path(cwd, home = home, section = section)
   writer = _WRITERS[scope]
 
   # guard: a verbatim write replaces a whole tracked section; a keyed or local one has no verbatim form
@@ -442,7 +486,8 @@ def cmd_settings_get(argv: list[str]) -> int:
     try:
       print(json.dumps(load_verbatim_section(args.section, cwd = args.cwd, home = args.home)))
     except ValueError as error:
-      print(json.dumps({ ConfirmKey.ERROR: f"{resolve_settings_path(args.cwd, home = args.home)}: {error}" }))
+      path = resolve_settings_path(args.cwd, home = args.home, section = args.section)
+      print(json.dumps({ ConfirmKey.ERROR: f"{path}: {error}" }))
       return 1
     return 0
 

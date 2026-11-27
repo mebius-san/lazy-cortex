@@ -1,7 +1,7 @@
 ---
 name: lazy-core.scaffold-local
 description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to the `scaffold sync-plugin` verb each plugin's install runs."
-allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Manage Local Scaffold Entries
 
@@ -38,7 +38,7 @@ Resolve the scaffold registry path. Scope is always `project` for `_local` entri
 
 Where `<repo-root>` is `git rev-parse --show-toplevel`.
 
-Verify the registry file exists with `Bash(test -f <regPath>)`. If absent → FAIL with:
+Verify the registry file exists with `Bash(ls -d <regPath>)`: it is present when the command lists it, absent when it fails with "No such file or directory". If absent → FAIL with:
 
 > `scaffold-local: registry not found at <regPath>; run /lazy-core.install to initialise the scaffold registry`
 
@@ -46,13 +46,19 @@ State outcome `resolved`.
 
 ## Step 2 — Resolve core CLI
 
-When this repo authors the plugin itself (`<repo-root>/plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists), `<core-cli>` is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core` — the sources in the tree, never the cached copy, which lags them until the next publish. Otherwise read `~/.claude/plugins/installed_plugins.json`. Find the `lazycortex-core@lazycortex` key. If absent or its array is empty → FAIL with:
+When this repo authors the plugin itself (`<repo-root>/plugins/claude/lazycortex-core/.claude-plugin/plugin.json` exists), `<core-cli>` is `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core` — the sources in the tree, never the cached copy, which lags them until the next publish. Otherwise ask the plugin locator for the install the registry records for this repo or for the user:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_locator.py" installed lazycortex-core --start <repo-root>)
+```
+
+It prints the `installPath` of the highest-version `lazycortex-core` record made for the whole user or for this repo's main checkout, never another project's. If it exits non-zero → FAIL with:
 
 > `scaffold-local: cannot resolve core CLI — lazycortex-core not installed; run /lazy-core.install first`
 
-Take the `installPath` of the entry with the highest `version` — the registry keeps one record per project that ever installed the plugin, so the first or last entry may name an older cache dir. `<core-cli>` is `<installPath>/bin/lazycortex-core`; every verb below runs it through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`, because the file carries no exec bit.
+`<core-cli>` is `<installPath>/bin/lazycortex-core`; every verb below runs it through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`, because the file carries no exec bit.
 
-Verify the file exists with `Bash(test -f <core-cli>)`. If not → FAIL with:
+Verify the file exists with `Bash(ls -d <core-cli>)`: it is present when the command lists it, absent when it fails with "No such file or directory". If absent → FAIL with:
 
 > `scaffold-local: core CLI not found at <core-cli>; run /plugin update lazycortex-core@lazycortex to restore`
 

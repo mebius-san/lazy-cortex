@@ -4,9 +4,9 @@
 Emit JSON of every canonical skill / agent / command name visible to this session.
 
 Walks the configured artifact roots (in-repo plugin sources, project-local `.claude/` tree,
-installed-plugin directories listed in `installed_plugins.json`, and the global `~/.claude/`
-tree), prefers each artifact's frontmatter `name:` over its filesystem basename, and writes
-the merged result to stdout as a single JSON object.
+the installed-plugin directories `installed_plugins.json` records for this repo's main checkout
+or for the whole user, and the global `~/.claude/` tree), prefers each artifact's frontmatter
+`name:` over its filesystem basename, and writes the merged result to stdout as a single JSON object.
 
 The output object carries:
   - `canonical`: sorted unique names across every kind.
@@ -31,8 +31,15 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 HOME = Path.home()
-INSTALLED = HOME / ".claude" / "plugins" / "installed_plugins.json"
 
 NAME_RE = re.compile(r"^name:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", re.MULTILINE)
 LOGGING_RE = re.compile(r"^logging:\s*true\s*$", re.MULTILINE)
@@ -212,18 +219,14 @@ def merge(into: dict[ str, set[str] ], more: dict[ str, set[str] ]) -> None:
 
 def find_repo_root() -> Path | None:
   """
-  Return the nearest ancestor of the current working directory that contains a `.git` entry.
+  Return the root of the repository checkout the script works in.
 
   Returns:
-    The absolute path of the enclosing git repository, or `None` when the current working
-    directory is not inside any repository.
+    The root of the checkout that contains `$LAZY_REPO_ROOT`, else the current working directory (a linked
+    worktree's own root inside one), or `None` when that directory is not inside any repository.
   """
-  cwd = Path.cwd()
-  for parent in [ cwd, *cwd.parents ]:
-    # waiver: filesystem path/filename idiom, not a domain constant
-    if (parent / ".git").exists():
-      return parent
-  return None
+  # the checkout's own root, which only git can name; outside git there is none
+  return plugin_locator.find_checkout_toplevel(plugin_locator.query_repo_root())
 
 
 def find_all_in_repo_plugin_roots(repo: Path | None) -> list[Path]:
@@ -253,12 +256,12 @@ def find_project_local_root(repo: Path | None) -> Path | None:
   """
   Return the project-local `.claude/` root for the current session.
 
-  Prefers `<repo>/.claude/` when a repository is supplied; falls back to `<cwd>/.claude/` when
-  the call sites runs outside a git repository (typical in test harnesses that arrange a local
-  `.claude/` tree).
+  Prefers `<repo>/.claude/` when a repository is supplied; otherwise falls back to `.claude/` under the
+  directory the script works in (`$LAZY_REPO_ROOT` when set, else the current working directory), which is
+  the case outside a git repository.
 
   Args:
-    repo: Absolute path to the repository root, or `None` to force the cwd fallback.
+    repo: Absolute path to the repository root, or `None` to use the working-directory fallback.
 
   Returns:
     The absolute path to the resolved `.claude/` directory, or `None` when no candidate exists.
@@ -268,47 +271,10 @@ def find_project_local_root(repo: Path | None) -> Path | None:
     candidate = repo / ".claude"
     return candidate if candidate.is_dir() else None
 
-  # fall back to the current working directory when no git repo is available
+  # fall back to the directory the script works in (`$LAZY_REPO_ROOT`, else the cwd) when no git repo is available
   # waiver: filesystem path/filename idiom, not a domain constant
-  candidate = Path.cwd() / ".claude"
+  candidate = plugin_locator.query_repo_root() / ".claude"
   return candidate if candidate.is_dir() else None
-
-
-def read_installed_plugin_roots() -> list[Path]:
-  """
-  Return the install paths of every plugin recorded in `~/.claude/plugins/installed_plugins.json`.
-
-  Returns:
-    A deduplicated list of plugin install directories in first-seen order. Empty when the
-    registry file is missing, cannot be read or decoded, or contains invalid JSON.
-  """
-  # guard: registry file must exist before parsing
-  if not INSTALLED.is_file():
-    return []
-  try:
-    # waiver: stdlib idiom, not a domain constant
-    data = json.loads(INSTALLED.read_text(encoding = "utf-8"))
-  except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-    return []
-
-  # collect the install path of every recorded plugin entry
-  roots: list[Path] = []
-  # waiver: external installed-plugins JSON field name, not an internal key
-  for entries in data.get("plugins", {}).values():
-    for entry in entries:
-      # waiver: external installed-plugins JSON field name, not an internal key
-      install_path = entry.get("installPath")
-      if install_path:
-        roots.append(Path(install_path))
-
-  # deduplicate while preserving first-seen ordering
-  seen: set[Path] = set()
-  unique: list[Path] = []
-  for root in roots:
-    if root not in seen:
-      seen.add(root)
-      unique.append(root)
-  return unique
 
 
 def compute_global_root() -> Path:
@@ -357,8 +323,8 @@ def find_all_canonical_names() -> dict:
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["project_local_root"] = 1
 
-  # then every installed plugin recorded in the marketplace registry
-  for root in read_installed_plugin_roots():
+  # then every plugin the install registry records for this repo or the user, one root per plugin
+  for root in plugin_locator.installed_plugin_roots(repo or plugin_locator.query_repo_root()).values():
     merge(aggregate, harvest_root(root, counters, logged))
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["installed_roots"] += 1

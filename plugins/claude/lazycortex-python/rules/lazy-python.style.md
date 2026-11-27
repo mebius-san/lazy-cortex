@@ -5,7 +5,7 @@ paths:
 ---
 # Python style (LLM-read)
 
-Critical Python-discipline reminders for any `.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md` before making non-trivial changes; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/coding_guidelines.md` (overlay — read after canon, overrides on conflict).
+Critical Python-discipline reminders for any `.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md` before making non-trivial changes; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/coding_guidelines.md` (overlay — read after canon, overrides on conflict).
 
 ## Top-violated style rules
 
@@ -29,7 +29,7 @@ Critical Python-discipline reminders for any `.py` file. Read the full canon at 
 - **TypeAliases go with TypeVars** — in module section 3 (after `TYPE_CHECKING` block), not inline or near classes.
 - **`__init__` block separation**: when `super().__init__()` coexists with other code, it must be its own commented block, separated by blank lines.
 - **Every code block carries a purpose comment** — a block is any chunk after a blank line inside a body, including a lone trailing `return x`; `# waiver:` is not a purpose comment. `pcf` proves the comment is there; the review phase judges whether it says anything.
-- **No useless intermediate variables** — inline anything used once; never alias a trivial accessor. Justified only for expensive results reused, loop-invariant hoisting, complex multi-step expressions, an access chain two or more objects deep read more than once, a flag recording the result of a call made for its effect, or a complex argument lifted out of a call.
+- **No useless intermediate variables** — inline anything used once; never alias a trivial accessor. Justified only for expensive results reused, loop-invariant hoisting, complex multi-step expressions, an access chain two or more objects deep read more than once, a flag recording the result of a call made for its effect, an expression that inlined would overrun the line-length limit and wrap into a hard-to-read form, or a complex argument lifted out of a call.
 - **Read the full guides before adding an entity or refactoring** — before adding a class, enum, module, or package, and before any move / rename / split / restructure, read the canon plus the applicable project overlays. The trigger is the act itself, never your own judgement of whether the change is "trivial" — self-assessed triviality is exactly how placement rules get violated. These reminders and the scaffold templates may lag the guides; on conflict the guides win.
 - **No compatibility shims without consent** — no alias, wrapper or backward-compatibility layer for a renamed or removed symbol unless the operator asked for it; rename or remove everywhere instead.
 
@@ -44,7 +44,7 @@ The moment of the work decides the scope of each run. Steps 1 and 3, the local c
 | Before any commit | whole project (step 2) | local (step 3) |
 | Final gate (step 5) | whole project | whole suite |
 
-**Project-runner precedence.** `.claude/lazy.settings.json` may declare `python.check_cmd` / `python.test_cmd` — when either key is set, that command replaces `chk-py` / `tst-py` at every step below. A project rule or a `docs/guidelines/*.md` overlay declaring its own runner has the same effect; only the command differs, never the order.
+**Project-runner precedence.** `.claude/lazy.settings.json` may declare `python.check_cmd` / `python.test_cmd` — when either key is set, that command replaces `chk-py` / `tst-py` at every step below. A project rule or a `docs/guidelines/python/*.md` overlay declaring its own runner has the same effect; only the command differs, never the order.
 
 1. **`chk-py all <file>.py -q`** — the local check: per-file style/type sweep (pcf + toi + cmp + mypy + ruff + pylint), after every task and every fix. Run it on the one or two files edited; for a module-wide refactor (>3 files in the same dir) run `chk-py all <module-dir>/ -q` instead. This is your inner loop — fix every violation before moving on, including the ones that were already there before your edit: a changed file leaves the loop clean as a whole, not clean only on its new lines.
 2. **`chk-py all -q`** — the whole-project check: when the implementation is complete, after each cycle of review and fixes, and before any commit — not after a single task or fix. It catches cross-file regressions (broken imports, removed APIs, dangling type references). No further work until clean.

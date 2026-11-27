@@ -14,7 +14,8 @@ must not edit is mechanically restored from the operator's document.
 Frontmatter overlay keys are applied exactly as the caller passes them.
 
 The module also offers section-level helpers: status-callout upsert and strip, owned-section stripping,
-protected-section lift and restore, answered-question stripping, and edit-marker folding.
+protected-section lift and restore, answered-question stripping, discussion-block removal, and
+edit-marker folding.
 """
 from __future__ import annotations
 
@@ -204,6 +205,28 @@ def _is_section_tagged(section_body: str) -> bool:
   return False
 
 
+def _is_foreign_section(section_body: str) -> bool:
+  """
+  Report whether a section belongs to someone other than the main writer.
+
+  Args:
+    section_body: Section text below its H1 heading line.
+
+  Returns:
+    True when the section is tagged and the tag is not the discussion-block tag, False otherwise.
+  """
+
+  # Domain(review.markup):
+  # # A report's discussion block is the main writer's
+  # A report under review gathers the operator's remarks and the main writer's answers in one top-level section
+  # at the end of the report, the discussion block. The block is recognised by its tag on the section's first
+  # line with content, never by its heading, which is written in the document's language. It is tagged so that
+  # it can be found and removed, yet it is the main writer's own content: a main-writer round takes it from the
+  # writer's reply like the rest of the body, and a section writer's round leaves it where it stands.
+
+  return _is_section_tagged(section_body) and _section_tag_line(section_body) != Tag.DISCUSSION
+
+
 def _drop_sections(
     body: str,
     *,
@@ -216,8 +239,14 @@ def _drop_sections(
   When `drop_owned` is `True`, any section whose first non-empty content line is a tag
   (spec inv 8) is removed. This covers any foreign-owned overlay — they are not "main writer's body" —
   including ownerless tagged sections (`#protected/...`, `#consumer/...`), which are always
-  removed under the policy. When `drop_history` is `True`, the `# History` section
+  removed under the policy. A report's discussion block is the main writer's body and is kept.
+  When `drop_history` is `True`, the `# History` section
   (titled exactly `History`, with or without an ownership tag) is also removed.
+
+  Args:
+    body: Document body (no frontmatter).
+    drop_owned: Whether tagged sections other than the discussion block are removed.
+    drop_history: Whether the `# History` section is removed.
 
   Returns:
     `body` with the matching H1 sections removed; preamble content before the first H1
@@ -243,8 +272,8 @@ def _drop_sections(
         keep_ranges.append((start, end))
       continue
 
-    # under drop_owned policy, every tagged section is removed, ownerless ones (#protected/...) included
-    if drop_owned and _is_section_tagged(section_body_only):
+    # under drop_owned policy, every foreign tagged section is removed, ownerless ones (#protected/...) included
+    if drop_owned and _is_foreign_section(section_body_only):
       continue
     keep_ranges.append((start, end))
   return "".join(body[s:e] for s, e in keep_ranges)
@@ -267,10 +296,14 @@ def _heading_line_for(start: int, end: int, body: str) -> str:
 # Approve-checkbox lines inside the ready banner. Already covered by
 # banner-block stripping above, but kept as a safety net when a stale
 # checkbox sits outside a banner. Covers the four English gesture labels:
-# the one-box approve and the three post-validation gestures.
+# the one-box approve and the three post-validation gestures, and the two boxes
+# of a report class's banner in English and Russian.
 _APPROVE_LINE_RE = re.compile(
-    r"^>\s*-\s*\[[ x]\]\s*approve(?:\s+the\s+whole\s+document|\s+this\s+and\s+previous\s+rounds"
-    r"|\s+and\s+run\s+to\s+the\s+end\s+without\s+stops|\s+without\s+further\s+validation)[^\n]*$",
+    r"^>\s*-\s*\[[ x]\]\s*(?:approve(?:\s+the\s+whole\s+document|\s+this\s+and\s+previous\s+rounds"
+    r"|\s+and\s+run\s+to\s+the\s+end\s+without\s+stops|\s+without\s+further\s+validation)[^\n]*"
+    # a report box's label is matched whole, so an operator's task line that merely starts with it survives
+    r"|(?:accept\s+as\s+is,\s+without\s+fixes|fix\s+by\s+the\s+remarks"
+    r"|принять\s+как\s+есть,\s+без\s+исправлений|поправить\s+по\s+замечаниям)[ \t]*)$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -457,7 +490,7 @@ def upsert_status_callout(
   """
   Place or replace the terminal-state status callout at the top of `body`.
 
-  The callout is placed above the first H1 with exactly one blank line of separation. It
+  The callout is inserted at the very start of `body`, followed by exactly one blank line. It
   carries a `#status/<state>` tag in its own namespace, not under `#review/<x>`: the
   finalize-time system-callout strip removes `#review/` callouts only, so the status
   record survives as the terminal artifact the operator sees on opening a finalized
@@ -465,8 +498,8 @@ def upsert_status_callout(
   (e.g. setting `accepted` / `rejected` / `spawned`) write into the same callout slot —
   those values are not review-internal scaffolding.
 
-  Idempotent: any existing `#status/<x>` callout block at the top of `body` is removed
-  before the new one is inserted.
+  Idempotent: the first `#status/<x>` callout block found in `body` outside fenced code is
+  removed before the new one is inserted.
 
   Returns:
     `body` with the status callout inserted or replaced at the top.
@@ -535,6 +568,43 @@ def strip_owned_h1_sections(
   return "".join(body[s:e] for s, e in keep_ranges)
 
 
+def strip_discussion(body: str) -> str:
+  """
+  Remove every discussion block of a report from `body`.
+
+  A block is recognised by its tag, never by its heading, which is written in the document's language.
+
+  Guarantees:
+    - Every byte outside the removed blocks is kept as it was.
+    - A tag inside a code fence never marks a block.
+
+  Args:
+    body: Document body (no frontmatter).
+
+  Returns:
+    `body` without any H1 section whose first non-empty line is the discussion-block tag; each block runs to the
+    next H1 or the end of the body. A body with no such section comes back unchanged.
+  """
+
+  # Contract:
+  # Every byte outside a removed discussion block MUST be kept as it was, and a tag inside a code fence MUST NOT
+  # mark a block.
+
+  # each block runs from its heading to the next H1 or the end; every other range is kept as it stands
+  keep_ranges: list[tuple[int, int]] = []
+  cursor = 0
+  for start, end, _title, _heading in _enumerate_h1_spans(body):
+    heading_len = len(_heading_line_for(start, end, body))
+
+    # only a section the discussion tag opens is removed
+    if _section_tag_line(body[start + heading_len:end]) != Tag.DISCUSSION:
+      continue
+    keep_ranges.append((cursor, start))
+    cursor = end
+  keep_ranges.append((cursor, len(body)))
+  return "".join(body[s:e] for s, e in keep_ranges)
+
+
 def _extract_history_section(body: str) -> str | None:
   """
   Extract the full text of the `# History` section from `body`.
@@ -562,6 +632,9 @@ _ANSWERED_QUESTION_BLOCK_RE = re.compile(
     r"\n?"
 )
 
+# A ticked option line of a quoted callout block.
+_TICKED_LINE_RE = re.compile(r"(?m)^>[ \t]*-[ \t]*\[[xX]\]")
+
 
 def strip_answered_questions(body: str) -> str:
   """
@@ -570,7 +643,8 @@ def strip_answered_questions(body: str) -> str:
 
   Guarantees:
     - A question or candidate callout carrying no ticked option survives untouched — it is
-      still awaiting the operator.
+      still awaiting the operator — and so does a question carrying several ticked options, or a candidate with
+      both its boxes ticked, which answer nothing.
     - A callout inside a code fence, and any line outside the callout's own `>` lines, survives
       untouched.
     - Only `[!question] #review/question` and `[!decision-candidate]` callouts are considered;
@@ -588,9 +662,28 @@ def strip_answered_questions(body: str) -> str:
   # Contract:
   # A `[!question] #review/question` or `[!decision-candidate]` callout carrying a ticked
   # option MUST NOT survive this call, and a callout of any other kind — or one with no ticked
-  # option — MUST survive byte-for-byte.
+  # option, or one carrying several ticked options — MUST survive byte-for-byte.
 
-  return _parser.sub_outside_fences(_ANSWERED_QUESTION_BLOCK_RE, "", body)
+  return _parser.sub_outside_fences(_ANSWERED_QUESTION_BLOCK_RE, _strip_if_answered, body)
+
+
+def _strip_if_answered(match: re.Match[str]) -> str:
+  """
+  Decide what an answered-looking callout block is replaced with.
+
+  Args:
+    match: One match of the answered-callout pattern, a whole question or decision-candidate block.
+
+  Returns:
+    An empty string for an answered block; the block itself for a question with several ticked options or a
+    candidate with both boxes ticked.
+  """
+
+  # guard: a question ticked more than once, or a candidate accepted and rejected at once, carries no answer and
+  # stays open for the operator
+  if len(_TICKED_LINE_RE.findall(match.group(0))) > 1:
+    return match.group(0)
+  return ""
 
 
 # Inert H1 placeholder that stands in for a lifted `#protected/...` section while the
@@ -890,14 +983,14 @@ def _restore_owned_and_history(
     heading_len = len(_heading_line_for(start, end, operator_body))
     section_body_only = section_text[heading_len:]
     owner = _owner_of_section(section_body_only)
-    tagged = _is_section_tagged(section_body_only)
+    tagged = _is_foreign_section(section_body_only)
     if _parser.is_historian_section(section_body_only):
       history_section = section_text
       continue
 
-    # spec inv 8: preserve EVERY tagged H1 section (any tag), not
-    # only 2-part #expert/<flat>/<section-id>. Downstream consumer
-    # overlays may carry other prefixes. All foreign to the main writer.
+    # spec inv 8: preserve every foreign tagged H1 section (any tag prefix, not only the 2-part
+    # #expert/<flat>/<section-id>), since downstream overlays may carry other prefixes; a report's
+    # discussion block is tagged but is the main writer's own content, so it is not preserved here.
     # only foreign-owned tagged sections get re-placed; untagged main-writer body and the
     # caller's own section are passed over — but an ownerless tagged section (owner is None) never matches a None skip_owner.
     if not tagged or (skip_owner is not None and owner == skip_owner):

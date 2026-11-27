@@ -35,6 +35,9 @@ if str(_BIN) not in sys.path:
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: intentional suppression — bare-name sibling import resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
@@ -233,11 +236,10 @@ def main(argv: list[str]) -> int:
       # waiver: argparse CLI signature -- option flag + vault-root default
       "--cwd", type = Path, default = None,
       # waiver: one-off human-facing message -- argparse help text
-      help = "vault root holding .claude/lazy.settings.json (default: cwd)",
+      help = "directory inside the vault holding .claude/lazy.settings.json (default: $LAZY_REPO_ROOT, then cwd)",
   )
   args = parser.parse_args(argv)
-  vault: Path = (args.cwd or Path.cwd()).resolve()
-  print(resolve_spec_language(vault, args.relpath))
+  print(resolve_spec_language(spec_locator.query_settings_root(args.cwd), args.relpath))
   return 0
 
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -19,8 +19,8 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
-surface_sha: 71d0312d51a9e22253bc8813d05351a573e2c96d7d8a8d52b36c4452e64b1c2c
+source_sha: 0044ac4308cce96cc832c6dbbbe2042b5ad738d5
+surface_sha: ff0db2be7a90d2b3710d67952eeaee91bb514e4cbdfcdb0d582fd932e2a765ff
 ---
 # Troubleshooting
 
@@ -58,9 +58,9 @@ surface_sha: 71d0312d51a9e22253bc8813d05351a573e2c96d7d8a8d52b36c4452e64b1c2c
 
 **Symptom**: Running `chk-py` or `tst-py` from the terminal (or via `/lazy-python.check-style`) fails immediately with a message like "cannot locate the lazycortex-python plugin" — even though the wrappers are present in `cli/`.
 
-**Likely cause**: The wrapper scripts deployed in `cli/` are self-resolving, path-agnostic scripts — `/lazy-python.install` Phase 2 copies the template verbatim (no path substitution), and each wrapper resolves the active `lazycortex-python` install at the moment it runs: first a dev-vault sibling checkout, then `$LAZYCORTEX_PLUGIN_DIRS` (for daemon-spawned processes), then Claude Code's own `installed_plugins.json`. Every stage now checks only that the candidate `bin/chk` file exists, then launches it by reading its own shebang line — none of them check for an executable bit, since a mode-blind git client (Obsidian-git on Android, a Windows checkout) can strip it at any commit. This error fires only when none of the three stages finds the file at all — most often because the plugin genuinely is not installed or not enabled for the current session, or `installed_plugins.json` is missing or unreadable.
+**Likely cause**: The wrapper scripts deployed in `cli/` are self-resolving, path-agnostic scripts — `/lazy-python.install` Phase 2 copies the template verbatim (no path substitution), and each wrapper resolves the active `lazycortex-python` install at the moment it runs, through a plugin locator that Phase 2 deploys beside the wrappers as `cli/lazy_python_locator.py`. The locator tries, in order, the exported plugin directories (for daemon-spawned processes), this checkout's own `plugins/claude/` tree (a worktree's own tree inside a worktree), and last the install that Claude Code's `installed_plugins.json` records for this repository or for the whole user — never another project's install. Each wrapper then launches the found `bin/chk` (or `bin/tst`, `bin/cfg`) by reading its own shebang line; none of them check for an executable bit, since a mode-blind git client (Obsidian-git on Android, a Windows checkout) can strip it at any commit. The error fires when the locator finds nothing — most often because the plugin genuinely is not installed or not enabled for the current session, or `installed_plugins.json` is missing or unreadable — or when the located plugin tree carries no `bin/chk`. A variant of the message says `cli/lazy_python_locator.py is missing; re-run /lazy-python.install`: the locator copy was deleted or never deployed (a repo installed before the locator existed).
 
-**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, re-run `/lazy-python.install` — Phase 2 redeploys the wrappers (`cfg-py`, `chk-py`, `tst-py`) unconditionally from the current templates.
+**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, or the message names the missing locator, re-run `/lazy-python.install` — Phase 2 redeploys the wrappers (`cfg-py`, `chk-py`, `tst-py`) and the locator unconditionally from the current plugin.
 
 ---
 
@@ -194,7 +194,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: Style, type, or test runs behave as though a different environment is active than expected — for example `mypy` / `pylint` report against packages that don't match what's installed in the repo's own `.venv`, or a secret / credential from an unrelated bootstrap script shows up during a run.
 
-**Likely cause**: Two resolvers run back-to-back before every `chk-py` / `tst-py` invocation. `_ensure_venv.sh` picks the Python venv first (active `$VIRTUAL_ENV`, then `<repo>/.venv`, then a `pyproject.toml`-configured path, then a fallback bootstrap). Immediately after, `_ensure_env.sh` sources whichever script is on record as `python.env_source`. `/lazy-python.install` Step 7 records that key automatically when it finds exactly one candidate bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — but when a repo ships more than one candidate and nothing is recorded yet, the value stays unset until you disambiguate, and any checker run in the meantime sources none of them (or picks up stray state from your shell instead).
+**Likely cause**: Two resolvers run back-to-back before every `chk-py` / `tst-py` invocation. `_ensure_venv.sh` picks the Python venv first (active `$VIRTUAL_ENV`, then `<repo>/.venv`, then a `pyproject.toml`-configured path, then a fallback bootstrap). A `$VIRTUAL_ENV` that lacks a checker tool is passed over, and the run says so on stderr (`not using $VIRTUAL_ENV (...): it lacks <tool>`) before moving to the project venv. Immediately after, `_ensure_env.sh` sources whichever script is on record as `python.env_source`; the settings file and a relative `env_source` path are read from the nearest directory holding `.claude/lazy.settings.json` between where you run and the checkout root (a subdirectory reads its checkout's settings, a linked worktree its own). `/lazy-python.install` Step 7 records that key automatically when it finds exactly one candidate bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — but when a repo ships more than one candidate and nothing is recorded yet, the value stays unset until you disambiguate, and any checker run in the meantime sources none of them (or picks up stray state from your shell instead).
 
 **Fix**: Re-run `/lazy-python.install`. If `python.env_source` has not been recorded yet, Step 7 detects the multiple candidates and asks — via `AskUserQuestion`, naming each script — which one your project actually uses (with a `skip` option). Pick the correct script; the install records it, and every subsequent `chk-py` / `tst-py` run sources it automatically alongside the resolved venv. A value already on record is never silently replaced — the disambiguation only fires when nothing is recorded yet, so if the repo's bootstrap script layout changed since the last recorded choice, confirm which script your project intends before re-running.
 
@@ -276,7 +276,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: A rule file under `.claude/rules/` (`lazy-python.style.md`, `lazy-python.docstrings.md`, `lazy-python.tests.md`, or `lazy-python.failing-tests.md`) was hand-edited after install, or a rule the plugin gained since your last install is not mirrored yet. The mirror is plugin-managed; consumer edits are not supported and will be clobbered on the next install run.
 
-**Fix**: Re-run `/lazy-python.install`. Phase 1 intentionally overwrites the mirror with the current plugin canon. If you need project-specific overrides, add them to the overlay files under `docs/guidelines/` — writer agents read those after the canon and overlay rules win on conflict.
+**Fix**: Re-run `/lazy-python.install`. Phase 1 intentionally overwrites the mirror with the current plugin canon. If you need project-specific overrides, add them to the overlay files under `docs/guidelines/python/` — writer agents read those after the canon and overlay rules win on conflict.
 
 ---
 
@@ -310,6 +310,26 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ---
 
+## `/lazy-python.audit` `check4` reports `WARN` — `cli/lazy_python_locator.py` missing or stale
+
+**Symptom**: Check 4 shows `WARN` with a message that `cli/lazy_python_locator.py` is missing, or is stale against the plugin's locator, although the three wrappers are present.
+
+**Likely cause**: The wrappers and the mypy shim find the plugin through the locator copy that install deploys verbatim into `cli/`. A missing copy means install never ran since the locator was introduced; a differing copy means the plugin updated since the last install, or the file was hand-edited. Until it is restored, the wrappers may stop with "cannot locate the lazycortex-python plugin" (see the entry above).
+
+**Fix**: Re-run `/lazy-python.install`; Phase 2 overwrites the locator with the shipped copy. Do not edit the file by hand — it is overwritten on every install. Re-run `/lazy-python.audit` to confirm `check4` returns to `PASS`.
+
+---
+
+## `/lazy-python.audit` `check7` reports `WARN` or `FAIL` — overlay files missing or in the old folder
+
+**Symptom**: Check 7 reports that one or more of `coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md` under `docs/guidelines/python/` are missing or do not open with the `# Project additions to <topic>` header. Or, after an upgrade, the writer agents and the guideline review no longer apply your project's overlay rules, and `docs/guidelines/` still holds the old `<topic>_guidelines.md` files.
+
+**Likely cause**: The Python overlays moved from `docs/guidelines/<topic>_guidelines.md` to `docs/guidelines/python/<topic>_guidelines.md`, so another language's overlays and the language-neutral guides no longer share the folder. The writer agents, the rules, check 7 and `chk-py review` read only the new folder, so overlays left in the old place are invisible to them, and the next install scaffolds empty stubs at the new path beside them. A `WARN` (one or two files) or `FAIL` (three or more) can also mean a stub was never scaffolded, or a consumer-edited overlay lost its header line.
+
+**Fix**: Run `/lazy-core.migrate` (or `/lazy-core.setup`, which runs migrations after the install chain). The `001-python-overlay-folder` step moves each old overlay into `docs/guidelines/python/`. When both an old and a new file exist for a topic, the step leaves both in place and reports `kept-both` with the pair; compare them and decide which one you mean to keep. `docs/guidelines/domain-groups.md` and other language-neutral guides stay where they are. For a missing stub, re-run `/lazy-python.install`; Phase 5 scaffolds absent overlays and leaves existing ones untouched. If only the header is missing from an overlay you edited, restore the `# Project additions to <topic>` first line yourself — install keeps the body of your file.
+
+---
+
 ## `/lazy-python.audit` `check10` reports `FAIL` — `hooks.json` is invalid JSON
 
 **Symptom**: Check 10 exits `FAIL` (not `WARN`) with a JSON parse error on the plugin's `hooks/hooks.json` manifest. The PostToolUse check-style hook will not auto-register until this is fixed.
@@ -330,13 +350,23 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 ---
 
-## `chk-py` / `tst-py` stop with "the project venv is missing or stale"
+## `chk-py` / `tst-py` stop with "the project venv ... does not exist / lacks ... / is out of date"
 
-**Symptom**: `chk-py` or `tst-py` exits with a message that the project venv at its path is missing or stale and, depending on the case, that `LAZYCORTEX_PROTECTED` is set so nothing is installed, or that `bootstrap-fallback = false`.
+**Symptom**: `chk-py` or `tst-py` exits with a `[lazy-python]` message naming the project venv and one cause — "does not exist", "lacks `<tool>`", "was never set up by cfg-py", or "is out of date: `<inputs>` changed since it was set up" (optionally followed by a line that the venv's Python does not match the version the project asks for) — and then "The job stops here. It does not repair or set up the environment itself."
 
-**Likely cause**: Normally `chk-py` and `tst-py` configure the venv themselves when it is missing or stale. They do not when protected mode is on (nothing is installed there) or when `[tool.lazy-python] bootstrap-fallback = false` opts out of the automatic configure.
+**Likely cause**: Normally `chk-py` and `tst-py` configure the venv themselves when it is missing or stale. They do not when protected mode is on (`LAZYCORTEX_PROTECTED` is set, nothing is installed there, which includes daemon jobs) or when `[tool.lazy-python] bootstrap-fallback = false` opts out of the automatic configure. The message names the most basic cause that holds: no venv at all, then a missing checker tool, then no setup record, then a record that no longer matches `pyproject.toml` (naming the changed inputs when it can tell).
 
-**Fix**: Run `cfg-py` from an interactive session or console outside protected mode, then retry. With `bootstrap-fallback = false` you can instead activate a venv that carries the checker tools, which sets `$VIRTUAL_ENV`.
+**Fix**: Do what the message says: run `/lazy-python.install`, or `cfg-py` in a console outside protected mode, then continue or rebuild the job. `/lazy-python.install` Step 7.8 also brings the venv up to date on every run. With `bootstrap-fallback = false` you can instead activate a venv that carries the checker tools, which sets `$VIRTUAL_ENV`.
+
+---
+
+## `/lazy-python.install` Step 7.8 reports `venv-refresh-failed`, `daemon-venv-missing` or `daemon-venv-failed`
+
+**Symptom**: Install finishes, but Step 7.8 ends with `venv-refresh-failed`, or with `daemon-venv-missing` / `daemon-venv-failed` (reported as a `[WARN]` with a detail), and the step is not reported as done.
+
+**Likely cause**: Step 7.8 brings the project venv up to date, and also the venv of the checkout this host's daemon runs in when that venv is a different path. `venv-refresh-failed` means `cfg-py`'s logic could not create or update the venv: no `uv` on `PATH`, a package that does not install, or protected mode. `daemon-venv-missing` means the repository's `daemon.run_here` gate names a checkout on this host that is not on disk. `daemon-venv-failed` means that checkout's venv could not be refreshed.
+
+**Fix**: Read the `detail` the step prints; it carries the output of the refresh. Fix what it names (install `uv`, resolve the failing package, leave protected mode), then re-run `/lazy-python.install` or `cfg-py`. For `daemon-venv-missing`, clone the daemon checkout at the path the gate names, or point the gate at the right path with `daemon-run-here set --on` from that checkout.
 
 ---
 

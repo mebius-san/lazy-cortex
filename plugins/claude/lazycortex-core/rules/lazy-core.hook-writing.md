@@ -58,14 +58,7 @@ A hook that auto-commits its own writes MUST NOT use a pathspec on `git commit` 
 
 Right pattern: detect pre-existing staged content; if foreign paths exist in the index, **defer** the auto-commit (write the file in the working tree, log a warning, return) and let the next deliberate commit include the writes.
 
-```python
-# Acceptable: detect foreign, defer
-foreign = [p for p in pre_staged if p not in our_paths]
-if foreign:
-    sys.stderr.write(f"<hook>: foreign staged content; deferring\n")
-    return                                      # writes stay in working tree
-git_add(our_paths); git_commit(message)         # NO pathspec — index is clean
-```
+The code example of this pattern: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.hook-writing-examples.md` § 5.1.
 
 Forbidden: `git commit -m "..." -- our_paths` — pathspec leaves foreign paths in index.
 
@@ -75,22 +68,13 @@ A `Pre*` hook MUST NOT stage a file and exit relying on the in-progress tool cal
 
 Right pattern: detect commit shape. For `mcp__git__git_commit` (no pathspec possible) staging is always safe. For `Bash` matching `git commit`, parse the command for a pathspec — if present, refuse the modification (write nothing, emit a warning).
 
-```python
-# Bash branch: refuse if pathspec
-if re.search(r"\bgit\s+commit\b.*\s--\s+\S", command):
-    _context("<hook-name>: pathspec on commit; modification declined")
-    return
-```
+The code example of this check: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.hook-writing-examples.md` § 5.2.
 
 Forbidden: blind `git_add(file)` after writing, "hopes the commit picks it up".
 
 ### Severity
 
-`lazy-core.audit` Agent B:
-
-- **FAIL** — hook calls `git commit ... -- <pathspec>` (literal pattern: `commit"` followed by `"--"` plus path arguments in the same arg list).
-- **FAIL** — hook calls `git add` with no matching `git commit` in the same execution branch (heuristic, same shape as § 4 enforcement).
-- **WARN** — hook detects pre-existing staged content (`git diff --cached --name-only`) but doesn't act on the detection (no defer / no refuse / no warning emitted).
+The severities `lazy-core.audit` Agent B assigns under § 5: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.hook-writing-examples.md` § 5 Severity.
 
 ## 6. Auto-commit loop guard
 

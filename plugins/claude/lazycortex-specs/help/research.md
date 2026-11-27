@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Answer one question against the spec tree without loading whole documents into your context.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-spec.lookup
@@ -14,7 +14,7 @@ When you or an agent working on your behalf needs to know where something lives 
 
 ## What's in this block
 
-- **`/lazy-spec.lookup`** — takes a free-form question or token and an optional anchor (a registered product key, a vault-relative path, or a product-relative path of any depth scoped to a product) and returns the matching files with short excerpts. Give it no anchor and it searches the whole vault instead of one product's tree. A vault-relative path anchor is attributed to the product that owns it, so the sibling and backlink passes scope to that product's tree; a bare `<slug>` or `<folder>/<slug>` anchor is read relative to the product key you pass alongside it.
+- **`/lazy-spec.lookup`** — takes a free-form question or token and an optional anchor (a registered product key, a vault-relative path, or a product-relative path of any depth scoped to a product) and returns the matching files with short excerpts. Give it no anchor and it searches the whole vault instead of one product's tree. The vault it searches is the spec content root, `specs/` unless your project's `spec` settings name another folder. A vault-relative path anchor is attributed to the product that owns it, so the sibling and backlink passes scope to that product's tree; a bare `<slug>` or `<folder>/<slug>` anchor is read relative to the product key you pass alongside it.
 
 ## How they work together
 

@@ -50,6 +50,8 @@ class WorktreeTaskManager:
   # The step names a recording failure is reported under: the links of provisioning and the bootstrap command.
   _LINKS_STEP = "worktree_links"
   _BOOTSTRAP_STEP = "bootstrap"
+  # The failure a bootstrap command that exits non-zero returns: its exit code and the tail of its output.
+  _BOOTSTRAP_EXITED = "bootstrap exited {code}: {detail}"
   # The file inside a worktree's private git directory that records the byproducts its provisioning links and its
   # bootstrap created.
   _RECORD = "lazy-bootstrap-paths"
@@ -134,34 +136,44 @@ class WorktreeTaskManager:
       return f"worktree_links entry {rel!r} is not a path inside the repository"
     return None
 
-  def create(self, job_id: str, branch: str) -> tuple[Path, bool]:
+  def create(self, job_id: str, branch: str, *, start_point: str | None = None) -> tuple[Path, bool]:
     """
     Create and provision a worktree for one job, on a fresh or an existing branch.
 
-    A fresh dispatch names a branch that does not exist yet — it is created off fresh base
-    (`origin/<base>` when a remote tracking ref exists, else the local base branch). A
-    continuation names the branch a prior dispatch already created and reuses it as-is.
+    A fresh dispatch names a branch that does not exist yet — it is created off `start_point` when one is given,
+    else off fresh base (`origin/<base>` when a remote tracking ref exists, else the local base branch). A
+    continuation names the branch a prior dispatch already created, reuses it as-is, and ignores `start_point`.
 
     Guarantees:
       - The worktree root directory gains its own self-ignoring `.gitignore` before any
         worktree is added beneath it.
       - A `worktree_links` entry that is not a string or does not name a path inside the repository fails the
         creation before any worktree or branch is created.
+      - A `start_point` beginning with `-` fails the creation of a fresh branch before the start point reaches git;
+        a continuation ignores `start_point` whatever its value.
+      - A `start_point` that does not resolve to a commit, a tree or a blob included, fails the creation before
+        any branch or worktree is created; this applies only when the branch does not exist.
       - A provisioning failure removes the worktree it was provisioning and keeps the branch; no half-provisioned
         worktree is ever returned.
 
     Args:
       job_id: Job identifier; names the worktree directory.
       branch: Branch the worktree checks out, created when absent.
+      start_point: Commit-ish a fresh branch forks off, replacing `origin/<base>` and the local base branch; it
+        must resolve to a commit and must not begin with `-`, both for a fresh branch only. Ignored when the branch
+        already exists.
 
     Returns:
       A `(worktree_path, branch_created)` pair; `branch_created` is False on a continuation.
 
     Raises:
-      WorktreeStartError: When a configured link entry is invalid, the worktree cannot be created, or its
+      WorktreeStartError: When a configured link entry is invalid, a given `start_point` for a fresh branch begins
+        with `-` or does not resolve to a commit (a tree or blob included), the worktree cannot be created, or its
         provisioning (local config copy or links) fails.
     """
     wt = self.path_for(job_id)
+
+    # whether the job branch already exists decides between a fresh dispatch and a continuation
     # waiver: git CLI vocabulary, not a domain constant
     branch_exists = self._git("rev-parse", "--verify", "--quiet", branch).returncode == 0
 
@@ -172,6 +184,14 @@ class WorktreeTaskManager:
     # Contract:
     # A `worktree_links` entry that is not a string or does not name a path inside the repository fails the
     # creation with `WorktreeStartError` BEFORE any worktree or branch is created.
+
+    # Contract:
+    # A `start_point` beginning with `-` fails the creation of a fresh branch with `WorktreeStartError` BEFORE
+    # the start point reaches git; a continuation ignores `start_point` whatever its value.
+
+    # Contract:
+    # A `start_point` that does not resolve to a commit, a tree or a blob included, fails the creation with
+    # `WorktreeStartError` BEFORE any branch or worktree is created; this applies only when the branch does not exist.
 
     # Contract:
     # A provisioning failure removes the worktree it was provisioning, keeps the branch, and raises
@@ -186,6 +206,17 @@ class WorktreeTaskManager:
                       else f"worktree_links entry {rel!r} is not a path" ):
         raise WorktreeStartError(refusal)
 
+    # guard: a start point that reads as a git option refuses a fresh branch before it reaches git; a continuation
+    # ignores the start point whatever its value
+    if not branch_exists and start_point and start_point.startswith("-"):
+      raise WorktreeStartError(f"start point {start_point!r} is not a branch name")
+
+    # guard: a named start point that is no commit refuses a fresh branch before any branch or worktree exists
+    # waiver: git CLI vocabulary, not a domain constant
+    if (not branch_exists and start_point
+        and self._git("rev-parse", "--verify", "--quiet", f"{start_point}^{{commit}}").returncode != 0):
+      raise WorktreeStartError(f"start point {start_point!r} does not resolve to a commit")
+
     # the worktree root itself must never reach the primary checkout's tracked tree — each
     # job directory beneath it is its own linked worktree with its own git bookkeeping
     ensure_self_ignoring_dir(self._root)
@@ -194,13 +225,13 @@ class WorktreeTaskManager:
       # waiver: git CLI vocabulary, not a domain constant
       add = self._git("worktree", "add", str(wt), branch)
     else:
-      # fresh dispatch: fork off fresh base — prefer origin/<base> when a remote exists
-      start_point = f"origin/{self._base}"
+      # fresh dispatch: fork off the named start point, else fresh base — prefer origin/<base> when a remote exists
+      fork_point = start_point or f"origin/{self._base}"
       # waiver: git CLI vocabulary, not a domain constant
-      if self._git("rev-parse", "--verify", "--quiet", start_point).returncode != 0:
-        start_point = self._base
+      if not start_point and self._git("rev-parse", "--verify", "--quiet", fork_point).returncode != 0:
+        fork_point = self._base
       # waiver: git CLI vocabulary, not a domain constant
-      add = self._git("worktree", "add", str(wt), "-b", branch, start_point)
+      add = self._git("worktree", "add", str(wt), "-b", branch, fork_point)
 
     # guard: worktree add failed (dir collision, branch checked out elsewhere, git error)
     if add.returncode != 0:
@@ -487,7 +518,8 @@ class WorktreeTaskManager:
 
     # guard: bootstrap failed — the caller fails the job rather than spawning into a broken env
     if proc.returncode != 0:
-      return f"bootstrap exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[-300:]}"
+      detail = (proc.stderr or proc.stdout).strip()[-300:]
+      return self._BOOTSTRAP_EXITED.format(code = proc.returncode, detail = detail)
 
     # what the command produced joins the record, beside the links provisioning recorded
     return self._record_created(wt, before, self._BOOTSTRAP_STEP)

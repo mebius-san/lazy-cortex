@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import string
 import sys
@@ -58,10 +57,10 @@ import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import review_halt  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
-import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
-import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -81,7 +80,6 @@ from summary_render import apply_container_stats  # noqa: E402  # pylint: disabl
 
 
 _ENCODING = "utf-8"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _TAGS_KEY = "tags"
 _TRUE = "true"
 _MOMENT_MIDNIGHT = "T00:00:00Z"
@@ -945,8 +943,8 @@ def main(argv: list[str]) -> int:
   """
   Publish a release from the command line; `--today` pins the moment stamped beside each released gate.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
-  directory.
+  The repository root is the top of the checkout that the directory named by the `LAZY_REPO_ROOT` environment
+  variable sits in, falling back to the process working directory.
 
   Guarantees:
     - An exception raised by the publish is printed as one JSON object `{"outcome": "error", "reason"}` and ends
@@ -978,7 +976,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option name
   parser.add_argument("--today", default = None)
   args = parser.parse_args(argv)
-  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  repo = spec_locator.query_repo_root()
   note = (repo / args.note).resolve()
 
   # guard: the note names the release; nothing to publish without it

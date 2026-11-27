@@ -16,8 +16,9 @@
 # console instead.
 #
 # Usage:
-#   cfg            # create / update the project venv
-#   cfg --help     # print this usage
+#   cfg              # create / update the project venv
+#   cfg --if-stale   # leave a fresh venv untouched and print `fresh`; else configure it and print `configured`
+#   cfg --help       # print this usage
 set -e
 set -u
 set -o pipefail
@@ -32,6 +33,7 @@ function print_help() {
   echo "  installs the interpreter requires-python asks for, every project dependency,"
   echo "  extra and dependency group, plus the lazy-python checker tools"
   echo
+  echo "  --if-stale leave a fresh venv untouched (prints fresh), else configure it (prints configured)"
   echo "  -q         accepted as no-op (lazy-python.style.md compat)"
   echo "  --help     this help"
   echo
@@ -43,13 +45,18 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-# parse args: only -q is accepted
+# parse args: -q is a no-op, --if-stale keeps a fresh venv as it is and names the outcome on stdout
+if_stale=0
 while [ -n "${1-}" ]; do
-  if [ "$1" != "-q" ]; then
-    echo "cfg: unexpected arg: $1" >&2
-    print_help
-    exit 1
-  fi
+  case "$1" in
+    -q) ;;
+    --if-stale) if_stale=1 ;;
+    *)
+      echo "cfg: unexpected arg: $1" >&2
+      print_help
+      exit 1
+      ;;
+  esac
   shift
 done
 
@@ -63,5 +70,16 @@ if _lazy_py_protected; then
 fi
 
 venv="$(_target_venv)"
+
+# a fresh venv, by the runners' own rule (tools present, stamp matching), is left as it is
+if [ "$if_stale" = 1 ] && _venv_is_fresh "$venv"; then
+  echo "[lazy-python] project venv at ${venv} is up to date" >&2
+  echo "fresh"
+  exit 0
+fi
+
 _cfg_venv "$venv"
 echo "[lazy-python] project venv at ${venv} is configured" >&2
+if [ "$if_stale" = 1 ]; then
+  echo "configured"
+fi

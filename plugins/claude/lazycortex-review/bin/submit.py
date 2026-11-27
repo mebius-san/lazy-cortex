@@ -11,7 +11,9 @@ bootstrap-on-`review-entry` (`lazy-review.coordination-playbook.md` §
 "Opening the loop") sees an already-settled main round and the
 document goes straight to the operator's Ready banner. A document that carries a non-empty
 `[!todo] #review/command` callout is not leapfrogged: it lands on `review_phase: main` with an
-empty `review_main_done` and an unadvanced round, so the writer round runs on the command first.
+empty `review_main_done` and an unadvanced round, so the writer round runs on the command first. A document of a
+report class is never leapfrogged either: it enters the same writer state, so its implementer reads the report and
+records a verdict before the operator is shown the two decision boxes.
 
 `--expert` (optional) writes `review_expert` — a per-document
 override of the class `experts.main`. When given, the seeded writer
@@ -19,9 +21,10 @@ set is `[expert]`; otherwise it is the class's `experts.main` list,
 resolved from the repo's settings (`.claude/lazy.settings.json` with its
 local overlay merged on, as core reads them).
 
-The commit is made under the caller's git identity and carries a
-`Doc-Review-Phase: initial` trailer, so the coordinator watch does not treat
-it as an operator edit that resets the settled state submit just applied.
+The commit carries a `Doc-Review-Phase: initial` trailer. It is made under the review bot identity, so the
+coordinator watch does not treat it as an operator edit that resets the settled state submit just applied, unless
+the running job sets its own author identity (`GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` in the environment, as a
+daemon expert job does); that identity then authors it. Commit signing stays off either way.
 
 Returns 0 on success, 2 when the file is not a markdown file, 3 when an
 `--expert` is given that is not in the global experts table, 4 when the
@@ -44,6 +47,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -51,12 +57,13 @@ import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-e
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import note_ops as _note_ops  # type: ignore # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: `plugins/claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
-# `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
-# own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
+import note_ops as _note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
@@ -64,13 +71,9 @@ import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-imp
 from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import Bucket, JobKey, Paths, Phase, ReviewKey, Trailer  # noqa: E402
+from keys import BotIdentity, Bucket, JobKey, Phase, ReviewKey, Trailer  # noqa: E402
 # waiver: deferred sibling imports follow the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import start as _start  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-
-# How many ancestor directories the repo-root search climbs before falling back to the file's own directory.
-# limit: a document nested deeper than this below its repo root falls back to its parent dir; raise the depth if one appears
-_REPO_ROOT_SEARCH_DEPTH = 20
 
 # The bare YAML boolean literal a set frontmatter flag carries, as `frontmatter.py` writes it.
 _YAML_TRUE = "true"
@@ -80,12 +83,16 @@ _YAML_TRUE = "true"
 _LITERAL_MAGIC = ":(literal)"
 
 
-def _load_settings(repo: Path) -> dict:
+def _load_settings(settings_root: Path) -> dict:
   """
-  Read the `review` and `experts` sections of `repo`'s settings as core sees them, local overlay merged.
+  Read the `review` and `experts` sections for a settings root as core sees them, local overlay merged.
+
+  Notes:
+    - Core routes each section: the daemon-read `experts` section comes from the checkout toplevel, and `review`
+      from the nearest settings root `settings_root`.
 
   Args:
-    repo: Repository root whose settings are read.
+    settings_root: The nearest settings root of the document.
 
   Returns:
     Settings-shaped dict holding the merged `review` and `experts` sections, or `{}` when the
@@ -96,7 +103,7 @@ def _load_settings(repo: Path) -> dict:
   """
   # an unreadable settings layer registers nothing, exactly as an absent one does
   try:
-    return _core_settings.read_merged_sections(repo, JobKey.REVIEW, JobKey.EXPERTS)
+    return _core_settings.read_merged_sections(settings_root, JobKey.REVIEW, JobKey.EXPERTS)
   except SettingsReadError:
     return {}
 
@@ -146,6 +153,7 @@ def open_submit(
     *,
     expert: str | None = None,
     main_writers: list[str],
+    report: bool = False,
 ) -> bool:
   """
   Open a document for review as entry into a new cycle, skipping the opening writer round when it can.
@@ -158,7 +166,8 @@ def open_submit(
   This matches the lazy-review.submit contract: the operator hands a document whose body diffs are already
   pre-authored (a machine writer wrote them outside the review loop), and submit lands the document on the
   operator's Ready banner without dispatching the opening writer round. A document that carries an open
-  operator command instead enters in the writer state, with the writer round still owed.
+  operator command, and a document of a report class, instead enters the writer state, with the writer round
+  still owed.
 
   Guarantees:
     - Always leaves `review_approved` false: a submit is entry into a new cycle, so the document is never
@@ -166,6 +175,9 @@ def open_submit(
     - A document carrying a non-empty `[!todo] #review/command` callout is never leapfrogged: it lands on
       `review_phase: main` with an empty done-list and an unadvanced round, and its banner shows the
       writer round as owed.
+    - A document of a report class (`report` set) is never leapfrogged either: it lands in the same writer state,
+      and its banner waits for the implementer's answer with no decision box.
+    - Submitting a report clears the verdict recorded for it in the marker sidecar, a stopped cycle's included.
     - Submitting a document that already carries `review_active: true` is a no-op: nothing is written and
       the call returns `False`.
 
@@ -174,6 +186,8 @@ def open_submit(
     expert: Optional per-document main-writer override; writes `review_expert` when provided.
     main_writers: Flat-name list to mark done — `[expert]` when an override is given, else
       the class `experts.main` names. The caller resolves this set.
+    report: Whether the document belongs to a report class; it then enters the writer state, so its implementer
+      records a verdict first, and its banner waits for that answer.
 
   Returns:
     `True` if the document changed; `False` for a document already opted in or on an idempotent re-run.
@@ -189,11 +203,14 @@ def open_submit(
   # instead of only after each of those writers had actually run. The document surfaces on
   # the operator's own waiting state rather than dispatching that round's writers.
   # Submitting is entry into a new review cycle, so the document never enters it approved,
-  # whatever a stopped cycle left behind. The one exception to the skip is a document that
+  # whatever a stopped cycle left behind. One exception to the skip is a document that
   # carries a pending operator command: the command is the opening round's input, so nothing
   # is skipped. The document enters in the writer state of the opening phase, with an empty
   # list of finished writers and the round counter not advanced, and the operator is never
   # shown "ready to approve" while that writer round is still owed.
+  # A report is the other exception: its implementer owes a verdict on it before the operator
+  # can decide, so a submitted report enters the same writer state, the implementer reads it
+  # and records a verdict at once, and the banner waits for that answer.
   # A document that is already in its review loop is left exactly as it is: submitting it changes nothing at all.
 
   text = _atomic_io.read_text(file_path)
@@ -209,6 +226,15 @@ def open_submit(
   # Reuse start's bootstrap (review_active / round / approved / banner /
   # review_result and autorun-key clear / optional review_expert).
   _start.open_review(file_path, expert=expert)  # bootstrap, writes in place, no commit
+
+  # Contract:
+  # Submitting a report clears the verdict recorded for it in the marker sidecar, so its implementer's turn records
+  # a fresh one before the operator is shown a decision box.
+
+  # a report's implementer answers afresh on every submit, so no verdict recorded before survives it
+  if report:
+    _job_markers.clear_verdict(_query_repo_root_for(file_path), file_path)
+
   # the edits run on LF text; the document's own ending comes back once, on write
   bootstrapped, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
   meta, _body = _fm.parse(bootstrapped)
@@ -236,10 +262,15 @@ def open_submit(
   # it lands on `review_phase: main` with an empty done-list and an unadvanced round, so the
   # writer round runs on the command first and the banner shows that round as owed.
 
-  # a pending operator command is the opening round's input, so the writer round runs instead of the leapfrog
+  # Contract:
+  # A document of a report class is NEVER leapfrogged: it lands in the same writer state, so its
+  # implementer records a verdict before the operator is shown a decision box.
+
+  # a pending operator command is the opening round's input, and a report's implementer owes its verdict first,
+  # so the writer round runs instead of the leapfrog
   # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
   # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
-  if _note_ops.has_open_command(bootstrapped):  # type: ignore[attr-defined]
+  if report or _note_ops.has_open_command(bootstrapped):  # type: ignore[attr-defined]
     # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
     # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
     new_text = _note_ops.set_key(new_text, ReviewKey.PHASE, Phase.MAIN)  # type: ignore[attr-defined]
@@ -269,7 +300,7 @@ def open_submit(
   # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
   # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
   new_text = _note_ops.repaint_banner(  # type: ignore[attr-defined]
-      new_text, lang = _note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
+      new_text, lang = _note_ops.resolve_language(file_path), report = report)  # type: ignore[attr-defined]
   if new_text != bootstrapped:
     _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(new_text, ending))
   return _atomic_io.read_text(file_path) != text
@@ -288,8 +319,8 @@ def _resolve_main_writers(file_path: Path, expert: str | None) -> list[str] | No
   """
   if expert:
     return [expert]
-  repo = _repo_root_for(file_path)
-  class_cfg = _doc_class.class_for_file(_load_settings(repo), repo, file_path)
+  settings_root = _core_settings.query_settings_root_for(file_path)
+  class_cfg = _doc_class.class_for_file(_load_settings(settings_root), settings_root, file_path)
   if not class_cfg:
     return None
   return [m[JobKey.NAME] for m in (class_cfg.get(JobKey.EXPERTS, {}).get(Phase.MAIN) or [])]
@@ -306,33 +337,31 @@ def _is_expert_known(file_path: Path, expert: str) -> bool:
   Returns:
     `True` if the name exists in the global experts table; `False` otherwise.
   """
-  return expert in (_load_settings(_repo_root_for(file_path)).get(JobKey.EXPERTS) or {})
+  return expert in (_load_settings(_core_settings.query_settings_root_for(file_path)).get(JobKey.EXPERTS) or {})
 
 
-def _repo_root_for(file_path: Path) -> Path:
+def _query_repo_root_for(file_path: Path) -> Path:
   """
   Locate the repository root for the given file.
 
   Args:
-    file_path: Any file whose ancestor directories are searched.
+    file_path: Any file; the checkout holding its folder is resolved.
 
   Returns:
-    Nearest ancestor directory containing a `.git` entry, or `file_path.parent`
-    when none is found within 20 levels.
+    The root of the checkout the file sits in, a linked worktree's own root inside one; `file_path.parent` when
+    it is not inside a git repository.
   """
-  cur = file_path.parent
-  for _ in range(_REPO_ROOT_SEARCH_DEPTH):
-    if (cur / Paths.GIT_DIR).exists():
-      return cur
-    if cur.parent == cur:
-      break
-    cur = cur.parent
-  return file_path.parent
+  # the checkout git names for the file's folder, else the folder itself
+  return _review_locator.query_checkout_toplevel(file_path.parent)
 
 
 def _atomic_commit(file_path: Path) -> None:
   """
-  Stage and commit the file under the caller's git identity with the initial-phase trailer.
+  Stage and commit the file with the initial-phase trailer.
+
+  The commit is made under the review bot identity, unless the running job sets its own author identity
+  (`GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` in the environment, as a daemon expert job does), in which case that
+  identity authors it. Commit signing stays off either way.
 
   Args:
     file_path: The submitted document; only this file is committed, and its file name is taken literally, never as
@@ -345,12 +374,13 @@ def _atomic_commit(file_path: Path) -> None:
       cwd = file_path.parent, check = True, capture_output = True,
   )
 
-  # the pathspec keeps a concurrently staged foreign file out of the submit commit;
-  # the initial-phase trailer marks it as a system commit, so the coordinator watch does not
-  # read it as an operator edit that resets the settled state submit just applied
+  # the pathspec keeps a concurrently staged foreign file out of the submit commit; the review bot identity makes
+  # it a system commit, so the coordinator watch does not read it as an operator edit that resets the settled
+  # state submit just applied; the bot's flags also keep the operator's commit signing off a key it does not own
   subprocess.run(
       [
-          "git", "commit", "-q",
+          "git", *_git_ops.author_flags({ JobKey.NAME: BotIdentity.NAME, JobKey.EMAIL: BotIdentity.EMAIL }),
+          "commit", "-q",
           "-m", f"review: submit {file_path.name}",
           "-m", f"{Trailer.PHASE}: {Phase.INITIAL}",
           "--", f"{_LITERAL_MAGIC}{file_path.name}",
@@ -363,12 +393,23 @@ def main(argv: list[str]) -> int:
   """
   Open a document for review skipping the opening writer round.
 
+  Guarantees:
+    - The submit commit is authored by the review bot identity, unless the running job sets its own author identity
+      through `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, in which case that identity authors it; commit signing is
+      always off.
+
   Args:
     argv: Command-line arguments, excluding the program name.
 
   Returns:
     Exit code: 0 success, 2 not-markdown, 3 unknown expert, 4 no review class.
   """
+
+  # Contract:
+  # The submit commit is authored by the review bot identity, unless the running job sets its own author identity
+  # through `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, in which case that identity authors it. Commit signing is
+  # always off.
+
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazy-review.submit")
   # waiver: argparse CLI signature, not a domain key
@@ -401,7 +442,10 @@ def main(argv: list[str]) -> int:
     return 4
 
   # open the review, then commit it unless the caller asked for an uncommitted run
-  changed = open_submit(file_path, expert=args.expert, main_writers=writers)
+  # a report class's document opens its implementer's turn instead of the operator's
+  settings_root = _core_settings.query_settings_root_for(file_path)
+  report = _doc_class.is_report_class(_load_settings(settings_root), settings_root, file_path)
+  changed = open_submit(file_path, expert=args.expert, main_writers=writers, report=report)
   if changed and not args.no_commit:
     _atomic_commit(file_path)
   print(f"submitted: {file_path} (changed={changed})")

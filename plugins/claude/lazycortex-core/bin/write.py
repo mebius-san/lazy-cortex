@@ -27,14 +27,19 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from memory_runtime import (  # noqa: E402
   FrontmatterError, slugify, resolve_slug, validate_frontmatter,
   topic_from_tag, _read_note_frontmatter, regen_touched_tags,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import settings_cli  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 class WriteError(Exception):
@@ -666,7 +671,9 @@ def _main(argv: list[str]) -> int:
 
   Args:
     argv: Argument vector without the program name. Supports the positional `expert`,
-      optional `--slug`, repeatable `--consolidate`, and `--repo` (default current directory).
+      optional `--slug`, repeatable `--consolidate`, and `--repo`, a directory inside the repository (default:
+      `$LAZY_REPO_ROOT`, then the working directory); the note lands at the root of the checkout that directory
+      sits in, a linked worktree's own root inside one.
 
   Returns:
     `0` on a successful write (with or without a commit), `2` when the worker raises
@@ -681,13 +688,13 @@ def _main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--consolidate", action = "append", default = [])
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
   # body content arrives on stdin; the commit identity is resolved before anything is written, so a failure to
   # resolve it changes no file
   body = sys.stdin.read()
-  repo = Path(args.repo)
+  repo = query_repo_root(args.repo)
   try:
     identity = _resolve_memory_bot_identity(repo, args.expert)
     note_path, title, touched_paths = write_note(

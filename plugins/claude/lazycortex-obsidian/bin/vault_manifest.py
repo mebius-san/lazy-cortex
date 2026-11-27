@@ -27,16 +27,26 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from vault_keys import (  # pylint: disable=import-error
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from typing import Any
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import obsidian_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from vault_keys import (  # noqa: E402
   AppearanceKey, BundleKey, BundleSourceKind, CachePath, CommandKind, Encoding, Http, IconizeKey,
   ManifestKey, PluginKey, ReportKey, SnippetKey, SnippetSourceKind, TemplatePath, ThemeKey,
   VaultPath,
 )
-
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-  from typing import Any
 
 
 MANIFEST_VERSION = 1
@@ -1794,6 +1804,8 @@ def main(argv: list[str]) -> int:
 
   Notes:
     - Prints the JSON report on stdout, including when the subcommand fails.
+    - The root argument names a directory inside the vault repository (default: `$LAZY_REPO_ROOT`, then the working
+      directory); the vault is the root of the checkout that directory sits in, or that directory itself outside git.
 
   Args:
     argv: Command-line arguments without the program name.
@@ -1820,14 +1832,16 @@ def main(argv: list[str]) -> int:
       (CommandKind.DRIFT, "report how the vault config differs from the manifest")):
     child = sub.add_parser(name, help = help_text)
     # waiver: argparse CLI signature
-    child.add_argument("root", nargs = "?", default = ".", help = "vault repo root (default: cwd)")
+    child.add_argument("root", nargs = "?", default = None,
+                       help = "directory inside the vault repo (default: $LAZY_REPO_ROOT, then the cwd)")
   # waiver: argparse CLI signature
   sub.add_parser(CommandKind.LOOKUP, help = "print a community plugin's GitHub repo") \
      .add_argument("id", help = "plugin id as the community catalog records it")
   # waiver: argparse CLI signature
   strip = sub.add_parser(CommandKind.STRIP_PERSONAL, help = "strip personal per-device state from the manifest")
   # waiver: argparse CLI signature
-  strip.add_argument("root", nargs = "?", default = ".", help = "vault repo root (default: cwd)")
+  strip.add_argument("root", nargs = "?", default = None,
+                     help = "directory inside the vault repo (default: $LAZY_REPO_ROOT, then the cwd)")
   # waiver: argparse CLI signature
   strip.add_argument("--check", action = "store_true",
                      help = "write nothing; exit 0 while personal state is left to strip, 1 otherwise")
@@ -1839,8 +1853,10 @@ def main(argv: list[str]) -> int:
     print(json.dumps(report, indent = 2, ensure_ascii = False))
     return 1 if report[ReportKey.ERRORS] else 0
 
-  # resolve the vault root before any subcommand touches disk
-  root = Path(args.root).expanduser().resolve()
+  # resolve the vault root before any subcommand touches disk: the checkout the root argument, else
+  # `$LAZY_REPO_ROOT`, else the cwd sits in
+  start = Path(args.root).expanduser() if args.root else None
+  root = obsidian_locator.query_repo_root(start)
 
   # the check answers the migration predicate: 0 while something is left to strip, 1 for a clean or absent manifest;
   # the core migration engine applies a step's `verb` predicate only on exit 0

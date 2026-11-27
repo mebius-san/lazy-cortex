@@ -24,6 +24,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -100,6 +103,21 @@ def spec_content_root(settings_root: Path, spec_cfg: object) -> Path:
   return settings_root / rel.as_posix()
 
 
+def query_settings_root_for(file_path: Path) -> Path:
+  """
+  Return the directory whose `.claude/lazy.settings.json` configures a document.
+
+  Args:
+    file_path: The document; the search starts at its folder.
+
+  Returns:
+    The nearest directory from the document's folder upward holding `.claude/lazy.settings.json`, never above the
+    checkout the document sits in; the checkout's root when none holds it, the folder itself outside git.
+  """
+  # the nearest settings root within the document's checkout, else the checkout's root
+  return _review_locator.query_settings_root(file_path.parent)
+
+
 def read_merged_sections(repo: Path, *sections: str) -> dict[str, dict]:
   """
   Read settings sections of `repo` as core sees them: tracked file with the local overlay merged on.
@@ -110,7 +128,7 @@ def read_merged_sections(repo: Path, *sections: str) -> dict[str, dict]:
     - A failed read raises and never yields an empty section.
 
   Args:
-    repo: Repository root whose settings are read.
+    repo: Directory holding the `.claude/lazy.settings.json` that is read.
     *sections: Names of the top-level settings sections to read.
 
   Returns:
@@ -126,7 +144,7 @@ def read_merged_sections(repo: Path, *sections: str) -> dict[str, dict]:
   # an overlay-only value is never dropped — and a failed read MUST raise, never yield an empty section.
 
   # no core CLI reachable raises — review cannot know the identities or classes core works with
-  cli = _git_ops.require_core_cli()
+  cli = _git_ops.require_core_cli(repo)
 
   # one verb call per section; each prints that section's merged view as a JSON object
   merged: dict[str, dict] = {}

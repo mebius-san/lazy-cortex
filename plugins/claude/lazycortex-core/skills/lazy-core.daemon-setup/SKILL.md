@@ -130,61 +130,51 @@ The verb prints a JSON list of collisions (each with a `detail`) and exits 1 whe
 
 Pick the branch from Step 3's outcome:
 
-- **run-here** (and Step 4 **inbox-ok**) → 5a, then 5b on macOS or 5c on Linux.
-- **not-this-host** / **not-this-checkout** → 5a for `<REPO_ID>` only, then 5d (teardown).
+- **run-here** (and Step 4 **inbox-ok**) → 5a, then 5b.
+- **not-this-host** / **not-this-checkout** → 5c (teardown).
 - **run-here-declined** → state **supervisor-skipped**.
 
-### 5a. Derive supervisor kind, dev-mode, and the per-checkout unit id (no questions)
+### 5a. Record dev-mode (no questions)
 
-- **Supervisor kind** = the platform: macOS (`darwin`) → launchd (5b); Linux → systemd (5c). Any other platform → state **unsupported-platform** and skip to Step 6.
-- **`<REPO_ID>`** = `<basename>-<hash>`, the first 8 hex of `sha256(<absolute-repo-root>)` after the basename — unique per checkout, stable across re-runs:
+**dev-mode** = True when `Bash(ls <repo-root>/plugins/claude/*/.claude-plugin/plugin.json)` prints at least one path, else False. Read the record first:
 
 ```bash
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> repo-id)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get daemon --key supervisor/dev_mode --cwd <repo-root>)
 ```
 
-  `<REPO_NAME>` (bare basename) is used only for the human-readable systemd `Description`.
-- **dev-mode** = True when `Bash(ls <repo-root>/plugins/claude/*/.claude-plugin/plugin.json)` prints at least one path, else False. In dev-mode the shim prefers in-repo plugin sources over the cache. Persist it:
+Only when it prints a value other than the derived one, write it, so a re-run leaves the tracked file untouched:
 
 ```bash
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-set daemon --key supervisor/dev_mode --value <true|false> --cwd <repo-root>)
 ```
 
-- **python** = the absolute interpreter the unit hands to the shim: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase interpreter)`, held as `<PYTHON>`. The verb prints an operator-pinned `LAZYCORTEX_PYTHON` from `.claude/settings.local.json` when it still names a file; otherwise the version-neutral `python3` on `PATH` when it is the running interpreter outside a virtualenv; otherwise the running interpreter itself — so a minor Python upgrade does not leave the unit pointing at a removed version. launchd and systemd exec the shim with a minimal `PATH`, so the unit needs the absolute path; if that path stops resolving anyway, the shim reports it and falls back to `python3` on the login `PATH`. It is written into the unit file only — never into `lazy.settings.json` or `.claude/settings.local.json`.
-- **login-shell / env-files** = operator-provided supervisor options, read verbatim from the `daemon.supervisor` block (a missing or `null` key is off / empty):
+The record is informational: the unit takes `--dev-mode` from the checkout itself, never from this key.
+
+### 5b. Sync the supervisor unit (CLI)
+
+The unit is rendered, compared and loaded by the core verb, never by hand:
 
 ```bash
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get daemon --key supervisor --cwd <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" daemon-unit sync --repo-root <repo-root>)
 ```
 
-  Hold `<login_shell>` (bool) and the ordered `<env_files>` list. Render each `env_files` entry verbatim — the shim expands a leading `~` itself. `login_shell` gives the daemon a login-equivalent environment (token and PATH) on a headless host; `env_files` sources just the named files. They may combine.
+The verb derives everything itself, read-only: the supervisor kind from the platform (launchd on macOS, systemd on Linux), the per-checkout `<REPO_ID>`, the interpreter the unit exports as `LAZYCORTEX_PYTHON` (the operator's `LAZYCORTEX_PYTHON` pin from `.claude/settings.local.json` while it resolves, else the version-neutral `python3` when it is the running interpreter outside a virtualenv, else the running interpreter), the `login_shell` / `env_files` options from the `daemon.supervisor` block, and dev-mode from the checkout. It renders the shipped template with the shim flags, removes this checkout's legacy basename-only unit, writes the unit only when its bytes differ, and reloads the supervisor only when it wrote the unit or the unit is not loaded — a running daemon whose unit did not change is never restarted. It never writes a tracked file.
 
-### 5b. macOS launchd
+It prints one JSON line — `state`, `unit`, `repo_id`, `login_shell`, `env_files`, `dev_mode`, `legacy_removed`, `reloaded`:
 
-1. **Migrate a legacy basename-only unit.** If `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist` exists and `Bash(grep -F "<repo-root>" ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` matches, it is this checkout's old-scheme unit → `Bash(launchctl unload ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` then `Bash(rm ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`. Absent, or pointing at a different checkout → leave it. State **legacy-unit-migrated** or **no-legacy-unit**.
-2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
-3. Substitute `{REPO_ROOT}` → absolute `<repo-root>`, `{REPO_ID}` → `<REPO_ID>`, `{PYTHON}` → `<PYTHON>`.
-4. **Inject the shim flags** into `ProgramArguments`, between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line, each its own `<string>` element indented 8 spaces, in this order, omitting any whose source is unset: `--login-shell` when `<login_shell>` is True; for each `<env_files>` entry a `--env-file` element followed by the verbatim path element; `--dev-mode` when dev-mode is True.
-5. `Bash(mkdir -p ~/Library/LaunchAgents/)`
-6. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist`.
-7. `Bash(launchctl bootout gui/$UID/com.lazycortex.runtime.<REPO_ID>)` — a non-zero exit means the unit was not loaded, which is fine. `launchctl load` on a loaded label keeps the old plist in memory, so the unit is always booted out first.
-8. `Bash(launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)`
-9. State **launchd-installed** (**launchd-installed-dev-mode** when dev-mode is True; append **-login-shell** / **-env-files** when those flags were injected).
+- Exit 0 → `state` is **launchd-installed** / **launchd-refreshed** / **launchd-unchanged** or **systemd-installed** / **systemd-refreshed** / **systemd-unchanged**. State it, appending **-dev-mode** / **-login-shell** / **-env-files** for each option that is on, **-reloaded** when `reloaded` is true, and **legacy-unit-migrated** when `legacy_removed` is true.
+- Exit 1 with `state` **refused** → the gates the verb re-checks (`daemon.enabled`, `daemon.run_here` naming this host and this checkout, a supported platform) do not hold; print `reason` and state **supervisor-refused**.
+- Exit 1 with `state` **failed** → a write or a supervisor command failed; print `reason` verbatim and state **supervisor-failed**. The running daemon, if any, was not restarted on a unit that did not land.
 
-### 5c. Linux systemd
+### 5c. Teardown when the map does not name this checkout
 
-1. **Migrate a legacy basename-only unit.** If `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service` exists and `Bash(grep -F "<repo-root>" ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)` matches → `Bash(systemctl --user disable --now lazy-core-runtime-<REPO_NAME>.service)` then `Bash(rm ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)`. Absent, or pointing at a different checkout → leave it. State **legacy-unit-migrated** or **no-legacy-unit**.
-2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
-3. Substitute `{REPO_ROOT}` → absolute `<repo-root>`, `{REPO_NAME}` → basename, `{PYTHON}` → `<PYTHON>`.
-4. **Inject the shim flags** into the `ExecStart=` line, between `lazy.runtime.sh` and `{REPO_ROOT}`, in order: `--login-shell`, then `--env-file <path>` per `<env_files>` entry (quote a path containing spaces), then `--dev-mode`. With no flags the line is unchanged.
-5. `Bash(mkdir -p ~/.config/systemd/user/)`
-6. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service`.
-7. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_ID>.service)`
-8. State **systemd-installed** (**systemd-installed-dev-mode** when dev-mode is True).
+A unit for a checkout that must not run here is a leak or a stale install, and leaving it loaded keeps a duplicate daemon alive. Remove this checkout's unit on this host only. Compute `<REPO_ID>` first, from this checkout's path and nothing else:
 
-### 5d. Teardown when the map does not name this checkout
+```bash
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" install-phase --cwd <repo-root> repo-id)
+```
 
-A unit for a checkout that must not run here is a leak or a stale install, and leaving it loaded keeps a duplicate daemon alive. Remove this checkout's unit on this host only.
+Any platform other than macOS (`darwin`) or Linux → state **unsupported-platform** and skip to Step 6.
 
 macOS:
 1. `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist` absent → state **no-stray-unit** and stop.
@@ -202,7 +192,7 @@ Never touch a unit whose `<REPO_ID>` differs — it belongs to another checkout.
 
 ## Step 6 — Provision metrics
 
-Reached only when Step 5 installed a supervisor; otherwise state **skipped-not-run-here**. The endpoint is an HTTP server the daemon serves in-process, so a checkout with no daemon running here has nothing to scrape.
+Reached only when Step 5b exited 0; otherwise state **skipped-not-run-here**. The endpoint is an HTTP server the daemon serves in-process, so a checkout with no daemon running here has nothing to scrape.
 
 ```bash
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" settings-get daemon --key metrics/enabled --cwd <repo-root>)
@@ -258,9 +248,9 @@ One line per task in the canonical list, with its outcome word. A missing line i
 ## Failure modes
 
 - **`/lazy-core.daemon-setup` stops with "run /lazy-core.install first"** — the repo has no `daemon` section in `.claude/lazy.settings.json` → run `/lazy-core.install`, then re-run.
-- **Step 5 fails: supervisor template not found** — `templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex`, then re-run.
-- **Step 5 fails: `launchctl bootstrap` error** — the plist was written but `launchctl bootstrap` exited non-zero → inspect the plist in `~/Library/LaunchAgents/` for substitution errors, then re-run.
-- **Step 5 fails: `systemctl --user enable --now` error** — the unit was written but `systemctl` exited non-zero → `systemctl --user status lazy-core-runtime-<REPO_ID>.service` names the error; correct it and re-run.
+- **Step 5 states `supervisor-failed` with "cannot render the unit"** — `templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache, or `.claude/settings.local.json` is not valid JSON → run `/plugin update lazycortex-core@lazycortex` or fix the file, then re-run.
+- **Step 5 states `supervisor-failed` with a `launchctl bootstrap` / `systemctl` reason** — the unit was written but the supervisor refused it → `launchctl print gui/$UID/com.lazycortex.runtime.<REPO_ID>` or `systemctl --user status lazy-core-runtime-<REPO_ID>.service` names the error; correct it and re-run.
+- **Step 5 states `supervisor-failed` with "cannot write unit"** — `~/Library/LaunchAgents/` (macOS) or `~/.config/systemd/user/` (Linux) is not writable → fix the permission and re-run; the running daemon was left as it was.
 - **Daemon never starts for this checkout** — `daemon.run_here` names a different machine or checkout → point this host's entry at this checkout (`{"<this host>": "<this path>"}`) in the tracked `lazy.settings.json` and re-run.
 - **The daemon exits at once with `refuses to start: … inside a Dropbox folder`** — the checkout `run_here` names sits under a Dropbox folder → clone the project with git outside Dropbox (for example `~/lazy-runtime/<repo>`), point this host's entry at the clone, and re-run from the clone.
 - **A second machine or checkout started its own daemon for the same project** — the map is a boolean or a bare host list left by an older install → replace it with a hostname-to-path map naming the one driving checkout, and re-run on the others; each removes its stray unit.

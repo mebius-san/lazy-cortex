@@ -51,7 +51,7 @@ An asset folder is `<spec_path>/<folder>/<slug>/`, where `<folder>` is the type'
 - `vision.md` per the asset type's `vision` contract — opt-in on a feature, a change and `content` (`Write vision` checkbox, window closes with `spec_design_done`), never on a bug, a research or a release;
 - optionally `use-cases.md` and/or `ui-design.md` — feature/change layout only, NEVER on a bug; opt-in the same way as `code-plan.md` / `test-plan.md`, each created only once its launch checkbox is ticked or the product or asset declares it mandatory — see the [feature](./lazy-spec.feature-type.md) and [change](./lazy-spec.change-type.md) playbooks;
 - optionally `test-plan.md` — on a feature, a change or a bug the asset's own test cases (`test-plan`), hung by `Write test-plan`, reviewed and approved like `design.md`, in no gate; on a release the composed plan of the release's testing stage. `code-plan.md` exists in a release folder only;
-- `code-report.md` and `test-report.md` — a release folder's append-only execution journals, one `#### build <n>` entry per run, carrying no `spec_stage`; never in another asset's folder;
+- `code-report.md` and `test-report.md` — a release folder's execution journals, carrying no `spec_stage`: `code-report.md` holds one `#### build <n>` entry per build, the newest first, rewritten whole by each continuation of that build, and `test-report.md` is append-only, one `#### build <n>` entry per run, the newest first; never in another asset's folder;
 - optionally `decisions.md` — opt-in append-only registry of accepted decisions for this asset, never scaffolded, created lazily by the `decide` primitive on its first record; carries no `spec_stage` and plays no role in any gate or review.
 
 There is no per-asset `tech.md` (only the product carries `tech.md` at its root) and no `layout` doc.
@@ -213,7 +213,7 @@ All products follow this shape. No concrete names appear in this rule — skills
     │           │       ├── <NNNNN>.md       ← status folder-note: the full ladder, spec_version, spec_includes, tag release/<x-y-z>
     │           │       ├── code-plan.md     ← opt-in — the build's plan (planner)
     │           │       ├── test-plan.md     ← opt-in — the release's composed test plan (tester)
-    │           │       ├── code-report.md   ← append-only build journal, #### build <n> entries
+    │           │       ├── code-report.md   ← build journal, one #### build <n> entry per build
     │           │       ├── test-report.md   ← append-only test journal, #### build <n> entries
     │           │       └── decisions.md     ← opt-in — lazily created
     │           └── <folder>/                ← an asset type's folder (its `default_path` under `asset_types`)

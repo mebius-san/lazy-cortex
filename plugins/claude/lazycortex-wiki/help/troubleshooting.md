@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-23
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,8 +13,8 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: af2cec610e67efd656786250852436704318a125
-surface_sha: c35bb7fa5042426354023317bffe1afbf7d83bc1cc9062eb8c8376f8cbd789e3
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: f202c808aa583631debfb3761480d7779c0b6de88e6fdaf6c3298c742cc04a80
 ---
 # Troubleshooting
 
@@ -67,6 +67,16 @@ surface_sha: c35bb7fa5042426354023317bffe1afbf7d83bc1cc9062eb8c8376f8cbd789e3
 **Likely cause**: The target `lazy.settings.json` is not valid JSON. The write refuses to overwrite a file it cannot parse rather than risk losing its contents.
 
 **Fix**: Repair the file so it parses (restoring it from git is the quickest route), then re-run `/lazy-wiki.install`.
+
+---
+
+## `/lazy-wiki.configure` stops on a settings write error
+
+**Symptom**: `/lazy-wiki.configure` stops at a step that writes the scope back, with an error from the settings write.
+
+**Likely cause**: `lazy.settings.json` could not be read as JSON, and the write refuses to overwrite a file it cannot parse.
+
+**Fix**: Repair the file so it parses (restoring it from git is the quickest route), then re-run `/lazy-wiki.configure`.
 
 ---
 
@@ -350,6 +360,16 @@ surface_sha: c35bb7fa5042426354023317bffe1afbf7d83bc1cc9062eb8c8376f8cbd789e3
 
 ---
 
+## `/lazy-wiki.relink` lists `unledgered` paths and leaves them uncommitted
+
+**Symptom**: The relink report ends with a list of `unledgered` paths, and those files are not part of the commit the run made.
+
+**Likely cause**: These are wiki files that changed in the working tree without any writer of this run recording them — an edit of your own, or another session working in the same checkout. The run leaves them out of its commit on purpose, so it never commits work it did not do.
+
+**Fix**: Review those files and commit or discard them yourself. The next relink run is unaffected.
+
+---
+
 ## `/lazy-wiki.relink` Step 6 reports "unchanged" and creates no commit
 
 **Symptom**: The relink run completes all steps but reports `unchanged` at Step 6 — no commit is created.
@@ -376,7 +396,7 @@ surface_sha: c35bb7fa5042426354023317bffe1afbf7d83bc1cc9062eb8c8376f8cbd789e3
 
 **Likely cause**: `lazy.settings.json` has no top-level `structure` key — the project-structure map was never set up in this repository.
 
-**Fix**: Run `/lazy-wiki.configure structure` to collect depth profiles and exclusions and write the section, then re-run `/lazy-wiki.structure rebuild` to build the initial map.
+**Fix**: Run `/lazy-wiki.install`, which seeds the `structure` section, then re-run the skill. To set the depth profiles and exclusions yourself, use `/lazy-wiki.configure structure`. Then run `/lazy-wiki.structure rebuild` to build the initial map if it does not exist yet.
 
 ---
 
@@ -467,6 +487,16 @@ surface_sha: c35bb7fa5042426354023317bffe1afbf7d83bc1cc9062eb8c8376f8cbd789e3
 **Likely cause**: Code carries `Domain(<group>)` markers whose group name isn't in the dictionary yet — a genuinely new group, a block still filed under `Domain(unfiled):`, or a dictionary rename that left the old group name behind in code.
 
 **Fix**: For one or two groups, add the group to the dictionary by hand and re-run `/lazy-wiki.domain-sync`. When several groups are reported at once, or the blocks sit under `unfiled`, run `/lazy-python.knowledge-sweep` instead — it grows the dictionary with you and refiles the code's blocks under the accepted group names before the next sync. `/lazy-wiki.audit` also flags this condition.
+
+---
+
+## `/lazy-wiki.domain-sync` reports blocks under `untitled_blocks`
+
+**Symptom**: The `/lazy-wiki.domain-sync` report lists one or more `Domain(…)` blocks under `untitled_blocks`, and no document is generated for them.
+
+**Likely cause**: A block does not open with a title line, and every document is named from its block's title.
+
+**Fix**: Add the title line to the block in the code, then re-run `/lazy-wiki.domain-sync`.
 
 ---
 

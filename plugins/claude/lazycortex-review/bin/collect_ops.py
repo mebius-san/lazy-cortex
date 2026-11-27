@@ -30,9 +30,16 @@ Response-payload fields this module reads (the agent's `response.json`):
 
     {
       "outcome": "edited" | "empty" | "error",
-      "result": [{"path": "result/<document>"}, {"path": "result/<attachment>"}, ...]
+      "result": [{"path": "result/<document>"}, {"path": "result/<attachment>"}, ...],
                 # required when outcome == "edited"
+      "plan_verdict": "sufficient" | "new-plan"
+                # required of a `main` job on a document of a report class; ignored elsewhere
     }
+
+A report class's `main` job whose `plan_verdict` is absent or neither value is retired under `failed` with nothing
+of it landed. The verdict of the last such job the landing applies is stored as the document's `verdict` job marker
+under the document's repository root, in the same write that clears `active_job` when the collect's repository is
+that root.
 
 The first `result` entry is the job's own document. Every further entry is an attachment the
 landing puts beside that document under the entry's own basename — accepted on `mode == "main"`
@@ -85,33 +92,57 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import finalize as _finalize  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import payload as _payload  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import reapply as _reapply  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, ReviewKey, ReviewProtocol, Tag,
+    CoreCommand, EnvVar, JobFile, JobKey, JobMarker, JobStatus, Outcome, Phase, ReportVerdictKind, ReviewKey,
+    ReviewProtocol, Tag,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from errors import GitOpsError, JobConsumeError, PayloadError  # noqa: E402
+from errors import GitOpsError, JobConsumeError, PayloadError, SettingsReadError  # noqa: E402
 
 
 # A link target pointing into the job's own result dir — what a writer spells when it references
@@ -135,6 +166,11 @@ _RESULT_DIR = "result"
 # the reason inside each of its entries.
 _FAILED = "failed"
 _FAILED_REASON = "reason"
+
+# The reason reported for a report's main-writer job whose response gives no plan verdict.
+_MISSING_VERDICT_REASON = f"a report's main writer gave no `{JobKey.PLAN_VERDICT}`"
+# The reason reported for a report's main-writer job whose plan verdict is neither known value; the value follows it.
+_UNKNOWN_VERDICT_REASON = f"`{JobKey.PLAN_VERDICT}` is neither of {sorted(ReportVerdictKind)}"
 
 # The reason reported for an `edited` job whose payload or request is malformed.
 _UNAPPLIED_EDIT_REASON = "the edit's result or request is malformed and could not be applied"
@@ -198,6 +234,58 @@ class _Step(NamedTuple):
   written: dict[str, bytes]
   # The repo-relative paths of the attachments the job put beside the document.
   landed: list[str]
+
+
+# ------------------------------------------------------------- plan verdict
+
+
+def _is_report_document(file_path: Path) -> bool:
+  """
+  Tell whether the document's review class is configured as a report class.
+
+  Args:
+    file_path: The document whose class is resolved, from the merged settings nearest to it.
+
+  Returns:
+    True only when the resolved class sets `report` to `true`; a document no class covers and a class without the
+    flag read as False.
+
+  Raises:
+    RuntimeError: When no core CLI is resolvable.
+    ValueError: When the review settings cannot be read, so whether the document is a report is unknown.
+  """
+  # the document's nearest settings name its class
+  settings_root = _core_settings.query_settings_root_for(file_path)
+
+  # guard: unreadable settings say nothing about the class; reading them as "not a report" would land a report's
+  # main job with no verdict, so the landing is refused and the next pass retries
+  try:
+    settings = _core_settings.read_merged_sections(settings_root, JobKey.REVIEW)
+  except SettingsReadError as error:
+    raise ValueError(f"the review settings cannot be read, so the document's class is unknown: {error}") from error
+  return bool(_doc_class.is_report_class(settings, settings_root, file_path))
+
+
+def _verdict_failure(response: dict) -> str | None:
+  """
+  Judge the plan verdict a report's main writer gave in its response.
+
+  Args:
+    response: Parsed `response.json` contents of a main-writer job on a report-class document.
+
+  Returns:
+    The reason the job is retired under `failed`, or `None` when `plan_verdict` is one of the two known values.
+  """
+  verdict = response.get(JobKey.PLAN_VERDICT)
+
+  # guard: a report's writer always states whether the plan suffices; silence is a malformed answer
+  if verdict is None:
+    return _MISSING_VERDICT_REASON
+
+  # guard: a value outside the closed pair would paint a banner that promises no known path
+  if verdict not in set(ReportVerdictKind):
+    return f"{_UNKNOWN_VERDICT_REASON}: {verdict!r}"
+  return None
 
 
 # ------------------------------------------------------------- job discovery
@@ -904,11 +992,11 @@ def consume_job(repo: Path, jdir: Path) -> None:
   # nothing about. When the owner cannot be reached or refuses, the job stays finished and is left for a later
   # pass.
 
-  cli =_git_ops.resolve_core_cli()
-
   # guard: without the core CLI nothing may mark the job consumed
-  if cli is None:
-    raise JobConsumeError(f"{CoreCommand.CONSUME_JOB} {_job_ref(jdir)}: lazycortex-core CLI not resolvable")
+  try:
+    cli = _git_ops.require_core_cli(repo)
+  except RuntimeError as error:
+    raise JobConsumeError(f"{CoreCommand.CONSUME_JOB} {_job_ref(jdir)}: {error}") from error
 
   # core owns the bundle's markers and the ledger entry it writes before the marker; its output is taken as
   # bytes, so the exit code alone says whether the job was consumed, whatever core printed
@@ -1023,6 +1111,14 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
       committed. The working tree is then dirty. Under the daemon,
       its working-tree check stops on it and its discard restores it, after which a later pass lands the unconsumed
       jobs again.
+    - A `main` job with outcome `edited` or `empty` on a report-class document whose response carries no
+      `plan_verdict`, or one that is neither `sufficient` nor `new-plan`, is a job whose result cannot be applied:
+      its reason names the field. The verdict of the last applied such job is stored as the document's `verdict` job
+      marker under the document's repository root, in the write that clears `active_job` when the call's repository
+      is that root; a batch without one leaves the stored verdict as it was. On any
+      other class the field is ignored. When the document has finished jobs and its review settings cannot be read,
+      the call is refused with `ValueError` before anything is written: no job is consumed and the next pass
+      retries; such settings are never read as "not a report".
     - A job whose result cannot be applied is, when the call returns, consumed and named under `failed` with its
       reason, and nothing of its result is in the document. When the call raises instead, the jobs of this kind
       not yet consumed stay finished, are not listed under `failed`, and the next pass reports them.
@@ -1075,9 +1171,12 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
       that corrective rewrite itself fails (a double fault), the `summary` additionally carries `"unconsumed"`, a
       list of `"<expert>/<job id>"` in landing order naming the jobs whose results are in the document while
       unconsumed; the key is absent otherwise.
-    ValueError: When the document is not UTF-8 text (`UnicodeDecodeError`), or when its folder is not inside the
-      repository, as given or once its links are followed, or cannot be resolved, or git cannot be launched or
-      fails; nothing is written, nothing is applied and no job is consumed.
+    RuntimeError: When the document has finished jobs and no core CLI is resolvable to read its review class;
+      nothing is written and no job is consumed.
+    ValueError: When the document has finished jobs and its review settings cannot be read, or when the document is
+      not UTF-8 text (`UnicodeDecodeError`), or when its folder is not inside the repository, as given or once its
+      links are followed, or cannot be resolved, or git cannot be launched or fails; nothing is written, nothing is
+      applied and no job is consumed.
   """
 
   # Domain(review.jobs):
@@ -1140,6 +1239,17 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
   unfinished: list[str] = []
 
   # Contract:
+  # When the document has finished jobs, its review class is read before anything is written. Settings that cannot
+  # be read refuse the whole call with `ValueError`: nothing is written, no job is consumed, and every job stays
+  # finished for the next pass. They are NEVER read as "not a report".
+
+  # whether the document is a report is read once, before any job, so unreadable settings or an unreachable core
+  # refuse the call instead of failing each job; the plan verdict of the last applied main job is what the marker
+  # write stores
+  is_report = bool(candidates) and _is_report_document(file_path)
+  verdict: str | None = None
+
+  # Contract:
   # A DONE job with `outcome == "empty"` is consumed and counted with the document left
   # byte-identical: no text change is applied for it, and a batch of only-empty jobs still
   # clears the `active_job` marker — the round closes instead of stranding the marker until
@@ -1159,9 +1269,28 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
       request = json.loads((jdir / JobFile.REQUEST).read_text(encoding = "utf-8"))
       response = json.loads((jdir / JobFile.RESPONSE).read_text(encoding = "utf-8"))
 
+      # Contract:
+      # A `main` job that will be consumed (outcome `edited` or `empty`) on a report-class document MUST carry
+      # `plan_verdict` set to `sufficient` or `new-plan`. A job without it, or with any other value, is retired
+      # under `failed` with a reason naming the field, and nothing of it lands. On any other class, and on any
+      # other mode, the field is ignored.
+
+      # a report's main writer owes a plan verdict, and a job that withholds it lands nothing
+      job_verdict: str | None = None
+      is_consumable = response.get(JobKey.OUTCOME) in (Outcome.EDITED, Outcome.EMPTY)
+      if is_report and is_consumable and request.get(JobKey.MODE) == Phase.MAIN:
+        reason = _verdict_failure(response)
+        # guard: a missing or unknown verdict retires the job as failed, and nothing of it lands
+        if reason is not None:
+          sys.stderr.write(f"collect-job: {jdir}: {reason}\n")
+          failed.append(( jdir, reason ))
+          continue
+        job_verdict = response[JobKey.PLAN_VERDICT]
+
       # an `empty` writer finished with nothing to change — count it for consumption as-is
       if response.get(JobKey.OUTCOME) == Outcome.EMPTY:
         steps.append(_Step(jdir, text, {}, []))
+        verdict = job_verdict or verdict
         continue
       outcome_applied = _apply_one_job(text, jdir, request, response, file_path, ending)
 
@@ -1254,6 +1383,7 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
     landed = [ str(rel_folder / name) for name in payloads ]
     steps.append(_Step(jdir, text, payloads, landed))
     text = outcome_applied[0]
+    verdict = job_verdict or verdict
 
   # nothing landed — the document stays exactly as found, and the unappliable jobs are retired:
   # left unconsumed they would be counted as finished work by every later sweep
@@ -1325,11 +1455,26 @@ def collect_for_file(repo: Path, file_path: Path) -> dict:
   # recovering beyond the recorded history: the unrecorded changes are discarded and the jobs land again.
   # A document that is itself outside the repository is not landed at all.
 
+  # Contract:
+  # The plan verdict of the last applied main-writer job of a report-class document is stored as the document's
+  # `verdict` job marker under the document's repository root, whatever repository the collect was given; when the
+  # collect's repository is that root, the verdict is stored in the same write that clears `active_job`. A batch
+  # with no such job leaves the stored verdict as it was.
+
   # the coordinator collects inside its own wake: worktree write only, its `commit-doc`
   # carries the result and no new wake is raised for a landing already being served
   is_written = False
   try:
-    _job_markers.update(repo, file_path, { JobMarker.ACTIVE_JOB: None })
+    # the marker write that closes the writer's turn also carries the report's plan verdict, when one landed; the
+    # verdict is keyed by the document's repository root, so a document in another, nested checkout gets it its own
+    # write
+    markers: dict[str, str | None] = { JobMarker.ACTIVE_JOB: None }
+    verdict_repo = _finalize.query_repo_root_for(file_path)
+    if verdict is not None and verdict_repo.resolve() == repo.resolve():
+      markers[JobMarker.VERDICT] = verdict
+    elif verdict is not None:
+      _job_markers.update(verdict_repo, file_path, { JobMarker.VERDICT: verdict })
+    _job_markers.update(repo, file_path, markers)
     if text != original:
       _atomic_io.write_text_atomic(file_path, text)
     is_written = True
@@ -2047,7 +2192,9 @@ def main_tick(argv: list[str]) -> int:
   Run `collect_tick` and print its summary.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the sweep covers the root of the checkout that
+      directory sits in.
 
   Returns:
     Exit code: `0` when the sweep completed with nothing left uncollected, `1` when at least
@@ -2056,11 +2203,11 @@ def main_tick(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazycortex-review collect-tick")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
-  # resolve --repo then run the sweep; the CLI's whole contract is this one summary line
-  summary = collect_tick(Path(args.repo).resolve())
+  # sweep the checkout root of --repo, $LAZY_REPO_ROOT or the cwd; the CLI's whole contract is this one summary line
+  summary = collect_tick(_review_locator.query_repo_root(args.repo))
   # waiver: 'files'/'dispatched' are collect_tick's own wire-shape keys, not keys.py-promoted constants
   print(json.dumps({"files": summary["files"], "dispatched": summary["dispatched"]}))
   return 1 if JobKey.ERROR in summary else 0
@@ -2071,32 +2218,35 @@ def main(argv: list[str]) -> int:
   Land every DONE job targeting one review document and print the landing's summary.
 
   Prints one JSON object on stdout: the summary of the landing. Every failure exits `1` with a stderr line
-  starting with `collect-job:` and one JSON summary on stdout. An `OSError` or `ValueError` is told in one stderr
-  line even when its own text runs over several lines; a refused consume is written with its own text as it is.
-  No exception escapes.
+  starting with `collect-job:` and one JSON summary on stdout. An `OSError`, `ValueError` or `RuntimeError` is
+  told in one stderr line even when its own text runs over several lines; a refused consume is written with its
+  own text as it is. No exception escapes.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); a relative document path is read from the root of the
+      checkout that directory sits in.
 
   Returns:
     Exit code: `0` on success, also when the summary lists jobs under `failed` (a job whose attachment would
     replace a file git cannot give back is retired there and does not fail the call). `1` on any failure: the
     partial summary of what did land when core refused a consume, or `{"collected": 0}` when the document or the
     job marker could not be read or written, the document's folder is not inside the repository or cannot be
-    resolved, git cannot be launched or fails (`ValueError`), or the document is not UTF-8 text (that stderr line
-    says a retry will not help); also `1` with the printed summary when it carries `unfinished`. `2` only when the
-    target file does not exist.
+    resolved, git cannot be launched or fails, the review settings cannot be read, no core CLI can be reached
+    (`RuntimeError`), or the document is not UTF-8 text (that stderr line says a retry will not help); also `1`
+    with the printed summary when it carries `unfinished`. `2` only when the target file does not exist.
   """
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazycortex-review collect-job")
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
-  # `file` resolves against `--repo` unless it's already absolute
-  repo = Path(args.repo).resolve()
+  # `file` resolves against the root of the checkout `--repo`, `$LAZY_REPO_ROOT` or the cwd sits in, unless it is
+  # already absolute
+  repo = _review_locator.query_repo_root(args.repo)
   file_path = (repo / args.file).resolve()
 
   # guard: the named document does not exist, nothing to collect for
@@ -2124,9 +2274,10 @@ def main(argv: list[str]) -> int:
     )
     print(json.dumps(_summarize(0, [], [], [])))
     return 1
-  except (OSError, ValueError) as error:
-    # the document or the job marker could not be read or written: nothing landed and nothing is consumed;
-    # a failure whose own text runs over several lines is told in one, like every other
+  except (OSError, ValueError, RuntimeError) as error:
+    # the document or the job marker could not be read or written, or no core CLI could be reached to read the
+    # review class: nothing landed and nothing is consumed; a failure whose own text runs over several lines is
+    # told in one, like every other
     detail = " ".join(str(error).split())
     sys.stderr.write(f"collect-job: {file_path}: {type(error).__name__}: {detail}; nothing landed\n")
     print(json.dumps(_summarize(0, [], [], [])))

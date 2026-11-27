@@ -25,9 +25,9 @@ Inside any of the three phases, one skill may declare `lazy_setup_last: true` to
 
 The plugins "enabled in a repo" are the union of the `enabledPlugins` maps in `<repo>/.claude/settings.json` and `<repo>/.claude/settings.local.json` — every key whose value is `true`. Each key has the form `<plugin>@<marketplace>`; strip the `@<marketplace>` suffix to get the plugin name.
 
-This union is the **only** authority for which install chains apply to a repo. The machine-wide registry `~/.claude/plugins/installed_plugins.json` is a union of every project's plugins on the host (entries carry `scope: project` + `projectPath`) and MUST NOT be read as an enablement signal — it is consulted solely to resolve a plugin's `installPath` (any entry for that plugin will do; the cache path is per-plugin-version, not per-project).
+This union is the **only** authority for which install chains apply to a repo. The machine-wide registry `~/.claude/plugins/installed_plugins.json` is a union of every project's plugins on the host (entries carry `scope: project` + `projectPath`) and MUST NOT be read as an enablement signal — it is consulted solely to resolve a plugin's `installPath`, and only from an entry this repo may use: `scope: user` (or `managed`), or `scope: project` / `local` whose `projectPath` is the repo's main checkout (a subdirectory or a linked worktree maps to it). Among those the highest version wins; an entry made for another project is never used, even when it is newer.
 
-A plugin enabled in the repo but absent from the machine registry/cache is reported as `skipped: plugin not installed on this machine`, never a hard failure.
+A plugin enabled in the repo but with no install recorded for this repo or the user is reported as `skipped: plugin not installed for this repo or the user`, never a hard failure.
 
 The interactive `lazy-core.setup` runs inside the project's own session, where the enabled set is naturally the project's. The cross-repo agents `lazy-core.autosetup` and `lazy-core.autocheckup` have no such session context — they resolve the enabled set explicitly against `repo=` per this section, so a dispatching session's machine-wide view never leaks foreign install chains into the target repo.
 

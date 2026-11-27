@@ -6,8 +6,16 @@
   "autorun.stop-reason.question": "эксперт задал вопрос",
   "banner.action-needed": "> [!caution] Action needed #review/action-needed\n> Ответьте на открытый вопрос или кандидат решения ниже, отметив вариант, и закоммитьте.\n",
   "banner.finalizing": "> [!hint] Waiting: finalize #review/finalizing\n",
-  "banner.in-process": "> [!hint] {title} #review/in-process\n{autorun}> Чтобы вмешаться или разбудить застрявший документ, напишите указание в коллауте `[!todo] #review/command`.\n",
+  "banner.in-process": "> [!hint] {title} #review/in-process\n{waiting}{autorun}> Чтобы вмешаться или разбудить застрявший документ, напишите указание в коллауте `[!todo] #review/command`.\n",
+  "banner.ready-report": "> [!success] Ready to decide #review/ready\n{autorun}> {same_commit}\n> {both_ticked}\n> - [{tick}] Принять как есть, без исправлений\n> - [ ] Поправить по замечаниям\n{verdict}",
   "banner.ready-single": "> [!success] Ready to approve #review/ready\n{autorun}> Отметьте галочку ниже, чтобы утвердить документ целиком.\n> Чтобы отправить на доработку, поправьте текст и закоммитьте или напишите указание в коллауте `[!todo] #review/command`.\n> - [{tick}] утвердить документ целиком\n",
   "banner.ready-triple": "> [!success] Ready to approve #review/ready\n{autorun}> Отметьте ОДНУ галочку: утвердить и отдать валидаторам, утвердить и дать циклу дойти до конца, или утвердить и финализировать без ещё одного круга валидации.\n> Чтобы отправить на доработку, поправьте текст и закоммитьте или напишите указание в коллауте `[!todo] #review/command`.\n> - [{tick}] утвердить этот и предыдущие раунды\n> - [ ] утвердить и догнать до конца без остановок\n> - [ ] утвердить без дальнейшей валидации\n",
-  "history.explainer": "Журнал изменений документа за время ревью. Ведётся автоматически — руками не править."
+  "banner.report.both-ticked": "Отмечены обе галки — ни одна не сработала. Отметьте одну.",
+  "banner.report.fix-replan": "Запустит новый план и новую сборку.",
+  "banner.report.fix-rework": "Запустит доработку этой сборки.",
+  "banner.report.same-commit": "Галка вместе с новой правкой текста не сработает: сначала исполнитель ответит на правку.",
+  "banner.report.waiting": "Ждём ответа исполнителя",
+  "candidate.both-ticked": "Отмечены обе галки — ни одна не сработала. Отметьте одну",
+  "history.explainer": "Журнал изменений документа за время ревью. Ведётся автоматически — руками не править.",
+  "question.multi-ticked": "Отмечено несколько вариантов — ни один не применён. Отметьте один"
 }

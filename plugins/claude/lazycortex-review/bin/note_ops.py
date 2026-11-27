@@ -1,5 +1,5 @@
 """
-Deterministic read/write primitives for one review document: `parse-note`, `set-key`, `paint-banner`.
+Deterministic read/write primitives for one review document.
 
 The `parse-note` report (`build_report`) is what the `spec.coordinator`-style watch worker and
 coordinator agent read to decide what a review document needs next, without re-implementing
@@ -17,14 +17,30 @@ Report shape (see `build_report`):
       "sections": [{"title": str, "owner_tag": str}],
       "callouts": [{"type": str, "tag": str, "line": int, "body": str}],
       "ticked_question_options": [{"callout_line": int, "option": str}],
+      "multi_ticked_questions": [{"callout_line": int}],
+      "both_ticked_candidates": [{"callout_line": int}],
+      "send_back_items": [{"line": int, "text": str, "ticked": bool}],
       "job_markers": {"coordinator_job": str | None, "active_job": str | None,
                       "pending_wake": str | None},
     }
 
+`callouts`, `ticked_question_options` and `multi_ticked_questions` list only callouts outside code fences and
+foreign `#protected/...` sections, and every `line` is the callout's own line in the document. A question with
+exactly one ticked option reports that option under `ticked_question_options`; a question with several ticked options
+reports none of them there and is listed under `multi_ticked_questions` instead, since several ticks are no answer.
+A `[!decision-candidate]` with both its accept and reject boxes ticked decides nothing and is listed under
+`both_ticked_candidates`, outside code fences and foreign `#protected/...` sections alike.
+
 Each banner gesture's `kind` is derived from the checkbox's position inside the banner callout, never from its
-label, so every banner language yields the same kinds. In the ready state the closed set is `approve`,
+label, so every banner language yields the same kinds. Which kinds the boxes can carry is decided by the document's
+review class, never by the banner text. For a plain class the ready state's closed set is `approve`,
 `approve-autorun`, and `approve-skip-validation` (the first, second, and third box, as in
-`banner.READY_GESTURE_KINDS`). A box beyond the third, and any box in a non-ready state, reports `kind: null`.
+`banner.READY_GESTURE_KINDS`). For a report class the ready banner carries two boxes whose closed set is `accept` and
+`fix` (the first and the second box, as in `banner.READY_REPORT_GESTURE_KINDS`). A box beyond the last known
+position, any box in a non-ready state, every box of a banner that contradicts the class (a report class under a
+title that is not the report title, a plain class under a report banner), and both boxes of a report banner ticked at
+once (neither is a decision) report `kind: null`. When the class is unknown, every box of every banner reports
+`kind: null`.
 Every checkbox is reported in banner order with its `ticked` flag, so two simultaneous ticks both appear and
 resolving them is the caller's job.
 
@@ -32,10 +48,13 @@ resolving them is the caller's job.
 loop's job markers are runtime state in `job_markers.py`'s sidecar, not frontmatter, and they
 ride along here so one `parse-note` call still shows the coordinator the whole picture.
 
-`set_key` and `repaint_banner` are mutating writers over the same document; both raise
-`ParseError` on a malformed frontmatter block rather than reporting it in a return value.
+`set_key`, `repaint_banner`, `strip_open_command`, `clear_multi_ticked_questions` and `clear_both_ticked_candidates`
+are mutating writers over the same document. The first two raise `ParseError` on a malformed frontmatter block rather
+than reporting it in a return value; the others return the text unchanged instead of raising.
 """
 from __future__ import annotations
+
+from typing import NamedTuple
 
 import argparse
 import json
@@ -53,24 +72,49 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import banner as _banner  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import finalize as _finalize  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from errors import ParseError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import send_back as _send_back  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from errors import ParseError, SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import AutorunState, Bucket, CoreCommand, LangId, Phase, ReviewKey, Tag  # noqa: E402
+from keys import (  # noqa: E402
+    AutorunState, Bucket, CoreCommand, JobKey, JobMarker, LangId, Phase, ReportVerdictKind, ReviewKey, Tag,
+)
 
 
 # The closed `review_*` frontmatter schema (spec § Frontmatter schema) — any `review_`-prefixed
@@ -108,13 +152,28 @@ _WAITING_CONTEXT_BY_PHASE = {
 _GESTURE_RE = re.compile(r"^>\s*-\s*\[([ xX])\]\s*(.+)$", re.MULTILINE)
 
 # Any `[!<marker>] ... #review/<tag>` callout head line, whatever the marker (`todo`, `question`,
-# `attention`, ...) and whatever the review tag; captures the marker and the tag.
-_CALLOUT_HEAD_RE = re.compile(r"^>\s*\[!(\w+)\][^#\n]*#review/([a-z-]+)\s*$", re.MULTILINE)
+# `attention`, ...) and whatever the review tag; captures the marker and the tag. Only spaces, tabs and a CRLF line's
+# carriage return may trail the tag, so the match never runs past the head line's own end into a blank line below it.
+_CALLOUT_HEAD_RE = re.compile(r"^>\s*\[!(\w+)\][^#\n]*#review/([a-z-]+)[ \t\r]*$", re.MULTILINE)
 
 # A ticked option line inside a callout block, once its leading `> ` quote prefix is stripped.
 _TICKED_OPTION_RE = re.compile(r"^-\s*\[[xX]\]\s*(.+)$")
 
+# A decision-candidate callout's head line; the type token alone is its identity, it carries no review tag.
+_CANDIDATE_HEAD_RE = re.compile(r"^>\s*\[!decision-candidate\]", re.MULTILINE)
+
+# A checkbox option line inside a callout block, once its leading `> ` quote prefix is stripped.
+_OPTION_RE = re.compile(r"^-\s*\[[^\]\n]*\]")
+
+# The ticked checkbox of a quoted option line, captured up to the tick so the tick alone is replaced.
+_QUOTED_TICK_RE = re.compile(r"^(>\s*-\s*\[)[xX](\])")
+# What `_QUOTED_TICK_RE` puts back: the checkbox with a space where its tick stood.
+_UNTICKED_BOX = r"\1 \2"
+
 _QUOTE_PREFIX_RE = re.compile(r"^>\s?")
+
+# One line of a document with its `\n` kept, the last line possibly without one; no other character ends a line.
+_LINE_RE = re.compile(r"[^\n]*\n|[^\n]+$")
 
 # The checkbox-ticked marker character `_GESTURE_RE` / `_TICKED_OPTION_RE` capture.
 _TICK_CHAR = "x"
@@ -134,6 +193,22 @@ _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _ARG_CWD = "--cwd"
 
 
+# ----------------------------------------------------------------------------------------
+class _CommandSpotRecord(NamedTuple):
+  """
+  Where a document's open operator command callout sits, with its text.
+
+  Attributes:
+    head: Zero-based index of the callout's head line in the full document text.
+    body: The callout's text, quote prefixes stripped, as the `parse-note` report gives it.
+  """
+
+  head: int
+  body: str
+
+
+
+# ----------------------------------------------------------------------------------------
 def _coerce_known_value(key: str, raw: str) -> bool | int | str:
   """
   Coerce a raw frontmatter string to the type its `ReviewKey` carries.
@@ -143,7 +218,7 @@ def _coerce_known_value(key: str, raw: str) -> bool | int | str:
     raw: The raw string value `frontmatter.parse` read for `key`.
 
   Returns:
-    `bool` for the flag keys, `int` for the two round-counter keys (falling back to the
+    `bool` for the flag keys, `int` for the counter keys (falling back to the
     raw string when it isn't numeric), and the raw string for everything else.
   """
   if key in _BOOL_REVIEW_KEYS:
@@ -168,23 +243,26 @@ def _strip_quote_prefix(line: str) -> str:
   return _QUOTE_PREFIX_RE.sub("", line, count = 1)
 
 
-def _callout_block_lines(body: str, start: int) -> list[str]:
+def _find_all_callout_lines(body: str, start: int) -> list[str]:
   """
   Collect the consecutive `>`-prefixed lines of a callout, starting at `start`.
 
   Args:
     body: Document body text to slice from.
-    start: Byte offset immediately after the callout's head line.
+    start: Character offset into `body` immediately after the callout's head line.
 
   Returns:
-    The block's continuation lines (head line excluded), still carrying their `>` prefix.
+    The block's continuation lines (head line excluded), still carrying their `>` prefix and without any trailing
+    carriage return.
   """
+  # only `\n` ends a line, so a Unicode line separator inside a quoted line never cuts the block short; a CRLF
+  # line's carriage return is not part of its text
   collected: list[str] = []
-  for line in body[start:].splitlines():
+  for line in body[start:].split("\n"):
     # guard: the first line without a `>` prefix ends the callout block
     if not line.startswith(">"):
       break
-    collected.append(line)
+    collected.append(line.removesuffix("\r"))
   return collected
 
 
@@ -194,7 +272,7 @@ def _line_number(text: str, offset: int) -> int:
 
   Args:
     text: Full document text the offset is measured against.
-    offset: Byte offset into `text`.
+    offset: Character offset into `text`.
 
   Returns:
     The 1-indexed line number containing `offset`.
@@ -202,7 +280,7 @@ def _line_number(text: str, offset: int) -> int:
   return text.count("\n", 0, offset) + 1
 
 
-def _empty_banner_report() -> dict:
+def _build_empty_banner_report() -> dict:
   """
   Return the default `banner` report block for a document with no detected banner.
 
@@ -212,34 +290,39 @@ def _empty_banner_report() -> dict:
   return { "present": False, "state_tag": None, "gestures": [] }
 
 
-def _build_banner_report(body: str) -> dict:
+def _build_banner_report(body: str, report: bool | None) -> dict:
   """
   Build the `banner` report block for one document.
 
   Args:
     body: Document body text (post-frontmatter) to scan for the banner and its gestures.
+    report: Whether the document's review class is a report class, or `None` when the class is unknown.
 
   Returns:
     Dict with `present`, `state_tag`, and `gestures` — see module docstring. Gestures come only from the banner
     callout block itself, never from a question or any other callout before the first H1. Each gesture's `kind`
     follows the checkbox's position among the ready banner's checkboxes (so every language's banner reports the
-    same kinds), and is `None` for a checkbox past the last known position and for every checkbox of a banner
-    that is not the ready one.
+    same kinds), as the document's class reads them: the approve kinds for a plain class, `accept` and `fix` for a
+    report class. It is `None` for a checkbox past the last known position, for every checkbox of a banner that is
+    not the ready one, for every checkbox of a banner that contradicts the class, for both checkboxes of a report
+    banner ticked at once, and for every checkbox when the class is unknown.
   """
   state = _banner.extract(body)
 
   # guard: no banner present — nothing further to report
   if state is None:
-    return _empty_banner_report()
+    return _build_empty_banner_report()
 
   # only the banner callout's own lines are gestures: a question or any other callout near the
   # banner, before the first H1 or in a document with none, never reads as one
   banner_block = _banner.extract_block(body)
 
   # a checkbox's gesture kind follows its position among the ready banner's checkboxes, never
-  # its label, so every language's banner reports the same kinds; a checkbox past the last
-  # known position, or on a banner that is not the ready one, has no kind
-  kinds = _banner.READY_GESTURE_KINDS if state is _banner.State.READY else ()
+  # its label, so every language's banner reports the same kinds; the document's class decides which kinds the
+  # boxes can carry, and a checkbox past the last known position, on a banner that is not the ready one, or on a
+  # document whose class is unknown has no kind
+  is_ready = state is _banner.State.READY and report is not None
+  kinds = _banner.ready_gesture_kinds(banner_block, report = bool(report)) if is_ready else ()
   gestures = [
       {
           "label": match.group(2).strip(),
@@ -273,22 +356,52 @@ def _build_sections_report(text: str) -> list[dict]:
   return sections
 
 
-def _build_callout_reports(text: str, body: str) -> tuple[list[dict], list[dict]]:
+def _blank_inert_regions(body: str) -> str:
   """
-  Build the `callouts` and `ticked_question_options` report blocks in one pass.
+  Blank out the parts of a document body that can hold no live review callout.
+
+  Args:
+    body: Document body text.
+
+  Returns:
+    `body` with every foreign protected section and every fenced code block replaced by empty lines, the line count
+    kept, so a line number counted on the result names the same line in `body`.
+  """
+  # a protected section is lifted out, then put back as the same number of empty lines as it held
+  lifted, saved = _body.split_out_protected_sections(body)
+  blanked = _body.restore_protected_sections(lifted, [ "\n" * section.count("\n") for section in saved ])
+
+  # fenced text is literal: its lines read as empty too
+  return _parser.strip_code_fences(blanked)
+
+
+def _build_callout_reports(text: str, body: str) -> tuple[list[dict], list[dict], list[dict]]:
+  """
+  Build the `callouts`, `ticked_question_options` and `multi_ticked_questions` report blocks.
 
   Args:
     text: Full document text, used to compute absolute line numbers.
     body: Document body text to scan for `#review/<tag>` callouts.
 
   Returns:
-    A `(callouts, ticked_question_options)` tuple.
+    A `(callouts, ticked_question_options, multi_ticked_questions)` tuple.
   """
-  fm_length = len(text) - len(body)
+
+  # Domain(review.markup):
+  # # Only live callouts are review signals
+  # A callout shown inside a code fence is example text, and a callout inside a section another plugin owns is that
+  # plugin's content. Neither is a question, a command or any other signal to the review loop, so neither is
+  # reported, acted on or checked against the review's own vocabulary. Every callout that is reported keeps the line
+  # it stands on in the document as the operator sees it.
+
+  # fenced and protected regions read as empty lines, so offsets in the scan count lines exactly as the document does
+  fm_text = text[: len(text) - len(body)]
+  scan = _blank_inert_regions(body)
   callouts: list[dict] = []
   ticked_question_options: list[dict] = []
-  for m in _CALLOUT_HEAD_RE.finditer(body):
-    marker, tag = m.group(1), m.group(2)
+  multi_ticked_questions: list[dict] = []
+  for match in _CALLOUT_HEAD_RE.finditer(scan):
+    marker, tag = match.group(1), match.group(2)
 
     # guard: a banner-state tag is reported via `banner`, never duplicated here
     if tag in _BANNER_STATE_TAGS:
@@ -296,11 +409,11 @@ def _build_callout_reports(text: str, body: str) -> tuple[list[dict], list[dict]
 
     # gather the callout's block (head line's own end through its trailing `>` lines) and turn
     # it into the plain-text `body` this callout reports
-    head_line_end = body.find("\n", m.end())
-    head_line_end = len(body) if head_line_end == -1 else head_line_end + 1
-    block_lines = _callout_block_lines(body, head_line_end)
+    head_line_end = scan.find("\n", match.end())
+    head_line_end = len(scan) if head_line_end == -1 else head_line_end + 1
+    block_lines = _find_all_callout_lines(scan, head_line_end)
     callout_body = "\n".join(_strip_quote_prefix(line) for line in block_lines).strip()
-    line_no = _line_number(text, fm_length + m.start())
+    line_no = _line_number(fm_text + scan, len(fm_text) + match.start())
     callouts.append({
         "type": marker, "tag": f"{Tag.REVIEW_PREFIX}{tag}", "line": line_no, "body": callout_body,
     })
@@ -308,32 +421,113 @@ def _build_callout_reports(text: str, body: str) -> tuple[list[dict], list[dict]
     # guard: ticked options only matter inside a `[!question] ... #review/question` callout
     if marker != _QUESTION_MARKER or tag != _QUESTION_MARKER:
       continue
-    for raw_line in block_lines:
-      opt_match = _TICKED_OPTION_RE.match(_strip_quote_prefix(raw_line))
-      if opt_match:
-        ticked_question_options.append({ "callout_line": line_no, "option": opt_match.group(1).strip() })
-  return callouts, ticked_question_options
+
+    # Domain(review.markup):
+    # # Several ticks on one question are no answer
+    # The options of a question exclude one another, so a question the operator ticked more than once carries no
+    # answer: none of the ticked options is applied. Such a question is reported apart from the answered ones, so
+    # its ticks can be cleared and the operator told to tick one; a question with exactly one tick is answered by
+    # that option as before.
+
+    # the question's ticked options, each against the question's head line
+    ticked = [
+        opt_match.group(1).strip() for raw_line in block_lines
+        if (opt_match := _TICKED_OPTION_RE.match(_strip_quote_prefix(raw_line)))
+    ]
+
+    # guard: several ticks answer nothing — the question is listed apart and none of its options is reported
+    if len(ticked) > 1:
+      multi_ticked_questions.append({ "callout_line": line_no })
+      continue
+    ticked_question_options.extend({ "callout_line": line_no, "option": option } for option in ticked)
+  return callouts, ticked_question_options, multi_ticked_questions
 
 
-def build_report(text: str, job_markers: dict[str, str | None] | None = None) -> dict:
+def _build_candidate_report(text: str, body: str) -> list[dict]:
+  """
+  Build the `both_ticked_candidates` report block.
+
+  Args:
+    text: Full document text, used to compute absolute line numbers.
+    body: Document body text to scan for decision-candidate callouts.
+
+  Returns:
+    One `{"callout_line"}` entry per decision-candidate outside code fences and foreign protected sections whose
+    accept and reject boxes are both ticked, in document order.
+  """
+
+  # Domain(review.markup):
+  # # Both boxes of a decision candidate ticked decide nothing
+  # A decision candidate is accepted or rejected, never both, so a candidate the operator ticked both ways carries no
+  # decision: neither branch is taken, the candidate stays open, and it is reported apart so its ticks can be cleared
+  # and the operator told to tick one. A candidate with exactly one tick is decided by that tick.
+
+  # fenced and protected regions read as empty lines, so the head line counts as the document does
+  fm_text = text[: len(text) - len(body)]
+  scan = _blank_inert_regions(body)
+  entries: list[dict] = []
+  for match in _CANDIDATE_HEAD_RE.finditer(scan):
+    head_line_end = scan.find("\n", match.end())
+    head_line_end = len(scan) if head_line_end == -1 else head_line_end + 1
+    ticks = [
+        line for line in _find_all_callout_lines(scan, head_line_end)
+        if _TICKED_OPTION_RE.match(_strip_quote_prefix(line))
+    ]
+
+    # one tick or none is a decision, or none yet, and is not listed
+    if len(ticks) < 2:
+      continue
+    entries.append({ "callout_line": _line_number(fm_text + scan, len(fm_text) + match.start()) })
+  return entries
+
+
+def _build_send_back_report(text: str, body: str) -> list[dict]:
+  """
+  Build the report entries of the document's send-back items.
+
+  Args:
+    text: Full document text, frontmatter included.
+    body: The part of `text` after the frontmatter.
+
+  Returns:
+    One entry per send-back item in document order, with its line counted from the top of `text`.
+  """
+  # an item's line is counted from the top of the whole text, frontmatter lines included, as a callout's is
+  body_offset = text[: len(text) - len(body)].count("\n")
+  return [
+      { "line": body_offset + item.line, "text": item.text, "ticked": item.ticked }
+      for item in _send_back.find_all_send_back_items(body)
+  ]
+
+
+def build_report(
+    text: str, job_markers: dict[str, str | None] | None = None, *, report: bool | None = False,
+) -> dict:
   """
   Parse a review document into the structural report the coordinator and watch worker act on.
 
   Guarantees:
-    - When `parse_failed` is `True`, every other report field is empty rather than
-      partially populated.
+    - When `parse_failed` is `True`, every field read from the document is empty (or its empty shape), and
+      `job_markers` passes through from the sidecar as given.
+    - `callouts`, `ticked_question_options`, `multi_ticked_questions` and `both_ticked_candidates` never list a
+      callout inside a code fence or a foreign `#protected/...` section, and every listed callout's `line` is its
+      line in `text`.
 
   Args:
     text: Full document text to inspect.
     job_markers: The document's runtime marker entry from `job_markers.read`, reported
       verbatim under `job_markers`. Defaults to the all-absent entry, which is what a caller
       reading a bare text snapshot (a pre-commit blob, a test fixture) has.
+    report: Whether the document's review class is a report class, from the caller's own class lookup, or `None`
+      when the class cannot be resolved, which leaves every banner box without a kind. Selects which kinds the
+      banner's boxes can carry.
 
   Returns:
     Dict with `parse_failed`, `frontmatter`, `unknown_review_keys`, `banner`, `sections`,
-    `callouts`, `ticked_question_options`, and `job_markers` — see module docstring for the
-    exact shape. `parse_failed` is `True` when the document carries no frontmatter block (or a
-    malformed one), in which case every other field is empty rather than partially populated.
+    `callouts`, `ticked_question_options`, `multi_ticked_questions`, `both_ticked_candidates`, `send_back_items`,
+    and `job_markers` — see module docstring for the exact shape. `parse_failed` is `True` when the document
+    carries no frontmatter block (or a malformed one), in which case every field read from the document is empty
+    (`banner` takes its empty shape) and `job_markers` passes through as given.
   """
   markers = dict(job_markers) if job_markers is not None else _job_markers.empty_entry()
   try:
@@ -342,8 +536,15 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
     meta, body = {}, ""
 
   # Contract:
-  # When `parse_failed` is True, every other report field is empty rather than
-  # partially populated.
+  # When `parse_failed` is True, every field read from the document is empty (or its empty shape),
+  # and `job_markers` passes through from the sidecar as given.
+
+  # Contract:
+  # `callouts`, `ticked_question_options`, `multi_ticked_questions` and `both_ticked_candidates` NEVER list a
+  # callout inside a code fence or inside a foreign protected section, and every listed callout's `line` is its
+  # line in `text`. The coordinator acts on these entries (`clear-multi-ticks` on the last two), the audit checks
+  # their tags, and the command wake, `strip-command` and the operator-text attribution all read the open command
+  # from them; a fenced example listed here would be acted on as a live signal.
 
   # guard: no usable frontmatter — the document is structurally broken for review purposes
   if not meta:
@@ -351,10 +552,13 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
         "parse_failed": True,
         "frontmatter": {},
         "unknown_review_keys": [],
-        "banner": _empty_banner_report(),
+        "banner": _build_empty_banner_report(),
         "sections": [],
         "callouts": [],
         "ticked_question_options": [],
+        "multi_ticked_questions": [],
+        "both_ticked_candidates": [],
+        "send_back_items": [],
         "job_markers": markers,
     }
 
@@ -377,15 +581,18 @@ def build_report(text: str, job_markers: dict[str, str | None] | None = None) ->
       unknown_review_keys.append(key)
 
   # assemble the remaining report blocks and return the full report
-  callouts, ticked_question_options = _build_callout_reports(text, body)
+  callouts, ticked_question_options, multi_ticked_questions = _build_callout_reports(text, body)
   return {
       "parse_failed": False,
       "frontmatter": frontmatter,
       "unknown_review_keys": unknown_review_keys,
-      "banner": _build_banner_report(body),
+      "banner": _build_banner_report(body, report),
       "sections": _build_sections_report(text),
       "callouts": callouts,
       "ticked_question_options": ticked_question_options,
+      "multi_ticked_questions": multi_ticked_questions,
+      "both_ticked_candidates": _build_candidate_report(text, body),
+      "send_back_items": _build_send_back_report(text, body),
       "job_markers": markers,
   }
 
@@ -394,21 +601,232 @@ def has_open_command(text: str) -> bool:
   """
   Report whether a review document carries an operator command the coordinator still owes.
 
+  Guarantees:
+    - A command callout inside a code fence or a foreign `#protected/...` section is never reported as open.
+    - A command reported as open is the one `strip_open_command` removes.
+
   Args:
-    text: Full document text, frontmatter included.
+    text: Full document text, frontmatter included, with LF line endings.
 
   Returns:
-    `True` when a `[!todo] #review/command` callout with a non-empty body is present; `False`
-    otherwise, including for a document whose frontmatter does not parse.
+    `True` when a `[!todo] #review/command` callout with a non-empty body sits outside code fences and foreign
+    protected sections; `False` otherwise, including for a document whose frontmatter does not parse.
   """
-  # the same callout reading the coordinator's command wake trigger uses
-  # waiver: 'callouts'/'type'/'tag'/'body' are build_report's own wire-shape keys (module docstring), not keys.py
-  # constants
-  return any(
-      callout["type"] == _COMMAND_MARKER and callout["tag"] == _COMMAND_TAG and callout["body"].strip()
-      # waiver: 'callouts' is build_report's own wire-shape key (module docstring), not a keys.py constant
-      for callout in build_report(text)["callouts"]
-  )
+
+  # Contract:
+  # A command callout inside a code fence or inside a foreign protected section is NEVER an open command; this
+  # answer and `strip_open_command` read the document the same way, so a command this reports open is the one
+  # `strip_open_command` removes. The coordinator's command wake builds on it: a command it could not remove
+  # would wake the coordinator forever.
+
+  # the one reading of an open command that the removal also uses
+  return _find_open_command(text) is not None
+
+
+def find_open_command_body(text: str) -> str | None:
+  """
+  Return the text of the operator command standing open in a review document.
+
+  Guarantees:
+    - The body returned is that of the command `has_open_command` reports open and `strip_open_command` removes;
+      a command callout inside a code fence or a foreign `#protected/...` section is never returned.
+
+  Args:
+    text: Full document text, frontmatter included, with LF line endings.
+
+  Returns:
+    The body of the open command `has_open_command` reports, or `None` when the document holds none.
+  """
+
+  # Contract:
+  # The body returned is that of the command `has_open_command` reports open and `strip_open_command` removes; a
+  # command callout inside a code fence or inside a foreign protected section is NEVER returned. The operator-text
+  # attribution builds on it: a fenced example returned here would credit a writer's landing to the operator.
+
+  # the same reading `has_open_command` and `strip_open_command` use
+  return None if (spot := _find_open_command(text)) is None else spot.body
+
+
+def _find_open_command(text: str) -> _CommandSpotRecord | None:
+  """
+  Find the first open operator command callout outside code fences and foreign protected sections.
+
+  Args:
+    text: Full document text, frontmatter included, with LF line endings.
+
+  Returns:
+    Where the callout sits and its text, or `None` when the document holds no open command or its frontmatter
+    cannot be parsed.
+  """
+  # the report lists only live callouts — none inside a fence or a foreign protected section — and none at all for a
+  # document whose frontmatter cannot be parsed
+  # waiver: 'callouts' is build_report's own wire-shape key (module docstring), not a keys.py constant
+  callouts = build_report(text)["callouts"]
+
+  # guard: no open command among them
+  if (command := next((callout for callout in callouts if _is_open_command(callout)), None)) is None:
+    return None
+
+  # the spot the command sits at, its head line counted in the document itself
+  # waiver: 'line'/'body' are build_report's own wire-shape keys (module docstring), not keys.py constants
+  return _CommandSpotRecord(head = command["line"] - 1, body = str(command["body"]))
+
+
+def _is_open_command(callout: dict) -> bool:
+  """
+  Report whether one `parse-note` callout entry is an open operator command.
+
+  Args:
+    callout: One entry of the report's `callouts` list.
+
+  Returns:
+    `True` for a `[!todo] #review/command` callout whose body is not empty; `False` for any other callout.
+  """
+  # waiver: 'type'/'tag'/'body' are build_report's own wire-shape keys (module docstring), not keys.py constants
+  return callout["type"] == _COMMAND_MARKER and callout["tag"] == _COMMAND_TAG and bool(callout["body"].strip())
+
+
+def strip_open_command(text: str) -> str:
+  """
+  Remove the document's first open operator command callout, leaving every other byte as it was.
+
+  Guarantees:
+    - Only the first open command callout outside code fences and foreign `#protected/...` sections is removed:
+      its head line, its consecutive `>` lines, and one blank line only when the removal would otherwise leave
+      two blank lines adjacent.
+    - Every other byte of the document stays identical.
+    - A document with no such callout, or with frontmatter that cannot be parsed, is returned unchanged.
+
+  Args:
+    text: Full document text, frontmatter included, with LF line endings.
+
+  Returns:
+    The document text without the removed callout, or `text` itself when nothing was removed.
+  """
+
+  # Contract:
+  # Only the first open command callout outside code fences and foreign protected sections is removed: its head
+  # line, its consecutive `>` lines, and at most one blank line where the removal would leave two in a row. Every
+  # other byte of the document stays identical, and a document with no such callout, or with frontmatter that
+  # cannot be parsed, is returned unchanged.
+
+  # Domain(review.markup):
+  # # Removing a finished operator command
+  # A command the operator wrote into a document under review is a callout block: its head line and every quoted
+  # line that follows it without a break, whatever those lines hold. Once the command is done, exactly that block
+  # comes off the document, and nothing after the first unquoted line: a template comment, a heading or another
+  # callout that follows the block stays. Where the block stood between two
+  # blank lines, one of them goes too, so the removal never leaves a double gap. A command shown inside a code
+  # fence is example text, and a command inside a section another plugin owns is that plugin's content; neither
+  # is ever removed.
+
+  # guard: no open command, or frontmatter that cannot be parsed — the document stays byte-identical
+  if (spot := _find_open_command(text)) is None:
+    return text
+
+  # the block runs from its head line over every `>` line after it, by the extent the report reads it with; lines
+  # are split on `\n` alone, as the report counts them
+  lines = _LINE_RE.findall(text)
+  end = spot.head + 1 + len(_find_all_callout_lines("".join(lines[spot.head + 1:]), 0))
+
+  # a blank line on both sides would be left doubled, so the one after the block goes with it
+  if spot.head > 0 and end < len(lines) and not lines[spot.head - 1].strip() and not lines[end].strip():
+    end += 1
+
+  # every line outside the cut is kept as it was
+  return "".join(lines[:spot.head] + lines[end:])
+
+
+def clear_multi_ticked_questions(text: str, notice: str) -> str:
+  """
+  Clear every tick of each question the operator ticked more than once, and say why under its options.
+
+  Guarantees:
+    - Every question `build_report` lists under `multi_ticked_questions` comes back with all its options unticked
+      and one `notice` line under its last option; a question that already carries the line gets no second one.
+    - Every other byte of the document stays identical, a question with one tick or none included.
+
+  Args:
+    text: Full document text, frontmatter included, with LF line endings.
+    notice: The line written under the options, in the document's language.
+
+  Returns:
+    The document text with the ticks cleared, or `text` itself when no question carries several ticks.
+  """
+
+  # Contract:
+  # Every question listed under `multi_ticked_questions` comes back with all its options unticked and one notice
+  # line under its last option, never two; every other byte stays identical. The coordinator runs this on the wake
+  # that brought the ticks, and a question left ticked would be read again on the next one.
+
+  # waiver: 'multi_ticked_questions'/'callout_line' are build_report's own wire-shape keys, not keys.py constants
+  return _clear_ticks_at([ entry["callout_line"] - 1 for entry in build_report(text)["multi_ticked_questions"] ],
+                         text, notice)
+
+
+def clear_both_ticked_candidates(text: str, notice: str) -> str:
+  """
+  Clear both boxes of each decision-candidate the operator ticked both ways, and say why under them.
+
+  Guarantees:
+    - Every candidate `build_report` lists under `both_ticked_candidates` comes back with both boxes unticked and one
+      `notice` line under its last box; a candidate that already carries the line gets no second one.
+    - Every other byte of the document stays identical.
+
+  Args:
+    text: Full document text, frontmatter included, with LF line endings.
+    notice: The line written under the boxes, in the document's language.
+
+  Returns:
+    The document text with the boxes cleared, or `text` itself when no candidate is ticked both ways.
+  """
+
+  # Contract:
+  # Every candidate listed under `both_ticked_candidates` comes back with both boxes unticked and one notice line
+  # under its last box, never two; every other byte stays identical. The coordinator runs this on the wake that
+  # brought the ticks, and a candidate left ticked both ways would be read again on the next one.
+
+  # waiver: 'both_ticked_candidates'/'callout_line' are build_report's own wire-shape keys, not keys.py constants
+  return _clear_ticks_at([ entry["callout_line"] - 1 for entry in build_report(text)["both_ticked_candidates"] ],
+                         text, notice)
+
+
+def _clear_ticks_at(heads: list[int], text: str, notice: str) -> str:
+  """
+  Untick every option of the callouts starting at the given lines and write a notice under each one's options.
+
+  Args:
+    heads: Zero-based indices of the callouts' head lines in `text`.
+    text: Full document text, with LF line endings.
+    notice: The line written under the options.
+
+  Returns:
+    The document text with those callouts rewritten, or `text` itself when `heads` is empty.
+  """
+
+  # guard: no callout to clear — the document stays byte-identical
+  if not heads:
+    return text
+
+  # each callout's lines are rewritten in place, from the last one up so earlier indices stay valid
+  lines = _LINE_RE.findall(text)
+  for head in reversed(heads):
+    end = head + 1 + len(_find_all_callout_lines("".join(lines[head + 1:]), 0))
+    last_option = head
+    for index in range(head + 1, end):
+      lines[index] = _QUOTED_TICK_RE.sub(_UNTICKED_BOX, lines[index], count = 1)
+      if _OPTION_RE.match(_strip_quote_prefix(lines[index])):
+        last_option = index
+
+    # guard: the notice already stands in the callout — a second tick round adds no second line
+    if any(_strip_quote_prefix(line).strip() == notice for line in lines[head + 1:end]):
+      continue
+
+    # the notice goes on its own line under the last option, even when that option ends the document unterminated
+    if not lines[last_option].endswith("\n"):
+      lines[last_option] += "\n"
+    lines.insert(last_option + 1, f"> {notice}\n")
+  return "".join(lines)
 
 
 def set_key(text: str, key: str, value: object) -> str:
@@ -469,13 +887,13 @@ def set_key(text: str, key: str, value: object) -> str:
 
   # normalise the autorun cycle counter to a non-negative integer, given as an int or its digit string
   if key == ReviewKey.AUTORUN_CYCLES:
-    value = _non_negative_int(key, value)
+    value = _to_non_negative_int(key, value)
 
   # set or overwrite the key using line-surgery (preserves body byte-for-byte)
   return _fm.set_field(text, key, value)
 
 
-def _non_negative_int(key: str, value: object) -> int:
+def _to_non_negative_int(key: str, value: object) -> int:
   """
   Normalize a value to a non-negative integer.
 
@@ -492,9 +910,12 @@ def _non_negative_int(key: str, value: object) -> int:
   # guard: an int (never a bool) passes through
   if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
     return value
+
   # guard: an ASCII digit string is the CLI's spelling of the same integer
   if isinstance(value, str) and value.isascii() and value.isdigit():
     return int(value)
+
+  # anything else is not a cycle count
   raise ValueError(f"set-key: value {value!r} for '{key}' is not an integer >= 0")
 
 
@@ -513,7 +934,7 @@ def _is_flag_true(meta: dict[str, str], key: str) -> bool:
   return meta.get(key, "").strip().lower() == "true"
 
 
-def _int_field(meta: dict[str, str], key: str) -> int:
+def _parse_int_field(meta: dict[str, str], key: str) -> int:
   """
   Read a `ReviewKey` counter field from the parsed frontmatter.
 
@@ -587,8 +1008,8 @@ def resolve_language(file_path: Path) -> str:
   # When core cannot be reached or answers nothing, resolution raises `RuntimeError` and NEVER substitutes a
   # language.
 
-  # walk up to the nearest settings root; a doc outside any vault keeps the floor
-  root = next((cand for cand in file_path.resolve().parents if (cand / _SETTINGS_REL).is_file()), None)
+  # the nearest settings root within the document's checkout; a doc outside any vault keeps the floor
+  root = _review_locator.find_nearest_dir(file_path.resolve().parent, _SETTINGS_REL)
 
   # guard: no settings file above the document — English is the shipped floor
   if root is None:
@@ -597,7 +1018,7 @@ def resolve_language(file_path: Path) -> str:
   # core owns the chain, and a missing core is a failure rather than a language; review names no section of its
   # own, so only the repo-wide key is read
   proc = subprocess.run(
-      [ sys.executable, str(_git_ops.require_core_cli()), CoreCommand.RESOLVE_LANGUAGE, _ARG_CWD, str(root) ],
+      [ sys.executable, str(_git_ops.require_core_cli(root)), CoreCommand.RESOLVE_LANGUAGE, _ARG_CWD, str(root) ],
       capture_output = True, text = True, check = False, encoding = "utf-8",
       # waiver: stdlib decode-error mode, not a domain constant
       errors = "replace",
@@ -612,23 +1033,31 @@ def resolve_language(file_path: Path) -> str:
   return proc.stdout.removesuffix("\n")
 
 
-def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId.EN) -> str:
+def repaint_banner(
+    text: str,
+    *,
+    job_in_flight: bool = False,
+    lang: str = LangId.EN,
+    report: bool = False,
+    verdict: str | None = None,
+) -> str:
   """
   Recompute and repaint the top banner from the document's current frontmatter state, or take it down when the
   review is not active.
 
-  The banner state is driven by frontmatter (`review_approved`, `review_phase`,
-  `review_validation_round`, `review_autorun`, `review_autorun_cycles`) plus the
-  body's own open-question and decision-candidate content — no class-config lookup. A
-  `review_validation_round` of 1 or more paints the three-checkbox ready banner unless `review_autorun` is
-  `clean`, which keeps the one-checkbox ready banner (approve the whole document) with the autorun stop line.
-  A job in flight always paints the in-process banner.
+  The banner state follows the document's review frontmatter and the open questions and decision candidates in
+  its body. A validation round paints the three-checkbox ready banner unless the autorun stopped clean, which
+  keeps the one-checkbox ready banner with the autorun stop line. For a report class the ready banner is instead
+  the two-checkbox report banner, shown only once the writer has recorded a known verdict; until then the
+  in-process banner waits for the implementer's answer. A job in flight always paints the in-process banner.
 
   Guarantees:
     - Repainting is idempotent: calling this function again on its own output, with the
       same `job_in_flight` value, returns identical text.
     - Never paints the ready banner on an unapproved document whose `review_phase` is `main` or
-      that carries a non-empty `[!todo] #review/command` callout.
+      that carries an open operator command, as `has_open_command` reads it.
+    - With `report` set, never paints the ready banner on an unapproved document whose `verdict` is not
+      `sufficient` or `new-plan`; the in-process banner then says the implementer's answer is awaited.
     - When `review_active` is not `true` the text comes back with no banner: an existing banner is stripped and none
       is inserted. A document with no frontmatter block and no banner comes back unchanged.
 
@@ -639,6 +1068,10 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
       is what a caller that has just seated a document's frontmatter itself knows.
     lang: Resolved language code for the banner's fixed strings; a language with no table of
       its own paints the shipped English wording.
+    report: Whether the document's class is a report class, from the caller's own class lookup; paints the
+      two-checkbox ready banner.
+    verdict: The report writer's verdict (`sufficient` / `new-plan`) choosing the line under the report banner's
+      fix box; with `report` set, any other value, including `None`, keeps the ready banner away.
 
   Returns:
     `text` with its banner replaced (or inserted, if absent) to match the current frontmatter, or with no banner
@@ -654,7 +1087,11 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
 
   # Contract:
   # The ready banner is NEVER painted on an unapproved document whose `review_phase` is
-  # `main` or that carries a non-empty `[!todo] #review/command` callout.
+  # `main` or that carries an open operator command, as `has_open_command` reads it.
+
+  # Contract:
+  # With `report` set, the ready banner is NEVER painted on an unapproved document whose `verdict` is
+  # not `sufficient` or `new-plan`.
 
   # Contract:
   # When `review_active` is not `true` the text comes back with no banner: an existing banner is stripped and none is
@@ -683,15 +1120,16 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
   )
 
   # feed the frontmatter snapshot into banner.py's own state ladder
-  # limit: no `domain_ready_when` class-config gate here (dispatcher._eval_domain_ready)
-  # — paint-banner has no class-resolution wiring; add it if a future review class needs the
-  # ACTION_NEEDED gate from this verb specifically rather than from the coordinator's judgment.
+  # limit: no `domain_ready_when` class-config gate here (dispatcher._eval_domain_ready) — the caller resolves
+  # the class only for its `report` flag; wire the gate in if a future review class needs the ACTION_NEEDED
+  # state from this verb specifically rather than from the coordinator's judgment.
   state = _banner.desired_state(
       body = body,
       dispatch_state = dispatch_state,
       approved = approved,
       review_phase = review_phase,
       command_pending = has_open_command(text),
+      verdict_owed = report and verdict not in set(ReportVerdictKind),
   )
 
   # render the callout for that state and splice it back into the document
@@ -699,11 +1137,13 @@ def repaint_banner(text: str, *, job_in_flight: bool = False, lang: str = LangId
   new_body = _banner.replace_banner(
       body, state,
       approved = approved,
-      validation_seen = _int_field(meta, ReviewKey.VALIDATION_ROUND) >= 1,
+      validation_seen = _parse_int_field(meta, ReviewKey.VALIDATION_ROUND) >= 1,
       autorun = meta.get(ReviewKey.AUTORUN, "").strip() or None,
-      autorun_cycles = _int_field(meta, ReviewKey.AUTORUN_CYCLES),
+      autorun_cycles = _parse_int_field(meta, ReviewKey.AUTORUN_CYCLES),
       waiting_context = waiting_context,
       lang = lang,
+      report = report,
+      verdict = verdict,
   )
   return text[: len(text) - len(body)] + new_body
 
@@ -712,8 +1152,14 @@ def main(argv: list[str]) -> int:
   """
   Print the structural report for a review document as JSON to stdout.
 
+  The banner's boxes are read by the document's review class, resolved from the merged settings nearest to the
+  document. When the settings cannot be read, the class is unknown and every banner box reports `kind: null`. The
+  reported job markers come from the checkout the command works in, except the verdict, which is the one recorded for
+  the document's own repository root.
+
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory), and the checkout it sits in is the one worked in.
 
   Returns:
     Exit code: always `0` — a structurally broken document is reported as `parse_failed: true`
@@ -725,12 +1171,12 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
-  # `file` resolves against `--repo` unless it's already absolute (pathlib drops the left
-  # operand of `/` when the right one is absolute, so this is safe either way)
-  repo = Path(args.repo).resolve()
+  # `file` resolves against the root of the checkout `--repo`, `$LAZY_REPO_ROOT` or the cwd sits in, unless it is
+  # already absolute (pathlib drops the left operand of `/` when the right one is absolute)
+  repo = _review_locator.query_repo_root(args.repo)
   file_path = (repo / args.file).resolve()
 
   # guard: a missing document cannot be reported on
@@ -738,9 +1184,24 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
 
+  # the banner's boxes are read by the document's class; settings or a core that cannot be read leave it unknown
+  report: bool | None
+  try:
+    settings_root = _core_settings.query_settings_root_for(file_path)
+    settings = _core_settings.read_merged_sections(settings_root, JobKey.REVIEW)
+    report = _doc_class.is_report_class(settings, settings_root, file_path)
+  except (SettingsReadError, RuntimeError):
+    report = None
+
+  # the writer's verdict is keyed by the document's repository root, whatever `--repo` names
+  markers = _job_markers.read(repo, file_path)
+  markers[JobMarker.VERDICT] = \
+      _job_markers.read(_finalize.query_repo_root_for(file_path), file_path)[JobMarker.VERDICT]
+
   # build the structural report and print it as JSON
   print(json.dumps(
-      build_report(file_path.read_text(encoding = "utf-8"), _job_markers.read(repo, file_path)), indent = 2
+      build_report(file_path.read_text(encoding = "utf-8"), markers, report = report),
+      indent = 2,
   ))
   return 0
 

@@ -14,18 +14,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import SettingsKey  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from settings_cli import resolve_settings_path  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from constants import SettingsKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from lazy_settings import load_tracked_section, save_section  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from settings_cli import resolve_settings_path  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -102,7 +115,7 @@ def ensure_routine_filter(repo: Path, name: str, filter_frontmatter: dict) -> di
   # merged into, or reordered, and a routine that has not been registered yet is never created
   # as a side effect of seeding.
 
-  path = resolve_settings_path(repo)
+  path = resolve_settings_path(repo, section = SettingsKey.ROUTINES)
   routines = load_tracked_section(path, SettingsKey.ROUTINES)
   entry = routines.get(name)
 
@@ -169,8 +182,8 @@ def cmd_routine_ensure_filter(argv: list[str]) -> int:
     print(json.dumps({ _K.STATUS: _K.ERROR, _K.REASON: _K.NOT_AN_OBJECT }))
     return 1
 
-  # seed against the explicit root, or the same LAZY_REPO_ROOT-or-cwd convention every verb uses
-  repo = Path(args.cwd) if args.cwd is not None else resolve_settings_path(None).parent.parent
-  result = ensure_routine_filter(repo, args.name, predicates)
+  # seed against the routines of the checkout the explicit --cwd, LAZY_REPO_ROOT or the cwd sits in, at its root,
+  # where the daemon reads them
+  result = ensure_routine_filter(query_repo_root(args.cwd), args.name, predicates)
   print(json.dumps(result))
   return 1 if result.get(_K.STATUS) == _K.ERROR else 0

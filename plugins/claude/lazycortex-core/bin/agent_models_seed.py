@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -14,19 +15,20 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import lazy_setup  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import plugin_locator  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import settings_cli  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_settings import resolve_agent_model_tier  # pylint: disable=import-error
+from constants import SettingsKey  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_git_toplevel  # pylint: disable=import-error
+from lazy_settings import resolve_agent_model_tier  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
-# The settings section the seed lives in, and the domain group inside it the seed owns.
-_SECTION = "agent_models"
+# The domain group inside the agent-models section that the seed owns.
 _GROUP = "lazycortex"
 # The shipped tier table, relative to the core plugin's root.
 _SOT_REL = Path("skills") / "lazy-core.agent-models" / "default-tiers.json"
@@ -52,7 +54,9 @@ class SeedState(StrEnum):
   Attributes:
     ADDED: The key was absent and a seed object was written.
     UNCHANGED: The seed object already matched the shipped tier.
-    REFRESHED: An untouched seed object followed the shipped tier to its new value.
+    CONVERTED: A bare string equal to the shipped tier was taken for an unrecorded seed and became a seed object.
+    REFRESHED: An untouched seed followed the shipped tier to its new value, a bare string naming an earlier shipped
+      tier being converted and moved to the current one.
     KEPT_LOCAL: The operator's own value was left as it is.
   """
 
@@ -60,7 +64,9 @@ class SeedState(StrEnum):
   ADDED = "added"
   # The seed object already matched the shipped tier.
   UNCHANGED = "unchanged"
-  # An untouched seed object followed the shipped tier to its new value.
+  # A bare string equal to the shipped tier was a seed and is rewritten as a seed object.
+  CONVERTED = "converted"
+  # An untouched seed, or a bare string naming an earlier shipped tier, followed the shipped tier to its new value.
   REFRESHED = "refreshed"
   # The operator's own value was left as it is.
   KEPT_LOCAL = "kept-local"
@@ -185,12 +191,12 @@ def _resolve_sot_path(root: Path, prefix: str) -> Path:
   Raises:
     SeedError: If the core plugin is not installed.
   """
-  # the tier table ships with the core plugin, found the same way the `plugin-root` verb finds it
-  report = lazy_setup.plugin_root(_CORE_PLUGIN, root, Path.home())
-
-  # guard: an unresolved core plugin has no tier table to read
-  if report is None:
-    raise SeedError(SeedReasonKind.SOT_MISSING, _sot_missing_message(prefix))
+  # guard: the tier table ships with the core plugin, found the same way the `plugin-root` verb finds it; an
+  # unresolved core plugin has no tier table to read
+  try:
+    report = lazy_setup.plugin_root(_CORE_PLUGIN, root)
+  except plugin_locator.PluginNotFoundError as error:
+    raise SeedError(SeedReasonKind.SOT_MISSING, _sot_missing_message(prefix)) from error
   return Path(report["root"]) / _SOT_REL
 
 
@@ -217,6 +223,69 @@ def _read_sot(path: Path, prefix: str) -> dict[str, str]:
 
   # the seed set is every dispatch string the plugin's prefix opens, verbatim
   return { key: tier for key, tier in defaults.items() if key.startswith(f"{prefix}:") }
+
+
+def _run_git(args: list[str], cwd: Path) -> str | None:
+  """
+  Run one git command beside the tier table and return its output.
+
+  Args:
+    args: Arguments after `git`.
+    cwd: Directory the command runs in.
+
+  Returns:
+    The command's standard output, or `None` when git cannot be spawned or the command fails.
+  """
+  # a git binary that cannot be spawned is the same answer as a failed command: no history
+  try:
+    done = subprocess.run(
+      [ "git", *args ], cwd = cwd, capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
+    )
+  except OSError:
+    return None
+
+  # only a successful command carries an answer
+  return done.stdout if done.returncode == 0 else None
+
+
+def _read_history(path: Path) -> dict[str, set[str]]:
+  """
+  Read the tiers each dispatch string held in earlier committed versions of the shipped tier table.
+
+  Args:
+    path: Tier table whose git history is read.
+
+  Returns:
+    Mapping of each dispatch string to the tiers it held in any committed version, empty when the table is not
+    in a git checkout or its history cannot be read.
+  """
+  # limit: the history is read under the table's current path only, a version committed under an earlier path is
+  # not seen; follow renames when the table moves
+  revisions = _run_git([ "log", "--format=%H", "--", path.name ], path.parent)
+
+  # guard: a table outside a git checkout has no history, so only the current tier counts as shipped
+  if revisions is None:
+    return {}
+
+  # every committed version adds the tiers it shipped
+  history: dict[str, set[str]] = {}
+  for revision in revisions.split():
+    # a version git cannot show, or one that does not parse, adds nothing
+    text = _run_git([ "show", f"{revision}:./{path.name}" ], path.parent)
+    try:
+      data = json.loads(text) if text is not None else None
+    except json.JSONDecodeError:
+      continue
+
+    # a version without a defaults map adds nothing; each listed key gains the tier it shipped
+    defaults = data.get(_SOT_DEFAULTS) if isinstance(data, dict) else None
+    for key, tier in (defaults.items() if isinstance(defaults, dict) else ()):
+      history.setdefault(key, set()).add(tier)
+
+  # the tiers every key held across the readable versions
+  return history
 
 
 def _read_group(settings: Path) -> dict:
@@ -247,16 +316,17 @@ def _read_group(settings: Path) -> dict:
     raise SeedError(SeedReasonKind.SETTINGS_UNPARSEABLE, f"{settings}: not a JSON object")
 
   # the domain group the seed owns, empty when not yet created
-  return (data.get(_SECTION) or {}).get(_GROUP) or {}
+  return (data.get(SettingsKey.AGENT_MODELS) or {}).get(_GROUP) or {}
 
 
-def _judge(recorded: object, tier: str) -> tuple[SeedState, object]:
+def _judge(recorded: object, tier: str, shipped: set[str]) -> tuple[SeedState, object]:
   """
   Decide what a seed run does with one recorded value.
 
   Args:
     recorded: The value recorded for the dispatch string, or `None` when absent.
     tier: The shipped tier for the dispatch string.
+    shipped: Tiers the dispatch string held in earlier versions of the shipped tier table.
 
   Returns:
     The verdict and the tier it replaces or preserves, `None` when there is none.
@@ -267,15 +337,30 @@ def _judge(recorded: object, tier: str) -> tuple[SeedState, object]:
   # Every value the installer writes records the shipped default it came from, so a later run can
   # tell an untouched seed from the operator's decision. An absent value gets the shipped default.
   # An untouched seed follows the shipped default when it moves, because a stale shipped value is
-  # nobody's choice. A seed whose value no longer matches the default it recorded, and a value
-  # written without any record of its origin, are the operator's pins and are never rewritten.
+  # nobody's choice. A seed whose value no longer matches the default it recorded is the operator's
+  # pin and is never rewritten.
+  # Seeds written before origins were recorded carry no record. A bare value equal to the current
+  # shipped default, or to a default that key held in an earlier version of the shipped table, is
+  # taken for such an old seed: it is given a record and from then on follows the usual seed rules,
+  # so an old default is moved to the current one. The earlier defaults are known only when the
+  # table sits in a version-controlled checkout; when they cannot be reached, only a match with the
+  # current default counts. Any other bare value is the operator's pin and is never rewritten.
 
   # an absent key takes the shipped tier
   if recorded is None:
     return SeedState.ADDED, None
 
-  # a bare string, or anything that is not a seed object, is the operator's pin
-  if not isinstance(recorded, dict) or recorded.get(_TIER) != recorded.get(_SEEDED_FROM):
+  # a bare string some version of the table shipped for this key was a seed written before seeds recorded their
+  # origin: it becomes a seed object, and an old shipped tier follows the current one
+  if isinstance(recorded, str) and recorded == tier:
+    return SeedState.CONVERTED, recorded
+  if isinstance(recorded, str) and recorded in shipped:
+    return SeedState.REFRESHED, recorded
+
+  # any other bare string, anything that is not a seed object carrying its tier and the tier it was seeded from, or a
+  # seed edited away from that tier, is the operator's pin
+  if not (isinstance(recorded, dict) and isinstance(recorded.get(_TIER), str)
+          and recorded.get(_TIER) == recorded.get(_SEEDED_FROM)):
     return SeedState.KEPT_LOCAL, resolve_agent_model_tier(recorded)
 
   # an untouched seed is current or follows the shipped tier
@@ -288,19 +373,27 @@ def seed(prefix: str, *, scope: str, cwd: Path | None = None) -> SeedResult:
   """
   Seed the shipped tiers of a plugin's agents into the settings file of a scope.
 
-  An absent key gets the shipped tier, an untouched seed follows the shipped tier when it moves, and a value the
-  operator set is never rewritten.
+  An absent key gets the shipped tier, an untouched seed, recorded or not, follows the shipped tier when it moves,
+  and a value the operator set is never rewritten.
 
   Guarantees:
-    - A value the operator pinned is never rewritten; it is pinned when it is not a seed object or no longer matches
-      the tier it recorded.
+    - A value the operator pinned is never rewritten; it is pinned when it is a seed object whose tier differs from
+      the tier it recorded, or when it is neither a seed object nor a bare string naming a tier the key ships or once
+      shipped.
+    - A bare string naming a tier the key ships or once shipped is rewritten as a seed object at the current tier.
     - Keys outside the given prefix are never touched.
+
+  Notes:
+    - Earlier shipped tiers are known only when the tier table sits in a git checkout; elsewhere only the current
+      tier counts.
 
   Args:
     prefix: Plugin prefix the dispatch strings must open with.
     scope: Install scope, `project` or `user`.
-    cwd: Conventional repository root, or `None` for `LAZY_REPO_ROOT` and then the process working directory; the
-      run widens it to its git toplevel, so a run from a subdirectory writes the checkout's settings file.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      checkout root it sits in fixes both files: the tier table is core's shipped file found through the plugin
+      lookup from that root, and the target is that root's `.claude/lazy.settings.json`, where the daemon reads the
+      tiers, so a run from a subdirectory, a nested project or a linked worktree writes that checkout's file.
 
   Returns:
     The run's outcome word, the tier table read and one record per dispatch string in scope.
@@ -311,7 +404,10 @@ def seed(prefix: str, *, scope: str, cwd: Path | None = None) -> SeedResult:
 
   # Contract:
   # A value the operator pinned is NEVER rewritten, whatever the shipped tier now says.
-  # A value counts as pinned when it is not a seed object or no longer matches the tier it recorded.
+  # A value counts as pinned when it is a seed object whose tier differs from the tier it recorded, or when it is
+  # neither a seed object nor a bare string naming a tier the key currently ships or once shipped; such a bare
+  # string is an unrecorded seed, never a pin, and the run turns it into a seed object. The earlier tiers are
+  # known only when the tier table sits in a git checkout; elsewhere only the current tier counts.
 
   # Contract:
   # Keys outside the given prefix are NEVER touched.
@@ -324,27 +420,35 @@ def seed(prefix: str, *, scope: str, cwd: Path | None = None) -> SeedResult:
   if scope not in ( _SCOPE_PROJECT, _SCOPE_USER ):
     raise SeedError(SeedReasonKind.MISSING_SCOPE, f"scope must be {_SCOPE_PROJECT} or {_SCOPE_USER}, got {scope!r}")
 
-  # the tier table and the target file are fixed before any value is compared; a run from a subdirectory
-  # works on the checkout's own root
-  root = resolve_git_toplevel(cwd)
-  sot = _resolve_sot_path(root, prefix)
+  # the tier table and the target file are fixed before any value is compared: the table is core's shipped file,
+  # found by the plugin lookup from the checkout root, and the target is the settings file at the checkout root,
+  # where the daemon reads the tiers
+  sot = _resolve_sot_path(plugin_locator.query_repo_root(cwd), prefix)
   seed_set = _read_sot(sot, prefix)
   home = scope == _SCOPE_USER
-  settings = settings_cli.resolve_settings_path(root, home = home)
+  settings = settings_cli.resolve_settings_path(cwd, home = home, section = SettingsKey.AGENT_MODELS)
 
   # guard: a prefix the table does not list is reported, and the file is not touched
   if not seed_set:
     return SeedResult(outcome = SeedOutcomeKind.NO_ENTRIES, sot = str(sot))
 
-  # each dispatch string is judged on its own against the recorded group, and only a changed key is written
+  # the recorded group the seed set is judged against
   group = _read_group(settings)
+
+  # opt: the table's history is read only when a bare string in scope needs it; seed objects and absent keys are
+  # judged without it
+  needs_history = any(isinstance(group.get(dispatch), str) for dispatch in seed_set)
+  history = _read_history(sot) if needs_history else {}
+
+  # each dispatch string is judged on its own, and only a changed key is written
   entries = []
   written = 0
   for dispatch, tier in seed_set.items():
-    state, previous = _judge(group.get(dispatch), tier)
-    if state in ( SeedState.ADDED, SeedState.REFRESHED ):
+    state, previous = _judge(group.get(dispatch), tier, history.get(dispatch, set()))
+    if state in ( SeedState.ADDED, SeedState.CONVERTED, SeedState.REFRESHED ):
       settings_cli.settings_set(
-        _SECTION, { _TIER: tier, _SEEDED_FROM: tier }, cwd = root, home = home, key = f"{_GROUP}/{dispatch}",
+        SettingsKey.AGENT_MODELS, { _TIER: tier, _SEEDED_FROM: tier }, cwd = cwd, home = home,
+        key = f"{_GROUP}/{dispatch}",
       )
       written += 1
     entries.append({ "dispatch": dispatch, "tier": tier, "state": str(state), "previous": previous })

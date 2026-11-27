@@ -1,17 +1,11 @@
 """
 Job-dispatch support primitives shared by `lazycortex-specs`' own dispatch workers.
 
-`core_dispatch_job` / `consume_stale_job` / `cancel_job` queue, retire and cancel jobs via the
-`lazycortex-core` CLI's `dispatch-job` / `consume-job` / `cancel-job` subcommands — the § 1c inter-plugin boundary
-contract in `dev.plugin-boundaries.md`. `collect_guideline_paths` names a product's role + wildcard
-guideline files for a dispatch bundle; `collect_decisions_paths` names the same bundle's asset
-and owning-product `decisions.md` registries beside them, per
-`spec-decisions-design.md` § "How decisions are read" — every job bundle gets both registries
-regardless of dispatched role, unlike the guideline lookup's per-role selection. No Python
-import of `lazycortex-core` internals. `coordinator_dispatch.py` and `gate_tick.py`'s own
-coordinator-job sweep are this module's production callers today — the launch-checkbox ladder
-itself is dispatched by the `spec.coordinator` persona directly (its own
-`Bash(lazycortex-core dispatch-job ...)` verb), not through a Python primitive here.
+Primitives for queueing, retiring and cancelling jobs through the `lazycortex-core` CLI — the § 1c inter-plugin
+boundary contract in `dev.plugin-boundaries.md` — and for assembling a dispatch bundle's reference files: its
+guideline files, named through core's guideline resolution, and its decisions registries, per
+`spec-decisions-design.md` § "How decisions are read". Every bundle gets both decisions registries regardless of
+the dispatched role. No Python import of `lazycortex-core` internals.
 """
 from __future__ import annotations
 
@@ -37,6 +31,9 @@ import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-po
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 from spec_keys import PlanReview  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -94,13 +91,14 @@ class PayloadKey:
   Payload keys naming files the expert reads in place rather than receiving as copies.
 
   Attributes:
-    GUIDELINES: Repo-relative paths of the product's role guidelines followed by its wildcard
-      ones.
+    GUIDELINES: Paths of the enabled plugins' canon for the role, then the product's role guidelines and its
+      wildcard ones; each repo-relative or absolute into a plugin tree.
     DECISIONS: Repo-relative paths of the asset's own `decisions.md` followed by the owning
       product's.
   """
 
-  # Repo-relative paths of the product's role guidelines followed by its wildcard ones.
+  # Paths of the enabled plugins' canon for the role, then the product's role guidelines and its wildcard ones; each
+  # repo-relative or absolute into a plugin tree.
   GUIDELINES = "guidelines"
   # Repo-relative paths of the asset's own `decisions.md` followed by the owning product's.
   DECISIONS = "decisions"
@@ -149,6 +147,13 @@ _CANCEL_VERB = "cancel-job"
 _CANCELLED_KEY = "cancelled"
 # The seconds a `cancel-job` call may take before the cancel counts as failed, so a hung CLI cannot stall a dispatch.
 _CANCEL_TIMEOUT_S = 60
+# The core verb that resolves a role's guideline entries, and the keys of its stdin request and stdout answer.
+_GUIDELINES_VERB = "guidelines-resolve"
+_DECLARED_KEY, _PATHS_KEY, _WARNINGS_KEY, _ERROR_KEY = "declared", "paths", "warnings", "error"
+# The seconds a `guidelines-resolve` call may take before it counts as failed, so a hung CLI cannot stall a dispatch.
+_GUIDELINES_TIMEOUT_S = 60
+# The warning prefix naming a guideline entry that resolves to no file, core's own wording
+_WARN_GUIDELINE_NOT_FOUND = "guideline not found: "
 
 
 def load_settings(repo: Path) -> dict:
@@ -180,46 +185,55 @@ def load_settings(repo: Path) -> dict:
 def collect_guideline_paths(
     repo: Path, product_record: dict, role: str, *, asset_type: str = "") -> tuple[list[str], list[str]]:
   """
-  Resolve the product's role, asset-type and wildcard `"*"` guidelines to repo-relative paths.
+  Resolve the guideline files a job of one role reads: the enabled plugins' canon, then the product's role,
+  asset-type and wildcard `"*"` guidelines.
 
   Per `products[<key>].guidelines` and `products[<key>].asset_types[<type>].guidelines`
-  (`lazy-spec.config-protocol`), a missing declared path is never a silent skip — it is surfaced
+  (`lazy-spec.config-protocol`), a declared entry that does not resolve is never a silent skip — it is surfaced
   as a warning string for the caller to log.
 
   Guarantees:
-    - A declared guideline path that does not resolve to a file is always reported in
-      `warnings`, never silently dropped.
-    - Paths come back role-specific first, then the asset type's, then the wildcard set, with
-      a path already listed never repeated.
+    - A declared guideline entry that does not resolve to a file is always reported in `warnings`, never silently
+      dropped.
+    - Paths come back with the enabled plugins' canon first, then role-specific, then the asset type's, then the
+      wildcard set, with an entry already listed never repeated.
+    - When the core resolver cannot be run or refuses, the declared repo paths that exist come back in declared
+      order, every other declared entry is reported, and one more warning names the failure; nothing is invented.
 
   Args:
     repo: The repository root the declared guideline paths are relative to.
     product_record: The owning product's settings record, or `{}` when none was resolved.
-    role: The dispatched job's role token — selects `guidelines[role]` in the config.
+    role: The dispatched job's role token — selects `guidelines[role]` in the config and the plugins' canon.
     asset_type: The dispatched asset's `spec_asset_type`, selecting the type's own guidelines;
       empty when the job is not about one asset.
 
   Returns:
-    A `(paths, warnings)` pair: `paths` holds the repo-relative path of every declared guideline
-    that resolves to a file, in the order the guarantee states; `warnings` names every declared
-    path that does not.
+    A `(paths, warnings)` pair: `paths` holds each guideline that resolves to a file, repo-relative or an absolute
+    path into a plugin tree, in the order the guarantee states; `warnings` names every entry that does not.
   """
 
   # Contract:
-  # A declared guideline path that does not resolve to a file is never silently dropped; it is
+  # A declared guideline entry that does not resolve to a file is never silently dropped; it is
   # always reported back in `warnings` for the caller to log.
 
   # Contract:
-  # Paths MUST come back role-specific first, then the asset type's own, then the wildcard set,
-  # with a path already listed never repeated.
+  # Paths MUST come back with the enabled plugins' canon first, then role-specific, then the asset type's own,
+  # then the wildcard set, with an entry already listed never repeated. An entry is repo-relative or an absolute
+  # path into a plugin tree.
+
+  # Contract:
+  # When the core resolver cannot be run or refuses, the answer holds only the declared repo paths that exist, in
+  # declared order; every other declared entry is one not-found warning and one more warning names the failure. The
+  # fallback never fabricates a path and never raises.
 
   # Domain(spec.dispatch):
   # # Guideline priority for a dispatched job
-  # A job dispatched to work on a spec asset follows guidelines chosen for the specific role it
-  # is playing, then the guidelines that belong to the kind of asset it works on whatever the
+  # A job dispatched to work on a spec asset first follows the canon that the language plugins
+  # enabled in the repository bring for the role it is playing, then the guidelines chosen for
+  # that role, then the guidelines that belong to the kind of asset it works on whatever the
   # role — a content record's schema reaches its designer and its data writer alike — and
-  # finally the guidelines that apply to every role no matter what it is doing: the role's own
-  # voice always comes first, the universal rules are added last. A guideline a product
+  # finally the guidelines that apply to every role no matter what it is doing: the plugins'
+  # canon is the outermost layer, the universal rules are added last. A guideline a product
   # declares but that turns out not to exist on disk is never silently skipped; it is reported
   # as a gap, so a missing file gets noticed instead of quietly leaving the job less informed
   # than the product intended.
@@ -231,16 +245,103 @@ def collect_guideline_paths(
     declared += asset_types.guidelines(asset_type, product_record or {})
   declared += list(guidelines_cfg.get(_SettingsKey.WILDCARD_ROLE) or [])
 
-  # a path that doesn't resolve is a warning, never a silent drop
+  # core prepends the plugins' canon for the role and resolves every entry
+  return resolve_guideline_entries(repo, declared, role = role)
+
+
+def resolve_guideline_entries(repo: Path, declared: list[str], *,
+                              role: str | None = None) -> tuple[list[str], list[str]]:
+  """
+  Resolve guideline entries through core, with the enabled plugins' canon for a role when one is given.
+
+  Guarantees:
+    - An entry that does not resolve to a file is always reported in `warnings`, never silently dropped.
+    - With `role`, the enabled plugins' canon for it comes first; without, the answer holds the declared entries
+      alone, and no plugin's canon is ever added.
+    - When the core resolver cannot be run or refuses, the declared repo paths that exist come back in declared
+      order, every other declared entry is reported, and one more warning names the failure; nothing is invented.
+
+  Args:
+    repo: The repository root the declared guideline paths are relative to.
+    declared: The guideline entries, each a repo-relative path or a `<plugin>:<name>` reference key, in order.
+    role: The dispatched job's role token whose plugin canon comes first, or `None` for the declared entries alone.
+
+  Returns:
+    A `(paths, warnings)` pair: `paths` holds each entry that resolves to a file, repo-relative or an absolute path
+    into a plugin tree, an entry already listed never repeated; `warnings` names every entry that does not.
+  """
+
+  # Contract:
+  # An entry that does not resolve to a file is never silently dropped; it is reported in `warnings`. Without a
+  # role no plugin's canon is added. When the core resolver cannot be run or refuses, the answer holds only the
+  # declared repo paths that exist, in declared order; every other declared entry is one not-found warning and one
+  # more warning names the failure. The fallback never fabricates a path and never raises.
+
+  # core resolves every distinct entry, the canon first when a role is given
+  entries = list(dict.fromkeys(declared))
+  resolved, failure = _run_guidelines_resolve(repo, role, entries)
+  if resolved is not None:
+    return resolved
+
+  # a path that doesn't resolve is a warning, never a silent drop; the failure itself is one more warning
   paths: list[str] = []
   warnings: list[str] = []
-  for rel in dict.fromkeys(declared):
-    path = repo / rel
-    if path.is_file():
+  for rel in entries:
+    if (repo / rel).is_file():
       paths.append(rel)
     else:
-      warnings.append(f"guideline not found: {rel}")
+      warnings.append(f"{_WARN_GUIDELINE_NOT_FOUND}{rel}")
+  warnings.append(f"{_GUIDELINES_VERB} unavailable, plugin canon and keys left out: {failure}")
   return paths, warnings
+
+
+def _run_guidelines_resolve(repo: Path, role: str | None,
+                            declared: list[str]) -> tuple[tuple[list[str], list[str]] | None, str]:
+  """
+  Ask the core `guidelines-resolve` verb for the guideline files of a role.
+
+  Args:
+    repo: The repository root the verb resolves against.
+    role: The dispatched job's role token, or `None` to resolve the declared entries alone.
+    declared: The caller's guideline entries, in the caller's order.
+
+  Returns:
+    The verb's `(paths, warnings)` and an empty reason, or `None` and the reason the verb could not answer.
+  """
+  # a missing core plugin, an unstartable interpreter or a hung verb each end in a reason, never in a raise; the
+  # declared paths are relative to `repo` (a nested settings root included), so core checks them there; no role
+  # asks for the declared entries alone
+  mode = [ "--role", role ] if role is not None else [ "--declared-only" ]
+  try:
+    cli = spec_paths.resolve_core_cli(repo)
+    # waiver: stdlib subprocess idiom, the arguments are the wire contract
+    proc = subprocess.run([ sys.executable, str(cli), _GUIDELINES_VERB, *mode, "--cwd", str(repo),
+                            "--base", str(repo) ],
+                          input = json.dumps({ _DECLARED_KEY: declared }), cwd = repo, capture_output = True,
+                          text = True, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
+                          timeout = _GUIDELINES_TIMEOUT_S)
+  # waiver: seam boundary — every way of not reaching the verb becomes the fallback's reason
+  except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
+    return None, str(error)
+
+  # the verb answers JSON on stdout; an unparsable answer reads as no answer
+  try:
+    answer = json.loads(proc.stdout)
+  except json.JSONDecodeError:
+    answer = None
+
+  # guard: an answer that is no JSON object carries nothing to read
+  if not isinstance(answer, dict):
+    return None, f"exit={proc.returncode} stdout={proc.stdout.strip()!r} stderr={proc.stderr.strip()!r}"
+
+  # guard: a refusal, or an answer whose lists are not lists of strings, is the verb's failure
+  paths, warnings = answer.get(_PATHS_KEY), answer.get(_WARNINGS_KEY)
+  if (proc.returncode != 0 or not isinstance(paths, list) or not isinstance(warnings, list)
+      or not all(isinstance(item, str) for item in [ *paths, *warnings ])):
+    return None, f"exit={proc.returncode} error={answer.get(_ERROR_KEY)!r}"
+
+  # the verb's own answer, plugin canon included
+  return (paths, warnings), ""
 
 
 def collect_decisions_paths(repo: Path, asset_dir: Path | None, product_record: dict) -> list[str]:
@@ -299,7 +400,9 @@ def main_core_cli(argv: list[str]) -> int:
   Run the `core-cli` verb: print the resolved `lazycortex-core` CLI path.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the lookup starts at the root of the checkout that
+      directory sits in.
 
   Returns:
     Exit code: `0` with the absolute path on stdout, `1` with an `error:` line on stderr when no
@@ -308,12 +411,13 @@ def main_core_cli(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog = "lazycortex-specs core-cli")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
-  # the resolver names every stage it searched in its message; the verb only prefixes it
+  # the resolver names every stage it searched in its message; the verb only prefixes it; the repo is the checkout
+  # `--repo`, else `$LAZY_REPO_ROOT`, else the cwd sits in
   try:
-    cli = spec_paths.resolve_core_cli(Path(args.repo).resolve())
+    cli = spec_paths.resolve_core_cli(spec_locator.query_repo_root(args.repo))
   except RuntimeError as exc:
     sys.stderr.write(f"error: {exc}\n")
     return 1

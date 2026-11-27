@@ -31,12 +31,14 @@ spec_source_docs: []
 <!-- The conditions under which the run counts as complete. One bullet per condition, checkable from the report. What is in or out of the run lives in Scope. -->
 
 ## Tests
-<!-- The test cases run against the deployed product, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority. The mechanisms the tests use live in Mechanisms, and a unit test, a test run entirely on stubs or a check that reads the sources belongs to the build, never here. -->
+<!-- The test cases run against the deployed product, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority; tests that rely on the state an earlier test leaves form a chain in an order that runs as written, and tests that cannot join one chain form separate chains, each opening with explicit steps that bring the system into the state it needs. The mechanisms the tests use live in Mechanisms, and a unit test, a test run entirely on stubs or a check that reads the sources belongs to the build, never here. -->
 
 ### _Test name_
 - **Type**: _one of the tester's test types._
 - **Risk**: _what breaking here would mean._
 - **Preconditions**: _only when they differ from the common ones._
+- **State in**: _the state this test needs from an earlier test of its chain; only in a chain._
+- **State out**: _the state this test leaves for a later test of its chain; only in a chain._
 - **Priority**: high | medium | low
 
 #### Steps

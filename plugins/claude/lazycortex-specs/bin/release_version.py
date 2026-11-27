@@ -24,27 +24,34 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import Gate, HistoryEvent, ReleaseConfigKey, ReleaseKey  # noqa: E402
 
 
 _ENCODING = "utf-8"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _TAGS_KEY = "tags"
 
 # The bump parts in the order the version's numbers carry them
@@ -496,8 +503,9 @@ def main(argv: list[str]) -> int:
   """
   Write a release's version from an explicit value or from a bump over the product's previous version.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the repository that
-  holds the note; the `--bump` form reads the product record from it and both forms commit into it.
+  The run works in the nearest directory, within the note's checkout, that holds `.claude/lazy.settings.json`,
+  searched upward from the note, else that checkout's root; the `--bump` form reads the product record from it and
+  both forms commit into it.
 
   Guarantees:
     - A `--bump` never lowers or repeats a version: a bumped value not above the note's current `spec_version`
@@ -558,9 +566,9 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"no such note: {note}\n")
     return 2
 
-  # the version to write: given outright, or bumped over the product's previous one
-  env_root = os.environ.get(_ENV_REPO_ROOT)
-  repo = scaffold_asset.repo_root(Path(env_root) if env_root else note.parent)
+  # the version to write, given outright or bumped over the product's previous one, under the note's own settings:
+  # the note path is the explicit start
+  repo = spec_locator.query_settings_root(note.parent)
   previous: str | None = None
   try:
     if args.explicit is not None:

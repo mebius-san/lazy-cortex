@@ -29,7 +29,6 @@ malformed settings file.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -43,6 +42,10 @@ sys.path.insert(0, str(_BIN_DIR))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from constants import EnvVar, HooksKey, SettingsFile, SettingsKey  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+import plugin_locator  # noqa: E402
 
 
 def is_admitted(name: str) -> bool:
@@ -88,7 +91,8 @@ def is_enabled(name: str, *, cwd: Path | None = None) -> bool:
 
   Notes:
     - Under the allow-list environment variable the answer comes from the environment alone, with no I/O.
-    - Otherwise it runs a `git` subprocess and reads the repository's settings file on every call; nothing is cached.
+    - Otherwise it runs several `git` subprocesses and reads the repository's settings file on every call; nothing
+      is cached.
 
   Args:
     name: The hook's canonical short name (a `HookName` value, e.g. `git-guard`).
@@ -132,13 +136,14 @@ def _disabled_hooks(cwd: Path | None) -> frozenset[str]:
   """
   Return the set of hook short names the operator has disabled for interactive sessions.
 
-  Reads the `hooks` section of the `lazy.settings.json` of the repository holding `cwd` (tracked value with
-  the local overlay merged on top). Fails open — any resolution error (no repository, no settings
-  file, or an unreadable or malformed value) yields an empty set, so only an explicit
-  `hooks.disabled` entry silences a hook.
+  Reads the `hooks` section of the nearest `lazy.settings.json` from `cwd` upward within the repository holding it,
+  else the one at that repository's root (tracked value with the local overlay merged on top). Fails open — any
+  resolution error (no repository, no settings file, or an unreadable or malformed value) yields an empty set, so
+  only an explicit `hooks.disabled` entry silences a hook.
 
   Notes:
-    - Runs a `git` subprocess and reads the settings file from disk on every call.
+    - Runs several `git` subprocesses (repository root, settings root, nearest-directory bound) and reads the
+      settings file from disk on every call.
 
   Args:
     cwd: A directory inside the repository to read; `None` means the process's working directory.
@@ -156,15 +161,12 @@ def _disabled_hooks(cwd: Path | None) -> frozenset[str]:
   # never fall silent because of a missing or broken settings file; it can only fall silent because
   # someone said so.
 
-  # the repository whose settings hold the block-list
-  repo = _repo_root(cwd)
-
   # guard: not inside a git repository — nothing to disable against
-  if repo is None:
+  if _repo_root(cwd) is None:
     return frozenset()
 
-  # the block-list lives in that repository's own settings, never the session's
-  settings_path = repo / SettingsFile.REL
+  # the block-list lives in the settings nearest to the directory within that repository, never the session's
+  settings_path = plugin_locator.query_settings_root(cwd if cwd is not None else Path.cwd()) / SettingsFile.REL
 
   # guard: no settings file for this repository
   if not settings_path.exists():
@@ -203,15 +205,7 @@ def _repo_root(cwd: Path | None) -> Path | None:
     cwd: The directory to resolve from; `None` means the process's working directory.
 
   Returns:
-    The repository root as a `Path`, or None when the directory is missing or not inside a git
-    repository, or the `git` binary is missing.
+    The root of the checkout the directory sits in as a `Path`, a linked worktree's own root inside one; None when
+    the directory is missing or not inside a git repository, or the `git` binary is missing.
   """
-  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
-  try:
-    out = os.fsdecode(subprocess.check_output(
-      [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL, cwd = cwd,
-    )).strip()
-  except (subprocess.CalledProcessError, OSError):
-    return None
-  return Path(out) if out else None
+  return plugin_locator.find_checkout_toplevel(cwd if cwd is not None else Path.cwd())

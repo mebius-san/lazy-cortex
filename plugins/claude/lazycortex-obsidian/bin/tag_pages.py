@@ -21,8 +21,10 @@ from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from iconize_sync import (  # pylint: disable=import-error
-  FM_BLOCK_RE, IconizeError, find_vault, plugin_root_name, resolve_plugin_roots, walk_md_files,
+  FM_BLOCK_RE, IconizeError, find_vault, walk_md_files,
 )
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import obsidian_locator  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import vault_manifest  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -85,12 +87,14 @@ VERB_PLAN, VERB_APPLY = "plan", "apply"
 # Refusal reasons the CLI adds on top of the module's own
 NO_GIT_DIR_REASON = "{vault} is not inside a git repository; the summaries file has nowhere to live"
 SUMMARIES_INVALID_REASON = "{path} is not a JSON object of tag -> summary strings"
-NO_CORE_REASON = "lazycortex-core is not found, so --templated cannot learn the vault's language"
+NO_CORE_REASON = "lazycortex-core is not found, so --templated cannot learn the vault's language: {detail}"
 LANGUAGE_FAILED_REASON = "lazycortex-core resolve-language failed (exit {code}): {detail}"
 
 # The core plugin that answers the vault's language, and its CLI inside the plugin root
 CORE_PLUGIN = "lazycortex-core"
 CORE_CLI_REL = Path("bin") / "lazycortex-core"
+# The directory holding this plugin's own tree, where a development checkout keeps the core plugin beside it
+_SIBLING_BASE = Path(__file__).resolve().parents[2]
 
 # The settings section whose own `language` key overrides the repo-wide one
 SETTINGS_SECTION = "obsidian"
@@ -533,13 +537,15 @@ def resolve_language(vault: Path) -> str:
   # `TagPagesRefusedError` and NEVER return a default language code. The templated
   # apply relies on this to refuse instead of writing pages in a guessed language.
 
-  # the core CLI lives in the first visible root that is the core plugin
-  cli = next(( root / CORE_CLI_REL for root in resolve_plugin_roots(vault)
-               if plugin_root_name(root) == CORE_PLUGIN and (root / CORE_CLI_REL).is_file() ), None)
+  # the core plugin through the shared lookup; a miss names every place searched
+  try:
+    cli = obsidian_locator.plugin_root(CORE_PLUGIN, vault, sibling_base = _SIBLING_BASE)[0] / CORE_CLI_REL
+  except obsidian_locator.PluginNotFoundError as error:
+    raise TagPagesRefusedError(NO_CORE_REASON.format(detail = error)) from error
 
-  # guard: without core there is no language to fall back on
-  if cli is None:
-    raise TagPagesRefusedError(NO_CORE_REASON)
+  # guard: a core root without its CLI file leaves no language to fall back on
+  if not cli.is_file():
+    raise TagPagesRefusedError(NO_CORE_REASON.format(detail = f"{cli} is absent"))
 
   # ask core for the language of the plugin's own settings section
   # waiver: core CLI vocabulary, not domain constants

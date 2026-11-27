@@ -158,6 +158,15 @@ from myapp.core import (
   - The whole suite:                 `tst-py -q`, or `tst-py all -q`
 - The module is the only filter: `tst-py` takes one module name and no file, class, method, or keyword selector. A module name with no `tests/<module>/` directory is refused, and the refusal lists the modules that exist.
 
+### A project's own runner calling `tst-py`
+
+A project that keeps its own test runner (`python.test_cmd`) calls `tst-py` from it instead of calling pytest, so the plugins `tst-py` loads into pytest reach that project too. Two environment variables, set by the calling runner, shape that call; with neither set `tst-py` behaves as described above.
+
+- `LAZYCORTEX_TST_PASSTHROUGH_PY` — set to anything but empty or `0`, it turns on passthrough mode: every argument goes to pytest as given, with no module check, no `-q` and no help shortcut. The calling runner owns what is run and what is refused. The only addition is the CPU-yield plugin (`-p _pytest_cpu_yield`); the re-export dedup plugin is not loaded, so the tests the caller selects are exactly the tests that run.
+- `LAZYCORTEX_TOOL_PYTEST` — the path to the pytest executable to run. The venv resolver is skipped, because the caller has chosen its environment, and the directory of that executable goes first on `PATH`. A path that names no file is refused before anything runs.
+
+Passthrough mode is for a runner, never for an agent: an agent runs the project's declared runner, or `tst-py <module> -q` when none is declared.
+
 ## Re-export shim de-duplication (automatic)
 
 `tst-py <module>` scopes a run at the directory level, to `tests/<module>/`. In repositories that aggregate their suites through **re-export shims** — a `test_all.py` that star-imports every package, plus per-package shim files that re-export a package's own test classes — each test class is then collected **twice**: once through its own shim and once through the aggregator. Double collection doubles the reported test count and can produce false failures when the repeated instances share mutable state between runs.
@@ -180,6 +189,13 @@ When at least one duplicate is removed, the plugin prints one summary line:
 ```
 
 In a repository **without** re-export shims no key ever repeats, so the plugin is a no-op: the collected-test count is unchanged and the summary line is not printed. Parametrized tests are never collapsed — different parameters yield different keys.
+
+## CPU yield (automatic)
+
+A test run is background work, and several runs started at once from different sessions must not starve the machine. The runner loads a second small pytest plugin (`bin/_pytest_cpu_yield.py`, injected via `-p _pytest_cpu_yield`) — no setting to enable, nothing in `lazy.settings.json`.
+
+- **Lowered priority.** Every pytest process — the controller and each xdist worker — lowers its own scheduling priority, and the subprocesses the tests spawn inherit it. On macOS and Linux the process raises its niceness to `10`; on Windows it moves to the below-normal priority class. A process already running at a lower priority keeps it, and a refusal by the system never fails the run.
+- **Capped automatic worker count.** With `-n auto` (or `-n logical`) xdist gets one worker per CPU minus two, and never fewer than one. From Python 3.13 the CPUs counted are those available to the process; an older interpreter counts every CPU of the machine. An explicit `-n <number>` is taken as given, and so is a count named in the `PYTEST_XDIST_AUTO_NUM_WORKERS` environment variable.
 
 ## Performance / property-based tests
 
@@ -229,4 +245,4 @@ A repo that ships its own check / test aggregator declares it once, so every age
 - **Both keys are optional.** Absent → `chk-py` / `tst-py` are used, which is the default for a repo with no aggregator of its own.
 - **A declared runner is authoritative.** It replaces the wrapper at every step of the Verification order, including the `review` phase (`<check_cmd> review`). A local aggregator carries project configuration the plugin wrapper does not see; falling back to `chk-py` when `check_cmd` is set produces misleading results.
 - **The subcommand vocabulary is unchanged** — a project runner is expected to accept the same verbs (`all`, `pcf`, `toi`, `review`, …), delegating to the plugin where it has no implementation of its own.
-- These keys supersede runner declarations written in prose in a project rule or a `docs/guidelines/*.md` overlay; when both exist, they must name the same command.
+- These keys supersede runner declarations written in prose in a project rule or a `docs/guidelines/python/*.md` overlay; when both exist, they must name the same command.

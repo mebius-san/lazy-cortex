@@ -38,6 +38,9 @@ import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-
 import gate_tick  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -132,7 +135,9 @@ def main(argv: list[str]) -> int:
   Run `collect_tick` from the command line and print its summary.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the sweep covers the root of the checkout that
+      directory sits in.
 
   Returns:
     Exit code: `0` when every poll completed; `1` when at least one note failed to tick, or when the job sidecar
@@ -142,12 +147,12 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog = "lazycortex-specs collect-tick")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
-  # resolve --repo then run the sweep; only the three counters are printed — the error detail
-  # already went to stderr line by line
-  repo = Path(args.repo).resolve()
+  # resolve the checkout `--repo`, else `$LAZY_REPO_ROOT`, else the cwd sits in, then run the sweep; only the three
+  # counters are printed — the error detail already went to stderr line by line
+  repo = spec_locator.query_repo_root(args.repo)
   try:
     summary = collect_tick(repo)
   # a job sidecar that cannot be read, or set aside, lists no note to poll; the sweep is refused with its error

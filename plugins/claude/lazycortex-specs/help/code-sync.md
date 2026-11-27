@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep specs aligned with the product's code — sync the whole spec tree, one product or one asset with the code, and gap-scan for capabilities no asset documents.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the two skills relate"
   request: "Decision-tree showing when to reach for lazy-spec.sync-with-code vs lazy-spec.coverage — inputs are 'code changed since last sync' and 'looking for capabilities the spec tree never documented'; outputs are document rewrites, created and deleted assets, gate proposals, and gap-candidate reports with proposed category+slug."
@@ -32,6 +32,8 @@ Beyond rewriting, a sync run:
 - **Marks abandoned decisions obsolete.** A recorded decision the code no longer follows is marked obsolete through the decisions registry — the record of what was chosen is never edited by hand.
 - **Scaffolds missing folder-notes.** A folder with authored documents but no status folder-note gets one. If the asset type cannot be told from the folder, you are asked once.
 - **Proposes gate and stage corrections.** When an open release's included assets objectively landed on the default branch and the release's plan gate already reads true, it proposes flipping the release's `spec_develop_done` (otherwise the release is reported as held at its plan gate). A design-only asset has no develop gate of its own: one whose code landed with no release carrying it is reported as implemented outside a release, for you to fold into the next one. A document whose stage is objectively wrong against the code gets a stage-correction proposal. Every change goes through `/lazy-spec.flip-gate` and `/lazy-spec.set-stage` after you confirm; the skill never edits gate frontmatter itself.
+- **Leaves protected and cancelled material alone.** Sections other plugins own (the Sources and See also blocks, and every other protected section) stay byte-for-byte, apart from the one History line the sync adds. A cancelled asset is not reported on and not touched.
+- **Asks only where it must.** Beyond the approved-asset questions below, it asks when the scope argument matches several products or none, and when a folder-note has to be scaffolded for a folder whose asset type cannot be told.
 - **Runs the spec audit** at the end and reports its findings next to the diff, without fixing them.
 
 An asset that holds an approved document is never touched silently. When the code disagrees with an approved asset, the skill asks once for the whole asset: `update` applies every finding for it and keeps each document's stage, `leave` skips the asset this run (a later `--full` run finds the same drift and asks again).
@@ -59,6 +61,10 @@ You can also run either in isolation. Sync is for any moment source code has mov
 **Nested products.** A product owns its spec subtree minus every nested product's subtree; each nested product is its own unit of work, so no document is reconciled twice.
 
 **An approved asset keeps showing the same drift.** You answered `leave` for it in an earlier run. Re-run with `--full` and answer `update`. Likewise, a release that never gets a develop-gate proposal despite landed code has not settled its plan gate yet; settle that first, then sync again.
+
+**When no spec exists yet.** Sync reconciles an existing spec tree. For code with no spec at all, start with `/lazy-spec.create-from-code` instead.
+
+**A run refuses or does nothing.** A product key that is not registered is refused; register it through `/lazy-spec.product-config` and run again. A design-only product is skipped until you add its source paths the same way. A repository with no commit yet has no HEAD to record, so make the first commit first.
 
 **After sync, review the audit output.** `sync-with-code` runs `/lazy-spec.audit` at the end of each run and reports findings without auto-fixing. Review them as a follow-up step before you allow the commit.
 

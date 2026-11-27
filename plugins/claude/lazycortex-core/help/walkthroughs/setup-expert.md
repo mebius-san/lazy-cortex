@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-11-21
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,8 +11,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: 3459cd087cda795ff380ecf8ae38754173f91ada2d140960ba6d85a2c05c9323
+source_sha: ebfb485e33c56f106f3f0952e6753075e46419f6
+surface_sha: 8a79eddcf4c4d3d06e7bfc3ea68ba81a97c3b2883b6efada4b25aa7f0e7b5201
 ---
 # Add a named expert and dispatch your first async job
 
@@ -43,7 +43,7 @@ Run `/lazy-core.install` in the repo you want the async team to work in. Alongsi
 - Registers the built-in routines — the queue-draining `lazy-expert.pump`, `lazy-runtime.doctor`, `lazy-core.index-guard`, a daily `lazy-core.runtime-gc` cleanup, and a weekly `lazy-core.autocheckup` — in `lazy.settings.json[routines]`, again unconditionally. Re-running install fills in default keys an older registration lacked. The daemon is never required for the queue itself to exist.
 - Restores externally-sourced working directories when the repo declares any (directories it does not carry in git). It reads what is already on record and only asks once, on a fresh checkout with nothing recorded: link them from a source root you name, or leave them. If git can see the freshly linked directories, it offers to append the missing `.gitignore` lines — decline and the tree stays dirty, so a daemon on this checkout halts on its first tick.
 - Installs the `lazy-claude` wrapper into `~/.local/bin/` for any other daemon on the host that wants the shared subscription rate-limit guard. It is host-wide and needs no action from you here.
-- Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default and never asks about it. Install does not touch the background daemon: it installs no supervisor unit and does not ask `daemon.run_here`. Both belong to `/lazy-core.daemon-setup`, which you run only if you decide the project should get a daemon (see below).
+- Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default and never asks about it. Install does not set up the background daemon: it never creates a supervisor unit from scratch and does not ask `daemon.run_here`. Both belong to `/lazy-core.daemon-setup`, which you run only if you decide the project should get a daemon (see below). The one exception is a project whose daemon is already enabled and runs from another checkout on this host: install then brings that checkout current — it refreshes its sandbox file and expert permissions, and re-renders its supervisor unit only when the unit changed. It never writes a tracked file there. If the daemon runs on a different machine, install tells you to run `/lazy-core.setup` there instead.
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Pins LF line endings for the whole checkout, unconditionally: writes `* text=auto eol=lf` as the first rule in `<repo>/.gitattributes`, so git checks out text files with LF on every machine regardless of OS or `core.autocrlf`. This matters most for the daemon checkout below — a checkout synced between machines by something other than git (Dropbox, for example) is exactly how CRLF or half-written files creep in.
 - Configures the expert-spawn sandbox in `.runtime/sandbox.settings.json`, so every expert job — whether a daemon or a manual `/lazy-runtime.tick` spawns it — runs confined to the repo. The sandbox applies only to expert spawns, never to your interactive session. If an existing sandbox file records `enabled: false`, install asks once whether to merge the shipped value or keep yours.
@@ -85,9 +85,14 @@ Run `/lazy-expert.dispatch-job` and supply the required inputs:
   - `role` — a role label for this job (often matches the expert name or describes the task type).
   - `request` — the human-readable task description (e.g. `Review docs/api.md for clarity and completeness`).
 
-One optional input:
+Optional inputs:
 
 - `protocols` — a JSON array of protocol reference strings (e.g. `["lazycortex-core:lazy-core.expert-protocols-contract"]`). Defaults to `[]` when omitted. Pass this when the expert's agent requires an explicit protocol reference written into `config.json` alongside the request.
+
+- `source` and `context` — lists of `{"path": "<repo-relative path>"}` objects naming repository files the expert should read. These are manifests, not content: nothing is copied when you dispatch. The pump copies each file into the job's `source/` or `context/` folder when it claims the job, so the expert sees the file as it stands at claim time. A path that has been deleted by then fails the job; re-dispatch with the current path.
+- `source_inline` and `context_inline` — filename-to-text maps, for content that exists in no file.
+- `result` — a list of `{"path": "result/<filename>"}` objects; each creates an empty placeholder file for the expert to fill.
+- `can_commit_in_repo` — `true` or `false`, overriding the expert's commit default for this one job.
 
 Example:
 

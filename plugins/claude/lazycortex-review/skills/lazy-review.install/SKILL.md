@@ -47,8 +47,8 @@ Every file this skill creates or updates follows three cases — no per-file "in
 **Resolve the project root (`<repo-root>`) first**, by run kind — `install.py` below and every later step use it:
 
 1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
-2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
-3. Not in a git repo: fall back to the current working directory — but warn the user.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/review_locator.py" settings-root)` — the nearest directory holding `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer, so a nested project with its own settings is installed into its own.
+3. Not in a git repo: warn the user before using the printed path.
 
 Run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd <repo-root>`. The script applies the File-sync policy at the section level:
 
@@ -76,7 +76,7 @@ Outcome: `installed` (anything was created, merged, or reconciled — a routine 
 
 Step 1's seed gives `lazy-review.coordinator-watch` its **mandatory** protocol, the coordination playbook the woken coordinator reasons from. The doc-review protocol is NOT attached here: the coordinator attaches it to each expert job it dispatches, and the routine's own job carries the playbook instead. Attach the shared markdown-style protocol too, since every wake produces markdown in the vault — a mandatory protocol is not an operator choice, so no question is asked:
 
-**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-review" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-review" core-cli)` prints its absolute path — this plugin's plugin locator, asked from the working directory, tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the checkout's own `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records for this repository or the user; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-review.coordinator-watch --ids lazycortex-core:lazy-core.markdown-style --cwd <repo-root>)
@@ -127,7 +127,7 @@ The core `agent-models-seed` verb seeds the canonical model tiers of this plugin
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-review --scope project --cwd <repo-root>)
 ```
 
-The verb prints one JSON line: `outcome` (`seeded-N` / `unchanged` / `no-entries`) and one `entries` row per agent with its state (`added` / `unchanged` / `refreshed` / `kept-local`). Fold those rows into the Report; never report a seed the verb did not answer. Exit 1 carries `sot-missing`, `missing-prefix`, `missing-scope`, or an unparseable settings file — relay its message and do not fabricate seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
+The verb prints one JSON line: `outcome` (`seeded-N` / `unchanged` / `no-entries`) and one `entries` row per agent with its state (`added` / `unchanged` / `converted` / `refreshed` / `kept-local`). Fold those rows into the Report; never report a seed the verb did not answer. Exit 1 carries `sot-missing`, `missing-prefix`, `missing-scope`, or an unparseable settings file — relay its message and do not fabricate seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 
 Outcome: `seeded` (`seeded-N`) or `unchanged` (`unchanged` / `no-entries`).
 

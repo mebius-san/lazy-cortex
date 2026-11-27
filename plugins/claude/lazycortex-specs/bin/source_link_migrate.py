@@ -35,6 +35,9 @@ if str(_BIN) not in sys.path:
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -106,8 +109,6 @@ _MD_SUFFIX = ".md"
 _ENCODING = "utf-8"
 # How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
 _DECODE_ERRORS = "replace"
-# The environment variable naming the repository root when `--cwd` is absent.
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # The result's own wire-shape keys, read by the migration step and the tests.
 _CHANGED_KEY = "changed"
@@ -485,9 +486,10 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Command-line arguments, excluding the program name; `--dry-run` reports without writing, `--check` reports
-      without writing and answers through the exit code whether anything is left to migrate, `--cwd` names the
-      repository root (falling back to the `LAZY_REPO_ROOT` environment variable, then the process working
-      directory).
+      without writing and answers through the exit code whether anything is left to migrate, `--cwd` names a
+      directory inside the repository (falling back to the `LAZY_REPO_ROOT` environment variable, then the process
+      working directory); the run works in the nearest directory at or above it, within its checkout, that holds
+      `.claude/lazy.settings.json`, else the checkout's root.
 
   Returns:
     Exit code: with `--check`, 0 when a document would change and 1 when none would; 0 otherwise; 2 on any failure.
@@ -507,12 +509,9 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--cwd", default = None)
   args = parser.parse_args(argv)
 
-  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
   # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
   try:
-    result = migrate(repo, dry_run = args.dry_run or args.check)
+    result = migrate(spec_locator.query_settings_root(args.cwd), dry_run = args.dry_run or args.check)
   # waiver: CLI boundary — malformed settings raise errors of any type from the shared readers, and an uncaught one
   # would exit 1, which `--check` and the migration step read as "nothing to do"
   except Exception as error:  # pylint: disable=broad-exception-caught

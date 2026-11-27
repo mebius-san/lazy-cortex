@@ -11,8 +11,8 @@ strings: audit severities, writer-phase / outcome value tokens, record / payload
 dict-key names, tag prefixes, and job-dir filenames. Each container below holds
 plain `str` constants whose values are byte-identical to the literals they
 replace — they are NOT enums, so `value == Container.X` stays a string
-comparison and parsed strings keep matching. The one exception is `LangId`, a
-`StrEnum` whose members still compare equal to the plain code strings.
+comparison and parsed strings keep matching. The exceptions are the `StrEnum`s, whose members still compare
+equal to the plain code strings.
 """
 from __future__ import annotations
 
@@ -41,6 +41,34 @@ class LangId(StrEnum):
 
 
 # ----------------------------------------------------------------------------------------
+class PassageKind(StrEnum):
+  """
+  The origins a passage of a review document's prose can have when it counts as the operator's.
+
+  Attributes:
+    EDIT: The operator wrote it, or a submit carried it in from the operator's draft.
+    COMMAND: A review commit landed it while an operator command stood open.
+  """
+
+  EDIT = "edit"
+  COMMAND = "command"
+
+
+# ----------------------------------------------------------------------------------------
+class ReportVerdictKind(StrEnum):
+  """
+  The verdicts a report's writer gives on the operator's remarks.
+
+  Attributes:
+    SUFFICIENT: The plan suffices; fixing by the remarks reworks the same build.
+    NEW_PLAN: The remarks need a new plan; fixing by them starts a new plan and a new build.
+  """
+
+  SUFFICIENT = "sufficient"
+  NEW_PLAN = "new-plan"
+
+
+# ----------------------------------------------------------------------------------------
 class LockitKey:
   """
   Keys of the user-visible strings the review plugin reads from its lockit files.
@@ -52,6 +80,22 @@ class LockitKey:
   BANNER_READY_SINGLE = "banner.ready-single"
   # The ready banner carrying the three approval checkboxes.
   BANNER_READY_TRIPLE = "banner.ready-triple"
+  # The ready banner of a report class, carrying the accept box and the fix box.
+  BANNER_READY_REPORT = "banner.ready-report"
+  # The line under a report banner's fix box when the writer's verdict is that the plan suffices.
+  BANNER_REPORT_FIX_REWORK = "banner.report.fix-rework"
+  # The line under a report banner's fix box when the writer's verdict is that a new plan is needed.
+  BANNER_REPORT_FIX_REPLAN = "banner.report.fix-replan"
+  # The report banner's line that a box ticked together with a text edit does not fire.
+  BANNER_REPORT_SAME_COMMIT = "banner.report.same-commit"
+  # The report banner's line that both boxes ticked at once fire neither.
+  BANNER_REPORT_BOTH_TICKED = "banner.report.both-ticked"
+  # The line written under a question whose several ticked options were all cleared.
+  QUESTION_MULTI_TICKED = "question.multi-ticked"
+  # The line written under a decision-candidate whose accept and reject boxes were both ticked and cleared.
+  CANDIDATE_BOTH_TICKED = "candidate.both-ticked"
+  # The line a report's in-process banner carries while the implementer's answer is owed.
+  BANNER_REPORT_WAITING = "banner.report.waiting"
   # The ready banner's opening line after an autorun stopped.
   AUTORUN_STOP_LINE = "autorun.stop-line"
   # The prefix of an autorun stop-reason key; an `AutorunState` stop token follows it.
@@ -154,6 +198,7 @@ class JobMarker:
     ACTIVE_JOB: The id of the expert job currently in flight on the document.
     PENDING_WAKE: The wake the postman raised and the watch worker has yet to consume.
     LAST_SEEN_SHA: The last git-watch item sha the wake worker judged for this document.
+    VERDICT: The plan verdict the report's main writer gave in its last landed job.
     JOB_DONE: The `PENDING_WAKE` value a landed expert payload raises.
     KIND_COORDINATOR: The `mark-job` CLI token selecting `COORDINATOR_JOB`.
     KIND_WRITER: The `mark-job` CLI token selecting `ACTIVE_JOB`.
@@ -167,6 +212,8 @@ class JobMarker:
   PENDING_WAKE = "pending_wake"
   # The last git-watch item sha the wake worker judged for this document.
   LAST_SEEN_SHA = "last_seen_sha"
+  # The plan verdict the report's main writer gave in its last landed job.
+  VERDICT = "verdict"
   # The `PENDING_WAKE` value a landed expert payload raises.
   JOB_DONE = "job-done"
   # The `mark-job` CLI token selecting `COORDINATOR_JOB`.
@@ -285,6 +332,7 @@ class JobKey:
     FILE: A file-path field.
     OUTCOME: A job-outcome field.
     RESULT: A result-payload field.
+    PLAN_VERDICT: The response field a report's main writer gives its plan verdict in.
     STATUS: A status field.
     EMAIL: A git-author email field.
     EDIT_MARKER_STYLE: The configured edit-marker style key.
@@ -326,6 +374,7 @@ class JobKey:
     REVIEW: The top-level `review` config block key.
     CLASS: A class-entry name field.
     PATHS: A class-entry paths-glob list field.
+    REPORT: A class-entry flag marking the class's documents as reports decided by accept or fix.
     CHECK: An audit-finding check-id field.
     LEVEL: An audit-bundle aggregate-level field.
     FINDINGS: An audit-bundle findings-list field.
@@ -395,6 +444,8 @@ class JobKey:
   OUTCOME = "outcome"
   # A result-payload field.
   RESULT = "result"
+  # The response field a report's main writer gives its plan verdict in.
+  PLAN_VERDICT = "plan_verdict"
   # A status field.
   STATUS = "status"
   # A git-author email field.
@@ -477,6 +528,8 @@ class JobKey:
   CLASS = "class"
   # A class-entry paths-glob list field.
   PATHS = "paths"
+  # A class-entry flag marking the class's documents as reports decided by accept or fix.
+  REPORT = "report"
   # An audit-finding check-id field.
   CHECK = "check"
   # An audit-bundle aggregate-level field.
@@ -592,6 +645,8 @@ class Tag:
     PROTECTED_PREFIX: The cross-plugin persistent-owner tag prefix `#protected/`.
     HISTORY: The persistent ownership tag of the `# History` section.
     STATUS_PREFIX: The terminal status-callout tag prefix `#status/`.
+    SEND_BACK: The tag a producer's task line carries to offer its problem for sending back.
+    DISCUSSION: The tag that opens a report's discussion block, the main writer's H1 section.
   """
 
   # The ownership-tag prefix `#expert/`.
@@ -604,6 +659,10 @@ class Tag:
   HISTORY = "#protected/review/history"
   # The terminal status-callout tag prefix `#status/`.
   STATUS_PREFIX = "#status/"
+  # The tag a producer's task line carries to offer its problem for sending back.
+  SEND_BACK = "#review/send-back"
+  # The tag that opens a report's discussion block, the main writer's H1 section.
+  DISCUSSION = "#review/discussion"
 
 
 # ----------------------------------------------------------------------------------------
@@ -740,12 +799,18 @@ class ResultValue:
   Attributes:
     APPROVED: The document was approved and finalized cleanly.
     APPROVED_WITH_CONCERNS: The document was finalized with outstanding concerns accepted.
+    SENT_BACK: The cycle ended without approval, the operator's ticked problems handed back to the producer.
+    SENT_TO_PLAN: A report's review ended by fix-by-remarks whose verdict asked for a new plan.
   """
 
   # The document was approved and finalized cleanly.
   APPROVED = "approved"
   # The document was finalized with outstanding concerns accepted.
   APPROVED_WITH_CONCERNS = "approved-with-concerns"
+  # The cycle ended without approval, the operator's ticked problems handed back to the producer.
+  SENT_BACK = "sent-back"
+  # A report's review ended by fix-by-remarks whose verdict asked for a new plan.
+  SENT_TO_PLAN = "sent-to-plan"
 
 
 # ----------------------------------------------------------------------------------------
@@ -812,7 +877,6 @@ class Paths:
   Attributes:
     CLAUDE_DIR: The per-repo `.claude` configuration directory name.
     SETTINGS_FILE: The `lazy.settings.json` configuration filename.
-    GIT_DIR: The `.git` directory name used as a repo-root marker / walk-skip entry.
     BIN_DIR: The plugin `bin` directory name used for CLI binary resolution.
     RUNTIME_DIR: The per-repo gitignored runtime-state directory name.
     JOBS_SIDECAR: The job-marker sidecar filename inside `RUNTIME_DIR`.
@@ -822,8 +886,6 @@ class Paths:
   CLAUDE_DIR = ".claude"
   # The `lazy.settings.json` configuration filename.
   SETTINGS_FILE = "lazy.settings.json"
-  # The `.git` directory name used as a repo-root marker / walk-skip entry.
-  GIT_DIR = ".git"
   # The plugin `bin` directory name used for CLI binary resolution.
   BIN_DIR = "bin"
   # The per-repo gitignored runtime-state directory name.
@@ -874,6 +936,7 @@ class CoreCommand:
     CONSUME_JOB: Mark a collected job consumed.
     RESOLVE_LANGUAGE: Resolve the repository's configured language.
     SETTINGS_GET: Read one settings section.
+    GUIDELINES_RESOLVE: Resolve the guideline files one job role reads.
   """
 
   # Queue a new expert job.
@@ -888,6 +951,8 @@ class CoreCommand:
   RESOLVE_LANGUAGE = "resolve-language"
   # Read one settings section.
   SETTINGS_GET = "settings-get"
+  # Resolve the guideline files one job role reads.
+  GUIDELINES_RESOLVE = "guidelines-resolve"
 
 
 # ----------------------------------------------------------------------------------------
@@ -940,9 +1005,15 @@ class BotIdentity:
   Attributes:
     NAME: The mechanical-commit author name.
     EMAIL: The mechanical-commit author email fallback.
+    COORDINATOR_EMAIL: The coordinator's shipped author email, used when its settings entry is incomplete.
+    OWN_EMAILS: Every identity the plugin's own code commits under.
   """
 
   # The mechanical-commit author name.
   NAME = "lazy-review"
   # The mechanical-commit author email fallback.
   EMAIL = "lazy-review@bot.invalid"
+  # The coordinator's shipped author email, used when its settings entry carries no complete identity.
+  COORDINATOR_EMAIL = "review.coordinator@bot.invalid"
+  # Every identity the plugin's own code commits under; each counts as the review system whatever the settings say.
+  OWN_EMAILS = frozenset({ EMAIL, COORDINATOR_EMAIL })

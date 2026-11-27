@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: FAQ on products, assets, vision/design docs, gates, release specialists, requests, decisions, coverage gaps, and spec lookups.
-last_regen: 2026-11-23
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,8 +31,8 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 2653a5426b5529f470a56e14491a26e6ce85968a
-surface_sha: e02ad133bc669575f2d64d52d71a5fa3b4c43a8d36f32c0a01e1b8c0f272f0b1
+source_sha: 0044ac4308cce96cc832c6dbbbe2042b5ad738d5
+surface_sha: c0ffd936660e46b0679e09db583c2f70de115e7f1ecb28fd10a88358bdde50a1
 ---
 # Frequently asked questions
 
@@ -41,6 +41,16 @@ surface_sha: e02ad133bc669575f2d64d52d71a5fa3b4c43a8d36f32c0a01e1b8c0f272f0b1
 `<specs-cli>` stands for the specs plugin's `bin/lazycortex-specs` file — the copy that `~/.claude/plugins/installed_plugins.json` records as installed for `lazycortex-specs@lazycortex`, or `plugins/claude/lazycortex-specs/` in a checkout that authors the plugin. Never locate it by searching the plugin cache: the cache keeps every version ever installed, so a search can land on a stale copy. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `vision.md` at the spec content-root, seeded through `"${LAZYCORTEX_PYTHON:-python3}" <specs-cli> seed-doc` from the `system-vision` type's template — whenever neither it nor a pre-existing `design.md` without a vision (the legal pre-vision state, migrated by the operator by hand) is already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while both are absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. When `lazycortex-wiki` is installed, install also keeps your requests out of the terms dictionary's link pass: a request under the vault's `requests/` folder is your own text and stays verbatim, so install asks the wiki to mark that folder as excluded from term links on the terms scope that covers the catalog. The seed only fills the setting when it is absent — a scope that already carries its own exclusion list is left as it stands — and install reports `seeded`, `kept` or `no-scope` for it. It also retires the old one-document `research` review class, no longer seeds classes for `data-report` / `docs-report`, and wires the release code-plan class to hand its writer the product's specialist list. Install never asks about products — it only reports whether one is already registered. Registering your first product is a separate, explicit `/lazy-spec.product-config` run, whenever you're ready.
+
+Beyond the two routines named above, install registers the rest of the daemon's set the same way: `lazy-spec.coordinator-deletes` (hands a commit that deletes a spec document to the coordinator, so the owning folder-note stops listing rows for a document that is gone), `lazy-spec.collect` (delivers finished expert jobs promptly), `lazy-spec.runtime-gc` (a daily clean-up of per-note runtime rows whose note was deleted or moved), and, only when an upstream source is configured, `lazy-spec.upstream-tick`. None of them waits on the daemon: a checkout that never starts one can still run them with `/lazy-runtime.tick`. Install also mirrors the plugin's own rules into `.claude/rules/`, seeds the agent-model tiers for the three spec agents, and, when `lazycortex-wiki` is installed, makes `product` and `category` available as classification axes and seeds the spec catalog's wiki scope with sensible defaults. It never asks whether to wire a part of the plugin: an enabled plugin is installed whole, and the only question it can ask is the authoring language, and only when none is on record.
+
+Re-running install after a plugin update is how existing routines catch up. A routine that is already registered is refreshed, never skipped: the values the plugin owns (the file mask, the filter, the worker) are corrected to the shipped ones, while your own cadence and priority settings stay as you set them. The one case that cannot be merged mechanically is a routine recorded in an older shape; install then shows both versions and asks which survives. The same run also repairs older catalogs in place: it types untyped documents, backfills each asset's kind, renames the retired `dev-plan` / `dev-report` document types to `code-plan` / `code-report`, and migrates the old readiness flag to `spec_released`. These repairs write into your working tree and commit nothing; commit them yourself after reading the diff.
+
+---
+
+## `/lazy-spec.install` stopped with `aborted:vault-root-not-subdir`. What do I change?
+
+Install requires the spec catalog to live in a sub-directory of the repository. The `vault_root` value of the `spec` settings section is the repository root itself (`.`), an absolute path, or a path that climbs out through `..`. Install stops before writing anything and asks nothing. Move the catalog into a sub-directory (the default is `specs`), point the spec setting's `vault_root` at that directory, and re-run `/lazy-spec.install`. An absent `vault_root` counts as the default and passes.
 
 ---
 
@@ -228,6 +238,20 @@ The second way is answering one of the coordinator's own `[!question]` callouts 
 A product folder-note and every container folder-note under it (`bugs/`, `changes/`, and any folder you add or name with `--path`) may also each carry their own `# Coordinator rules` section. Features, content and research assets sit straight in the product root. The coordinator reads the whole chain top-down (playbook, then the level note of every enclosing product, outermost first, then the product's own, then every container note down to the asset, then the asset's own `# Coordinator rules`) before it decides anything on that asset. Writing a constraint at the product or container level applies it to every asset underneath without repeating it on each one; leaving the section empty (or absent) is normal until you actually need a group-wide rule.
 
 Request routing — deciding whether a submitted request attaches to an existing asset or spawns a new one — is handled by a sibling persona, `spec.catalog-coordinator`, not by `spec.coordinator`; see the requests-inbox question below for how that works.
+
+---
+
+## I ticked two options on a coordinator question, or both boxes on a conflict callout. What happens?
+
+Nothing is applied. The options of one question exclude each other, so a question ticked more than once is no answer: the coordinator unticks every option of it, keeps the question in place, writes one line under the options (in the note's language) saying that several options were ticked and none was applied, and records no history line. A conflict callout works the same way: with both `Resolve here` and `Not a conflict` ticked, neither fires, both boxes are cleared and a line asks you to tick one. The one exception to counting is a request's routing question, which offers an attach and a spawn for each existing asset: one tick per asset is an answer, and only two ticks that settle the same asset contradict each other. The coordinators clear contradicting ticks on any wake that finds them, including a wake that another, singly ticked question further down raised. Tick one option and commit again.
+
+When you tick several rows in `# Gates` that do not contradict one another (for example two launch rows), they are not a problem: the coordinator enacts them top to bottom in the order they stand in the note, and takes off any row whose precondition no longer holds once it gets there.
+
+---
+
+## A release's build report is waiting on me. What can I decide?
+
+A finished build (or a continuation of one) submits the release's `code-report.md` into review with the release implementer as its writer, so the report is discussed with the expert that built it. You decide once: accept the report as it is, or fix it by your remarks. Accepting closes the release's `spec_develop_done` gate and merges the build's branch. A fix comes back in one of two forms. `sent-back` means the implementer reworks the last build: a continuation is dispatched on the same branch with the report's discussion as its task, and the build keeps its number. `sent-to-plan` means the build is not reworked: the coordinator returns `code-plan.md` to `draft`, reopens its review with your remarks on that build, turns `spec_plan_done` off, and once the plan is approved again starts a new build from that unmerged branch, with no `Rebuild` tick needed from you. A continuation that fails (an error, a dead or cancelled job) does not fail the build: the build stays open with its branch, `# Status brief` names the failure, and the `Rebuild` that follows closes it. On a published or cancelled release a fix is refused and nothing is dispatched; the change goes into the next release. The testing stage writes a report only (`test-report.md`) and puts nothing into the repository.
 
 ---
 

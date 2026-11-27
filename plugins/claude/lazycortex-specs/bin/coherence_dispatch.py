@@ -49,6 +49,9 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -116,11 +119,17 @@ def _wiki_neighbours(repo: Path, doc: str) -> list[str] | None:
     The repo-relative neighbours the wiki lists, or `None` when the wiki cannot answer: its CLI does not resolve,
     fails, prints no JSON object, or answers that no wiki scope covers the document.
   """
-  cli = spec_paths.resolve_plugin_cli(_WIKI_CLI_NAME, dev_repo = repo)
+  # guard: a wiki plugin found without its CLI cannot answer
+  try:
+    cli = spec_paths.find_plugin_cli(_WIKI_CLI_NAME, repo)
+  except RuntimeError:
+    return None
 
   # guard: without the wiki plugin there is no one to ask
   if cli is None:
     return None
+
+  # ask the wiki for the document's neighbours; a CLI that cannot start or prints no JSON gives no answer
   try:
     proc = subprocess.run(
         [ sys.executable, str(cli), _WIKI_NEIGHBOURS_VERB, doc, _WIKI_REPO_OPTION, str(repo) ],
@@ -133,6 +142,8 @@ def _wiki_neighbours(repo: Path, doc: str) -> list[str] | None:
   # guard: an answer that is no object, or one no scope covers, leaves the question to the hierarchy
   if not isinstance(answer, dict) or answer.get(_WIKI_SCOPE) is None:
     return None
+
+  # the listed neighbours that are paths; a scope answer without a list names none
   listed = answer.get(_WIKI_NEIGHBOURS)
   return [ path for path in listed if isinstance(path, str) ] if isinstance(listed, list) else []
 
@@ -643,7 +654,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("doc")
   args = parser.parse_args(argv)
-  repo = coherence.repo_root()
+  repo = spec_locator.query_repo_root()
 
   # the whole dispatch, refused as one when the document, its note or the runtime is unusable
   try:

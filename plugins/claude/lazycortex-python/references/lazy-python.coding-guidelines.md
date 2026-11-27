@@ -23,6 +23,24 @@ conventions.
 
 ### Code Quality Rules
 - **Always choose the simplest solution first.** No unnecessary copies, no intermediate data structures, no over-engineering. If a simple loop works, use a simple loop.
+- **A method's own check is judged by that method's contract, never by how the members it calls are implemented today.** A guard, a `raise`, or a `Raises` docstring entry is never declared dead, unreachable or redundant because the current body of another method or property makes it impossible to trigger. Such a check is kept. Implementations of the called members change and new states get added; a check removed on the strength of another member's internals silently stops protecting the method the moment those internals change, and the defect surfaces far from its cause. A guarantee the called member states in its own contract — a `Contract:` block or its docstring `Guarantees` section — is a sound basis: a check that this stated guarantee rules out may be judged redundant. The simplest-solution rule above never overrides this one.
+- Incorrect reasoning (the second guard declared dead because `is_created` is today `state == CREATED` and `is_playable` is today `state in { CREATED, ONGOING }`, neither of which states a guarantee):
+```python
+def launch(self, *, db = None) -> None:
+  """
+  Raises:
+    TaleHasWrongStatus: Raised when the Tale is not in the correct status to be launched.
+  """
+  # guard: check its tale is created; any other state doesn't need launch
+  if not self.is_created:
+    return
+
+  # guard: check if the tale is not playable
+  if not self.is_playable:
+    raise TaleHasWrongStatus(self)
+  ...
+```
+  Both the second guard and the `Raises` entry stay.
 - **Think before coding.** Before writing any code, ask: "Is there a simpler way?" If yes, use it.
 - **Do not create unnecessary intermediate objects.** For example, don't use `dict(iterator)` when you can iterate directly; don't copy via `export_dict()` when a new empty instance suffices.
 - **No local aliases for built-in accessors.** Never assign `inst = self.__dict__` or similar aliases for `self.__dict__`, `self.__class__`, etc. Use the original accessor directly everywhere. **Exception:** capturing `self.__class__` for `super()` calls inside nested functions is allowed because Python requires an explicit class reference in that context.
@@ -32,6 +50,7 @@ conventions.
   - a genuinely complex multi-step expression — then a comment says what it holds;
   - an access chain reaching **two or more objects deep** (`self._place.place_grid`, `entity_data.state_b.position`) that is read more than once, and especially inside a loop — there the alias shortens every use site and saves the repeated walk;
   - a flag that takes the boolean result of a call made for its effect (repairing, dropping, saving) — the call does the work and the local only records whether it changed anything; assigning each such result first also keeps every call running, which an inline `or` would short-circuit (`has_dead = self._drop_dead_ids(...)`, then `if has_dead or has_dead_groups:`) — no `# waiver:` needed;
+  - an expression that, inlined, would push its line past the line-length limit and force a wrap that splits it into a hard-to-read expression — a named local reads better than the wrapped one, and its name says what it holds;
   - a complex argument lifted out of a call, per the bullet below.
   A local that must stay for any other reason carries a `# waiver: <reason>` line above it, since a bare `local = <accessor>` reads as a violation.
 - **A complex call should not be nested inside another call.** When an argument is itself a multi-line call, a conditional expression wrapping a call, or a call with its own keyword arguments, assign it to a local first and pass the local; this is the counterpart of the rule above, not an exception to it. A one-line argument with no arguments of its own stays inline.

@@ -32,9 +32,14 @@ _activate() {
 }
 
 # ---- Probe 1: $VIRTUAL_ENV ----------------------------------------------------
-if [ -n "${VIRTUAL_ENV:-}" ] && _venv_has_tools "${VIRTUAL_ENV}"; then
-  _activate "${VIRTUAL_ENV}"
-  return 0 2>/dev/null || exit 0
+# a set VIRTUAL_ENV that lacks a tool is passed over, saying which one, and the target venv is probed
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+  if _venv_missing="$(_venv_missing_tool "${VIRTUAL_ENV}")"; then
+    echo "[lazy-python] not using \$VIRTUAL_ENV (${VIRTUAL_ENV}): it lacks ${_venv_missing}" >&2
+  else
+    _activate "${VIRTUAL_ENV}"
+    return 0 2>/dev/null || exit 0
+  fi
 fi
 
 # ---- Probe 2: target venv, fresh ---------------------------------------------
@@ -45,10 +50,27 @@ if _venv_is_fresh "${_venv_dir}"; then
 fi
 
 # ---- Missing or stale: protected mode installs nothing -----------------------
+# the failure states the actual cause — no venv, a missing tool, an outdated stamp and what
+# changed, an interpreter that does not match — then that the job stops and the operator acts
 if _lazy_py_protected; then
-  echo "[lazy-python] the project venv at ${_venv_dir} is missing or stale (not configured against the current pyproject.toml)" >&2
-  echo "[lazy-python] LAZYCORTEX_PROTECTED is set, so nothing is installed here" >&2
-  echo "[lazy-python] run cfg-py from an interactive session or console, outside protected mode, then retry" >&2
+  _venv_missing=""
+  _venv_missing_tool "${_venv_dir}" >/dev/null && _venv_missing="$(_venv_missing_tool "${_venv_dir}")"
+  _venv_diag_args=()
+  if [ -n "${_venv_missing}" ] && [ "${_venv_missing}" != "python" ]; then
+    _venv_diag_args+=(--missing-tool "${_venv_missing}")
+  fi
+  # only uv can judge the interpreter; without uv, or when it fails, the other causes still stand
+  if [ "${_venv_missing}" != "python" ] && command -v uv >/dev/null 2>&1; then
+    _venv_verdict=0
+    _venv_interpreter_ok "${_venv_dir}" || _venv_verdict=$?
+    if [ "${_venv_verdict}" -eq 1 ]; then
+      _venv_diag_args+=(--interpreter-mismatch)
+    fi
+  fi
+  "${LAZYCORTEX_PYTHON:-python3}" -I "${_lazy_py_bin}/venv_spec.py" diagnose "${_project_dir}" "${_venv_dir}" \
+    "${_venv_diag_args[@]}" >&2 \
+    || echo "[lazy-python] the project venv at ${_venv_dir} cannot be used, and the job stops;" \
+      "ask the operator to run /lazy-python.install or cfg-py, then continue or rebuild the job" >&2
   return 1 2>/dev/null || exit 1
 fi
 

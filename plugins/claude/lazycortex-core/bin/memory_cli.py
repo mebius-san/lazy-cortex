@@ -7,8 +7,8 @@ expert's recent run logs under `.logs/claude/<expert>/` and every memory note un
 `.memory/<expert>/`; the bundle itself is queued through the runtime like any other job.
 
 An expert without the persona aspect prints `not-persona` and exits 1 before anything is
-queued. The repository root follows the dispatcher convention — `LAZY_REPO_ROOT`, then the
-process working directory, overridable per call with `--cwd`.
+queued. The repository root is the toplevel of the checkout that `--cwd`, else
+`LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself outside git).
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from expert_runtime import dispatch_job, lookup_expert  # pylint: disable=import
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from provider_env import ProviderConfigError  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -150,7 +150,7 @@ def cmd_memory_reflect(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
-  repo = resolve_repo_root(args.cwd)
+  repo = query_repo_root(args.cwd)
 
   # guard: only a persona-marked expert has memory to consolidate — the skill branches on this word
   if not is_persona(repo, args.expert):

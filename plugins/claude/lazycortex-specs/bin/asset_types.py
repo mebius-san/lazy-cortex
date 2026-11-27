@@ -44,6 +44,9 @@ import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -139,7 +142,6 @@ _FM_ANCHOR_RE = re.compile(r"(?m)^spec_role\s*:.*$")
 # waiver: CLI verb tokens -- dispatch keys for this module's own argparse router
 _VERB_OF = "of"
 _VERB_BACKFILL = "backfill"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _OUT_ASSET_TYPE = "asset_type"
 
 
@@ -559,19 +561,6 @@ def backfill(repo: Path, *, dry_run: bool = False, with_paths: bool = False) -> 
   return result
 
 
-def _repo_from_args(cwd: str | None) -> Path:
-  """
-  Resolve the repository root the same way every other lazycortex-specs subcommand does.
-
-  Args:
-    cwd: The explicit `--cwd` value, or None.
-
-  Returns:
-    Absolute repository root: the flag, then the daemon-exported env var, then the process cwd.
-  """
-  return Path(cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
-
 def main(argv: list[str]) -> int:
   """
   Run one `asset-type` subcommand from the command line, printing its result as JSON.
@@ -600,7 +589,7 @@ def main(argv: list[str]) -> int:
     return 0
 
   # the only remaining verb — argparse rejected anything else before reaching here
-  print(json.dumps(backfill(_repo_from_args(args.cwd))))
+  print(json.dumps(backfill(spec_locator.query_settings_root(args.cwd))))
   return 0
 
 

@@ -38,5 +38,6 @@ The dictionary is reached through the `lazy-wiki.terms` skill, named here and ne
 - When the dictionary carries a *neighbouring* concept under the name you were about to use, pick a different word for yours and make the difference readable from your text.
 - When the dictionary carries nothing matching, use your own word and keep writing. The curator enters it later, reading the finished document; nothing is expected of you.
 - When the dictionary and the job's upstream document name one concept differently, the dictionary wins, silently: your document carries no note about the upstream's word. The upstream document is the curator's report finding, and a reader of your document has no use for it.
+- The dictionary settles the name, never the meaning. When its definition of a term disagrees with what an approved document says the concept is, the approved document's wording wins: you describe the concept as that document does and never copy the dictionary's definition over it. The stale definition is the curator's to rewrite; your document carries no note about it.
 - When the choice is genuinely ambiguous, take the existing term. You have no operator to ask, two definitions that drifted apart can be merged afterwards, and a synonym already spread across documents cannot be recalled from them.
 - Never write to the terms dictionary.

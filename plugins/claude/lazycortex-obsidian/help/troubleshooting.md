@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,8 +16,8 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
-surface_sha: edede0959220815c78a08a5217a2f5dfec039aa14e76f7310ae75f2ff632a1b4
+source_sha: ebfb485e33c56f106f3f0952e6753075e46419f6
+surface_sha: 2f2431ed5e60a5f76159702a62fce3065de115fdea5333d81067563dce77651e
 ---
 # Troubleshooting
 
@@ -71,13 +71,13 @@ surface_sha: edede0959220815c78a08a5217a2f5dfec039aa14e76f7310ae75f2ff632a1b4
 
 ---
 
-## `/lazy-obsidian.iconize-install` aborts: core not installed
+## `/lazy-obsidian.iconize-install` or `/lazy-obsidian.install` aborts: core not installed
 
-**Symptom**: `/lazy-obsidian.iconize-install` aborts because it could not find the lazycortex-core command-line tool.
+**Symptom**: `/lazy-obsidian.iconize-install` (or `/lazy-obsidian.install`, which runs the same lookup) aborts because it could not find the lazycortex-core command-line tool. The abort prints an `error:` line that names every place it searched.
 
-**Likely cause**: lazycortex-core is not installed on this machine, and the install step relies on it.
+**Likely cause**: No usable lazycortex-core was found for this repo. The lookup only accepts an install of core that is available to you in this repo: one made for your whole user account (or managed scope), or one made for this repo's main checkout. An install of core recorded for a different project is ignored, even when its version is newer. A machine where core is installed only for another project therefore aborts here, the same as a machine with no core at all.
 
-**Fix**: Install `lazycortex-core@lazycortex`, then re-run `/lazy-obsidian.iconize-install`.
+**Fix**: Install `lazycortex-core@lazycortex` for your user or for this repo, then re-run the skill. If core is already installed but only for another project, install it for this repo as well.
 
 ---
 

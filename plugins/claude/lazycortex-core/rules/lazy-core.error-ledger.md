@@ -41,4 +41,4 @@ No routine, daemon, agent or skill builds a failure mechanism of its own: no pri
 
 ## Enforcement
 
-No audit check proves these invariants; a review of the routine, agent or skill holds the author to them.
+`lazy-core.audit` D19 reads the code a `command` routine runs whenever the repo authors that plugin, installed on the machine or not, and reports as `WARN`, with file and line, a caught error printed or logged before a success exit, a private error file, and an own notification. A plugin the repo does not author is read where it is authored. Agent and skill text stay with a review of the author.

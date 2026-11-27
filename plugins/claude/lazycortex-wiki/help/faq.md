@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, the tag-values canon, and the wiki's own writing language.
-last_regen: 2026-11-23
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -20,8 +20,8 @@ source_skills:
   - lazy-wiki.structure-curator
   - lazy-wiki.tag-curator
   - lazy-wiki.terms-curator
-source_sha: af2cec610e67efd656786250852436704318a125
-surface_sha: 1c153d33788665762aa55e1862fa00f13cf9a8309454a11e0e80caa84b2d2128
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: 273c307f7a634ad0609731df40237e7e47c337c25351e3b84674d9262d8716c9
 ---
 # Frequently asked questions
 
@@ -228,6 +228,26 @@ The terms dictionary is distinct from the tag-values dictionary — a terms scop
 ## My terms scope still has a single-file dictionary — how do I move to the directory form?
 
 Until the dictionary is migrated, the wiki code serves nothing from that scope, and `/lazy-wiki.configure terms` says so and refuses to migrate it itself. Run `/lazy-core.setup`: its migration step converts a scope that still carries a legacy single-file dictionary into a dictionary directory with one file per term. The audit's `config` finding for such a scope names the same route, and also offers the `terms-migrate` verb directly: `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> terms-migrate --repo <repo-root>`, after which you commit what it changed, because the verb commits nothing.
+
+---
+
+## Term files in my dictionary mix capitalised and lower-case titles — how do I bring them to one canon?
+
+A term's title line, and the file name derived from it, follow the letter case of the term's language: an English term starts every word with a capital, a Russian term only its first word, and a proper name inside a term keeps its own capital. The terms curator writes every new title in that canon. A dictionary written by an earlier release kept whatever case a document used, so both kinds can sit side by side. Run `/lazy-core.setup`: its migration step recases every dictionary that is already a directory of term files, renames the term files whose names break the canon, and moves the links to them onto the new names with their display text kept, so no sentence a reader sees changes. Commit what it changed afterwards.
+
+On a case-insensitive checkout git may not notice a case-only rename of a tracked file. The migration then moves that file back: its name stays, its title is still cased, and the links to it keep pointing at the name it has. Documents under an open review are updated too; a document the scope excludes from link editing is left as it is.
+
+---
+
+## When a document is approved and uses a term differently, which one wins — the document or the dictionary?
+
+The approved document. A document the operator approved (`spec_stage: approved` in its frontmatter) that says a term means something other than its dictionary definition has changed the term's meaning, and the terms curator rewrites the definition to match, dropping the old sense instead of merging it in. This keeps writers from copying a stale definition into every document they regenerate afterwards. A definition stays short, but it may describe a mechanism when that is what the thing is.
+
+---
+
+## Can I run the wiki commands from a subproject that has its own settings file?
+
+Yes. Commands that read the wiki settings (`/lazy-wiki.configure`, `/lazy-wiki.query`, `/lazy-wiki.domains`, `/lazy-wiki.domain-sync`, `/lazy-wiki.install`) look for the nearest `.claude/lazy.settings.json` from the working directory upward, never beyond the checkout, and fall back to the checkout's root when none is nearer. Scopes, the domain tree, and the paths in them are then relative to that directory. The sections the runtime daemon reads (`experts`, `agent_models`, and `routines`) always stay in the checkout root's settings, because one daemon serves the whole checkout. Run `/lazy-wiki.install` from the subproject to seed its own sections; it keeps the daemon-read ones at the root for you.
 
 ---
 

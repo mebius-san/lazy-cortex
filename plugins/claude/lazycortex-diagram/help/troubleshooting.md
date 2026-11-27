@@ -1,14 +1,14 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-21
+last_regen: 2026-11-25
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.install
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: b693d60f55ddaa95928fdebf55571a261ef5dd6ec0dee399c37275916dd2f570
+source_sha: 88d47d0ab4a4435e3073f0c0cd294cb8c976cd21
+surface_sha: 8262d7ba684c884a617a56a09533fd962954472d322661764cc8f514950d7bcc
 ---
 # Troubleshooting
 

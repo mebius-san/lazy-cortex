@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-21
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,8 +15,8 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: b403457ed42fde9355061d986acfe473dbe7423628d0d170441889a6c18f72a0
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: ac7e379cb71cc709d4570a769b8347451975ed75be0e5b26938fac345ee7671f
 ---
 # Troubleshooting
 
@@ -114,9 +114,9 @@ surface_sha: b403457ed42fde9355061d986acfe473dbe7423628d0d170441889a6c18f72a0
 
 **Symptom**: After `/lazy-review.submit <file>`, instead of landing directly on the operator's Ready banner, a main-writer round fires on the next wake.
 
-**Likely cause**: There are two usual reasons. First, the document carried a non-empty `[!todo] #review/command` callout when it was submitted. `submit` does not skip past an open command: the command is the opening round's input, so the document enters in the writer state with an empty `review_main_done` and a `Waiting: writer` banner, and the coordinator's first wake carries the command out. The Ready banner is never shown while a writer round is owed. Second, `submit` pre-fills `review_main_done` with the class's `experts.main` list as it stood at submit time, then advances the document straight to the operator's turn. Every wake, though, re-evaluates who is still pending against the class's *current* `experts.main` order minus the names already recorded in `review_main_done`. If the class was reconfigured after this document was submitted — a main writer added, or the chain extended with a new name — that added writer isn't in the stale seed, so it counts as pending and its round fires.
+**Likely cause**: There are three usual reasons. First, the document carried a non-empty `[!todo] #review/command` callout when it was submitted. `submit` does not skip past an open command: the command is the opening round's input, so the document enters in the writer state with an empty `review_main_done` and a `Waiting: writer` banner, and the coordinator's first wake carries the command out. Second, the document belongs to a report class (`report: true`). `submit` does not skip the writer round for it either: the document enters the same writer state, its banner reads "Waiting for the implementer's answer" with no decision box, any verdict recorded earlier (a stopped cycle's included) is cleared, and the first wake sends the implementer to read the report and record its verdict. The two decision boxes appear only once that verdict is recorded. The Ready banner is never shown while a writer round is owed. Third, `submit` pre-fills `review_main_done` with the class's `experts.main` list as it stood at submit time, then advances the document straight to the operator's turn. Every wake, though, re-evaluates who is still pending against the class's *current* `experts.main` order minus the names already recorded in `review_main_done`. If the class was reconfigured after this document was submitted — a main writer added, or the chain extended with a new name — that added writer isn't in the stale seed, so it counts as pending and its round fires.
 
-**Fix**: Run `/lazy-review.status <file>` to see which owner is currently active. If an open command callout caused it, let that writer round finish; the document then lands on the Ready banner. If a class change is what caused this, either let the newly-added writer's round complete — the document lands on the operator's Ready banner once its payload is in — or run `/lazy-review.configure` to remove that writer from the class if it shouldn't apply to documents already in flight.
+**Fix**: Run `/lazy-review.status <file>` to see which owner is currently active. If an open command callout caused it, let that writer round finish; the document then lands on the Ready banner. If the document is of a report class, let the implementer's round finish and record its verdict; the decision boxes then appear and nothing is wrong. If a class change is what caused this, either let the newly-added writer's round complete — the document lands on the operator's Ready banner once its payload is in — or run `/lazy-review.configure` to remove that writer from the class if it shouldn't apply to documents already in flight.
 
 ---
 
@@ -206,7 +206,7 @@ surface_sha: b403457ed42fde9355061d986acfe473dbe7423628d0d170441889a6c18f72a0
 
 **Likely cause**: A product-scoped review class's `paths` glob was written without `**`, so it fixes the asset's depth below the product's `spec_path`. An asset sitting at the product root, or nested deeper than the glob expects, falls outside the class and loses that product's own expert chain.
 
-**Fix**: Re-run `/lazy-spec.product-config <key>` in edit mode — the wizard regenerates the class's globs with `**` so they cover an asset at any depth below the product. Then re-run `/lazy-review.audit` to confirm the WARN is gone.
+**Fix**: Run `/lazy-review.configure` and fix the class entry's `paths` so it carries a `**` segment below the product root, which reaches an asset at any depth. Then re-run `/lazy-review.audit` to confirm the WARN is gone.
 
 ---
 

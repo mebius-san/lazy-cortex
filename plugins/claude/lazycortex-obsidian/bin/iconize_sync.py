@@ -21,19 +21,33 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from icon_keys import (  # pylint: disable=import-error
-  CallbackKey, FrontmatterKey, IconKey, InterpToken, MapKey,
-  ResultKey, VersionStatus, WhenKey, YamlScalar,
-)
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from shebang_launch import ShebangError, argv_for  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from frontmatter_rewriter import rewrite_file, rewrite_frontmatter  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NoReturn
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from icon_keys import (  # noqa: E402
+  CallbackKey, FrontmatterKey, IconKey, InterpToken, MapKey,
+  ResultKey, VersionStatus, WhenKey, YamlScalar,
+)
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from shebang_launch import ShebangError, argv_for  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from frontmatter_rewriter import rewrite_file, rewrite_frontmatter  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import obsidian_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 PROTOCOL_VERSION = "2.3.2"
@@ -100,8 +114,6 @@ _CALLBACK_VAULT_CACHE = None
 # and folds their matchers under the vault's personal icon-map. No install-time merge.
 PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
 REGISTRY_SUFFIX = ".iconize-registry.json"
-# waiver: external Claude Code registry path, not an internal key
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
 REGISTRY_SCHEMA_VERSION = 1
 
 # Semantic priority bands for registry matchers (see the iconize registry contract):
@@ -242,44 +254,26 @@ class IconizeError(Exception):
     self.code = code
 
 
-def find_vault_git_root(start: Path) -> Path | None:
+def find_vault_git_root() -> Path | None:
   """
-  Return the git toplevel of the repository containing `start`.
-
-  Args:
-    start: Filesystem path to resolve the enclosing repository for.
+  Return the root of the git checkout the run works in, a linked worktree's own root inside one.
 
   Returns:
-    The repository toplevel as an absolute path, or None when `start` is not inside a
-    git repository (or git itself is unavailable).
+    The checkout root of `$LAZY_REPO_ROOT`, else the current working directory, as an absolute path; None when
+    that directory is not inside a git repository or git is unavailable.
   """
 
   # Decision: the vault root is the git toplevel, not an `.obsidian/`-marked ancestor — the
   # icon-map lives under `.claude/` and every note path is repo-relative, while `.obsidian/`
   # is untracked since the vault-manifest migration and absent from headless checkouts.
 
-  # resolve the enclosing repository through git itself
-  # waiver: git CLI vocabulary, not domain constants
-  try:
-    proc = subprocess.run(
-      ["git", "-C", os.path.abspath(start), "rev-parse", "--show-toplevel"],
-      check = False, capture_output = True,
-    )
-  except OSError:
-    # guard: git binary unavailable — no repository can be resolved
-    return None
-
-  # guard: not a git repository — there is no vault to resolve
-  # the toplevel is read as bytes and decoded as a file-system name, so no byte of the path is rewritten
-  # waiver: line terminator of the git answer, not a domain constant
-  if proc.returncode != 0 or not (top := os.fsdecode(proc.stdout.rstrip(b"\n"))):
-    return None
-  return Path(top)
+  # the checkout root of the run's start directory; only git can tell it from a directory outside every checkout
+  return obsidian_locator.find_checkout_toplevel(obsidian_locator.query_repo_root())
 
 
 def find_vault(override: str | None) -> Path:
   """
-  Return the vault root, either from an explicit override or as the git toplevel of the cwd.
+  Return the vault root, either from an explicit override or as the root of the checkout the run works in.
 
   Args:
     override: Caller-supplied vault path; when set it must name an existing directory.
@@ -288,8 +282,9 @@ def find_vault(override: str | None) -> Path:
     Absolute path to the resolved vault root.
 
   Raises:
-    IconizeError: When `override` is provided but does not name an existing directory, or
-      when the current working directory is not inside a git repository.
+    IconizeError: When `override` is provided but does not name an existing directory.
+    IconizeError: When no override is given and the run's start directory (`$LAZY_REPO_ROOT`, else the current
+      working directory) is not inside a git repository.
   """
   # an explicit override path takes precedence over discovery
   if override:
@@ -299,7 +294,7 @@ def find_vault(override: str | None) -> Path:
     if not vault.is_dir():
       raise IconizeError(VAULT_NOT_DIRECTORY.format(vault = vault))
     return vault
-  found = find_vault_git_root(Path.cwd())
+  found = find_vault_git_root()
 
   # guard: discovery failed
   if found is None:
@@ -2338,45 +2333,6 @@ def version_sort_key(name: str) -> tuple[int, ...]:
   return tuple(out)
 
 
-def _read_installed_plugin_roots() -> list[Path]:
-  """
-  Enumerate every installed plugin's source root from Claude Code's plugin registry.
-
-  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
-  version that installed a plugin, each naming its `installPath`; per plugin the highest recorded
-  version wins. The plugin cache itself is never searched: it keeps every version ever installed,
-  so a walk across it returns copies the registry no longer names. The registry is always read from the
-  current user's home directory.
-
-  Returns:
-    One existing root per plugin name, sorted by plugin name; empty without a readable registry.
-  """
-  registry = Path.home() / _INSTALLED_PLUGINS_REL
-  try:
-    data = json.loads(registry.read_text(encoding = "utf-8"))
-  except (OSError, ValueError):
-    return []
-  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
-  # waiver: install-registry key, Claude Code's own schema
-  plugins = data.get("plugins", data) if isinstance(data, dict) else {}
-  best: dict[str, dict] = {}
-  for key, entries in plugins.items():
-    name = key.split("@", 1)[0]
-    for rec in entries or []:
-      # guard: a record without an install path names nothing to read
-      # waiver: install-registry key, Claude Code's own schema
-      if not isinstance(rec, dict) or not rec.get("installPath"):
-        continue
-      current = best.get(name)
-      # waiver: install-registry key, Claude Code's own schema
-      if current is None or version_sort_key(str(rec.get("version", ""))) > version_sort_key(
-          # waiver: install-registry key, Claude Code's own schema
-          str(current.get("version", ""))):
-        best[name] = rec
-  roots = [ Path(str(best[name]["installPath"])) for name in sorted(best) ]
-  return [ root for root in roots if root.is_dir() ]
-
-
 def plugin_root_name(root: Path) -> str:
   """
   Name the plugin a root belongs to.
@@ -2404,11 +2360,11 @@ def resolve_plugin_roots(vault: Path) -> list[Path]:
 
   Plugin roots come from the `LAZYCORTEX_PLUGIN_DIRS` dev trees the runtime daemon exports; when
   that is empty the dev-vault sibling layout `<vault>/plugins/claude/*` stands in. Every plugin
-  those roots do not cover then comes from Claude Code's install registry
-  (`~/.claude/plugins/installed_plugins.json`, that plugin's highest recorded version).
+  those roots do not cover then comes from Claude Code's install registry: the highest version
+  installed for the vault's repository or for the whole user, never another project's install.
 
   Args:
-    vault: Resolved vault root, used only for the dev-vault sibling layout.
+    vault: Resolved vault root, used for the dev-vault sibling layout and as the repository whose installs count.
 
   Returns:
     The visible plugin roots: the dev trees first, then the installed plugins they do not cover.
@@ -2423,10 +2379,11 @@ def resolve_plugin_roots(vault: Path) -> list[Path]:
     if dev.is_dir():
       roots = [ dev / name for name in sorted(os.listdir(dev)) ]
 
-  # the env carries dev trees only, so every plugin they do not cover comes from the install
-  # registry — read now, never frozen at daemon start; a dev root shadows its installed copy by name
+  # the env carries dev trees only, so every plugin they do not cover comes from the install records
+  # this repository may use — read now, never frozen at daemon start; a dev root shadows its installed copy by name
   covered = { plugin_root_name(root) for root in roots }
-  return roots + [ root for root in _read_installed_plugin_roots() if plugin_root_name(root) not in covered ]
+  installed = obsidian_locator.installed_plugin_roots(vault)
+  return roots + [ installed[name] for name in sorted(installed) if name not in covered ]
 
 
 def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:

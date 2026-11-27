@@ -4,6 +4,8 @@ from the notes' frontmatter. Recovery / operator tool. No commit.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -16,12 +18,16 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from memory_runtime import (  # noqa: E402
   _read_note_frontmatter, _iter_notes, topic_from_tag,
   regen_local_tag_file, regen_global_tag_file,
 )
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 def reindex(repo: Path) -> dict:
@@ -133,20 +139,22 @@ def _main(argv: list[str]) -> int:
   Emits the rebuild summary as a single JSON line on stdout.
 
   Args:
-    argv: Argument list without the program name. Supports `--repo <path>` (default `.`).
+    argv: Argument list without the program name. Supports `--repo <path>`, a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the index rebuilt is the one at the root of the
+      checkout that directory sits in, a linked worktree's own root inside one.
 
   Returns:
     The process exit code (`0` on success).
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import argparse
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import json
+  # the one option: a directory inside the repository whose checkout's index is rebuilt
   parser = argparse.ArgumentParser()
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
-  print(json.dumps(reindex(Path(args.repo))))
+
+  # the index of the checkout `--repo`, `$LAZY_REPO_ROOT` or the cwd sits in is rebuilt; its summary, one JSON line,
+  # is the whole output
+  print(json.dumps(reindex(query_repo_root(args.repo))))
   return 0
 
 

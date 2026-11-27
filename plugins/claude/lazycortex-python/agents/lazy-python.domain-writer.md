@@ -56,7 +56,7 @@ Read, always — never skip on the assumption they are loaded:
 
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md` — the Domain Comments section is the format canon; the Marker Comments section carries the standalone-block rule.
 - The dictionary at the `dictionary=<path>` the dispatch names, else `.claude/lazy.settings.json[wiki.domains.dictionary]`, else `${CLAUDE_PROJECT_DIR}/docs/guidelines/domain-groups.md` — the project's group dictionary, resolved as `# The dictionary` states. Missing file → note it; the sentinel path in Step 3 covers it.
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` — project overlay, overrides canon on conflict.
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/documenting_guidelines.md` — project overlay, overrides canon on conflict.
 
 Outcome: `guidelines-loaded` (append `no-dictionary` when the dictionary file is absent).
 

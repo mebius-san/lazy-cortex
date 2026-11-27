@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the templates reach your project"
   request: "Flow showing python-template.py, init-template.py, and scaffold.entries.json shipping from the plugin, scaffold-sync copying both templates into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching a new *.py file against python-template.py or, when the file is an __init__.py, against init-template.py instead (the more specific glob wins)"
@@ -10,8 +10,8 @@ source_skills:
   - python/init-template.py
   - python/scaffold.entries.json
   - lazy-python.install
-source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
-surface_sha: 5fd9ad59020898c9b303d66535cd7e7a5d74873e8009e563f68fe580263fa23e
+source_sha: 0044ac4308cce96cc832c6dbbbe2042b5ad738d5
+surface_sha: 2cfade6b1359b4ebcb7a28e2f9d4d2dd1dbce9b160117605490db8317b4aabc5
 ---
 # Python file scaffold
 
@@ -38,6 +38,10 @@ Both templates are install-managed mirrors, not consumer-owned config: the plugi
 Do not hand-edit `.claude/templates/python/python-template.py` or `init-template.py` directly expecting the change to stick — as install-managed mirrors, both are overwritten the next time `/lazy-python.install` runs and finds them diverged from the shipped source. If you want different starting content, author your own template file and register it under the `_local` key in your project's `lazy-core.scaffold.md` instead: a `_local` entry wins over the plugin's `lazycortex-python` entry at equal glob specificity, and the sync never touches `_local` entries on any re-run. Use this to add project-specific header comments, swap the example class for a base class from your own codebase, or adjust the package-docstring shape `init-template.py` expects.
 
 The globs the scaffold rule registers are intentionally broad (`**/*.py` and `**/__init__.py`). If you want a template applied only in a subtree (e.g. `src/**/*.py`), adjust the corresponding glob in your project's `lazy-core.scaffold.md` under the `lazycortex-python` key after install. That key is yours once written; subsequent sync runs will not overwrite it unless you explicitly re-run the sync.
+
+## Where this fits
+
+The templates cover only the starting shape of a file. The rules behind that shape live in the plugin's guideline canon, and your project's own deltas to it live in the overlay stubs that `/lazy-python.install` Step 5 creates under `docs/guidelines/python/` (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`). The overlay is read after the canon and wins on conflict, and an existing overlay file is never touched by a re-run. Both templates and the overlay are written by the same install run, but they are separate mechanisms: the templates are install-managed mirrors that get overwritten, while the overlay files are yours. When a template and a guideline disagree, the guideline wins.
 
 ## How the templates reach your project
 

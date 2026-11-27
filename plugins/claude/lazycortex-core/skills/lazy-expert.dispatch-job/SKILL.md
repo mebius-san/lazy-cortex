@@ -29,6 +29,7 @@ Required inputs from the caller:
 - `source` / `context` (lists of `{"path": "<repo-relative path>"}` objects, optional) — **path manifests**, never file content. An entry may carry a `description` beside `path`; nothing else names the path. They are recorded into the job's `config.json`; nothing is copied at dispatch. The pump copies each entry into `<job_dir>/source/` or `<job_dir>/context/` when it claims the job — a directory under `<parent-directory-name>-<directory-name>`, a file under its basename — so the expert reads the tree as it stands at claim, not at dispatch. An entry that escapes the work tree, or that no longer exists at claim, fails the job with a `logical` error.
 - `source_inline` / `context_inline` (dicts of filename → text, optional) — content that exists in no file, written into the same two buckets at dispatch time.
 - `result` (list of `{"path": "result/<filename>"}` objects, optional) — each names one file created as an empty placeholder under `<job_dir>/result/` for the expert to fill.
+- `can_commit_in_repo` (boolean, optional) — the commit right of this one job, overriding the expert's `can_commit_in_repo` default; `false` makes the pump inject the no-commit clause. Absent, the expert's default applies; a non-boolean is refused by `dispatch-job`.
 
 Pre-flight checks:
 1. `expert_name` must be a non-empty string. If absent → abort: "`expert_name` is required."
@@ -61,7 +62,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
 
 If it prints `null` → abort with outcome `aborted-no-experts-entry` and the message "`<expert_name>` is not registered in `lazy.settings.json[experts]`."
 
-Then run the core `dispatch-job` verb with the job bundle on stdin — `expert`, `payload`, `protocols` (a JSON array, `[]` when empty), plus whichever of the io keys `source` / `context` / `source_inline` / `context_inline` / `result` the caller passed:
+Then run the core `dispatch-job` verb with the job bundle on stdin — `expert`, `payload`, `protocols` (a JSON array, `[]` when empty), plus whichever of the io keys `source` / `context` / `source_inline` / `context_inline` / `result` and the `can_commit_in_repo` override the caller passed:
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" dispatch-job <<'EOF'

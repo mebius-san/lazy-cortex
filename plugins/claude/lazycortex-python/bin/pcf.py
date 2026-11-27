@@ -27,6 +27,15 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import python_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # Hardcoded exclusions that should never be scanned
 HARDCODED_EXCLUDES = ['.venv', '__pycache__']
 
@@ -434,7 +443,8 @@ def load_config(start_path: str | None = None) -> dict:
   """
   Load configuration from pyproject.toml.
 
-  Search for pyproject.toml starting from the given path and moving up to parent directories.
+  Search for pyproject.toml starting from the given path and moving up to parent directories, never above the
+  root of the checkout the path sits in; outside git the search climbs to the filesystem root.
 
   Args:
     start_path: starting a directory path to search for pyproject.toml.
@@ -448,17 +458,10 @@ def load_config(start_path: str | None = None) -> dict:
   if start_path is None:
     start_path = os.getcwd()
 
-  # search for pyproject.toml in parent directories
-  current = Path(start_path).resolve()
-  pyproject_path = None
-
-  # walk up to the filesystem root so a nested source dir still finds the project config
-  while current != current.parent:
-    candidate = current / 'pyproject.toml'
-    if candidate.exists():
-      pyproject_path = candidate
-      break
-    current = current.parent
+  # the nearest pyproject.toml from the start up to the checkout root, so a nested source dir still finds the
+  # project config and a nested subproject keeps its own
+  found = python_locator.find_nearest_dir(Path(start_path), 'pyproject.toml')
+  pyproject_path = found / 'pyproject.toml' if found is not None else None
 
   # load configuration if pyproject.toml found
   if pyproject_path:

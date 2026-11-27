@@ -7,12 +7,22 @@ import re
 import sys
 # noinspection PyCompatibility
 import tomllib
+from pathlib import Path
 
 from collections import defaultdict
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import python_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # Hardcoded exclusions that should never be scanned
@@ -34,7 +44,7 @@ INVALID_WAIVER_NOTE = 'invalid waiver (empty reason) for import {name} from {mod
 # ----------------------------------------------------------------------------------------
 def load_config() -> dict:
   """
-  Load configuration from pyproject.toml.
+  Load configuration from the nearest `pyproject.toml` between the working directory and its checkout's root.
 
   Guarantees:
     - Returns an empty dict, never raises, when `pyproject.toml` is missing or carries no
@@ -48,13 +58,16 @@ def load_config() -> dict:
   # Returns an empty dict when `pyproject.toml` is missing or carries no `[tool.toi]` section;
   # never raises for either condition.
 
-  config_path = 'pyproject.toml'
+  # the nearest project config from the working directory up to the checkout root, so a nested subproject keeps
+  # its own
+  found = python_locator.find_nearest_dir(Path.cwd(), 'pyproject.toml')
+
   # guard: no pyproject.toml — no configuration to load
-  if not os.path.exists(config_path):
+  if found is None:
     return {}
 
   # the whole manifest is parsed because tomllib offers no partial read
-  with open(config_path, 'rb') as fle:
+  with open(found / 'pyproject.toml', 'rb') as fle:
     data = tomllib.load(fle)
 
   # only this tool's own section is of interest; an absent section means default behaviour

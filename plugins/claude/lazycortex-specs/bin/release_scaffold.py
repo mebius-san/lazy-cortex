@@ -47,6 +47,9 @@ import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
 # via sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
 # via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -60,7 +63,6 @@ from spec_keys import AssetState, Gate, ReleaseKey, SpecStateKey  # noqa: E402
 
 
 _ENCODING = "utf-8"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # The bot identity this verb commits under
 SCAFFOLD_NAME = "lazy-spec.release-scaffold"
@@ -329,7 +331,8 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
     - The stats region of the `releases` group note is refreshed to count the new release.
 
   Args:
-    repo: Repository root.
+    repo: The settings root whose settings configure the product; the root of its checkout carries the commit and
+      the wake reports.
     key: A product key; the release owner is resolved from it.
     bump: The version part to raise over the previous version: `major`, `minor` or `patch`.
 
@@ -467,12 +470,12 @@ def scaffold_release(repo: Path, key: str, *, bump: str) -> dict:
     if (stats_moved or created.get(_GROUP_NOTE)) and group_note not in written:
       written.append(group_note)
 
-  # one commit under this verb's identity carries every written path
-  release_version.commit_paths(repo, written, author = SCAFFOLD_NAME,
+  # one commit under this verb's identity, in the checkout the settings root sits in, carries every written path
+  release_version.commit_paths(spec_locator.query_repo_root(repo), written, author = SCAFFOLD_NAME,
                                subject = f"{SCAFFOLD_NAME}: {slug} ({version}) under {owner}")
 
   # every member painted in-release is told once the release has landed, so its brief follows its new state
-  _wake_members(repo, [ entry.note for entry in included ])
+  _wake_members(spec_locator.query_repo_root(repo), [ entry.note for entry in included ])
   return {
       _STATUS: _STATUS_SET, _FOLDER: created[_FOLDER], _FOLDER_NOTE: created[_FOLDER_NOTE], _VERSION: version,
       _INCLUDED: [ entry.token for entry in included ],
@@ -494,7 +497,8 @@ def refresh_includes(repo: Path, release_note: Path, *, waived: bool = False) ->
       architecture document, or a call that waives the architecture, holds none behind.
 
   Args:
-    repo: Repository root.
+    repo: The settings root whose settings configure the release's product; the root of its checkout carries the
+      commit and the wake reports.
     release_note: The release's status note.
     waived: When True, the architecture holds no new asset out of the release.
 
@@ -563,11 +567,12 @@ def refresh_includes(repo: Path, release_note: Path, *, waived: bool = False) ->
     recounted = _update_in_release_state([ entry.note for entry in added ], products = registry,
                                          catalog_guidelines = catalog)
     release_version.commit_paths(
-        repo, [ release_note, *( entry.note for entry in added ), *recounted ], author = SCAFFOLD_NAME,
+        spec_locator.query_repo_root(repo), [ release_note, *( entry.note for entry in added ), *recounted ],
+        author = SCAFFOLD_NAME,
         subject = f"{SCAFFOLD_NAME}: {len(added)} new member(s) in {release_note.parent.name}")
 
     # only the newly listed members changed state, so only they are told
-    _wake_members(repo, [ entry.note for entry in added ])
+    _wake_members(spec_locator.query_repo_root(repo), [ entry.note for entry in added ])
 
   # the members newly listed and the delta members already there
   return { _ADDED: [ entry.token for entry in added ], _KEPT: kept, _BEHIND: behind }
@@ -577,8 +582,10 @@ def main(argv: list[str]) -> int:
   """
   Create a product's next release, or refresh an open release's members.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
-  directory.
+  The product's settings come from the nearest `.claude/lazy.settings.json` above the directory named by the
+  `LAZY_REPO_ROOT` environment variable, falling back to the process working directory, within the checkout that
+  directory sits in; without one, from the checkout's root. A `--refresh` note is relative to that settings root,
+  and the commit lands in the checkout.
 
   Notes:
     - Prints the JSON result of `scaffold_release` or `refresh_includes` on stdout.
@@ -604,14 +611,14 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + standard argparse action
   parser.add_argument("--no-architecture", action = "store_true")
   args = parser.parse_args(argv)
-  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  settings_root = spec_locator.query_settings_root()
 
   # a commit that does not land is the verb's failure, named on stderr; what the verb wrote stays as it is, and
   # the dirty tree it leaves is the alarm
   try:
     # the refresh form names a note; the create form names a product and a bump
     if args.refresh:
-      note = (repo / args.refresh).resolve()
+      note = (settings_root / args.refresh).resolve()
 
       # guard: the refresh form names a note that must exist
       if not note.is_file():
@@ -619,9 +626,9 @@ def main(argv: list[str]) -> int:
         return 2
 
       # the refresh pulls the delta's new members into the open release
-      result = refresh_includes(repo, note, waived = args.no_architecture)
+      result = refresh_includes(settings_root, note, waived = args.no_architecture)
     elif args.product and args.bump:
-      result = scaffold_release(repo, args.product, bump = args.bump)
+      result = scaffold_release(settings_root, args.product, bump = args.bump)
     else:
       sys.stderr.write(_MSG_USAGE)
       return 2

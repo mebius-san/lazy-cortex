@@ -5,8 +5,8 @@ Supports three reference forms — plugin-scoped (`<plugin>:<name>`), user-scope
 (`user:<name>`), and bare (`<name>`) — and three categories (`agents`,
 `protocols`, `aspects`). Plugin-scoped references prefer dev-plugin directories
 listed in `LAZYCORTEX_PLUGIN_DIRS` before falling back to the install root Claude Code's
-plugin registry (`~/.claude/plugins/installed_plugins.json`) records; the plugin cache is
-never walked.
+plugin registry (`~/.claude/plugins/installed_plugins.json`) records for the repo's main
+checkout or for the whole user; the plugin cache is never walked.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import PluginFile  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_setup import installed_plugin_root  # pylint: disable=import-error
+from plugin_locator import installed_plugin_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -87,13 +87,10 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
   """
   Resolve a reference string to a filesystem path.
 
-  Reference forms:
-    `<plugin>:<name>` — `<installPath>/<category>/<name>.md`, where `<installPath>`
-    is the highest-version record for the plugin in Claude Code's install registry
-    (`~/.claude/plugins/installed_plugins.json`); this mirrors `resolve_routine_command`
-    in `runtime_daemon.py`, and the plugin cache is never walked.
-    `user:<name>` — global `~/.claude/<category>/<name>.md`.
-    `<name>` — repo-local `.claude/<category>/<name>.md`.
+  A `<plugin>:<name>` reference names `<installPath>/<category>/<name>.md`, where `<installPath>` is the
+  highest-version record for the plugin in Claude Code's install registry among those made for the repo's
+  main checkout or for the whole user; the plugin cache is never walked. A `user:<name>` reference names the
+  global `~/.claude/<category>/<name>.md`. A bare `<name>` names the repo-local `.claude/<category>/<name>.md`.
 
   Guarantees:
     - For a plugin-scoped reference, a matching dev-plugin directory takes precedence over
@@ -104,7 +101,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
   Args:
     ref: Reference string in one of the three forms above.
     category: One of `agents`, `protocols`, or `aspects`.
-    repo: Repository root used for bare references.
+    repo: Repository root used for bare references, and the repo whose installs a plugin-scoped reference uses.
 
   Returns:
     Absolute path to the resolved reference file.
@@ -132,7 +129,8 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
   # A plugin-scoped reference always tries that plugin's active development sources first, so
   # work in progress on a plugin is read from its live source rather than a stale installed
   # copy; only once no matching development source exists does resolution fall back to the
-  # installed copy of that plugin — the one the machine's install registry records.
+  # installed copy of that plugin — the one the machine's install registry records for this
+  # repository or for the whole user, never another project's.
 
   # Plugin-shipped protocols live under <plugin-root>/references/ — the
   # repo-wide convention used by every plugin's own protocol/contract docs
@@ -162,7 +160,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
           if not hit.exists():
             raise ReferenceError(f"{category} not found in dev plugin: {ref} → {hit}")
           return hit
-      root = installed_plugin_root(scope)
+      root = installed_plugin_root(scope, Path(repo))
 
       # guard: the install registry records no install of the requested plugin scope
       if root is None:

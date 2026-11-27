@@ -5,7 +5,7 @@ paths:
 ---
 # Python docstrings (LLM-read)
 
-Critical docstring-discipline reminders for any `.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` before writing or editing any docstring; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` (overlay — read after canon, overrides on conflict). The comment side of the canon — the `Domain(...)`, `Contract:`, and marker-comment rules the clauses below lean on — lives in the sibling `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md`.
+Critical docstring-discipline reminders for any `.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` before writing or editing any docstring; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/documenting_guidelines.md` (overlay — read after canon, overrides on conflict). The comment side of the canon — the `Domain(...)`, `Contract:`, and marker-comment rules the clauses below lean on — lives in the sibling `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md`.
 
 ## Top docstring rules
 
@@ -21,6 +21,6 @@ Full rules + per-section schemas (Class / Method / Property), Zero-Tolerance Blo
 
 ## Hard prohibitions
 
-- **Never write docstrings manually — use the `lazy-python.docstring-writer` agent.** The agent enforces the full canon (section ordering, Zero-Tolerance Blockers, semantic Pre-Return Self-Check, special-comment handling, overlay merging with `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md`) which is too long to load into this rule body. Writing docstrings by hand from session-memory of the canon reliably violates at least one of the nine Self-Check clauses; dispatch the agent and let it own the result.
+- **Never write docstrings manually — use the `lazy-python.docstring-writer` agent.** The agent enforces the full canon (section ordering, Zero-Tolerance Blockers, semantic Pre-Return Self-Check, special-comment handling, overlay merging with `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/documenting_guidelines.md`) which is too long to load into this rule body. Writing docstrings by hand from session-memory of the canon reliably violates at least one of the nine Self-Check clauses; dispatch the agent and let it own the result.
 - **Never silently strip or rewrite `TODO:` / `TMP:` / `DBG:` / `ref:` / `opt:` / `guard:` / `limit:` / `Decision:` / `Domain(...)` markers** while touching surrounding docstrings — they are caller-visible invariants, not noise.
 - **Never use double backticks for inline code** in docstrings, Domain comments, or any other Python-file prose; the project's flavour is single-backtick only.

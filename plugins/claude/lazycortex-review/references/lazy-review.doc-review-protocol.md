@@ -1,10 +1,10 @@
 ---
 name: lazy-review.doc-review-protocol
-version: 10
+version: 13
 routine_protocol_candidate: true
 description: Markdown-document review protocol for lazycortex-review — minimal request/response contract for jobs dispatched to experts via lazycortex-core's expert runtime queue.
 ---
-# doc-review protocol v9
+# doc-review protocol v13
 
 Canonical contract for jobs dispatched to experts by the ``lazycortex-review`` dispatcher (or any other consumer producing doc-review-shaped jobs). The dispatcher enforces ownership-isolation in code (``reapply.py`` + ``body.py``); the agent does NOT need to self-police section boundaries — those are restored by reapply byte-for-byte. The dispatcher classifies each dispatch into a structural ``mode`` (see § Mode rules) that determines what bytes the dispatcher will accept back. Consumer-side state machine, banner vocabulary, finalize behavior, and approve-gesture flow are out of scope for this wire contract — they belong to the consumer that drives the dispatcher.
 
@@ -20,6 +20,8 @@ Canonical contract for jobs dispatched to experts by the ``lazycortex-review`` d
   "result":                [{"path": "result/<file>"}],
   "edit_marker_style":     "simple | diff | criticmarkup | html",
   "decisions":             ["<repo-relative path>", ...],
+  "guidelines":            ["<absolute path>", ...],
+  "report":                true,
   "concerns": [
     {
       "group":            "<section-id>",
@@ -40,11 +42,13 @@ Field notes:
 - ``result[0].path`` — relative to the job dir, points at the empty file the expert writes to when ``outcome=edited``. Writer modes (``main`` / ``validation`` / ``terminal`` / ``repair``) return body content this way. A ``mode=main`` writer may declare further ``result`` entries of its own in the response — see § Attachments; the request only ever names the one.
 - ``edit_marker_style`` — names which annotation style is attached to the job. The agent reads this value and locates the matching block of marker rules in the ``lazy-core.markdown-style`` protocol attached to the job's ``config.json`` (one source of truth for marker shape — no per-style template duplicated in the payload). The dispatching consumer fills it from the document's pinned ``review_marker_style`` frontmatter (see § Frontmatter reserved keys), falling back to its settings only when the pin is absent.
 - ``decisions`` — optional array of repo-relative paths pointing into the working tree: the decisions registry of the asset the document belongs to first, the owning product's second, each omitted when its file does not exist. The field is absent when neither exists and on ``mode=repair``. The two files share a basename, so the order is the only thing that distinguishes them and is fixed. The expert opens these paths in the working tree directly, as they stand when it runs; they are not copied into the job dir, and nothing under ``source/`` or ``context/`` corresponds to them.
+- ``guidelines`` — optional array of absolute paths into a plugin tree: the canon the plugins enabled in the repository declare for the writer's role, in the order the writer reads them. A repo-relative project overlay a plugin declares next to its canon travels in ``context`` like every other repo-relative guideline; the canon comes before it. The field is absent when no plugin declares canon for the role and on ``mode=repair``. The expert reads every listed file in place, as it reads ``context``; the files are not copied into the job dir.
 - ``concerns`` — present only on ``mode=main`` dispatches AND only when at least one ``mode=validation`` section currently holds non-empty content. Each entry names one validation H1 section and carries its body (heading + ownership tag stripped). The main writer cannot edit the validation section content directly (the dispatcher restores it byte-for-byte on reapply); the field exists so the main writer's agent body has access to what the validator said.
+- ``report`` — present, with the value ``true``, only on a ``mode=main`` dispatch for a report (§ A report's main round); absent on every other dispatch. The field alone tells the writer the document is a report, whatever banner the source carries.
 
 ## Response shape (``response.json``)
 
-The response envelope — ``outcome`` / ``result`` / ``error`` — is owned by ``lazy-core.expert-runtime-contract``; read it alongside this protocol. This protocol adds ``history_entry`` on top of it (see § ``history_entry`` shape) and declares its own values:
+The response envelope — ``outcome`` / ``result`` / ``error`` — is owned by ``lazy-core.expert-runtime-contract``; read it alongside this protocol. This protocol adds ``history_entry`` (see § ``history_entry`` shape) and ``plan_verdict`` (see § ``plan_verdict``) on top of it and declares its own values:
 
 - ``outcome`` — ``edited | empty | error`` for a review-kind dispatch (``mode`` one of ``main`` / ``validation`` / ``terminal``); ``edited | error`` for a repair-kind dispatch (``mode == "repair"`` — a repair produces a parseable file or fails, there is no partial-progress ``empty``); ``summarized | noop | error`` for a history-kind dispatch (``mode == "history"`` — see `mode == "history"`).
 - ``error.category`` — one of the three standard categories the runtime contract defines: ``logical`` (the input was invalid), ``transient`` (a queue or Claude-process crash), ``technical`` (a schema violation). This protocol introduces no categories of its own.
@@ -59,15 +63,15 @@ Agent-side persona / lens / phrasing live in the agent's own `.md` definition wh
 
 ### mode == "main"
 
-Dispatcher reads the full document body from `result/<file>` and grafts it back excluding tagged H1 sections, `# History`, banner, status callout, and approve checkbox (those are restored byte-for-byte from the operator's prior state). The document's first-level heading (the `# <title>` line — the document identity) is likewise restored from the operator's prior state when the writer omits it — a defensive guard, not a licence to drop it (Bug 105). The document's frontmatter is restored from the operator's prior state; nothing in the reply changes it (see § Frontmatter reserved keys). Receives `concerns` when at least one `mode=validation` section is non-empty.
+Dispatcher reads the full document body from `result/<file>` and grafts it back excluding tagged H1 sections, `# History`, banner, status callout, and approve checkbox (those are restored byte-for-byte from the operator's prior state). The document's first-level heading (the `# <title>` line — the document identity) is likewise restored from the operator's prior state when the writer omits it — a defensive guard, not a licence to drop it (Bug 105). The document's frontmatter is restored from the operator's prior state; nothing in the reply changes it (see § Frontmatter reserved keys). Receives `concerns` when at least one `mode=validation` section is non-empty. On a report one tagged H1 section is the writer's own and is not restored: the `#review/discussion` block, which the writer writes and returns (§ A report's main round).
 
 The main writer owns the body's free prose. It rewrites paragraphs to address validator concerns and folds answered questions into the surrounding prose once resolved. Free prose, operator questions with answer options, and non-system commentary are the allowed shapes — the dispatcher-owned state blocks (the banner and its variants) are not authored by the main writer. The document's first-level heading (`# <title>`) is identity, not editable prose: the main writer MUST return it verbatim as the body's first line and never drop or rename it (dropping it strands downstream banner placement — Bug 105).
 
 **Operator-question invariant (MANDATORY for every operator question the writer emits, this mode and any other).** A question to the operator MUST carry answer options, or the dispatcher never sees the answer — ticking an option is the only answer signal a consumer can detect. When the writer wants free-form clarification instead, it writes the prompt as plain body prose, not as a question block. Whether a question also carries the escape row `- [ ] other — my answer in prose below` is the writer's judgement per question (`lazy-core.markdown-style.md` § Question callouts): add it when the listed options may not exhaust what the operator would say, leave it out when the answer set is closed by its nature.
 
-**An answered question is a settled decision (MANDATORY).** A callout carrying a ticked option is the operator's decision: the writer folds it into the surrounding prose in the SAME round and removes the callout. This covers a ticked `[!decision-candidate]` exactly as it covers a ticked `[!question]`: on `accept` the candidate's thesis becomes prose (or a `[!decision]` statement when it passes the weight test), on `reject` the operator's prose written under the callout becomes the text, and the callout is gone either way. A ticked `other` row on a question is folded the same way as a rejected candidate: the operator's prose under the callout is the decision, the writer works it into the text, and the callout is gone. A candidate left in the body — ticked or not — is a questionnaire the finalize step refuses to ship.
+**An answered question is a settled decision (MANDATORY).** A callout carrying a ticked option is the operator's decision: the writer folds it into the surrounding prose in the SAME round and removes the callout. This covers a ticked `[!decision-candidate]` exactly as it covers a ticked `[!question]`: on `accept` the candidate's thesis becomes prose (or a `[!decision]` statement when it passes the weight test), on `reject` the operator's prose written under the callout becomes the text, and the callout is gone either way. A ticked `other` row on a question is folded the same way as a rejected candidate: the operator's prose under the callout is the decision, the writer works it into the text, and the callout is gone. A candidate left in the body — ticked or not — is a questionnaire the finalize step refuses to ship. A `[!question]` with more than one ticked option is no decision: its options exclude one another, so none of them is applied. The writer folds nothing from it and leaves the callout exactly where it stands; the coordinator clears its ticks and writes the line asking the operator to tick one. The same holds for a `[!decision-candidate]` with both `accept` and `reject` ticked: it decides nothing, the writer leaves it in place, and the coordinator clears both boxes with a line saying that neither fired.
 
-**An open operator command is round input (MANDATORY).** A `[!todo] #review/command` callout in the source document whose mini-plan marks a writer step in progress is the operator's assignment for this round: the main writer carries the instruction out across its footprint. The callout itself is the dispatcher's pen — the writer returns it verbatim, never marks progress in it and never removes it.
+**An open operator command is round input (MANDATORY).** A `[!todo] #review/command` callout in the source document whose mini-plan marks a writer step in progress is the operator's assignment for this round: the main writer carries the instruction out across its footprint. The callout itself is the dispatcher's pen — the writer returns it verbatim, never marks progress in it and never removes it. On a report this paragraph does not apply: a command there is a remark, answered as § A report's main round says.
 
 ### mode == "validation"
 
@@ -134,6 +138,27 @@ Exhaustive forbidden-vocabulary list (shared by every expert that emits a ``hist
 
 The sentence is the expert's account of its own edit. Whether and how the consumer lands it under ``# History`` — the heading shape, the ordering, who writes the section — is consumer policy, out of scope for this wire contract.
 
+## A report's main round
+
+A report is the document of a ``mode=main`` request that carries ``"report": true`` (§ Request shape) — and only that: the field decides, never the source. A report's review closes with one of two decisions — accept it as it is, or fix by the operator's remarks — instead of an approve; while the operator decides, the source's banner shows those two boxes, but while a round runs it shows the in-process banner instead, so the banner is never the test. On a report the ``mode=main`` round is a discussion, and the writer's duties in it are these (MANDATORY):
+
+- **The round runs before any remark.** A report enters review with its main round owed, so the writer is dispatched on it before the operator has written anything. It reads the report and gives its verdict all the same; with no remark to answer it writes nothing else and returns ``outcome: empty`` with ``plan_verdict: sufficient``, since no remark falls outside the accepted plan.
+- **Remarks go into the discussion block.** The writer gathers every remark the operator wrote, wherever in the report, into one H1 section at the end of the body whose first non-empty line is the tag `#review/discussion`, and answers each remark there. The writer owns that block, creates it when it is absent, and keeps it as the body's last section before `# History`.
+- **Remarks leave the rest of the text.** Once a remark stands in the discussion block, the writer takes it out of the place where the operator wrote it.
+- **The round changes the report only.** The writer never changes code, never changes or runs checks, and writes nothing in the working tree outside the report itself; carrying a remark out is later work, never this round's. The job is dispatched without the right to commit in the repository, whatever the expert's own default, and so is every other job on the report: its validators, its terminal writers and a structure repair.
+- **A command is a remark.** A `[!todo] #review/command` callout in a report carries no mini-plan: the writer answers it in the discussion block, writing how it would be carried out, and does not carry it out. The callout itself stays the dispatcher's pen: the writer returns it verbatim and never removes it.
+- **Answered questions are still folded.** A ticked `[!question]` or `[!decision-candidate]` is folded into the report's own text and removed, as § mode == "main" says; when the answer needs work outside the report, the writer also records that in the discussion block as a remark.
+
+Every such response also carries ``plan_verdict`` (below).
+
+## ``plan_verdict``
+
+A report is defined in § A report's main round: the document of a ``mode=main`` request carrying ``"report": true``. On a report, the ``mode=main`` writer gives one verdict on the whole report in every response whose ``outcome`` is ``edited`` or ``empty``:
+
+- ``plan_verdict`` — ``sufficient`` when every operator remark can be carried out under the accepted plan; ``new-plan`` when at least one remark does not fit it.
+
+The field is **required** there: a response that omits it, or carries any other value, is malformed — nothing of it lands, and the job is retired as failed. On a document that is not a report, and in every other mode, the field is ignored. The dispatcher keeps the verdict of the last landed response and shows it in the report's banner, beside the fix box, until a later response replaces it.
+
 ## Language
 
 Review is the one chain with no language of its own. Write every line of prose — the report body, edit-marker rationales, question and concern callouts, the history entry — in **the language of the document under review**, judged from the document's own existing prose, and do not consult any settings key or language-resolving verb for it. A document written in one language whose review annotations arrive in another is the failure this clause prevents.
@@ -158,6 +183,7 @@ An extra ``result`` entry on any other mode is dropped with a line in the daemon
 
 - Expert MUST NOT touch any file outside its job dir.
 - Expert writes ONLY into ``result/`` (paths declared in the response's ``result`` array) — the document first, attachments after it, and nothing anywhere else in the working tree.
+- A task line tagged ``#review/send-back`` is the document producer's record of an open problem, not review content: a writer keeps every such line, its tick state included, exactly as it stands.
 
 ## Frontmatter reserved keys
 
@@ -171,6 +197,6 @@ No writer mode changes the document's frontmatter: a writer never receives it, a
 - ``review_autorun`` — the operator autorun state, set by `approve and run to the end without stops`: `running` while the review advances on its own, then `clean` (a validator barrier raised no concerns after at least one automatic approve), `cap` (the cycle cap was reached) or `question` (a writer raised a question for the operator) once it stops.
 - ``review_autorun_cycles`` — count of autorun cycles run in this review.
 - ``review_marker_style`` — the edit-marker style pinned to this review cycle at open time. Every consumer of the style (dispatch payload, strip-markup views, finalize's marker fold) reads this key first and falls back to ``review.edit_marker_style`` in settings only when it is absent, so changing the settings value mid-cycle never touches an open review.
-- ``review_result`` — terminal discriminator stamped by finalize as the LAST step (``approved`` | ``approved-with-concerns``). All other ``review_*`` keys are stripped at finalize; ``review_result`` is the single key that survives and signals downstream md-scan routines (e.g. consumer apply-gates) that the review has closed. Cleared by the open transition when a doc re-enters the review loop.
+- ``review_result`` — terminal discriminator stamped by finalize as the LAST step (``approved`` | ``approved-with-concerns``), or ``sent-back`` when the cycle ended without approval because the operator ticked task lines tagged ``#review/send-back`` to hand those problems back to the document's producer. All other ``review_*`` keys are stripped at finalize; ``review_result`` is the single key that survives and signals downstream md-scan routines (e.g. consumer apply-gates) that the review has closed. Cleared by the open transition when a doc re-enters the review loop.
 
 A stale or contradictory value in any of these keys is not a finding for a writer: no writer round can close it, and the plugin that owns the key refreshes it on its own schedule — the wiki curator, for one, skips documents under review and refreshes their summaries after finalize.

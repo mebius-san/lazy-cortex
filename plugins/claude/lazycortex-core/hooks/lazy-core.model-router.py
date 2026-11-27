@@ -43,12 +43,18 @@ if TYPE_CHECKING:
 # bin/ to sys.path so `lazy_settings` is importable.
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from lazy_settings import load_section, resolve_agent_model_tier  # noqa: E402
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import hook_gate  # noqa: E402
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from constants import AgentToolInput, HookKey, HookName, SettingsFile, SettingsKey, ToolName  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_repo_root  # noqa: E402
 
 
 TIER = { "haiku": 1, "sonnet": 2, "opus": 3, "fable": 4 }
@@ -88,19 +94,17 @@ def load_config(cwd: str | None) -> dict:
   per-group basis (project wins on collisions within a group).
 
   Args:
-    cwd: Working directory reported by the hook payload, used to locate the project settings
-      file. May be None when the payload omits it.
+    cwd: Working directory reported by the hook payload; the project settings file is the one at the root of the
+      checkout it sits in, where the daemon reads the same section. May be None when the payload omits it, then
+      `$LAZY_REPO_ROOT` or the process working directory stands in.
 
   Returns:
     A dict with one key `agent_models` whose value is the merged grouped configuration.
   """
-  # resolve both candidate settings paths (user-scope + project-scope)
-  user_path = Path.home() / SettingsFile.REL
-  proj_path = Path(cwd or ".") / SettingsFile.REL
-
-  # read both layers; either may be absent, which _safe_load reports as an empty section
-  user_section = _safe_load(user_path)
-  proj_section = _safe_load(proj_path)
+  # read both layers, the user's and the one at the root of the payload cwd's checkout; either may be absent, which
+  # _safe_load reports as an empty section
+  user_section = _safe_load(Path.home() / SettingsFile.REL)
+  proj_section = _safe_load(query_repo_root(cwd) / SettingsFile.REL)
 
   # merge per-group: user first, project overrides within each group
   merged: dict = {}
@@ -179,7 +183,15 @@ def main() -> None:
     sys.exit(0)
 
   # the hook payload carries the tool call this dispatch is about to make
-  payload = json.load(sys.stdin)
+  # guard: a payload that is not JSON routes nothing, and the trigger is never blocked
+  try:
+    payload = json.load(sys.stdin)
+  except ValueError:
+    sys.exit(0)
+
+  # guard: a JSON payload that is not an object names no tool call to route
+  if not isinstance(payload, dict):
+    sys.exit(0)
 
   # guard: only Agent dispatches participate in routing
   if payload.get(HookKey.TOOL_NAME) != ToolName.AGENT:

@@ -213,25 +213,20 @@ _SPEC_PATH_KEY = "spec_path"
 
 # `[!question]` callout detection and its ticked-option marker, per
 # `lazy-spec.coordination-playbook.md` § 9. `_QUESTION_HEAD_RE` alone matches ANY `[!question]`
-# callout, coordinator-authored or not — `_QUESTION_ATTRIBUTION` is what narrows a ticked one
+# callout, coordinator-authored or not — `_QUESTION_ATTRIBUTIONS` is what narrows a ticked one
 # down to the coordinator's own pen (below).
 _QUESTION_HEAD_RE = re.compile(r"^>\s*\[!question\]")
 _CALLOUT_HEAD_RE = re.compile(r"^>\s*\[!")
-_TICKED_OPTION_RE = re.compile(r"^>\s*-\s*\[x\]", re.IGNORECASE)
+_TICKED_OPTION_RE = re.compile(r"^>\s*-\s*\[x\]\s*(.*)$", re.IGNORECASE)
 
-# The coordinator's own pen format for a `[!question]` callout it writes (`lazy-spec.coordinator.md`
-# "Your pen" + `lazy-spec.coordination-playbook.md` § 9) — its LAST quoted line, exactly. An
-# expert-authored or operator-authored `[!question]` never carries this line, so a ticked option
-# under one of THOSE blocks never satisfies `_find_ticked_question_block`'s attribution check
-# below and never wakes the ANSWER trigger.
-_QUESTION_ATTRIBUTION = "> — spec.coordinator"
-
-# The same attribution line for the level persona, and the closed set of both. A level note's
-# questions are signed by the catalog coordinator, so an ANSWER on one would never match the
-# asset persona's line; membership in this two-element set is what lets one ladder serve both,
-# and an expert- or operator-authored `[!question]` still matches neither.
-_CATALOG_QUESTION_ATTRIBUTION = f"> — {_CATALOG_EXPERT}"
-_QUESTION_ATTRIBUTIONS = frozenset({ _QUESTION_ATTRIBUTION, _CATALOG_QUESTION_ATTRIBUTION })
+# The closing lines both coordinator personas sign their own `[!question]` callouts with
+# (`lazy-spec.coordinator.md` "Your pen" + `lazy-spec.coordination-playbook.md` § 9) — each its LAST quoted line,
+# exactly. An expert-authored or operator-authored `[!question]` never carries either, so a ticked option under one
+# of THOSE blocks never satisfies `_find_ticked_question_block`'s attribution check below and never wakes the
+# ANSWER trigger. A level note's questions are signed by the catalog persona, so membership in this one set is what
+# lets one ladder serve both. The set is the one `note_ops` reads too, so the answer check and the tick clearing
+# recognise the same questions.
+_QUESTION_ATTRIBUTIONS = note_ops.QUESTION_SIGNATURES
 
 # ATX heading boundary: a line opening with one to six `#` and whitespace ends the section above it.
 _HEADING_RE = re.compile(r"^#{1,6}\s")
@@ -393,10 +388,26 @@ def _is_attributed_ticked_block(ticked: bool, block_lines: list[str]) -> bool:
   return False
 
 
-def _find_ticked_question_block(body: str) -> str | None:
+def _is_answered(ticked: list[str], roots: Mapping[str, str] | None) -> bool:
   """
-  Locate the first coordinator-attributed `[!question]` callout in `body` carrying a ticked
-  `- [x]` option.
+  Judge whether a question's ticked options make an answer.
+
+  Args:
+    ticked: The texts of the question's ticked options.
+    roots: Product key to the product's repo-relative spec path, the routing question's targets are resolved
+      against; `None` resolves no product.
+
+  Returns:
+    True when at least one option is ticked and the ticks do not contradict each other.
+  """
+  return bool(ticked) and not note_ops.ticks_contradict(ticked, roots)
+
+
+def _find_ticked_question_block(body: str, roots: Mapping[str, str] | None = None) -> str | None:
+  """
+  Locate the first coordinator-attributed `[!question]` callout in `body` answered by its ticked `- [x]` options.
+
+  A block whose ticked options contradict each other is no answer and is skipped like an unticked one.
 
   A ticked block that does NOT end in one of the coordinator personas' own attribution lines is
   skipped rather than returned — scanning continues past it, so a foreign ticked question
@@ -404,6 +415,8 @@ def _find_ticked_question_block(body: str) -> str | None:
 
   Args:
     body: The folder-note section text to search.
+    roots: Product key to the product's repo-relative spec path, the routing question's targets are resolved
+      against; `None` resolves no product.
 
   Returns:
     The matching block's raw text (from its `[!question]` head line through its attribution
@@ -411,7 +424,7 @@ def _find_ticked_question_block(body: str) -> str | None:
     coordinator's own attribution.
   """
   in_block = False
-  ticked = False
+  ticked: list[str] = []
   block_lines: list[str] = []
 
   # walk the body once, tracking whether the current line sits inside a `[!question]` block
@@ -420,9 +433,9 @@ def _find_ticked_question_block(body: str) -> str | None:
 
     # entering a [!question] callout — flush a prior attributed-ticked block first
     if _QUESTION_HEAD_RE.match(stripped):
-      if in_block and _is_attributed_ticked_block(ticked, block_lines):
+      if in_block and _is_attributed_ticked_block(_is_answered(ticked, roots), block_lines):
         return "\n".join(block_lines)
-      in_block, ticked, block_lines = True, False, [line]
+      in_block, ticked, block_lines = True, [], [line]
       continue
 
     # lines outside a question block are passed over
@@ -431,16 +444,16 @@ def _find_ticked_question_block(body: str) -> str | None:
 
     # a different callout starts, or the quote-block ends — this question block is over
     if _CALLOUT_HEAD_RE.match(stripped) or not stripped.startswith(">"):
-      if _is_attributed_ticked_block(ticked, block_lines):
+      if _is_attributed_ticked_block(_is_answered(ticked, roots), block_lines):
         return "\n".join(block_lines)
       in_block = False
       continue
     block_lines.append(line)
-    if _TICKED_OPTION_RE.match(stripped):
-      ticked = True
+    if option := _TICKED_OPTION_RE.match(stripped):
+      ticked.append(option.group(1))
 
   # the body ended while still inside an attributed-ticked block (no trailing heading)
-  if in_block and _is_attributed_ticked_block(ticked, block_lines):
+  if in_block and _is_attributed_ticked_block(_is_answered(ticked, roots), block_lines):
     return "\n".join(block_lines)
   return None
 
@@ -976,15 +989,15 @@ def resolve_wake_trigger(repo_root: Path,
 
   # Domain(spec.lifecycle):
   # # Wake-trigger priority order
-  # A coordinator wake evaluates several possible reasons to act, in a fixed order, and only the
-  # first one that applies is acted on this wake: an explicit operator command, then — unless
-  # the asset is paused — a fresh answer to a question the coordinator itself asked, then a
-  # background job finishing, then a linked document's review outcome changing, then any other
-  # operator edit. Pausing an asset silences every one of these except the explicit command,
-  # which still gets through, so an operator can always reach a paused asset directly even
-  # though the automation around it has gone quiet. An edit to a linked document that is itself
-  # under active review belongs to that review's own loop rather than to this precedence, so it
-  # is never treated as an operator edit until the review concludes.
+  # A coordinator wake evaluates its possible reasons to act in a fixed order, and only the
+  # first one that applies is acted on this wake. First comes an explicit operator command: it
+  # wins even on a paused asset, so an operator can always reach a paused asset directly even
+  # though the automation around it has gone quiet. Pausing an asset silences every other
+  # reason, so past the command a paused asset gets no wake. Next comes a fresh answer to a
+  # question the coordinator itself asked, counted only when the answer differs from the one
+  # last acted on. Then comes a background job finishing, whoever authored the commit that
+  # carried it. Last comes an operator edit made recently; when none applies, nothing wakes the
+  # coordinator this tick.
 
   # a non-empty commands section wakes the coordinator even on a halted asset — the one
   # exception to the halt override below (playbook § 1, § 5 "Commands run on halted assets too")
@@ -998,7 +1011,7 @@ def resolve_wake_trigger(repo_root: Path,
   # a ticked question re-fires only when its content differs from the fingerprint stamped the
   # last time this worker dispatched on it (I1/I-D: retires the trigger so a destroyed removal
   # commit — the coordinator's own — can't resurrect an infinite re-dispatch loop)
-  if (ticked_block := _find_ticked_question_block(body)) is not None:
+  if (ticked_block := _find_ticked_question_block(body, note_ops.product_roots(repo_root))) is not None:
     if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return CoordinatorTrigger.ANSWER
 
@@ -1069,7 +1082,7 @@ def _resolve_group_trigger(repo_root: Path,
 
   # a ticked question re-fires only when its content differs from the fingerprint stamped the
   # last time this worker dispatched on it
-  if (ticked_block := _find_ticked_question_block(body)) is not None:
+  if (ticked_block := _find_ticked_question_block(body, note_ops.product_roots(repo_root))) is not None:
     if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return CoordinatorTrigger.ANSWER, {}
 
@@ -1206,7 +1219,7 @@ def _resolve_level_trigger(repo_root: Path,
     return None, {}
 
   # a ticked question re-fires only when its content differs from the stamped fingerprint
-  if (ticked_block := _find_ticked_question_block(body)) is not None:
+  if (ticked_block := _find_ticked_question_block(body, note_ops.product_roots(repo_root))) is not None:
     if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return CoordinatorTrigger.ANSWER, {}
 
@@ -2288,7 +2301,8 @@ def _has_group_wake(frontmatter: dict,
                     *,
                     raised_lags: Mapping[str, str],
                     note_changed: bool = True,
-                    basenames: frozenset[str] | None = None) -> bool:
+                    basenames: frozenset[str] | None = None,
+                    roots: Mapping[str, str] | None = None) -> bool:
   """
   Check whether a tick the busy-job guard is about to decline actually carries a wake-worthy
   signal — a cheap "is there anything to catch up on" probe, not the full trigger ladder.
@@ -2318,6 +2332,8 @@ def _has_group_wake(frontmatter: dict,
       a member is scanned for a transition when it carries a `spec_doc_type`
       (`spec_doc_types.is_ladder_document`).
     raised_lags: The note's stage-lag record, from `spec_job_markers.read_stage_lag`.
+    roots: Product key to the product's repo-relative spec path, the routing question's targets are resolved
+      against; `None` resolves no product.
 
   Returns:
     True when a `# Coordinator commands` section is non-empty, a coordinator-attributed ticked
@@ -2331,7 +2347,7 @@ def _has_group_wake(frontmatter: dict,
 
   # a ticked coordinator question counts only when its answer differs from the recorded fingerprint,
   # so an answer the coordinator already consumed never wakes it again
-  if (ticked_block := _find_ticked_question_block(body)) is not None:
+  if (ticked_block := _find_ticked_question_block(body, roots)) is not None:
     if frontmatter.get(AnsweredQuestionKey.FINGERPRINT) != _compute_answer_fingerprint(ticked_block):
       return True
 
@@ -2739,6 +2755,7 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
           and (release_member or _has_group_wake(
               frontmatter, body, item, wake_members, raised_lags = raised_lags,
               note_changed = wake_note_changed, basenames = doc_basenames,
+              roots = note_ops.product_roots(repo_root),
           ))
       ):
         spec_job_markers.update(repo_root, asset_note, { JobMarker.PENDING_WAKE: JobMarker.DECLINED })
@@ -3160,7 +3177,10 @@ def coordinator_dispatch(asset_note: Path,  # pylint: disable=too-many-branches
 
   # stamp the answered-question fingerprint so an identical ticked block never re-fires ANSWER
   # once this worker has already reacted to it (I1/I-D)
-  answered_block = _find_ticked_question_block(body) if trigger == CoordinatorTrigger.ANSWER else None
+  answered_block = (
+      _find_ticked_question_block(body, note_ops.product_roots(repo_root))
+      if trigger == CoordinatorTrigger.ANSWER else None
+  )
   if answered_block is not None:
     fm_text = note_ops.set_fm_scalar(
         fm_text, AnsweredQuestionKey.FINGERPRINT, _compute_answer_fingerprint(answered_block),

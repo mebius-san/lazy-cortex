@@ -25,7 +25,7 @@ import file_sync  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_git_toplevel  # pylint: disable=import-error
+from plugin_locator import installed_plugin_roots, query_repo_root, read_registry  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -34,8 +34,6 @@ if TYPE_CHECKING:
 
 REGISTRY_HEADING = "## Registry"
 LOCAL_KEY = "_local"
-# The consumer-side record of which plugins are installed; relative to the operator's home.
-_INSTALLED_PLUGINS = "~/.claude/plugins/installed_plugins.json"
 # A plugin's per-group scaffold manifest, one directory below its templates tree.
 MANIFEST_NAME = "scaffold.entries.json"
 # The plugin-root directory that holds the template groups.
@@ -690,26 +688,21 @@ def scope_root(registry: str) -> str:
   return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(registry))))
 
 
-def read_installed_plugins() -> frozenset[str] | None:
+def read_installed_plugins(start: str) -> frozenset[str] | None:
   """
-  Return the names of the plugins installed for the operator, or None when that record is unreadable.
+  Return the names of the plugins installed for a scope, or None when the install registry cannot be read.
+
+  Args:
+    start: The scope root: a repo, whose main checkout's and the user's installs count, or the operator's home.
 
   Returns:
-    The plugin names, each taken from the part of a record key before `@`; None when
-    the record is absent, unreadable, or not shaped as expected.
+    The bare names of the plugins installed for that repo or for the user; None when the install
+    registry file is absent or cannot be read as a JSON object.
   """
-  try:
-    with open(os.path.expanduser(_INSTALLED_PLUGINS), encoding = "utf-8") as fle:
-      data = json.load(fle)
-  except (OSError, ValueError):
+  # guard: a registry that is absent, or cannot be read as an object, says nothing about what is installed
+  if read_registry() is None:
     return None
-  # waiver: external-result schema field name, not an internal key
-  plugins = data.get("plugins")
-
-  # guard: an unexpected shape says nothing about what is installed
-  if not isinstance(plugins, dict):
-    return None
-  return frozenset(key.split("@")[0] for key in plugins)
+  return frozenset(installed_plugin_roots(Path(start)))
 
 
 def _is_template_readable(path: str, base_dir: str) -> bool:
@@ -1243,7 +1236,7 @@ def _cmd_sync_plugin(args: argparse.Namespace) -> int:
   """
   result = sync_plugin(
     args.plugin, args.install_path, scope = args.scope,
-    repo_root = str(resolve_git_toplevel(args.cwd)), home = str(Path.home()),
+    repo_root = str(query_repo_root(args.cwd)), home = str(Path.home()),
   )
   print(json.dumps(result))
 
@@ -1402,12 +1395,8 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
   Refresh a consumer's scaffold rule file from the shipped source and report the outcome.
 
   The whole file is taken from the shipped source; only the Registry block body
-  is carried over from the consumer's current copy. The written file is re-read
-  and compared before the outcome is reported.
-
-  Guarantees:
-    - Refreshing an existing consumer file preserves that file's own line ending in the
-      merged result, regardless of the shipped source's line ending.
+  is carried over from the consumer's current copy, and the consumer file keeps its own line ending. The written
+  file is re-read and compared before the outcome is reported.
 
   Args:
     src: Path of the shipped rule file.
@@ -1433,10 +1422,6 @@ def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
       new_md = graft_registry(shipped, current)
     except ValueError as error:
       return _emit({ "status": "error", "msg": str(error) })
-
-    # Contract:
-    # Refreshing an existing consumer file preserves that file's own line ending in the
-    # merged result, regardless of the shipped source's line ending.
 
     # the consumer's line ending survives a refresh from the shipped source
     new_md = new_md.replace("\r\n", "\n").replace("\n", _newline_of(current))
@@ -1545,9 +1530,8 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     Shell exit code 0.
   """
   # the registry's own location names the consumer scope its relative template paths live in
-  found = validate(
-    _read_or_minimal(args.registry), base_dir = scope_root(args.registry), installed = read_installed_plugins(),
-  )
+  root = scope_root(args.registry)
+  found = validate(_read_or_minimal(args.registry), base_dir = root, installed = read_installed_plugins(root))
   return _emit({"status": "ok", "findings": found})
 
 
@@ -1576,6 +1560,10 @@ def main(argv: list[str]) -> int:
   Maintains and inspects scaffold registry markdown files from the command line. Each
   invocation reports its result as a single JSON object on stdout.
 
+  Guarantees:
+    - The `sync-rule` verb, run on a rule file that already exists, keeps that file's own line ending in the
+      refreshed result, whatever line ending the shipped source uses.
+
   Args:
     argv: Argument list (typically `sys.argv[1:]`).
 
@@ -1583,6 +1571,11 @@ def main(argv: list[str]) -> int:
     Shell exit code: 0 on success, 1 on an error, a manifest collision, or a template that is not found, and 3 when
     a template write did not verify.
   """
+
+  # Contract:
+  # The `sync-rule` verb, run on a rule file that already exists, keeps that file's own line ending
+  # in the refreshed result, regardless of the line ending of the shipped source.
+
   # one subparser per registry operation, each naming its registry file
   arg_parser = argparse.ArgumentParser(prog = "lazycortex-core scaffold")
   # waiver: argparse CLI signature, not a domain key

@@ -5,13 +5,13 @@ paths:
 ---
 # Python tests (LLM-read)
 
-Critical test-discipline reminders for any `tests/**/*.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.testing-guidelines.md` before writing or editing any test; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/testing_guidelines.md` (overlay — read after canon, overrides on conflict).
+Critical test-discipline reminders for any `tests/**/*.py` file. Read the full canon at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.testing-guidelines.md` before writing or editing any test; project-specific deltas live at `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/testing_guidelines.md` (overlay — read after canon, overrides on conflict).
 
 ## Top test placement & naming rules
 
 - **Tests live at `tests/<module>/`** — the test tree mirrors the project's source layout. A class under `<module>/foo/bar.py` has its tests at `tests/<module>/foo/test_bar.py`.
-- **Base test class is project-specific** — the canonical inheritance chain (which `BaseTest` subclass each test type inherits from, and the rules for picking it) lives in `${CLAUDE_PROJECT_DIR}/docs/guidelines/testing_guidelines.md`. The plugin canon does not hardcode a class name — every project's test scaffolding differs.
-- **Method naming, max 35 chars**: `test_init`, `test_prop__<name>`, `test_feature__<variation>`. Double underscore separates the subject from the variation.
+- **Base test class is project-specific** — the canonical inheritance chain (which `BaseTest` subclass each test type inherits from, and the rules for picking it) lives in `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/testing_guidelines.md`. The plugin canon does not hardcode a class name — every project's test scaffolding differs.
+- **Method naming, max 37 chars**: `test_init`, `test_prop__<name>`, `test_feature__<variation>`. Double underscore separates the subject from the variation.
 - **One test method per behaviour** — no multi-behaviour tests, no parametrize-as-disguised-multi-test for unrelated cases.
 - **No `setUp` / `tearDown` / `setup_method` / `teardown_method`** — pytest fixtures only. Per-test setup goes in fixtures or `__init__`-style construction inside the test.
 

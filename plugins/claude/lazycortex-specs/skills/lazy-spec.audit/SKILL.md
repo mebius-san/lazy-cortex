@@ -137,7 +137,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.file-roles-protocol.md` and `${C
   - **Missing `Status:` line (FAIL)** — a `## D-NNN — <thesis>` heading whose following metadata block carries no `Status:` line.
   - **Header mismatch (FAIL)** — the file's leading `# <title> — decisions` H1 does not match its own path + role, same rule as every other role-bearing doc's header check above.
   - **Duplicate `D-NNN` (FAIL)** — two `## D-NNN — …` headings in the same file share a number. The primitive's own file-lock prevents this under normal operation; a duplicate here means the lock was bypassed (a hand-edit, or a lock broken mid-write) — no auto-fix, the operator resolves which record keeps the number.
-  - **Missing `wiki_pinned_topics` doc-kind pin (WARN, report-only)** — only when a spec-scope is configured in `wiki.scopes` (skip entirely otherwise — an unconfigured wiki has nothing to be wrong, same honesty rule as Check 10). A `decisions.md`, or any other role-bearing doc, whose `wiki_pinned_topics` lacks its expected `wiki/doc-kind/<role>` entry. **The audit never backfills a missing pin itself** — it has a standing "no migration, ever" rule and a vault-wide pin sweep is exactly that; the fix is `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doctor --apply`, run once and re-run after any bulk content import.
+  - **Missing `wiki_pinned_topics` doc-kind pin (WARN, report-only)** — only when a spec-scope is configured in `wiki.scopes` (skip entirely otherwise — an unconfigured wiki has nothing to be wrong, same honesty rule as Check 10). A `decisions.md`, or any other role-bearing doc, whose `wiki_pinned_topics` lacks its expected `wiki/doc-kind/<role>` entry. A level note (`spec_role: product` or `catalog`) is never checked: its template carries no pin block, and `doctor --apply` restores none to it. **The audit never backfills a missing pin itself** — it has a standing "no migration, ever" rule and a vault-wide pin sweep is exactly that; the fix is `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doctor --apply`, run once and re-run after any bulk content import.
 - **Decision statement in the wrong document (WARN)** — a `[!decision] … #spec/decision` block (a full decision statement, not a candidate) found in a document that is not a living doc, i.e. whose frontmatter `spec_role` is NOT one of the closed set `vision`, `design`, `bug`, `tech`, `architecture` (the roles `decide promote` reads blocks from). Two examples of what the predicate cuts off:
   - **A plan** (a release's `code-plan` / `test-plan`; `stages: true`, but a plan is a decomposition of already-accepted decisions, never their source): propose raising the block into an included asset's design or vision document, or the product's vision / tech / architecture document, instead.
   - **A report** (a release's `code-report` / `test-report`, or any other declared type with `append_only: true`): a report only ever holds a decision-*candidate*; propose rewriting the block as one, or raising it into the living doc through the normal review round.
@@ -370,7 +370,7 @@ scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 - Dangling `superseded-by`: `<feat>/decisions.md` `## D-003` points at `D-011`, which does not exist
 - Duplicate decision number: `<feat>/decisions.md` has two `## D-004 — …` headings
 - Decisions header mismatch: `<feat>/decisions.md` H1 does not match its path + role
-- Code decision link unresolved: `<repo>/src/export.py:42` cites `Decision: core/export#D-007` — no such `decisions.md` or `D-007` heading
+- Code decision link unresolved: `<file>:<line>` cites `Decision: <path>#D-<NNN>` — no such `decisions.md` or `D-<NNN>` heading
 - Request schema: `requests/<slug>.md` missing/invalid `request_status`/`request_class`/`created`
 - Unresolvable `spec_source_requests`: `<feat>/<feat>.md` lists `<path>` but no request file exists there
 - Upstream unit without note: `upstream/<repo-key>/<mount>/<unit>/` carries `source/` or `processed/` but no `<unit>.md` note
@@ -403,7 +403,7 @@ scan: Check 11 vault-spec — <clean|INFO|WARN> (<0|1> findings)
 - Decision statement in a report: `releases/<NNN>/code-report.md` carries a `[!decision]` block — that role holds only a decision-candidate
 - Dangling `Origin` back-link: `<feat>/decisions.md` `## D-002` is `active` with `Origin` naming `design.md`, which has no reference-link back to it
 - Missing `doc-kind` pin: `<feat>/decisions.md` `wiki_pinned_topics` lacks `wiki/doc-kind/decisions` (spec-scope configured in `wiki.scopes`) — run `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" doctor --apply`
-- Code decision link rescinded: `<repo>/src/export.py:42` cites `Decision: core/export#D-007` — record `Status: superseded-by D-011`
+- Code decision link rescinded: `<file>:<line>` cites `Decision: <path>#D-<NNN>` — record `Status: superseded-by D-<MMM>`
 
 ### Info
 - N source files, M routes, K assets documented

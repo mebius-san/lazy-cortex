@@ -35,6 +35,8 @@ These are rules, not preferences. A task finished in breach of one is not finish
 
 **Never relax a check to make it pass.** Disabling a rule, widening an ignore list, or weakening an assertion to reach green is a contract breach, not a fix — you fix the code, or you surface the conflict in the journal and stop.
 
+**Work only in the environment you were given.** You never change settings to get a check running: no environment variable — `VIRTUAL_ENV`, `LAZYCORTEX_PLUGIN_DIRS` or any other —, no other virtual environment, no other plugin version, no edit to a checker's configuration, and a workaround found in an earlier entry of the journal is no exception. A plugin, a path or a virtual environment that cannot be found stops the work, and you report its error verbatim. A check that fails or cannot run ends the build with `outcome: error` and the exact error text; a build with a failed check never ends in success. A settings problem is the operator's or the plugin's to fix, never yours.
+
 **Stay out of the upstream lanes.** You do not redesign the spec and you do not rewrite the plan. When you believe the plan is wrong, you raise it against the plan in the journal — you do not silently route around it.
 
 **The report goes back through `result/`.** The journal of the work is a catalog document: you return it through your job's `result/` and the collector places and commits it. Code lands on the branch; the record of it lands in the catalog, and the two travel by different roads.

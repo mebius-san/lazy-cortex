@@ -22,7 +22,7 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it".
 3. **Do not reach Step 7 (Report) until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Output one line per task — gaps are a bug.
-5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every scheme lookup (Step 4) is the single `Bash(test -f …)` the step names, written with the `${CLAUDE_PLUGIN_ROOT}` variable form exactly as printed here, and never as a `;`-chained compound command; the permission layer denies an expanded absolute path and the skill dies before Step 5.
+5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every scheme lookup (Step 4) is the single `Bash(ls -d …)` the step names, written with the `${CLAUDE_PLUGIN_ROOT}` variable form exactly as printed here, and never as a `;`-chained compound command; the permission layer denies an expanded absolute path and the skill dies before Step 5.
 
 ## Input
 
@@ -77,7 +77,7 @@ Outcome: `extracted (<chars>)` or `warned`.
 
 ### Step 4: Resolve scheme path
 
-- For `format=mermaid`: `Bash(test -f "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json")`. A non-zero exit → `failed:scheme-not-found:<name>`. Short-circuit.
+- For `format=mermaid`: `Bash(ls -d "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json")`. The scheme is present when the command lists the path; when it fails with "No such file or directory" → `failed:scheme-not-found:<name>`. Short-circuit.
 - For `format=ascii`: skip — ASCII drawers do not consume scheme files.
 
 Outcome: `resolved scheme=<name>` (mermaid) / `n/a (ascii)` / `failed:scheme-not-found:<name>`.

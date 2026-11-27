@@ -27,4 +27,4 @@ A skill that stages for you returns the paths it touched; fold them into your co
 
 ## Staging-window mutex
 
-A per-repo lock at `.git/lazy-git.lock` serializes the window from the first `git add` to the `git commit` that empties the index. Plan every edit before any `git add`, then add → pre-commit pipeline → commit back-to-back; an idle non-empty index over 10 min is broken by the stale-and-idle rule. On "another Claude session is staging…": wait, retry once, then escalate. Never break the lock yourself; `/lazy-core.git-status` and `/lazy-core.git-unlock` are the operator's hatches.
+A per-repo lock at `lazy-git.lock` in the repository's shared git directory (`<main checkout>/.git/`, the same file from every linked worktree) serializes the window from the first `git add` to the `git commit` that empties the index. Plan every edit before any `git add`, then add → pre-commit pipeline → commit back-to-back; an idle non-empty index over 10 min is broken by the stale-and-idle rule. On "another Claude session is staging…": wait, retry once, then escalate. Never break the lock yourself; `/lazy-core.git-status` and `/lazy-core.git-unlock` are the operator's hatches.

@@ -65,6 +65,9 @@ import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -114,11 +117,8 @@ _GIT_NO_MATCH = 1
 # The entry a repository, a worktree or a submodule carries at its top level.
 _GIT_ENTRY = ".git"
 
-# The locale git is asked in, so its messages come untranslated, and the words it refuses a folder outside every
-# repository with.
-_GIT_LOCALE_VAR = "LC_ALL"
-_GIT_LOCALE = "C"
-_NOT_A_REPOSITORY = "not a git repository"
+# The failure raised when git cannot name the top level of a repository whose `.git` is in sight.
+_LOOKUP_FAILED = "git cannot name the top level of the repository holding {folder}"
 
 # Error-ledger incident key a failed icon repaint opens; every failed repaint of the repo folds into it
 _REPAINT_INCIDENT = "spec-icon-repaint"
@@ -515,63 +515,45 @@ def find_repo_top(cwd: Path) -> Path | None:
   Find the top-level folder of the git repository that holds a folder.
 
   Guarantees:
-    - A result of `None` is given in three cases only: git itself refuses the folder with its "not a git repository"
-      message, no `.git` entry exists at the folder or above it, or git exits zero but names no folder.
-    - Every other git failure is never answered with `None`: git exiting non-zero for another reason, such as a
-      refused ownership check, or git being unable to run while a `.git` entry is in sight raises
-      `subprocess.CalledProcessError` or `OSError`, so a caller that skips its commit on `None` never skips it
-      over such a failure.
+    - A result of `None` is given only when no `.git` entry exists at the folder or above it, so a caller that
+      skips its commit on `None` skips it only where no repository exists.
+    - Wherever a `.git` entry is in sight, a lookup git cannot answer — a refused ownership check, git unable to
+      run, or git naming no folder — raises `OSError`, never answers `None`.
 
   Args:
     cwd: The folder the lookup starts from.
 
   Returns:
-    The repository's top-level folder, or `None` when git itself says the folder is in no git repository, when no
-    `.git` entry is at the folder or above it, or when git names no folder.
+    The repository's top-level folder, a linked worktree's own root inside one; `None` when no `.git` entry is at
+    the folder or above it.
 
   Raises:
-    subprocess.CalledProcessError: If git exits non-zero for any other reason inside a repository, such as a refused
-      ownership check.
-    OSError: If git cannot be run while a `.git` entry is in sight.
+    OSError: If git cannot name the top level while a `.git` entry is in sight.
   """
 
   # Contract:
-  # The answer `None` is given in three cases only: git itself refuses the folder with its "not a git repository"
-  # message; no `.git` entry exists at the folder or above it, so a failing or missing git cannot have been
-  # reading a repository; or git exits zero but names no folder, so there is no work tree to commit into.
-  # Every other git failure is never answered with `None`: git exiting non-zero for another reason, such as a
-  # refused ownership check, or git being unable to run while a `.git` entry is in sight raises
-  # `subprocess.CalledProcessError` or `OSError`, so a caller that skips its commit on `None` never skips it
-  # over such a failure.
+  # The answer `None` is given only when no `.git` entry exists at the folder or above it, so a caller that skips
+  # its commit on `None` skips it only where no repository exists.
+
+  # Contract:
+  # Wherever a `.git` entry is in sight, a lookup git cannot answer — a refused ownership check, git unable to
+  # run, or git naming no folder — MUST raise `OSError`, never answer `None`.
 
   # a folder that does not exist yet is looked up from its nearest existing ancestor, so a missing folder is never
   # mistaken for a missing git
   folder = next(( candidate for candidate in ( cwd, *cwd.parents ) if candidate.is_dir() ), cwd)
 
-  # the top level git names for the folder, asked in git's own untranslated words so its refusal can be read;
-  # the answer is captured as bytes, so no byte of the folder's name is changed by a decoder or a newline rule
-  try:
-    done = subprocess.run(
-        [ "git", "rev-parse", "--show-toplevel" ], cwd = folder, check = True, capture_output = True,
-        env = { **os.environ, _GIT_LOCALE_VAR: _GIT_LOCALE },
-    )
-  except subprocess.CalledProcessError as error:
-    # guard: git itself says the folder lies in no repository, or no `.git` is in sight at or above it — the
-    # silent answer; any other refusal inside a repository is git's own failure and the caller's too
-    if _NOT_A_REPOSITORY in os.fsdecode(error.stderr or b"") or not _is_inside_git_dir(cwd):
-      return None
-    raise
-  except OSError:
-    # guard: git cannot be run at all — silent only where no `.git` is in sight
-    if not _is_inside_git_dir(cwd):
-      return None
-    raise
+  # the top level the shared locator names for the folder
+  top = spec_locator.find_checkout_toplevel(folder)
 
-  # the name as the file system spells it, less the one line end git closes its answer with
-  top = os.fsdecode(done.stdout).removesuffix("\n")
+  # guard: no `.git` in sight at or above the folder — the silent answer
+  if top is None and not _is_inside_git_dir(cwd):
+    return None
 
-  # an answer that names no folder names no work tree to commit into
-  return Path(top) if top else None
+  # guard: a `.git` in sight that git cannot answer for is git's own failure and the caller's too
+  if top is None:
+    raise OSError(_LOOKUP_FAILED.format(folder = folder))
+  return top
 
 
 def _is_inside_git_dir(cwd: Path) -> bool:
@@ -585,8 +567,7 @@ def _is_inside_git_dir(cwd: Path) -> bool:
     True when the folder or any of its ancestors carries a `.git` directory or file.
   """
   # a `.git` entry — a directory, or the file a worktree or a submodule carries — at the folder or above it
-  folder = cwd.resolve()
-  return any(( candidate / _GIT_ENTRY ).exists() for candidate in ( folder, *folder.parents ))
+  return spec_locator.find_nearest_dir(cwd, _GIT_ENTRY) is not None
 
 
 def repo_root(cwd: Path) -> Path:
@@ -600,8 +581,7 @@ def repo_root(cwd: Path) -> Path:
     The repository top-level `Path`, or `cwd` when the folder is in no git repository.
 
   Raises:
-    subprocess.CalledProcessError: If git fails inside a repository.
-    OSError: If git cannot be run inside a repository.
+    OSError: If git cannot name the top level while a `.git` entry is in sight.
   """
   top = find_repo_top(cwd)
 
@@ -863,13 +843,13 @@ def commit_paths_detail(repo: Path, paths: Iterable[Path | str], *,
     `(False, [], [])` only when there is truly no repository, a path lies outside `repo`, or nothing changed.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails, or git fails inside a repository during the repository
-      lookup or the status query; a lookup failure is never read as "no repository". A failure of the status
-      query or the commit after a `deferred_write` landed is re-raised after the deferred path is put back; a
-      commit that does not land also takes back the icon repaint's own rewrite of each repainted note, back to
-      the bytes the caller had written.
-    OSError: If git cannot be run during the repository lookup, the status query or the commit; after a
-      `deferred_write` landed, the deferred path is put back first.
+    subprocess.CalledProcessError: If the commit fails, registering a new file with `git add -N` fails, or git
+      fails during the status query. A failure of the status query or the commit after a `deferred_write` landed
+      is re-raised after the deferred path is put back; a commit that does not land also takes back the icon
+      repaint's own rewrite of each repainted note, back to the bytes the caller had written.
+    OSError: If git cannot name the top level while a `.git` entry is in sight, so a lookup failure is never read
+      as "no repository", or if git cannot be run for the status query or the commit; after a `deferred_write`
+      landed, the deferred path is put back first.
     BaseException: Any other exception raised after a `deferred_write` landed and before the commit landed is
       re-raised unchanged once the deferred path is put back.
   """
@@ -1015,9 +995,10 @@ def commit_paths(repo: Path, paths: Iterable[Path | str], *,
     True when a commit was made.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails, or git fails inside a repository during the repository
-      lookup; such a failure is never read as "no repository".
-    OSError: If git cannot be run inside a repository during the repository lookup.
+    subprocess.CalledProcessError: If the commit fails, registering a new file with `git add -N` fails, or git
+      fails during the status query.
+    OSError: If git cannot name the top level while a `.git` entry is in sight, so a lookup failure is never read
+      as "no repository", or if git cannot be run for the status query or the commit.
     BaseException: Any other exception raised after a `deferred_write` landed and before the commit landed is
       re-raised unchanged once the deferred path is put back.
   """
@@ -1105,9 +1086,9 @@ def _commit_flip(
       when refreshed) alone.
 
   Raises:
-    subprocess.CalledProcessError: If a git command in the commit branch fails, including the repository lookup
-      when git fails inside a repository; such a failure is never read as "no repository".
-    OSError: If git cannot be run inside a repository during the repository lookup.
+    subprocess.CalledProcessError: If a git command in the commit branch fails, the commit included.
+    OSError: If git cannot name the top level while a `.git` entry is in sight, so a lookup failure is never read
+      as "no repository", or if git cannot be run inside the commit branch.
   """
   # no top level means there is no repo to commit into; a git failure inside a repository raises here
   repo = find_repo_top(asset_dir)
@@ -1359,9 +1340,9 @@ def _commit_halt(
       note alone.
 
   Raises:
-    subprocess.CalledProcessError: If a git command in the commit branch fails, including the repository lookup
-      when git fails inside a repository; such a failure is never read as "no repository".
-    OSError: If git cannot be run inside a repository during the repository lookup.
+    subprocess.CalledProcessError: If a git command in the commit branch fails, the commit included.
+    OSError: If git cannot name the top level while a `.git` entry is in sight, so a lookup failure is never read
+      as "no repository", or if git cannot be run inside the commit branch.
   """
   # no top level means there is no repo to commit into; a git failure inside a repository raises here
   repo = find_repo_top(asset_dir)

@@ -19,12 +19,14 @@ spec_source_docs: []
 <!-- What the cases below cover and what they deliberately leave out. One bullet per item in and per item out. How a run is set up and when it counts as complete lives in the product's test-plan. -->
 
 ## Tests
-<!-- The test cases, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority. The mechanisms the tests use live in the product's test-plan. -->
+<!-- The test cases, in three shapes: one procedure with its expected outcome, one procedure over many inputs, and a checklist over one area. One block per test in the shapes below, with type, risk and priority; a test that relies on the state an earlier test leaves records that state, so the release plan can build a chain that runs as written. The mechanisms the tests use live in the product's test-plan. -->
 
 ### _Test name_
 - **Type**: _one of the tester's test types._
 - **Risk**: _what breaking here would mean._
 - **Preconditions**: _only when they differ from the common ones._
+- **State in**: _the state this test needs from an earlier test of its chain; only in a chain._
+- **State out**: _the state this test leaves for a later test of its chain; only in a chain._
 - **Priority**: high | medium | low
 
 #### Steps

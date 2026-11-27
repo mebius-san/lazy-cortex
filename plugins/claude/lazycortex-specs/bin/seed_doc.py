@@ -53,32 +53,52 @@ import re
 import sys
 from pathlib import Path
 
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import apply_request  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import asset_types  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import flip_gate  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import release_delta  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import resolve_product  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scaffold_asset  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import sources_refresh  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_doc_types  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_frontmatter  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import spec_paths  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from spec_keys import Gate, LevelDoc, ReleaseKey, SiblingDoc, SpecKey, SpecValue  # pylint: disable=import-error
-
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import apply_request  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import release_delta  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import sources_refresh  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from spec_keys import Gate, LevelDoc, ReleaseKey, SiblingDoc, SpecKey, SpecValue  # noqa: E402
 
 
 _PROG = "lazycortex-specs seed-doc"
@@ -123,9 +143,8 @@ _JOURNAL_DOCS = frozenset({ SiblingDoc.CODE_REPORT, SiblingDoc.TEST_REPORT })
 # A frontmatter line opening a top-level key: a column-0 name, optional blanks, the colon
 _TOP_KEY_RE = re.compile(r"^([^\s#-][^:\s]*)[ \t]*:(?=\s|$)", re.M)
 
-# The `migrate-journals` verb: its program name, the daemon-exported repo root, its result keys and its failure exit
+# The `migrate-journals` verb: its program name, its result keys and its failure exit
 _PROG_JOURNALS = "lazycortex-specs migrate-journals"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _TOUCHED_KEY = "touched"
 _SKIPPED_KEY = "skipped"
 _PATHS_KEY = "paths"
@@ -617,8 +636,9 @@ def main_journals(argv: list[str]) -> int:
 
   Notes:
     - Prints the `backfill_journals` result, with `paths`, to stdout as one JSON object.
-    - The repository root is `--cwd`, else the `LAZY_REPO_ROOT` environment variable, else the process working
-      directory.
+    - The run works in the nearest directory, within its checkout, that holds `.claude/lazy.settings.json`, searched
+      upward from `--cwd`, else the `LAZY_REPO_ROOT` environment variable, else the process working directory; the
+      checkout's root when none holds it.
 
   Args:
     argv: The verb's argv tail: `--dry-run`, `--check` and `--cwd`.
@@ -643,12 +663,10 @@ def main_journals(argv: list[str]) -> int:
   parser.add_argument(scaffold_asset.Keys.ARG_CWD, default = None, help = scaffold_asset.Keys.HELP_CWD)
   args = parser.parse_args(argv)
 
-  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
   # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
   try:
-    result = backfill_journals(repo, dry_run = args.dry_run or args.check, with_paths = True)
+    result = backfill_journals(spec_locator.query_settings_root(args.cwd), dry_run = args.dry_run or args.check,
+                               with_paths = True)
   # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught
@@ -784,7 +802,7 @@ def main(argv: list[str]) -> int:
       scaffold_asset.fail(scaffold_asset.Keys.CAT_LOGICAL, _ERR_REPLACE_WITH_REFRESH)
 
     # the plan path is read against the repository the refresh acts in; the result goes out as JSON
-    repo = Path(args.cwd).resolve() if args.cwd else scaffold_asset.repo_root(Path.cwd())
+    repo = spec_locator.query_settings_root(args.cwd)
     print(json.dumps(refresh_release_plan(repo, repo / args.refresh_sources)))
     return 0
 
@@ -805,7 +823,7 @@ def main(argv: list[str]) -> int:
     product, note_rel = args.product, args.note
 
   # resolve the repo, the product record, and the note before any write
-  repo = Path(args.cwd).resolve() if args.cwd else scaffold_asset.repo_root(Path.cwd())
+  repo = spec_locator.query_settings_root(args.cwd)
   record = scaffold_asset.resolve_product(repo, product) if product else {}
   note_path = repo / note_rel
 

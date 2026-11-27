@@ -5,16 +5,15 @@ Agent rename for the lazycortex-experts plugin.
 
 Backs the `rename-implementer-agent` verb: the agent `lazy-experts.implementer` is now `lazy-experts.developer`, and
 a consumer's settings still name the old one. The verb rewrites the `agent` of every expert that names the old agent
-and moves the `agent_models` tiers keyed by the old dispatch string, in three settings layers: the tracked settings,
-the gitignored local overlay beside them, and the user-scope settings file in the home directory. Settings are
-written only through the core CLI. It never commits.
+and moves the `agent_models` tiers keyed by the old dispatch string, in three settings layers: the tracked settings
+and the gitignored local overlay beside them, at the toplevel of the checkout the run works in, and the user-scope
+settings file in the home directory. Settings are written only through the core CLI. It never commits.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +21,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import experts_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The dispatch string of the agent before the rename and after it.
@@ -53,8 +61,7 @@ _LOCAL_SCOPE = "local"
 # The seconds a core call may run before it counts as failed.
 _CORE_TIMEOUT_S = 120
 
-# The environment variable naming the repository root, and how undecodable subprocess output is read.
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+# How undecodable subprocess output is read.
 _DECODE_ERRORS = "replace"
 
 # The result's wire-shape keys.
@@ -315,6 +322,11 @@ def main(argv: list[str]) -> int:
       does.
     - Any failure exits 2 under every flag, never an answer `--check` gives.
 
+  Notes:
+    - The tracked settings and the local overlay are those at the toplevel of the checkout that `--cwd`, else
+      `$LAZY_REPO_ROOT`, else the working directory sits in, even inside a nested project with settings of its own:
+      the sections migrated are read by the daemon, which keeps them at the checkout's toplevel.
+
   Args:
     argv: Command-line arguments, without the program name.
 
@@ -342,13 +354,13 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--core-cli", default = None)
   args = parser.parse_args(argv)
 
-  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+  # the core CLI to call, when the caller names one
   core_cli = Path(args.core_cli) if args.core_cli else None
 
-  # a check runs dry; any failure exits 2
+  # a check runs dry against the checkout toplevel of `--cwd`, else of the daemon's env var, else of the process cwd,
+  # where the daemon-read sections live; any failure exits 2
   try:
-    result = migrate(repo, core_cli, dry_run = args.dry_run or args.check)
+    result = migrate(experts_locator.query_repo_root(args.cwd), core_cli, dry_run = args.dry_run or args.check)
   # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught

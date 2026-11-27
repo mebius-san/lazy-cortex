@@ -1,4 +1,5 @@
-"""Main CLI for lazy-review (dispatched by the `lazycortex-review` shim).
+"""
+Main CLI for lazy-review (dispatched by the `lazycortex-review` shim).
 
 Subcommands:
 
@@ -37,9 +38,26 @@ Subcommands:
 - `strip-status` — remove every `#status/<state>` callout from the document body outside code fences in
                  place, frontmatter untouched, no commit, printing `{"changed": bool}` — run by a caller
                  abandoning the document.
+- `strip-command` — remove the document's open `#review/command` callout outside code fences and foreign protected
+                 sections in place, every other byte untouched, no commit, printing `{"changed": bool}` — run by
+                 the coordinator when a command is finished; a document with no command is not an error.
+- `clear-multi-ticks` — clear every tick of each `[!question] #review/question` callout ticked more than once and of
+                 each `[!decision-candidate]` callout with both boxes ticked, and write a notice line in the
+                 document's language under each one's options in place, no commit, printing `{"cleared": <n>}`
+                 counting both kinds — run by the coordinator on the wake that brought the ticks; a document with
+                 none is not an error.
+- `strip-discussion` — remove a report's discussion block from the document body in place, every other byte
+                 untouched, no commit, printing `{"stripped": bool}` — run when a report's review closes on a
+                 path that takes the block off; a document with no block is not an error.
 - `repair-structure` — delegate to :mod:`structure_repair` (repair an unclosed fence or frontmatter
                  delimiter and strip lone edit-annotation opening marks (the mark characters only, outside
                  sections another plugin owns) in place when no guess is needed, no commit; `--check` only reports).
+- `operator-text` — delegate to :mod:`operator_text` (print the passages of the document's prose an
+                 operator commit wrote, a submit carried in from the operator's draft, or a review commit
+                 landed while an operator command stood open).
+- `decision-clean` — delegate to :mod:`decision_gate` (print `{"clean": bool}`: whether a decision box ticked on
+                 the ready banner counts, true only when the operator's commits since the review system's last
+                 commit changed nothing but the banner's box ticks).
 - `configure-apply` — delegate to :mod:`configure_apply` (write one review class collected by
                  `/lazy-review.configure` and re-run the install bootstrap; JSON in via `--payload`,
                  `--payload-file`, or stdin).
@@ -47,14 +65,17 @@ Subcommands:
                  map of whichever decisions-registry file(s) resolve for one document; the
                  coordinator folds this into a main or barrier writer dispatch's `context`).
 - `guidelines-context` — delegate to :mod:`guidelines_context` (print the `{paths, warnings}`
-                 map of the product guidelines one expert carries on one document; the
-                 coordinator names the paths in a main or barrier writer dispatch's `context`).
+                 map of the plugin canon and product guidelines one expert carries on one
+                 document; a main or barrier writer dispatch names the repo-relative paths in
+                 its `context` and the absolute canon paths in the payload's `guidelines`).
 - `dispatch-writer` — delegate to :mod:`writer_dispatch` (build the whole expert-job bundle for one
                  document and one expert, write the writer job marker, and queue the job through
                  core; prints `{job_id, status, warnings}`, or `{error}` on a refusal).
 - `core-cli` — print the absolute path of the `lazycortex-core` CLI this plugin resolves
-                 (`$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling, then the install
-                 registry); the coordinator agent holds it as `<core-cli>` for the wake.
+                 for the repository the working directory belongs to: `$LAZYCORTEX_PLUGIN_DIRS`,
+                 the dev-vault sibling, the checkout's own plugin tree, then the install the
+                 registry records for this repository or the user; the coordinator agent holds
+                 it as `<core-cli>` for the wake.
 """
 from __future__ import annotations
 
@@ -73,22 +94,45 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobMarker  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from keys import JobKey, JobMarker, LockitKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from review_lockit import Lockit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# Subcommand names, help lines and argument spellings of the `repair-structure` and `configure-apply` verbs
+# Subcommand names, help lines and argument spellings of the verbs registered with named constants below
 _REPAIR_VERB = "repair-structure"
 _REPAIR_HELP = "repair the doc's mechanical structure in place"
 _CONFIGURE_VERB = "configure-apply"
 _CONFIGURE_HELP = "write one review class from stdin and re-run install"
+_OPERATOR_TEXT_VERB = "operator-text"
+_OPERATOR_TEXT_HELP = "list the doc's passages the operator wrote or ordered by command"
+_STRIP_COMMAND_VERB = "strip-command"
+_DECISION_CLEAN_VERB = "decision-clean"
+_DECISION_CLEAN_HELP = "report whether the operator changed only the banner's boxes since the system's last commit"
+_STRIP_COMMAND_HELP = "remove the doc's open #review/command callout"
+_CLEAR_MULTI_TICKS_VERB = "clear-multi-ticks"
+_CLEAR_MULTI_TICKS_HELP = "clear the ticks of every question ticked more than once and say why under it"
+_STRIP_DISCUSSION_VERB = "strip-discussion"
+_STRIP_DISCUSSION_HELP = "remove a report's discussion block from the doc body"
 _ARG_FILE = "file"
 _ARG_CHECK = "--check"
 _ARG_REPO = "--repo"
+# The parsed-namespace attribute `--repo` lands in
+_REPO_ATTR = "repo"
+# The parsed-namespace attribute keeping `--repo` as given, before it is widened to the checkout root
+_REPO_START_ATTR = "repo_start"
 _ARG_PAYLOAD = "--payload"
 _ARG_PAYLOAD_FILE = "--payload-file"
 _STORE_TRUE = "store_true"
@@ -107,6 +151,8 @@ _POSITIONS = ( "top", "bottom" )
 
 # The exit code of the `paint-banner` verb when the job markers cannot be read, so the job state is unknown.
 _EXIT_JOB_STATE_UNKNOWN = 1
+# The exit code of the `paint-banner` verb when the document's review class cannot be resolved.
+_EXIT_CLASS_UNKNOWN = 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -122,7 +168,7 @@ def cmd_status(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import status  # type: ignore  # pylint: disable=import-error
-  return status.main([args.file])
+  return status.main([ args.file ])
 
 
 def cmd_parse_note(args: argparse.Namespace) -> int:
@@ -142,7 +188,7 @@ def cmd_parse_note(args: argparse.Namespace) -> int:
   # run the bare `import note_ops` above resolves to that unrelated module instead (this dir's
   # `__init__.py` makes review's own copy package-qualified as `bin.note_ops`), so mypy checks the
   # attribute against the wrong file's shape rather than skipping it as unresolved
-  return note_ops.main([args.file, "--repo", args.repo])  # type: ignore[attr-defined]
+  return note_ops.main([ args.file, "--repo", args.repo ])  # type: ignore[attr-defined]
 
 
 def cmd_set_key(args: argparse.Namespace) -> int:
@@ -157,7 +203,8 @@ def cmd_set_key(args: argparse.Namespace) -> int:
     args: Parsed namespace with `file`, `key`, `value`, and `repo` attributes.
 
   Returns:
-    Exit code: 0 on success, 2 if the key is unknown (file untouched).
+    Exit code: 0 on success; 2 when the file does not exist or `set_key` refuses the key or value (an unknown or
+    retired key, a bad autorun state, a bad cycle count), with the file left untouched.
 
   Raises:
     ParseError: If the document has an opening frontmatter fence with no matching closing fence.
@@ -223,29 +270,46 @@ def cmd_mark_job(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import job_markers  # type: ignore  # pylint: disable=import-error
-  forward: list[str] = [args.file, args.kind]
+
+  # the file and marker kind always go through; a job id only when one was given
+  forward: list[str] = [ args.file, args.kind ]
   if args.job_id:
     forward.append(args.job_id)
+
+  # a clear request is replayed as its flag
   if args.clear:
     # waiver: argparse CLI signature, not a domain key
     forward.append("--clear")
-  return job_markers.main([*forward, "--repo", args.repo])
+  return job_markers.main([ *forward, "--repo", args.repo ])
 
 
 def cmd_paint_banner(args: argparse.Namespace) -> int:
   """
   Delegate the `paint-banner` subcommand to the note_ops module.
 
+  The banner painted is the report banner when the document's review class is configured with `report: true`, and
+  the plain banner otherwise; a report banner carries the plan-verdict line when the document has a stored verdict.
+  The verdict is the one recorded for the document's own repository root, whatever checkout the command works in;
+  the other job state comes from that checkout. The review class comes from the document's nearest
+  `.claude/lazy.settings.json` within its checkout, the checkout's root when none is nearer.
+
+  Guarantees:
+    - When the document's review class cannot be resolved, because the review settings cannot be read or no core CLI
+      is resolvable, no banner is painted and the document is left untouched.
+
   Args:
     args: Parsed namespace with `file` and `repo` attributes.
 
   Returns:
-    Exit code: 0 on success, 1 when the job markers cannot be read (the banner is left as it is and one stderr
-    line says the job state is unknown), 2 if the file does not exist (nothing written).
+    Exit code: 0 on success, 1 when the job markers cannot be read or the document's review class cannot be resolved
+    (the banner is left as it is and one stderr line says the job state or the class is unknown), 2 if the file does
+    not exist (nothing written).
 
   Raises:
     ParseError: If the document has an opening frontmatter fence with no matching closing
       fence — mirrors `cmd_set_key`, which propagates the same failure uncaught.
+    RuntimeError: If the document sits in a vault and the `lazycortex-core` language lookup fails or returns no
+      language.
   """
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
@@ -253,6 +317,18 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import note_ops  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import core_settings  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import doc_class  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import finalize  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  from errors import SettingsReadError  # type: ignore  # pylint: disable=import-error
 
   # resolve the file path against --repo, mirroring cmd_set_key
   repo = Path(args.repo).resolve()
@@ -263,13 +339,15 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
 
-  # repaint and write back — no commit, per the verb's contract. Whether a job is out on the
-  # document is runtime state now, so the banner's in-process state comes from the sidecar
+  # the document is read once, its line ending kept for the write back
   lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
 
   # guard: markers that cannot be read do not say "no job in flight"; the banner is left as it is
+  # the writer's verdict is keyed by the document's repository root, where every other verdict reader and writer
+  # keys it, whatever `--repo` names
   try:
-    in_flight = bool(job_markers.read_checked(repo, file_path)[JobMarker.ACTIVE_JOB])
+    markers = job_markers.read_checked(repo, file_path)
+    verdict = job_markers.read_checked(finalize.query_repo_root_for(file_path), file_path)[JobMarker.VERDICT]
   except OSError as error:
     sys.stderr.write(
         f"paint-banner: job state unknown, banner left as it is: {job_markers.sidecar_path(repo)}: "
@@ -277,11 +355,27 @@ def cmd_paint_banner(args: argparse.Namespace) -> int:
     )
     return _EXIT_JOB_STATE_UNKNOWN
 
-  # the banner is repainted from the frontmatter state and the job state just read
+  # guard: settings or a core that cannot be read say nothing about the class, and painting either banner on a guess
+  # could put the approve banner on a report; the banner is left as it is
+  try:
+    settings_root = core_settings.query_settings_root_for(file_path)
+    settings = core_settings.read_merged_sections(settings_root, JobKey.REVIEW)
+    report = bool(doc_class.is_report_class(settings, settings_root, file_path))
+  except (SettingsReadError, RuntimeError) as error:
+    sys.stderr.write(
+        f"paint-banner: the document's review class is unknown, banner left as it is: "
+        f"{type(error).__name__}: {error}\n"
+    )
+    return _EXIT_CLASS_UNKNOWN
+
+  # the banner is repainted from the frontmatter state and the sidecar's job state and plan verdict, then written
+  # back with no commit
   # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
   # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
   updated_text = note_ops.repaint_banner(  # type: ignore[attr-defined]
-      lf_text, job_in_flight = in_flight, lang = note_ops.resolve_language(file_path))  # type: ignore[attr-defined]
+      lf_text, job_in_flight = bool(markers[JobMarker.ACTIVE_JOB]),
+      lang = note_ops.resolve_language(file_path),  # type: ignore[attr-defined]
+      report = report, verdict = verdict)
   _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(updated_text, ending))
   return 0
 
@@ -299,7 +393,7 @@ def cmd_collect_job(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import collect_ops  # type: ignore  # pylint: disable=import-error
-  return collect_ops.main([args.file, "--repo", args.repo])
+  return collect_ops.main([ args.file, "--repo", args.repo ])
 
 
 def cmd_collect_tick(args: argparse.Namespace) -> int:
@@ -315,7 +409,7 @@ def cmd_collect_tick(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import collect_ops  # type: ignore  # pylint: disable=import-error
-  return collect_ops.main_tick(["--repo", args.repo])
+  return collect_ops.main_tick([ "--repo", args.repo ])
 
 
 def cmd_sanitize(args: argparse.Namespace) -> int:
@@ -331,7 +425,7 @@ def cmd_sanitize(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import sanitize  # type: ignore  # pylint: disable=import-error
-  return sanitize.main(["--repo", args.repo])
+  return sanitize.main([ "--repo", args.repo ])
 
 
 def cmd_coordinator_dispatch(args: argparse.Namespace) -> int:
@@ -347,7 +441,7 @@ def cmd_coordinator_dispatch(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import coordinator_dispatch  # type: ignore  # pylint: disable=import-error
-  return coordinator_dispatch.main([args.item_json, "--repo", args.repo])
+  return coordinator_dispatch.main([ args.item_json, "--repo", args.repo ])
 
 
 def cmd_commit_doc(args: argparse.Namespace) -> int:
@@ -365,10 +459,11 @@ def cmd_commit_doc(args: argparse.Namespace) -> int:
   import commit_doc  # type: ignore  # pylint: disable=import-error
 
   # each landed attachment is replayed as its own flag — the verb reads `--also` repeatably
-  extra = [token for path in (args.also or ()) for token in ("--also", path)]
+  extra = [ token for path in (args.also or ()) for token in ("--also", path) ]
+
   # each History line is replayed as its own flag, in the order given
-  lines = [token for line in (args.history or ()) for token in ("--history", line)]
-  return commit_doc.main([args.file, "--subject", args.subject, "--repo", args.repo, *extra, *lines])
+  lines = [ token for line in (args.history or ()) for token in ("--history", line) ]
+  return commit_doc.main([ args.file, "--subject", args.subject, "--repo", args.repo, *extra, *lines ])
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -384,9 +479,11 @@ def cmd_start(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import start  # type: ignore  # pylint: disable=import-error
-  forward: list[str] = [args.file]
+
+  # the file always goes through; an expert only when one was named
+  forward: list[str] = [ args.file ]
   if args.expert:
-    forward.extend(["--expert", args.expert])
+    forward.extend([ "--expert", args.expert ])
 
   # a caller that owns the commit itself takes the bootstrap alone — see the flag's own help
   if args.no_commit:
@@ -408,9 +505,11 @@ def cmd_submit(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import submit  # type: ignore  # pylint: disable=import-error
-  forward: list[str] = [args.file]
+
+  # the file always goes through; an expert only when one was named
+  forward: list[str] = [ args.file ]
   if args.expert:
-    forward.extend(["--expert", args.expert])
+    forward.extend([ "--expert", args.expert ])
   return submit.main(forward)
 
 
@@ -430,6 +529,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import stop  # type: ignore  # pylint: disable=import-error
+
+  # the file always goes through; a caller owning the commit itself asks for none
   forward = [ args.file ]
   if args.no_commit:
     # waiver: argparse CLI signature forwarded verbatim to the stop module
@@ -513,7 +614,24 @@ def cmd_finalize(args: argparse.Namespace) -> int:
   # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
   # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import finalize  # type: ignore  # pylint: disable=import-error
-  return finalize.main([args.file])
+  return finalize.main([ args.file ])
+
+
+def cmd_send_back(args: argparse.Namespace) -> int:
+  """
+  Delegate the `send-back` subcommand to the send_back module.
+
+  Args:
+    args: Parsed namespace with `file`, `repo`, and `decision` attributes; a set `decision` is forwarded as the
+      `--decision` flag.
+
+  Returns:
+    Exit code from the send_back module.
+  """
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import send_back  # type: ignore  # pylint: disable=import-error
+  return send_back.main([ args.file, _ARG_REPO, args.repo, *([ "--decision" ] if args.decision else []) ])
 
 
 def cmd_strip_markup(args: argparse.Namespace) -> int:
@@ -646,6 +764,8 @@ def cmd_dispatch_writer(args: argparse.Namespace) -> int:
   # each extra context file is replayed as its own flag, in the order given
   for path in args.context or ():
     forward.extend([ _ARG_CONTEXT, path ])
+
+  # a doctor repair dispatch is replayed as its flag
   if args.repair:
     forward.append(_ARG_REPAIR)
   return writer_dispatch.main(forward)
@@ -777,6 +897,172 @@ def cmd_strip_status(args: argparse.Namespace) -> int:
   return 0
 
 
+def cmd_clear_multi_ticks(args: argparse.Namespace) -> int:
+  """
+  Clear the ticks of every question ticked more than once and every decision-candidate ticked both ways, in place,
+  with no commit.
+
+  Guarantees:
+    - A document with no such question or candidate exits 0, prints `{"cleared": 0}`, and is not rewritten.
+    - A missing file exits 1, and nothing is written then.
+
+  Notes:
+    - The notice line under each cleared question or candidate is written in the document's language.
+    - Prints one JSON line, `{"cleared": <n>}`, the number of questions and candidates cleared together, to stdout on
+      success.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code: 0 on success, none to clear included, 1 when the file is missing (nothing written).
+  """
+
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import note_ops  # type: ignore  # pylint: disable=import-error
+
+  # resolve the file against --repo; an absolute file argument wins over the repo root
+  file_path = (Path(args.repo).resolve() / args.file).resolve()
+
+  # guard: only an existing file has questions to clear
+  if not file_path.is_file():
+    sys.stderr.write(f"file not found: {file_path}\n")
+    return 1
+
+  # the questions are counted and cleared on the LF view of the document, its line ending kept for the write back
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
+  # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
+  # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
+  report = note_ops.build_report(lf_text)  # type: ignore[attr-defined]
+  # waiver: 'multi_ticked_questions'/'both_ticked_candidates' are parse-note's own wire-shape keys (note_ops docstring)
+  cleared = len(report["multi_ticked_questions"]) + len(report["both_ticked_candidates"])
+
+  # write only when a question or a candidate was cleared, so a repeat call is a no-op on disk
+  if cleared:
+    # waiver: type: ignore — the same whole-project mypy binding of `note_ops` as above
+    lang = note_ops.resolve_language(file_path)  # type: ignore[attr-defined]
+    # waiver: type: ignore — the same whole-project mypy binding of `note_ops` as above
+    updated = note_ops.clear_multi_ticked_questions(  # type: ignore[attr-defined]
+        lf_text, Lockit.text(LockitKey.QUESTION_MULTI_TICKED, lang))
+    # waiver: type: ignore — the same whole-project mypy binding of `note_ops` as above
+    updated = note_ops.clear_both_ticked_candidates(  # type: ignore[attr-defined]
+        updated, Lockit.text(LockitKey.CANDIDATE_BOTH_TICKED, lang))
+    _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(updated, ending))
+  print(json.dumps({ "cleared": cleared }))
+  return 0
+
+
+def cmd_strip_command(args: argparse.Namespace) -> int:
+  """
+  Remove the document's open operator command callout in place, with no commit.
+
+  Guarantees:
+    - A document with no open command exits 0, prints `{"changed": false}`, and is not rewritten.
+    - A missing file exits 1, and nothing is written then.
+
+  Notes:
+    - The file is rewritten atomically, and only when a callout was removed.
+    - Prints one JSON line, `{"changed": bool}`, to stdout on success.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code: 0 on success, an absent command included, 1 when the file is missing (nothing written).
+  """
+
+  # Contract:
+  # A document with no open command exits 0 with `{"changed": false}` and is not rewritten; a missing file exits 1
+  # with nothing written. The coordinator runs this at the end of every finished command, and an absent callout
+  # must never break its wake.
+
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import note_ops  # type: ignore  # pylint: disable=import-error
+
+  # resolve the file against --repo; an absolute file argument wins over the repo root
+  file_path = (Path(args.repo).resolve() / args.file).resolve()
+
+  # guard: only an existing file has a command to remove
+  if not file_path.is_file():
+    sys.stderr.write(f"file not found: {file_path}\n")
+    return 1
+
+  # the command comes off the LF view of the document, its line ending kept for the write back
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
+  # waiver: type: ignore — a whole-project mypy run binds `note_ops` to
+  # `lazycortex-specs/bin/note_ops.py`, so this review module's attributes are unknown to it
+  stripped = note_ops.strip_open_command(lf_text)  # type: ignore[attr-defined]
+
+  # write only when a callout came off, so a repeat call is a no-op on disk
+  changed = stripped != lf_text
+  if changed:
+    _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(stripped, ending))
+  print(json.dumps({ "changed": changed }))
+  return 0
+
+
+def cmd_strip_discussion(args: argparse.Namespace) -> int:
+  """
+  Remove a report's discussion block from the document body in place, with no commit.
+
+  Guarantees:
+    - Frontmatter bytes and every byte outside the block are left untouched, and the line ending is kept.
+    - A document with no discussion block exits 0, prints `{"stripped": false}`, and is not rewritten.
+    - A missing file exits 1, and nothing is written then.
+
+  Notes:
+    - No commit is made.
+    - Prints one JSON line, `{"stripped": bool}`, to stdout on success.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code: 0 on success, an absent block included, 1 when the file is missing (nothing written).
+
+  Raises:
+    ParseError: If the document has an opening frontmatter fence with no matching closing fence.
+  """
+
+  # Contract:
+  # A document with no discussion block exits 0 with `{"stripped": false}` and is not rewritten; a missing file
+  # exits 1 with nothing written. The file is rewritten only when a block came off, and no commit is ever made.
+
+  # Contract:
+  # Frontmatter bytes and every byte outside the discussion block are left untouched, and the document's
+  # line ending is kept.
+
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import body as _body  # type: ignore  # pylint: disable=import-error
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
+  import frontmatter as _fm  # type: ignore  # pylint: disable=import-error
+
+  # resolve the file against --repo; an absolute file argument wins over the repo root
+  file_path = (Path(args.repo).resolve() / args.file).resolve()
+
+  # guard: only an existing file has a body to strip
+  if not file_path.is_file():
+    sys.stderr.write(f"file not found: {file_path}\n")
+    return 1
+
+  # split the document once — the frontmatter half is written back byte-for-byte
+  lf_text, ending = _atomic_io.to_lf(_atomic_io.read_text(file_path))
+  _meta, body = _fm.parse(lf_text)
+  fm_text = lf_text[: len(lf_text) - len(body)]
+
+  # write only when a block came off, so a repeat call is a no-op on disk
+  new_body = _body.strip_discussion(body)
+  stripped = new_body != body
+  if stripped:
+    _atomic_io.write_text_atomic(file_path, _atomic_io.restore_ending(fm_text + new_body, ending))
+  print(json.dumps({ "stripped": stripped }))
+  return 0
+
+
 def cmd_repair_structure(args: argparse.Namespace) -> int:
   """
   Delegate the `repair-structure` subcommand to the `structure_repair` module.
@@ -795,12 +1081,45 @@ def cmd_repair_structure(args: argparse.Namespace) -> int:
   return structure_repair.main([ args.file, _ARG_REPO, args.repo, *([ _ARG_CHECK ] if args.check else []) ])
 
 
+def cmd_operator_text(args: argparse.Namespace) -> int:
+  """
+  Delegate the `operator-text` subcommand to the `operator_text` module.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code from the `operator_text` module.
+  """
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; pylint cannot see that path
+  import operator_text  # pylint: disable=import-error
+  return operator_text.main([ args.file, _ARG_REPO, args.repo ])
+
+
+def cmd_decision_clean(args: argparse.Namespace) -> int:
+  """
+  Delegate the `decision-clean` subcommand to the `decision_gate` module.
+
+  Args:
+    args: Parsed namespace with `file` and `repo` attributes.
+
+  Returns:
+    Exit code from the `decision_gate` module.
+  """
+  # waiver: deferred local import — each verb loads its flat `bin/` sibling module only when that verb runs
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; pylint cannot see that path
+  import decision_gate  # pylint: disable=import-error
+  return decision_gate.main([ args.file, _ARG_REPO, args.repo ])
+
+
 def cmd_configure_apply(args: argparse.Namespace) -> int:
   """
   Delegate the `configure-apply` subcommand to the `configure_apply` module.
 
   Args:
-    args: Parsed namespace with the `repo`, `payload`, and `payload_file` attributes.
+    args: Parsed namespace with the `repo`, `payload`, and `payload_file` attributes, and `repo_start`, the `--repo`
+      value as given, when `main` parsed it.
 
   Returns:
     Exit code from the `configure_apply` module.
@@ -812,7 +1131,12 @@ def cmd_configure_apply(args: argparse.Namespace) -> int:
   # each given document source is replayed as its flag; with neither, the document stays on stdin for the module
   payload = [ _ARG_PAYLOAD, args.payload ] if args.payload is not None else []
   payload_file = [ _ARG_PAYLOAD_FILE, args.payload_file ] if args.payload_file is not None else []
-  return configure_apply.main([ _ARG_REPO, args.repo, *payload, *payload_file ])
+
+  # the settings written are the nearest ones to `--repo` as given, so the module gets it unwidened; none given, the
+  # module falls back to `$LAZY_REPO_ROOT`, then the cwd, itself
+  start = getattr(args, _REPO_START_ATTR, args.repo)
+  repo_args = [ _ARG_REPO, start ] if start is not None else []
+  return configure_apply.main([ *repo_args, *payload, *payload_file ])
 
 
 def cmd_decisions_context(args: argparse.Namespace) -> int:
@@ -847,7 +1171,7 @@ def cmd_decisions_context(args: argparse.Namespace) -> int:
 
 def cmd_guidelines_context(args: argparse.Namespace) -> int:
   """
-  Print the product guideline paths one expert carries on one review document.
+  Print the plugin canon and product guideline paths one expert carries on one review document.
 
   Args:
     args: Parsed namespace with `file` and `expert` attributes.
@@ -868,7 +1192,7 @@ def cmd_guidelines_context(args: argparse.Namespace) -> int:
 
 def cmd_core_cli(_args: argparse.Namespace) -> int:
   """
-  Print the absolute path of the `lazycortex-core` CLI this plugin resolves.
+  Print the absolute path of the `lazycortex-core` CLI resolved for the repository the command works in.
 
   Args:
     _args: Parsed namespace; the verb takes no arguments.
@@ -877,13 +1201,13 @@ def cmd_core_cli(_args: argparse.Namespace) -> int:
     Exit code: 0 with the path on stdout, 1 with an `error:` line on stderr when no lookup
     stage finds core.
   """
-  # one resolver for the whole plugin — the verb only exposes what every other caller already uses
+  # one resolver for the whole plugin, started at the checkout root the command works in
   try:
-    cli = _git_ops.require_core_cli()
+    cli = _git_ops.require_core_cli(_review_locator.query_repo_root())
   # no lookup stage found a binary — the agent stops and reports rather than guessing a path; the
   # resolver's own message names every stage searched
-  except RuntimeError as exc:
-    sys.stderr.write(f"error: {exc}\n")
+  except RuntimeError as error:
+    sys.stderr.write(f"error: {error}\n")
     return 1
   print(cli)
   return 0
@@ -898,29 +1222,29 @@ def build_parser() -> argparse.ArgumentParser:
   """
   # the root parser and the subcommand slot every verb below registers itself into
   # waiver: argparse CLI signature, not a domain key
-  parser = argparse.ArgumentParser(prog="lazy-review")
+  parser = argparse.ArgumentParser(prog = "lazy-review")
   # waiver: argparse CLI signature, not a domain key
-  sub = parser.add_subparsers(dest="cmd", required=True)
+  sub = parser.add_subparsers(dest = "cmd", required = True)
 
   # `status` — read-only introspection for the operator
   # waiver: argparse CLI signature, not a domain key
-  p_status = sub.add_parser("status", help="introspect one file")
+  p_status = sub.add_parser("status", help = "introspect one file")
   # waiver: argparse CLI signature, not a domain key
   p_status.add_argument("file")
-  p_status.set_defaults(func=cmd_status)
+  p_status.set_defaults(func = cmd_status)
 
   # `parse-note` — read-only structural report for the coordinator / watch worker
   # waiver: argparse CLI signature, not a domain key
-  p_parse = sub.add_parser("parse-note", help="structural report for one file")
+  p_parse = sub.add_parser("parse-note", help = "structural report for one file")
   # waiver: argparse CLI signature, not a domain key
   p_parse.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_parse.add_argument("--repo", default=".")
-  p_parse.set_defaults(func=cmd_parse_note)
+  p_parse.add_argument("--repo", default = None)
+  p_parse.set_defaults(func = cmd_parse_note)
 
   # `set-key` — write a frontmatter key to a review document
   # waiver: argparse CLI signature, not a domain key
-  p_set = sub.add_parser("set-key", help="set frontmatter key in a review document")
+  p_set = sub.add_parser("set-key", help = "set frontmatter key in a review document")
   # waiver: argparse CLI signature, not a domain key
   p_set.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
@@ -928,65 +1252,65 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   p_set.add_argument("value")
   # waiver: argparse CLI signature, not a domain key
-  p_set.add_argument("--repo", default=".")
-  p_set.set_defaults(func=cmd_set_key)
+  p_set.add_argument("--repo", default = None)
+  p_set.set_defaults(func = cmd_set_key)
 
   # `mark-job` — write one runtime job marker into the gitignored sidecar
   # waiver: argparse CLI signature, not a domain key
-  p_mark = sub.add_parser("mark-job", help="set or clear one runtime job marker on a review document")
+  p_mark = sub.add_parser("mark-job", help = "set or clear one runtime job marker on a review document")
   # waiver: argparse CLI signature, not a domain key
   p_mark.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_mark.add_argument("kind", choices=[JobMarker.KIND_COORDINATOR, JobMarker.KIND_WRITER])
+  p_mark.add_argument("kind", choices = [ JobMarker.KIND_COORDINATOR, JobMarker.KIND_WRITER ])
   # waiver: argparse CLI signature, not a domain key
-  p_mark.add_argument("job_id", nargs="?", default=None)
+  p_mark.add_argument("job_id", nargs = "?", default = None)
   # waiver: argparse CLI signature, not a domain key
-  p_mark.add_argument("--clear", action="store_true")
+  p_mark.add_argument("--clear", action = "store_true")
   # waiver: argparse CLI signature, not a domain key
-  p_mark.add_argument("--repo", default=".")
-  p_mark.set_defaults(func=cmd_mark_job)
+  p_mark.add_argument("--repo", default = None)
+  p_mark.set_defaults(func = cmd_mark_job)
 
   # `paint-banner` — repaint the top banner from the document's current frontmatter state
   # waiver: argparse CLI signature, not a domain key
-  p_paint = sub.add_parser("paint-banner", help="repaint the review banner from frontmatter state")
+  p_paint = sub.add_parser("paint-banner", help = "repaint the review banner from frontmatter state")
   # waiver: argparse CLI signature, not a domain key
   p_paint.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_paint.add_argument("--repo", default=".")
-  p_paint.set_defaults(func=cmd_paint_banner)
+  p_paint.add_argument("--repo", default = None)
+  p_paint.set_defaults(func = cmd_paint_banner)
 
   # `collect-job` — land DONE job payloads for one file into the working tree, no commit
   # waiver: argparse CLI signature, not a domain key
-  p_collect = sub.add_parser("collect-job", help="land DONE job payloads for one review document")
+  p_collect = sub.add_parser("collect-job", help = "land DONE job payloads for one review document")
   # waiver: argparse CLI signature, not a domain key
   p_collect.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_collect.add_argument("--repo", default=".")
-  p_collect.set_defaults(func=cmd_collect_job)
+  p_collect.add_argument("--repo", default = None)
+  p_collect.set_defaults(func = cmd_collect_job)
 
   # `collect-tick` — sweep the whole job queue, landing every DONE-and-not-CONSUMED job
   # waiver: argparse CLI signature, not a domain key
-  p_collect_tick = sub.add_parser("collect-tick", help="sweep the job queue for finished review jobs")
+  p_collect_tick = sub.add_parser("collect-tick", help = "sweep the job queue for finished review jobs")
   # waiver: argparse CLI signature, not a domain key
-  p_collect_tick.add_argument("--repo", default=".")
-  p_collect_tick.set_defaults(func=cmd_collect_tick)
+  p_collect_tick.add_argument("--repo", default = None)
+  p_collect_tick.set_defaults(func = cmd_collect_tick)
 
   # `sanitize` — repair the three file-provable stuck review-loop states
   # waiver: argparse CLI signature, not a domain key
   p_sanitize = sub.add_parser("sanitize", help = "repair stuck review-loop state")
   # waiver: argparse CLI signature, not a domain key
-  p_sanitize.add_argument("--repo", default = ".")
+  p_sanitize.add_argument("--repo", default = None)
   p_sanitize.set_defaults(func = cmd_sanitize)
 
   # `commit-doc` — the coordinator's single wake commit, repaint folded in
   # waiver: argparse CLI signature, not a domain key
-  p_commit_doc = sub.add_parser("commit-doc", help="commit one review document's wake state")
+  p_commit_doc = sub.add_parser("commit-doc", help = "commit one review document's wake state")
   # waiver: argparse CLI signature, not a domain key
   p_commit_doc.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_commit_doc.add_argument("--subject", required=True)
+  p_commit_doc.add_argument("--subject", required = True)
   # waiver: argparse CLI signature, not a domain key
-  p_commit_doc.add_argument("--repo", default=".")
+  p_commit_doc.add_argument("--repo", default = None)
 
   # repeatable: one `--also <path>` per attachment a `collect-job` landed beside the document
   # waiver: argparse CLI signature, not a domain key
@@ -995,142 +1319,186 @@ def build_parser() -> argparse.ArgumentParser:
   # repeatable: one `--history <line>` per journal line the verb lands under today's day group
   # waiver: argparse CLI signature, not a domain key
   p_commit_doc.add_argument("--history", action = "append", default = None)
-  p_commit_doc.set_defaults(func=cmd_commit_doc)
+  p_commit_doc.set_defaults(func = cmd_commit_doc)
 
   # `coordinator-dispatch` — the git-watch routine's entrypoint for one tick's changed documents
   # waiver: argparse CLI signature, not a domain key
-  p_coord = sub.add_parser("coordinator-dispatch", help="detect a coordinator wake trigger and dispatch")
+  p_coord = sub.add_parser("coordinator-dispatch", help = "detect a coordinator wake trigger and dispatch")
   # waiver: argparse CLI signature, not a domain key
   p_coord.add_argument("item_json")
   # waiver: argparse CLI signature, not a domain key
-  p_coord.add_argument("--repo", default=".")
-  p_coord.set_defaults(func=cmd_coordinator_dispatch)
+  p_coord.add_argument("--repo", default = None)
+  p_coord.set_defaults(func = cmd_coordinator_dispatch)
 
   # `start` — opt a document in, opening writer round included
   # waiver: argparse CLI signature, not a domain key
-  p_start = sub.add_parser("start", help="opt a file into review")
+  p_start = sub.add_parser("start", help = "opt a file into review")
   # waiver: argparse CLI signature, not a domain key
   p_start.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_start.add_argument("--expert", default=None)
+  p_start.add_argument("--expert", default = None)
   # waiver: argparse CLI signature, not a domain key
-  p_start.add_argument("--no-commit", action="store_true",
+  p_start.add_argument("--no-commit", action = "store_true",
                        # waiver: one-off human-facing message -- argparse help text
-                       help="apply the bootstrap but leave the commit to the caller")
-  p_start.set_defaults(func=cmd_start, no_commit=False)
+                       help = "apply the bootstrap but leave the commit to the caller")
+  p_start.set_defaults(func = cmd_start, no_commit = False)
 
   # `submit` — opt a document in with the opening writer round skipped
   p_submit = sub.add_parser(
       # waiver: argparse CLI signature, not a domain key
-      "submit", help="opt a file into review skipping the opening writer round")
+      "submit", help = "opt a file into review skipping the opening writer round")
   # waiver: argparse CLI signature, not a domain key
   p_submit.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_submit.add_argument("--expert", default=None)
-  p_submit.set_defaults(func=cmd_submit)
+  p_submit.add_argument("--expert", default = None)
+  p_submit.set_defaults(func = cmd_submit)
 
   # `stop` — opt a document out mid-cycle
   # waiver: argparse CLI signature, not a domain key
-  p_stop = sub.add_parser("stop", help="opt a file out of review")
+  p_stop = sub.add_parser("stop", help = "opt a file out of review")
   # waiver: argparse CLI signature, not a domain key
   p_stop.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_stop.add_argument("--no-commit", action="store_true",
+  p_stop.add_argument("--no-commit", action = "store_true",
                       # waiver: one-off human-facing message -- argparse help text
-                      help="stop the review but leave the commit to the caller")
+                      help = "stop the review but leave the commit to the caller")
   # waiver: argparse CLI signature, not a domain key
-  p_stop.add_argument("--strip-banner", action="store_true",
+  p_stop.add_argument("--strip-banner", action = "store_true",
                       # waiver: one-off human-facing message -- argparse help text
-                      help="also remove the review banner and its approval gestures")
+                      help = "also remove the review banner and its approval gestures")
   # waiver: argparse CLI signature, not a domain key
-  p_stop.add_argument("--json", action="store_true",
+  p_stop.add_argument("--json", action = "store_true",
                       # waiver: one-off human-facing message -- argparse help text
-                      help="print the outcome, the cancelled jobs included, as one JSON object")
-  p_stop.set_defaults(func=cmd_stop, no_commit=False, strip_banner=False, json=False)
+                      help = "print the outcome, the cancelled jobs included, as one JSON object")
+  p_stop.set_defaults(func = cmd_stop, no_commit = False, strip_banner = False, json = False)
 
   # `raise-wake` — raise a document's job-done wake and dispatch the coordinator for it, no commit
   # waiver: argparse CLI signature, not a domain key
-  p_wake = sub.add_parser("raise-wake", help="raise a job-done wake and dispatch the review coordinator")
+  p_wake = sub.add_parser("raise-wake", help = "raise a job-done wake and dispatch the review coordinator")
   # waiver: argparse CLI signature, not a domain key
   p_wake.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_wake.add_argument("--repo", default=".")
+  p_wake.add_argument("--repo", default = None)
   # waiver: argparse CLI signature, not a domain key
-  p_wake.add_argument("--hint", default="wake",
+  p_wake.add_argument("--hint", default = "wake",
                       # waiver: one-off human-facing message -- argparse help text
-                      help="stable token folded into the dispatch's dedup key")
-  p_wake.set_defaults(func=cmd_raise_wake)
+                      help = "stable token folded into the dispatch's dedup key")
+  p_wake.set_defaults(func = cmd_raise_wake)
 
   # `finalize` — strip the review's markup from an approved document
   # waiver: argparse CLI signature, not a domain key
-  p_final = sub.add_parser("finalize", help="finalize a fully-approved doc")
+  p_final = sub.add_parser("finalize", help = "finalize a fully-approved doc")
   # waiver: argparse CLI signature, not a domain key
   p_final.add_argument("file")
-  p_final.set_defaults(func=cmd_finalize)
+  p_final.set_defaults(func = cmd_finalize)
+
+  # `send-back` — end the cycle without approval, handing the ticked problems back to the producer
+  # waiver: argparse CLI signature, not a domain key
+  p_send_back = sub.add_parser("send-back", help = "end the review cycle, handing ticked problems back")
+  # waiver: argparse CLI signature, not a domain key
+  p_send_back.add_argument("file")
+  # waiver: argparse CLI signature, not a domain key
+  p_send_back.add_argument("--repo", default = None)
+  # waiver: argparse CLI signature, not a domain key
+  p_send_back.add_argument("--decision", action = "store_true")
+  p_send_back.set_defaults(func = cmd_send_back)
 
   # `strip-markup` — markup-resolved view for validation / terminal dispatch sources
   # waiver: argparse CLI signature, not a domain key
-  p_strip = sub.add_parser("strip-markup", help="print the doc body, without frontmatter, with edit markup resolved")
+  p_strip = sub.add_parser(
+      # waiver: argparse CLI signature, not a domain key
+      "strip-markup", help = "print the doc body, without frontmatter, with edit markup resolved",
+  )
   # waiver: argparse CLI signature, not a domain key
   p_strip.add_argument("file")
-  p_strip.set_defaults(func=cmd_strip_markup)
+  p_strip.set_defaults(func = cmd_strip_markup)
 
   # `strip-frontmatter` — body-only view with raw markup, the main writer's dispatch source
   # waiver: argparse CLI signature, not a domain key
-  p_strip_fm = sub.add_parser("strip-frontmatter", help="print the doc body without its frontmatter")
+  p_strip_fm = sub.add_parser("strip-frontmatter", help = "print the doc body without its frontmatter")
   # waiver: argparse CLI signature, not a domain key
   p_strip_fm.add_argument("file")
-  p_strip_fm.set_defaults(func=cmd_strip_frontmatter)
+  p_strip_fm.set_defaults(func = cmd_strip_frontmatter)
 
   # `fold-markup` — fold the edit markers in place on an operator approve gesture
   # waiver: argparse CLI signature, not a domain key
-  p_fold = sub.add_parser("fold-markup", help="fold the doc's edit markup in place")
+  p_fold = sub.add_parser("fold-markup", help = "fold the doc's edit markup in place")
   # waiver: argparse CLI signature, not a domain key
   p_fold.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_fold.add_argument("--repo", default = ".")
-  p_fold.set_defaults(func=cmd_fold_markup)
+  p_fold.add_argument("--repo", default = None)
+  p_fold.set_defaults(func = cmd_fold_markup)
 
   # `strip-status` — remove every terminal-state status callout in place, no commit
   # waiver: argparse CLI signature, not a domain key
-  p_strip_status = sub.add_parser("strip-status", help="remove every #status/<state> callout from the doc body")
+  p_strip_status = sub.add_parser("strip-status", help = "remove every #status/<state> callout from the doc body")
   # waiver: argparse CLI signature, not a domain key
   p_strip_status.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
-  p_strip_status.add_argument("--repo", default = ".")
-  p_strip_status.set_defaults(func=cmd_strip_status)
+  p_strip_status.add_argument("--repo", default = None)
+  p_strip_status.set_defaults(func = cmd_strip_status)
+
+  # `strip-command` — remove the finished operator command callout in place, no commit
+  p_strip_command = sub.add_parser(_STRIP_COMMAND_VERB, help = _STRIP_COMMAND_HELP)
+  p_strip_command.add_argument(_ARG_FILE)
+  p_strip_command.add_argument(_ARG_REPO, default = None)
+  p_strip_command.set_defaults(func = cmd_strip_command)
+
+  # `clear-multi-ticks` — clear the ticks of every question ticked more than once in place, no commit
+  p_clear_ticks = sub.add_parser(_CLEAR_MULTI_TICKS_VERB, help = _CLEAR_MULTI_TICKS_HELP)
+  p_clear_ticks.add_argument(_ARG_FILE)
+  p_clear_ticks.add_argument(_ARG_REPO, default = None)
+  p_clear_ticks.set_defaults(func = cmd_clear_multi_ticks)
+
+  # `strip-discussion` — remove a report's discussion block in place, no commit
+  p_strip_discussion = sub.add_parser(_STRIP_DISCUSSION_VERB, help = _STRIP_DISCUSSION_HELP)
+  p_strip_discussion.add_argument(_ARG_FILE)
+  p_strip_discussion.add_argument(_ARG_REPO, default = None)
+  p_strip_discussion.set_defaults(func = cmd_strip_discussion)
 
   # `repair-structure` — the guess-free mechanical repair, written in place with no commit
   p_repair = sub.add_parser(_REPAIR_VERB, help = _REPAIR_HELP)
   p_repair.add_argument(_ARG_FILE)
   p_repair.add_argument(_ARG_CHECK, action = _STORE_TRUE)
-  p_repair.add_argument(_ARG_REPO, default = ".")
+  p_repair.add_argument(_ARG_REPO, default = None)
   p_repair.set_defaults(func = cmd_repair_structure)
+
+  # `operator-text` — the passages of a document's prose the operator wrote or ordered by command
+  p_operator = sub.add_parser(_OPERATOR_TEXT_VERB, help = _OPERATOR_TEXT_HELP)
+  p_operator.add_argument(_ARG_FILE)
+  p_operator.add_argument(_ARG_REPO, default = None)
+  p_operator.set_defaults(func = cmd_operator_text)
+
+  # `decision-clean` — whether a ticked decision box counts: nothing but the boxes changed since the system's turn
+  p_decision = sub.add_parser(_DECISION_CLEAN_VERB, help = _DECISION_CLEAN_HELP)
+  p_decision.add_argument(_ARG_FILE)
+  p_decision.add_argument(_ARG_REPO, default = None)
+  p_decision.set_defaults(func = cmd_decision_clean)
 
   # `configure-apply` — the wizard's collected class written through the core settings verbs
   p_configure = sub.add_parser(_CONFIGURE_VERB, help = _CONFIGURE_HELP)
-  p_configure.add_argument(_ARG_REPO, default = ".")
+  p_configure.add_argument(_ARG_REPO, default = None)
   p_configure.add_argument(_ARG_PAYLOAD, default = None)
   p_configure.add_argument(_ARG_PAYLOAD_FILE, default = None)
   p_configure.set_defaults(func = cmd_configure_apply)
 
   # `decisions-context` — decisions-registry context map for a main / barrier writer dispatch
   # waiver: argparse CLI signature, not a domain key
-  p_decisions = sub.add_parser("decisions-context", help="print the decisions-registry context map for one file")
+  p_decisions = sub.add_parser("decisions-context", help = "print the decisions-registry context map for one file")
   # waiver: argparse CLI signature, not a domain key
   p_decisions.add_argument("file")
-  p_decisions.set_defaults(func=cmd_decisions_context)
+  p_decisions.set_defaults(func = cmd_decisions_context)
 
-  # `guidelines-context` — product guideline paths for a main / barrier writer dispatch
+  # `guidelines-context` — the role's plugin canon and the product guideline paths for a main / barrier writer dispatch
   # waiver: argparse CLI signature, not a domain key
   p_guidelines = sub.add_parser(
-      "guidelines-context", help="print the product guideline paths one expert carries on one file",
+      "guidelines-context", help = "print the guideline paths one expert carries on one file",
   )
   # waiver: argparse CLI signature, not a domain key
   p_guidelines.add_argument("file")
   # waiver: argparse CLI signature, not a domain key
   p_guidelines.add_argument("expert")
-  p_guidelines.set_defaults(func=cmd_guidelines_context)
+  p_guidelines.set_defaults(func = cmd_guidelines_context)
 
   # `dispatch-writer` — the whole expert-job bundle built from the document, its class and a few flags
   p_dispatch = sub.add_parser(_DISPATCH_VERB, help = _DISPATCH_HELP)
@@ -1143,13 +1511,13 @@ def build_parser() -> argparse.ArgumentParser:
   # repeatable: one `--context <path>` per extra file the job should find in its context
   p_dispatch.add_argument(_ARG_CONTEXT, action = _APPEND, default = None)
   p_dispatch.add_argument(_ARG_REPAIR, action = _STORE_TRUE)
-  p_dispatch.add_argument(_ARG_REPO, default = ".")
+  p_dispatch.add_argument(_ARG_REPO, default = None)
   p_dispatch.set_defaults(func = cmd_dispatch_writer)
 
   # `core-cli` — the resolved `lazycortex-core` CLI path for the coordinator agent's `<core-cli>`
   # waiver: argparse CLI signature, not a domain key
-  p_core_cli = sub.add_parser("core-cli", help="print the absolute path of the resolved lazycortex-core CLI")
-  p_core_cli.set_defaults(func=cmd_core_cli)
+  p_core_cli = sub.add_parser("core-cli", help = "print the absolute path of the resolved lazycortex-core CLI")
+  p_core_cli.set_defaults(func = cmd_core_cli)
 
   # every subcommand carries its handler in `func`, so the caller dispatches on the parse
   # result alone and never has to match subcommand names a second time
@@ -1160,6 +1528,11 @@ def main(argv: list[str]) -> int:
   """
   Parse arguments and dispatch to the appropriate subcommand handler.
 
+  Notes:
+    - Every verb that takes `--repo` works in the root of the checkout of the directory `--repo` names (default:
+      `$LAZY_REPO_ROOT`, then the working directory), a linked worktree's own root inside one.
+    - `configure-apply` writes the settings nearest to `--repo` as given, so it receives that value unwidened.
+
   Args:
     argv: Command-line arguments, excluding the program name.
 
@@ -1167,6 +1540,14 @@ def main(argv: list[str]) -> int:
     Exit code from the dispatched subcommand.
   """
   args = build_parser().parse_args(argv)
+
+  # every verb that takes `--repo` works in the root of the checkout it names, else of `$LAZY_REPO_ROOT`, else of
+  # the cwd; a relative document path is then read from that root
+  if hasattr(args, _REPO_ATTR):
+    setattr(args, _REPO_START_ATTR, args.repo)
+    args.repo = str(_review_locator.query_repo_root(args.repo))
+
+  # the verb's handler runs against the resolved root and its exit code is the command's
   return args.func(args)
 
 

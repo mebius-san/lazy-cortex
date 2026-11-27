@@ -61,7 +61,7 @@ Outcome: `PASS` / `WARN` (no mirrored rules under `<consumer>/.claude/rules/` to
 
 ## Check 3: Artifacts present
 
-Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 6 references, 7 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 7 templates. Missing artifact means the plugin install is incomplete on this machine.
+Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 4 rules, 6 references, the binaries (the plugin locator among them), the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, every agent under `agents/`, and the 7 templates. Missing artifact means the plugin install is incomplete on this machine.
 
 Run:
 
@@ -73,7 +73,7 @@ Outcome: `PASS` / `FAIL` (the plugin tree at `${CLAUDE_PLUGIN_ROOT}` is incomple
 
 ## Check 4: Wrappers deployed
 
-Verify `<consumer>/cli/cfg-py`, `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, open with a shebang, and contain no unsubstituted `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholders. Missing wrappers mean install Phase 2 never ran; unsubstituted placeholders mean the install completed with a corrupted template.
+Verify `<consumer>/cli/cfg-py`, `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py` exist, open with a shebang, and contain no unsubstituted `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholders, and that `<consumer>/cli/lazy_python_locator.py` — the locator the wrappers and the mypy shim find the plugin through — exists and equals the shipped `${CLAUDE_PLUGIN_ROOT}/bin/python_locator.py` byte for byte. Missing wrappers or a missing locator mean install Phase 2 never ran or predates the locator; a differing locator means the plugin updated since the last install or the copy was hand-edited; unsubstituted placeholders mean the install completed with a corrupted template.
 
 Run:
 
@@ -81,7 +81,7 @@ Run:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check4 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `PASS` (all three wrappers deployed and substituted) / `WARN` (one or more wrappers missing from `<consumer>/cli/` → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholder is still in the wrapper — the install was interrupted → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
+Outcome: `PASS` (all three wrappers deployed and substituted, the locator present and current) / `WARN` (one or more wrappers missing from `<consumer>/cli/`, or `cli/lazy_python_locator.py` missing or stale → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)) / `FAIL` (a `{{CHK_BIN_PATH}}` / `{{TST_BIN_PATH}}` placeholder is still in the wrapper — the install was interrupted → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
 
 ## Check 5: Pyproject checker sections
 
@@ -109,7 +109,7 @@ Outcome: `PASS` (`inspect.sh` found) / `WARN` (not on `$PATH`, so `pch.py` stays
 
 ## Check 7: Overlay scaffolding headers
 
-Verify each of the four overlay files (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) under `<consumer>/docs/guidelines/` opens with the canonical `# Project additions to <topic>` header. Install Phase 5 scaffolds the stubs; consumer-edited overlays must preserve the header so writer agents recognize the file as an overlay (not as the canon itself).
+Verify each of the four overlay files (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) under `<consumer>/docs/guidelines/python/` opens with the canonical `# Project additions to <topic>` header. Install Phase 5 scaffolds the stubs; consumer-edited overlays must preserve the header so writer agents recognize the file as an overlay (not as the canon itself).
 
 Run:
 
@@ -117,7 +117,7 @@ Run:
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit_checks.py" check7 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `PASS` (all four headers correct) / `WARN` (1-2 overlay files under `<consumer>/docs/guidelines/` missing or carrying the wrong header → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), whose Phase 5 scaffolds the stubs; a consumer-edited overlay keeps its body, restore the header by hand) / `FAIL` (3+ missing or wrong → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
+Outcome: `PASS` (all four headers correct) / `WARN` (1-2 overlay files under `<consumer>/docs/guidelines/python/` missing or carrying the wrong header → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts), whose Phase 5 scaffolds the stubs; a consumer-edited overlay keeps its body, restore the header by hand) / `FAIL` (3+ missing or wrong → re-run `/lazy-python.install` (idempotent; it overwrites the mirror artifacts)).
 
 ## Check 8: Scaffold registry entry
 

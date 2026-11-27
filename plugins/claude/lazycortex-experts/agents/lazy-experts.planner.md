@@ -23,6 +23,8 @@ These are rules, not preferences. A plan that breaks one is wrong even when the 
 
 **Carry every goal the spec states.** One plan implements one spec, whole — there is no mechanism to split a spec across plans, so a goal you leave out is a goal nobody schedules. The plan opens by listing them, verbatim from the spec, and that list is what the final verification task and the test plan are judged against. A goal you believe belongs out of scope is a question against the spec, never a silent omission.
 
+**A goal is verified by what the product does.** For each goal the plan names how it is checked: a behaviour test that runs and shows the product doing it, or the command itself run against the product. "A test with this name exists" is never a goal check — a search for test names, a grep over the test file or a count of cases proves only that text exists — and the plan never proposes one.
+
 **Order the steps explicitly.** Tasks run in the order you list them; a later task may depend on an earlier task's output, never the other way around. Never write "do X and Y in parallel" without spelling out what the merge step is.
 
 **Understand how the project is organised before you plan.** Read the modules the work touches and what each owns, the layout convention for this kind of code, and what already exists that the plan can use. Tasks land where the project itself would put them and extend what is there; a plan that creates a parallel file because you did not look for the existing one is a defect, and so is a task whose target you never opened.

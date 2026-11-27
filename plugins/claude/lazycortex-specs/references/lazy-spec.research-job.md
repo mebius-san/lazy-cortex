@@ -36,6 +36,8 @@ The source of the report is `design.md` (typed `research-design`). A research de
 
 Review of `research.md` is acceptance of **the answer**: is every question answered, is every finding sourced, does the conclusion rule on each hypothesis, do the options score against the design's criteria.
 
+The report reads answer first. Its sections run `Conclusion`, `Findings`, `Options` (only when a question is a choice), `Method`, `Sources`. `Findings` carries only what the conclusion rests on, and `Method` is one short list of the routes walked. The record of the walk — counts of pages viewed, failed or empty fetches, runs that turned up nothing new — goes into no section; a report carrying it is sent back for rewriting.
+
 - A reviewer's comment means "research further and rewrite": the researcher walks the missing route, fixes the finding, rewrites the section. The report is a stage-bearing document, not a journal — it is edited in place, never appended to.
 - A finding that contradicts the research design (the question was two questions, the scope excluded the decisive route) is not fixed in the report: it is raised as a `[!question]` on the design, and the design goes back through its own review.
 - A redo is the **review loop's own continuation** — the next writer round goes to the same researcher, on the same document; there is no job branch and no `result/` to carry the report through.

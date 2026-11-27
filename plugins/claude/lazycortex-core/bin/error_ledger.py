@@ -44,7 +44,7 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 # Daemon-halt causes the runtime never retries itself, so the incident waits for an operator
 _HUMAN_HALT_CAUSES = {
   "git_pull_diverged", "git_push_failed", "git_remote_unavailable", "git_rebase_not_started",
-  "config_violation", "suspected_loop", "routine_config_invalid",
+  "config_violation", "suspected_loop", "routine_config_invalid", "forbidden_commit",
 }
 
 # ULID algorithm constants (per https://github.com/ulid/spec)

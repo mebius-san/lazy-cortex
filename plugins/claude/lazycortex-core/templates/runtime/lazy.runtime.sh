@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Resolve the installed lazycortex-core from Claude Code's plugin registry and exec its runner.
-# The registry is ~/.claude/plugins/installed_plugins.json: the highest-version
-# `lazycortex-core@*` record names the install root, `<installPath>/bin/runner`.
-# The plugin cache is never listed — it keeps every version ever installed.
+# The lookup is the shared plugin locator installed beside this shim (plugin_locator.py):
+# the highest-version `lazycortex-core@*` record made for <repo-root>'s main checkout or for
+# the whole user names the install root, `<installPath>/bin/runner`; another project's record
+# is never used. The plugin cache is never listed — it keeps every version ever installed.
 # Survives plugin version bumps without re-rendering the supervisor unit.
 #
 # Usage: lazy.runtime.sh [--login-shell] [--env-file <path>]... [--dev-mode] <repo-root> [--plugin-dir <path>]...
@@ -128,25 +129,18 @@ fi
 if [ -n "$DEV_RUNNER" ]; then
   RUNNER="$DEV_RUNNER"
 else
-  # the highest-version lazycortex-core record in the install registry, compared numerically
-  # (5.13.0 above 5.9.0); the program prints nothing when the record is absent, and the
-  # interpreter's own failure to run is reported as such, never as a missing record
-  RUNNER=$("${LAZYCORTEX_PYTHON:-python3}" -I -c '
-import json, os
-try:
-  with open(os.path.join(os.environ["HOME"], ".claude/plugins/installed_plugins.json"), encoding = "utf-8") as fh:
-    data = json.load(fh)
-  plugins = data.get("plugins", data)
-  records = [r for key, entries in plugins.items() if key.split("@", 1)[0] == "lazycortex-core"
-             for r in (entries or []) if isinstance(r, dict) and r.get("installPath")]
-  version = lambda r: tuple(int(p) if p.isdigit() else 0 for p in str(r.get("version", "")).split("."))
-  print(os.path.join(max(records, key = version)["installPath"], "bin", "runner"))
-except Exception:
-  pass
-')
+  # the interpreter's own failure to run is reported as such, never as a missing record
+  "${LAZYCORTEX_PYTHON:-python3}" -I -c '' >/dev/null 2>&1
   PROBE_RC=$?
   [ "$PROBE_RC" -ne 0 ] && { echo "lazy.runtime: interpreter ${LAZYCORTEX_PYTHON:-python3} failed to run (exit $PROBE_RC); cannot look up lazycortex-core/bin/runner" >&2; exit 1; }
-  [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not recorded in ~/.claude/plugins/installed_plugins.json" >&2; exit 1; }
+  # the shared locator: the highest-version lazycortex-core install made for this repo's main
+  # checkout or for the user, compared numerically (5.13.0 above 5.9.0); a miss prints the
+  # error naming every place searched and exits 1
+  LOCATOR="$(dirname "$0")/plugin_locator.py"
+  [ -f "$LOCATOR" ] || { echo "lazy.runtime: $LOCATOR is missing; re-run /lazy-core.install" >&2; exit 1; }
+  CORE_ROOT=$("${LAZYCORTEX_PYTHON:-python3}" -I "$LOCATOR" installed lazycortex-core --start "${REPO:-.}") || {
+    echo "lazy.runtime: cannot look up lazycortex-core/bin/runner" >&2; exit 1; }
+  RUNNER="$CORE_ROOT/bin/runner"
 fi
 # The runner is Python; run it under the interpreter install recorded rather than
 # whatever `python3` launchd/systemd happen to find — and never via the exec bit,

@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.install
 description: "Run when the operator asks to set up the spec system in a repo, after enabling or updating lazycortex-specs, or when spec skills misbehave because the `spec` settings section, the `lazy-spec.gate-tick` routine, or the vault spec (`vision.md`) is missing. Products are registered separately by /lazy-spec.product-config."
-allowed-tools: Read, Write, Edit, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(ls *), Bash(date *), Bash(rm *), Bash(PYTHONPATH=* python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(ls *), Bash(date *), Bash(rm *), Bash(PYTHONPATH=* python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Agent
 ---
 # Install lazycortex-specs
 
@@ -86,8 +86,8 @@ Resolve it via the core CLI, which reads `enabledPlugins` from the project setti
 **Resolve the project root (`<repo-root>`) first**, by run kind — `detect-scope` below and every later step use it:
 
 1. Headless run — the invoking prompt carries `repo=<abs>` (e.g. from `lazy-core.autosetup`): `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target.
-2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
-3. Not in a git repo: fall back to the current working directory — but warn the user.
+2. Interactive run with no `repo=`: `<repo-root>` = `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/spec_locator.py" settings-root)` — the nearest directory at or above the current one, within its checkout, that holds `.claude/lazy.settings.json`, else the checkout's root, so a nested project with its own settings keeps them.
+3. Not in a git repo: that command prints the current working directory itself — warn the user.
 
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-specs" core-cli --repo <repo-root>)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then `<repo-root>/plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records. The `--repo <repo-root>` flag is required: without it the resolver searches the current directory, and a headless run whose current directory is another checkout would run that checkout's core sources against this repository; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
@@ -774,11 +774,17 @@ Under `review.classes` append each entry below whose `class:` token no existing 
   experts:
     main:
       - name: <tester-expert>
-# code-report.md class — developer writes; no validators
+# code-report.md class — developer writes; no validators; a report review; context_from_verbs hands the
+# writer the build's registry record as context/build-branch.json (a failing verb refuses the dispatch;
+# `--backfill` creates the registry of a release built before registries existed, then reads it)
 - class: code-report
-  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
+  report: true
+  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol", "lazycortex-specs:lazy-spec.build-job"]
   paths:
     - "*/code-report.md"
+  context_from_verbs:
+    - name: build-branch.json
+      command: ["lazycortex-specs", "build-registry", "get", "{doc}", "--backfill"]
   experts:
     main:
       - name: <developer-expert>
@@ -873,7 +879,7 @@ Validator composition follows one rule: the architect is the standing validator 
 
 **These same classes are also the launch-checkbox expert source.** `spec.coordinator` (dispatched by the `lazy-spec.coordinator-watch` routine, per `lazy-spec.coordination-playbook.md` Chapter 5) resolves a ticked checkbox's expert from the review class whose name matches the checkbox's own RESULT document: the checkbox that produces a `code-plan` resolves the `code-plan` class, a `test-plan` the `test-plan` class, a release's `Test` the `test-report` class, and a research asset's `Start research` the `research-report` class. A release's `Build` resolves no class: it goes to the product's release implementer (`resolve-product release-implementer`). Which checkboxes exist at all is declared by the asset's type playbook, not by a table here. Each class's `experts.main[0].name` is the dispatched expert — whichever expert a product registered there (the placeholders above, or whatever the operator assigned through `/lazy-review.configure` instead, a product-scoped `<kind>@<key>` class included). Review on a finished job's report is opened by the coordinator itself on its `job-done` wake, through the class matching that report's own document type; `lazy-spec.gate-tick` no longer does it.
 
-**Suggest `workspace: branch` on whichever expert is wired into a report class's `main[0].name`.** The acceptance cycle these two classes drive (`lazy-spec.coordination-playbook.md` Chapter 8) runs its launch-checkbox job and every continuation on a job-scoped branch, enforced by the runtime, not by prose — see `lazy-core.expert-runtime-schema.md` § Workspace for the mechanics and `experts[<name>].merge` for the companion merge setting. This is a seed proposal only, same discipline as `can_commit_in_repo` above: `/lazy-experts.install` already seeds `workspace: branch` on its own developer/tester entries when the consumer uses `lazycortex-experts`; when the consumer supplies a project-local expert instead, point them at that same setting by hand — never overwrite an existing `workspace` value on an entry this skill does not own.
+**Suggest `workspace: branch` on whichever expert is wired into the `code-report` class's `main[0].name`, and on no other.** The acceptance cycle of a build report (`lazy-spec.coordination-playbook.md` Chapter 8) runs the build job and every continuation on a job-scoped branch, enforced by the runtime, not by prose — see `lazy-core.expert-runtime-schema.md` § Workspace for the mechanics and `experts[<name>].merge` for the companion merge setting. This is a seed proposal only, same discipline as `can_commit_in_repo` above: `/lazy-experts.install` already seeds `workspace: branch` on its own developer entry when the consumer uses `lazycortex-experts`; when the consumer supplies a project-local expert instead, point them at that same setting by hand — never overwrite an existing `workspace` value on an entry this skill does not own. The expert wired into the `test-report` class gets no `workspace: branch`: the tester commits nothing and its `Test` dispatch names no `branch`.
 
 ### 6f. Class protocols + retired-sieve cleanup (MANDATORY when 6d/6e classes are added)
 
@@ -882,7 +888,7 @@ The writers of the 6d/6e classes are dispatched by `lazycortex-review`'s coordin
 **Legacy cleanup.** Two leftovers from the retired md-scan sieve model may survive on an older repo:
 
 - `routines["lazy-review.scan"]` — retired by `/lazy-review.install` (its `process-file` consumer no longer exists). Do not touch it here; report `legacy-scan-routine-present` so the operator re-runs that install.
-- `.experts/.spec-imports/` — the retired `/spec.import` clone cache; nothing will ever populate it again. `Bash(test -d .experts/.spec-imports)`: **absent** → outcome `spec-imports-cache-absent`. **Present** → ask (this deletes data — propose, never silently delete). **No answer** → outcome `refused-no-answer`, cache untouched.
+- `.experts/.spec-imports/` — the retired `/spec.import` clone cache; nothing will ever populate it again. `Bash(ls -d .experts/.spec-imports)` — present when the command lists it, absent when it fails with "No such file or directory": **absent** → outcome `spec-imports-cache-absent`. **Present** → ask (this deletes data — propose, never silently delete). **No answer** → outcome `refused-no-answer`, cache untouched.
 
   ```
   Context (print before asking):
@@ -987,15 +993,15 @@ Read `products` from `<settings-dir>/lazy.settings.json`. Any product key beside
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> plugin-root lazycortex-wiki --cwd <repo-root>)
 ```
 
-Exit 0 with one printed path → `$WIKI_CLI` is `<printed path>/bin/lazycortex-wiki`. Exit 1 with an `error:` line → `$WIKI_CLI` stays unresolved — the graceful miss. This is the same resolver Step 2 and Step 5b-b already use: it checks `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-wiki/` in a checkout that carries the wiki's own sources, and last the `installPath` of the highest-version `lazycortex-wiki@lazycortex` record in `installed_plugins.json`, and never enumerates plugin-cache versions.
+Exit 0 with one printed path → `$WIKI_CLI` is `<printed path>/bin/lazycortex-wiki`. Exit 1 with an `error:` line → `$WIKI_CLI` stays unresolved — the graceful miss. This is the same resolver Step 2 and Step 5b-b already use: it checks `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling, then the repo's own `plugins/claude/lazycortex-wiki/` in a checkout that carries the wiki's own sources, and last the `installPath` of the highest-version `lazycortex-wiki@lazycortex` record in `installed_plugins.json` among the records made for the whole user or for this repo's main checkout (never another project's), and never enumerates plugin-cache versions.
 
 - `$WIKI_CLI` unresolved → `lazycortex-wiki` is not installed on this machine. State `skipped-no-wiki` and move on to Step 8 — this is the normal, expected outcome for a repo without the wiki plugin.
 - `$WIKI_CLI` resolved → continue below.
 
-**Ensure the axes.** The axis vocabulary belongs to the repository, not to any one scope, so this is a single call regardless of how many products are registered. `plugin-root` always prints an absolute path, so `$WIKI_CLI` is absolute whichever stage resolved it. Keep the call prefixed with `test -f "$WIKI_CLI" &&` so the invoked text always starts with `test `, matching the already-allowed `Bash(test *)` pattern and skipping cleanly when the file is gone:
+**Ensure the axes.** The axis vocabulary belongs to the repository, not to any one scope, so this is a single call regardless of how many products are registered. `plugin-root` always prints an absolute path, so `$WIKI_CLI` is absolute whichever stage resolved it. First confirm the file is there with `Bash(ls -d "$WIKI_CLI")`: it is present when the command lists it; when it fails with "No such file or directory", state `skipped-no-wiki` and move on to Step 8 without running any call below. When present, run:
 
 ```
-Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" ensure-axes product category --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" ensure-axes product category --repo <repo-root>)
 ```
 
 Idempotent union into `wiki.tag_axes` — a repository that already declares both axes reports `{"status": "unchanged"}` and is left untouched; an operator's other axes are never dropped, and no scope is read or written. A scope narrows the vocabulary to the axes it uses, so declaring these two here makes them available to the spec scope without touching any scope's own list.
@@ -1007,13 +1013,13 @@ A non-zero exit is non-fatal: surface its stderr first line in the report and co
 Resolve the scope covering each registered product: for every entry in `products` (skip the `_version` meta key), build the repo-relative probe path `<vault_root>/<spec_path>/design.md` — `<vault_root>` is the `spec.vault_root` setting (default `specs`). `--globs-only` makes `resolve-scope` match the path against the configured globs alone: the file need not exist on disk yet, and a `design.md` the scope's frontmatter filter currently rejects (under review, rejected, still an `empty` scaffold) still resolves to the scope that covers it:
 
 ```
-Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" resolve-scope <vault_root>/<spec_path>/design.md --globs-only --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" resolve-scope <vault_root>/<spec_path>/design.md --globs-only --repo <repo-root>)
 ```
 
 `{"scope_id": null}` → no configured wiki scope covers this product yet; count it under `no-scope` and skip it. Two products resolving to the same scope must not double-trigger the seed — dedupe scope ids across the loop. For every distinct `<id>`:
 
 ```
-Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" ensure-scope-config <id> --filter-json '{"spec_stage": {"in": [null, "draft", "approved", "deferred"]}, "review_result": {"not_in": ["rejected"]}}' --index-badges spec_stage --exclude '<vault_root>/requests/**' '**/*-plan.md' '**/*-report.md' --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" ensure-scope-config <id> --filter-json '{"spec_stage": {"in": [null, "draft", "approved", "deferred"]}, "review_result": {"not_in": ["rejected"]}}' --index-badges spec_stage --exclude '<vault_root>/requests/**' '**/*-plan.md' '**/*-report.md' --repo <repo-root>)
 ```
 
 A non-zero exit from either call is the same non-fatal case as above — count it under `cli-failed`, surface its stderr first line, continue.
@@ -1021,7 +1027,7 @@ A non-zero exit from either call is the same non-fatal case as above — count i
 **Keep operator requests free of term links.** A request under `<vault_root>/requests/` is the operator's own text and stays verbatim: the terms curator may take new terms from it but never edits it, which the terms scope covering the catalog records as its `link_exclude`. Seed it through the wiki's absent-key-only verb in one call, independent of the product loop above — a catalog with no registered product still has a request intake. The probe is a path inside the intake itself; the verb matches it against the terms scopes' `paths` alone, so the file need not exist:
 
 ```
-Bash(test -f "$WIKI_CLI" && "${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" terms-scope-config --repo <repo-root> <vault_root>/requests/request.md --link-exclude '<vault_root>/requests/**')
+Bash("${LAZYCORTEX_PYTHON:-python3}" "$WIKI_CLI" terms-scope-config --repo <repo-root> <vault_root>/requests/request.md --link-exclude '<vault_root>/requests/**')
 ```
 
 It prints one word: `seeded` — the terms scope covering the intake had no `link_exclude` and now carries this glob; `kept` — that scope already has a `link_exclude`, and it is left as it stands; `no-scope` — no terms scope covers the intake. Exit 1 is the same non-fatal case as above — count it under `cli-failed`, surface its stderr first line, continue. The seed runs before any terms migration of `/lazy-core.setup`, so the migration already leaves requests alone.

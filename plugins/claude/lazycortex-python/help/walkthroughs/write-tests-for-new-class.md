@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all nine Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-11-23
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads, Contract: blocks, Domain(...): blocks, opt: clauses); agent writes test file covering all 9 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 8c75aa4a3cb418ef616578ca49443ce78943e60c
-surface_sha: 818a49715aab16306e7076263c09b431cc17769b64bd7d9710bb7cccc04f89a8
+source_sha: 0044ac4308cce96cc832c6dbbbe2042b5ad738d5
+surface_sha: 2d64f952732a837a2601fba0770312f5f93a70e8a3aeb49b8ce7133847d99b43
 ---
 # Generate tests that cover all nine Paranoid-Testing categories for a new class
 
@@ -29,8 +29,8 @@ After completing this walkthrough you have:
 
 - `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/` — the tracked copies carry no executable bit on purpose, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip it silently on pull, so run them through the interpreter: `bash ./cli/chk-py` and `bash ./cli/tst-py` from the repo root. Install's Step 2b additionally deploys `~/.local/bin/chk-py` and `~/.local/bin/tst-py` — the only files this plugin ever marks executable, since they live outside any git-tracked tree and no mode-blind sync can touch their mode bit. Each one walks up from your current directory to the nearest `cli/chk-py` / `cli/tst-py` and runs it through `bash`, so once `~/.local/bin` is on your `$PATH`, the bare `chk-py` / `tst-py` commands used throughout this walkthrough work from anywhere under the repo.
 - A Python class whose public API has docstrings, and — where applicable — knowledge markers in its method bodies. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) and from `Contract:` blocks, `Domain(…):` blocks, and `opt:` clauses wherever they appear. A class without docstrings produces shallow tests; a class with a cache or a documented formula but no marker on it simply skips the categories those markers drive — that's not a failure, just nothing to anchor to. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
-- Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
-- `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Step 5). If it does not exist, re-run `/lazy-python.install` — Step 5 is idempotent and creates the stub without touching other installation artifacts.
+- Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/python/testing_guidelines.md`.
+- `docs/guidelines/python/testing_guidelines.md` present (created by `/lazy-python.install` Step 5). If it does not exist, re-run `/lazy-python.install` — Step 5 is idempotent and creates the stub without touching other installation artifacts. Overlays written by an older plugin version live directly under `docs/guidelines/`; the agent no longer reads them there. Run `/lazy-core.setup`, which applies the plugin's `001-python-overlay-folder` migration step and moves each old overlay into `docs/guidelines/python/`. If both the old and the new file exist, the step keeps both and names the pair so you can decide which to keep.
 - If your project bootstraps secrets or provider credentials from its own shell script before tests can run, make sure `/lazy-python.install` has recorded it — the skill's Step 7 detects a bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) and records it as `python.env_source` automatically. With that in place, `chk-py` and `tst-py` source the script before running, so the agent's own verification step and your later `tst-py` runs never execute against a half-configured environment.
 
 ## The journey
@@ -59,7 +59,7 @@ Come back to this walkthrough once the docstrings are substantive.
 
 ### Step 2 — Check the testing overlay declares your base class
 
-Open `docs/guidelines/testing_guidelines.md`. Find (or add) the section that maps production-class categories to test base classes. A typical entry looks like:
+Open `docs/guidelines/python/testing_guidelines.md`. Find (or add) the section that maps production-class categories to test base classes. A typical entry looks like:
 
 ```markdown
 ## Base test classes
@@ -91,7 +91,7 @@ The agent's very first action is to create a task list — one task per step —
 
 The agent then runs its seven ordered steps:
 
-1. **Read guidelines** — reads the plugin canon (`lazy-python.testing-guidelines.md`, `lazy-python.checking-guidelines.md`), then your project overlay (`docs/guidelines/testing_guidelines.md`, `docs/guidelines/checking_guidelines.md`), then the `## Testing` section of `CLAUDE.md`. Outcome: `guidelines-loaded`.
+1. **Read guidelines** — reads the plugin canon (`lazy-python.testing-guidelines.md`, `lazy-python.checking-guidelines.md`), then your project overlay (`docs/guidelines/python/testing_guidelines.md`, `docs/guidelines/python/checking_guidelines.md`), then the `## Testing` section of `CLAUDE.md`. Outcome: `guidelines-loaded`.
 2. **Read production class** — reads the full source file, including `Contract:`, `Domain(…):`, and `opt:` markers in method bodies, and the interface's `Contract:` blocks when the class implements one. Outcome: `read`.
 3. **Identify test targets** — enumerates `__init__` paths, public methods, properties, documented guarantees, documented exceptions, operator overloads, and every `Contract:` block, `Domain(…):` block, and `opt:` clause found in Step 2. Outcome: `<N>-targets`.
 4. **Write tests** — writes the test file covering all 9 Paranoid-Testing categories (see Step 4 below for what that means). Outcome: `<N>-tests-written`.
@@ -123,7 +123,7 @@ Categories 1–3 come from the public API surface. Categories 4–7 come from th
 
 After the agent completes, open the test file at the mirrored path. Check:
 
-- **Naming**: test class is `Test<ProductionClassName>`, test methods are under 35 characters, no production class name repeated in method names.
+- **Naming**: test class is `Test<ProductionClassName>`, test method names are at most 37 characters, no production class name repeated in method names.
 - **Coverage**: scan the nine categories above. Each category should have at least the minimums the guidelines require, where the source has markers or docstring sections to drive it.
 - **Tests left red**: any test the agent named in its report as failing against the current implementation (Step 6 outcome `<N>-mismatches-flagged`, `Status: blocked`). These are not errors in the test file — they are signals that the production code does not yet satisfy its own documented contract. Decide whether to fix the implementation or update the docstring; once the fix lands, the test goes green with nothing to remove. The always-loaded `lazy-python.failing-tests` rule governs how you settle it: judge which side is wrong before touching either, never bend correct code to satisfy an outdated test, and treat an edit to what a test asserts, or any new `skip` / `skipif` / `xfail` marker, as something that needs your explicit yes.
 - **Assertion messages**: every `assert` statement should carry an f-string message showing both expected and actual values.
@@ -173,11 +173,11 @@ When a test in that file later fails, the `lazy-python.failing-tests` rule (load
 
 Run `/lazy-python.audit` at any time to confirm the full installation is intact. Check 7 (`Overlay scaffolding headers`) tells you whether `testing_guidelines.md` and its three sibling overlay files still open with the canonical header; the audit does not validate overlay content beyond that.
 
-If a future dispatch produces tests that contradict your project's conventions, the fix is a more explicit rule in `docs/guidelines/testing_guidelines.md`, not a hand-edit to the test file. The overlay is re-read on every dispatch; updating it takes effect immediately.
+If a future dispatch produces tests that contradict your project's conventions, the fix is a more explicit rule in `docs/guidelines/python/testing_guidelines.md`, not a hand-edit to the test file. The overlay is re-read on every dispatch; updating it takes effect immediately.
 
 If your project uses an aggregate test file pattern (one file that validates many sibling classes via auto-discovery rather than individual per-class files), declare that pattern in your testing overlay. The agent reads the overlay before deciding whether to create a new file or skip a class it detects is already covered. Separately, `tst-py`'s automatic dedup (Step 6 above) handles the double-collection this pattern causes at run time — the two mechanisms address different problems: the overlay controls whether the agent writes a new file at all, dedup controls whether an already-written class gets counted twice when the suite runs.
 
-Track `docs/guidelines/testing_guidelines.md` in version control. When a teammate dispatches the agent and gets tests that violate your project's base-class mapping, the shared overlay is the single place to fix it.
+Track `docs/guidelines/python/testing_guidelines.md` in version control. When a teammate dispatches the agent and gets tests that violate your project's base-class mapping, the shared overlay is the single place to fix it.
 
 ## How test-writer walks a class
 

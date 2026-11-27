@@ -25,71 +25,22 @@ _run() {
   exec $_interp "$_file" "$@"
 }
 
-# 1. Dev vault: this wrapper lives at <repo>/cli/chk-py; prefer the live source tree.
+# Locate the plugin through the shared locator deployed beside this wrapper: the exported plugin
+# directories, then this checkout's own plugins/claude/ tree (a worktree's own tree inside a worktree),
+# last the install the registry records for this repository or for the whole user — never another
+# project's install. A miss prints the locator's error naming every place searched, and the wrapper stops.
 _here=$(cd "$(dirname "$0")" && pwd)
-_dev="$_here/../plugins/claude/lazycortex-python/$_bin"
-if [ -f "$_dev" ]; then
-  _run "$_dev" "$@"
+_locator="$_here/lazy_python_locator.py"
+if [ ! -f "$_locator" ]; then
+  echo "chk-py: $_locator is missing; re-run /lazy-python.install." >&2
+  exit 1
 fi
-
-# 2. Daemon context: a supervisor may export $LAZYCORTEX_PLUGIN_DIRS for its subprocesses.
-if [ -n "${LAZYCORTEX_PLUGIN_DIRS:-}" ]; then
-  _old_ifs=$IFS
-  IFS=:
-  for _d in $LAZYCORTEX_PLUGIN_DIRS; do
-    if [ -f "$_d/$_bin" ]; then
-      IFS=$_old_ifs
-      _run "$_d/$_bin" "$@"
-    fi
-  done
-  IFS=$_old_ifs
+if ! _root=$("${LAZYCORTEX_PYTHON:-python3}" "$_locator" root lazycortex-python --start "$_here"); then
+  echo "chk-py: cannot locate the lazycortex-python plugin; install/enable it, or re-run /lazy-python.install." >&2
+  exit 1
 fi
-
-# 3. Consumer install: read Claude Code's plugin manifest for the active install path.
-_resolved=$("${LAZYCORTEX_PYTHON:-python3}" - "$_bin" <<'PY'
-import json, os, sys
-
-bin_rel = sys.argv[1]
-cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-manifest = os.path.join(cfg, "plugins", "installed_plugins.json")
-try:
-  with open(manifest, encoding = "utf-8") as fh:
-    data = json.load(fh)
-except (OSError, ValueError):
-  sys.exit(0)
-
-
-def version_key(version):
-  parts = []
-  for piece in version.split("."):
-    parts.append(int(piece) if piece.isdigit() else 0)
-  return parts
-
-
-candidates = []
-for key, entries in (data.get("plugins") or {}).items():
-  if key.split("@", 1)[0] != "lazycortex-python":
-    continue
-  for entry in entries or []:
-    install_path = entry.get("installPath")
-    if not install_path:
-      continue
-    bin_path = os.path.join(install_path, bin_rel)
-    if os.path.isfile(bin_path):
-      project_scope = entry.get("scope") == "project"
-      candidates.append((project_scope, version_key(entry.get("version") or ""), bin_path))
-
-if not candidates:
-  sys.exit(0)
-# Prefer project scope over user scope, then the highest version.
-candidates.sort(key = lambda c: (c[0], c[1]))
-print(candidates[-1][2])
-PY
-)
-if [ -n "$_resolved" ] && [ -f "$_resolved" ]; then
-  _run "$_resolved" "$@"
+if [ ! -f "$_root/$_bin" ]; then
+  echo "chk-py: cannot locate the lazycortex-python plugin: $_root carries no $_bin; re-run /lazy-python.install." >&2
+  exit 1
 fi
-
-echo "chk-py: cannot locate the lazycortex-python plugin." >&2
-echo "  Install/enable it, or re-run /lazy-python.install if the layout drifted." >&2
-exit 1
+_run "$_root/$_bin" "$@"

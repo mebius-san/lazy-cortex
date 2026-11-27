@@ -34,6 +34,7 @@ class StateKey:
     FAILED_ITEMS: The per-watch list of items whose `command`-shape worker exited non-zero,
       stored inside a `git_watch` entry; retried before fresh items on the next tick.
     LAST_CLEANUP_AT: The wall-clock timestamp of the last housekeeping pass.
+    FORBIDDEN_COMMITS: The list of found forbidden commits, one record per job, kept until the operator resumes.
   """
 
   # The optional halt-reason block written when the daemon stops.
@@ -51,6 +52,8 @@ class StateKey:
   FAILED_ITEMS = "failed_items"
   # The wall-clock timestamp of the last housekeeping pass.
   LAST_CLEANUP_AT = "last_cleanup_at"
+  # The list of found forbidden commits, one record per job, kept until the operator resumes.
+  FORBIDDEN_COMMITS = "forbidden_commits"
 
 
 # ----------------------------------------------------------------------------------------
@@ -230,6 +233,7 @@ class DaemonKey:
     TRANSIENT_MAX_RETRIES: Transient-error budget per job bundle before the pump closes it.
     RUN_HERE: The hostname-to-checkout-path mapping deciding whether the daemon starts in this working copy.
     RATE_LIMIT_GUARD: The subscription-rate-limit guard sub-configuration block.
+    SUPERVISOR: The supervisor-unit options block the operator records for the daemon's unit.
   """
 
   # The metrics sub-configuration block.
@@ -274,6 +278,25 @@ class DaemonKey:
   TRANSIENT_MAX_RETRIES = "transient_max_retries"
   # The name of the environment variable holding this daemon's OAuth token.
   TOKEN_ENV = "token_env"
+  # The supervisor-unit options block the operator records for the daemon's unit.
+  SUPERVISOR = "supervisor"
+
+
+
+# ----------------------------------------------------------------------------------------
+class SupervisorKey:
+  """
+  Keys in the `daemon.supervisor` sub-configuration block.
+
+  Attributes:
+    LOGIN_SHELL: Whether the unit gives the daemon a login-equivalent environment.
+    ENV_FILES: The ordered environment files the unit sources before the daemon starts.
+  """
+
+  # Whether the unit gives the daemon a login-equivalent environment.
+  LOGIN_SHELL = "login_shell"
+  # The ordered environment files the unit sources before the daemon starts.
+  ENV_FILES = "env_files"
 
 
 # ----------------------------------------------------------------------------------------
@@ -434,6 +457,9 @@ class JobConfigKey:
     CAN_COMMIT_IN_REPO: Whether the expert may write and commit inside the repo it runs in.
     HALT_EXEMPT: Whether the pump still serves this job while the system is halted or dirty;
       written only by a dispatcher whose job is the triage of that very condition.
+    ALLOW_NO_COMMIT: Whether an isolated job continuing a branch that existed before its first attempt may finish
+      with the branch unmoved when it reports success; a first run on a fresh branch keeps its commit obligation.
+      Written only by a dispatcher whose continuation may legitimately have nothing to commit.
     MCP_CONFIG: Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
     SETTING_SOURCES: Setting scopes the spawn loads (`user`/`project`/`local`), or unset for the hermetic default.
     WORKSPACE: The workspace mode (`main`/`branch`) the pump enforces before and after the spawn.
@@ -461,6 +487,10 @@ class JobConfigKey:
   # Whether the pump still serves this job while the system is halted or dirty; written only by a dispatcher whose
   # job is the triage of that very condition.
   HALT_EXEMPT = "halt_exempt"
+  # Whether an isolated job continuing a branch that existed before its first attempt may finish with the branch
+  # unmoved when it reports success; a first run on a fresh branch keeps its commit obligation. Written only by a
+  # dispatcher whose continuation may legitimately have nothing to commit.
+  ALLOW_NO_COMMIT = "allow_no_commit"
   # Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
   MCP_CONFIG = "mcp_config"
   # Setting scopes the spawn loads (`user`/`project`/`local`), or unset for the hermetic default.
@@ -509,6 +539,8 @@ class SettingsKey:
     PROVIDERS: The provider configuration section name.
     EXTERNAL_DIRS: The externally-sourced working-directory declaration section name.
     SANDBOX: The expert-spawn sandbox declaration section name, in Claude Code's own `sandbox` shape.
+    GIT: The staging-guard configuration section name.
+    DAEMON_SECTIONS: The settings sections the daemon reads, always resolved in the checkout toplevel's settings.
   """
 
   # The per-section schema-version sentinel key.
@@ -531,6 +563,10 @@ class SettingsKey:
   EXTERNAL_DIRS = "external_dirs"
   # The expert-spawn sandbox declaration section name, in Claude Code's own `sandbox` shape.
   SANDBOX = "sandbox"
+  # The staging-guard configuration section name, read by the git guard of the checkout's shared index.
+  GIT = "git"
+  # The settings sections the runtime daemon reads: they live in the checkout root's settings file, never a nested one
+  DAEMON_SECTIONS = frozenset({ DAEMON, ROUTINES, EXPERTS, AGENT_MODELS, PROVIDERS, SANDBOX, EXTERNAL_DIRS, GIT })
 
 
 # ----------------------------------------------------------------------------------------
@@ -641,6 +677,9 @@ class EnvVar:
     MAX_SUBAGENT_SPAWN_DEPTH: The `claude` CLI's own subagent-nesting-depth variable name.
     SUBAGENT_SPAWN_DEPTH_PIN: The value this runtime always sets it to, so a change to the CLI's own default never
       changes how deep a headless expert's subagents may nest.
+    PROTECTED: The variable that puts the plugins' tools into protected mode, where nothing installs or reconfigures
+      the environment.
+    PROTECTED_ON: The value every expert job spawn carries for it.
     GIT_CONFIG_COUNT: git's own variable naming how many config slots the environment carries.
     GIT_CONFIG_KEY: Prefix of a slot's config-key variable; the slot index completes the name.
     GIT_CONFIG_VALUE: Prefix of a slot's config-value variable; the slot index completes it.
@@ -661,6 +700,11 @@ class EnvVar:
   # The value this runtime always pins it to, so a change to the CLI's own default never changes how deep a headless
   # expert's subagents may nest.
   SUBAGENT_SPAWN_DEPTH_PIN = "3"
+  # The variable that puts the plugins' tools into protected mode, where nothing installs or reconfigures the
+  # environment.
+  PROTECTED = "LAZYCORTEX_PROTECTED"
+  # The value every expert job spawn carries for it.
+  PROTECTED_ON = "1"
   # git's own variable naming how many config slots the environment carries.
   GIT_CONFIG_COUNT = "GIT_CONFIG_COUNT"
   # Prefix of a slot's config-key variable; the slot index completes the name.
@@ -920,6 +964,10 @@ class HaltKey:
     DIRTY_PATHS: The repository-relative paths reported dirty at halt time.
     RESETS_AT: The epoch-second timestamp a rate-limit halt lifts itself at.
     METRIC_PENDING: Set by a halt writer without metrics; the daemon counts the halt and clears it.
+    COMMITS: The `<hash> <subject>` lines of the forbidden commits, or the one line naming why they could not be
+      listed.
+    CLAIM_HEAD: The commit the work tree stood at when the barred job was claimed.
+    JOBS: The `<expert>/<job id>` names of the jobs whose forbidden commits the block lists.
   """
 
   # The wall-clock timestamp at which the halt was raised.
@@ -934,6 +982,12 @@ class HaltKey:
   RESETS_AT = "resets_at"
   # Set by a halt writer without metrics; the daemon counts the halt and clears it.
   METRIC_PENDING = "metric_pending"
+  # The `<hash> <subject>` lines of the forbidden commits, or the one line naming why they could not be listed.
+  COMMITS = "commits"
+  # The commit the work tree stood at when the barred job was claimed.
+  CLAIM_HEAD = "claim_head"
+  # The `<expert>/<job id>` names of the jobs whose forbidden commits the block lists.
+  JOBS = "jobs"
 
 
 # ----------------------------------------------------------------------------------------
@@ -952,6 +1006,7 @@ class HaltReason:
     INBOX_COLLISION: Another checkout on this host drives the same physical inbox.
     ROUTINE_CONFIG_INVALID: A registry entry does not conform to its type schema.
     RATE_LIMIT: The subscription rate-limit window is closed; spawns pause until it reopens.
+    FORBIDDEN_COMMIT: A job barred from committing in the repository committed under its expert's identity.
   """
 
   # An expert or routine left the working tree dirty.
@@ -974,6 +1029,8 @@ class HaltReason:
   ROUTINE_CONFIG_INVALID = "routine_config_invalid"
   # The subscription rate-limit window is closed; spawns pause until it reopens.
   RATE_LIMIT = "rate_limit"
+  # A job barred from committing in the repository committed under its expert's identity.
+  FORBIDDEN_COMMIT = "forbidden_commit"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1099,7 +1156,8 @@ class MigrationTerritory:
   """
 
   # Repo-relative directory prefixes (ending in `/`) and exact file paths of the territory.
-  PREFIXES = ( ".claude/", "docs/domains/", ".state/", "upstream/", "pyproject.toml", ".obsidian.manifest.json" )
+  PREFIXES = ( ".claude/", "docs/domains/", "docs/guidelines/", ".state/", "upstream/", "pyproject.toml",
+               ".obsidian.manifest.json" )
   # The `writes` entry that stands for every terms dictionary and the documents it serves.
   TERMS_TOKEN = "{terms}"
 
@@ -1250,6 +1308,12 @@ class JobArtifact:
       `source/` / `context/` were copied from. A consumer deciding whether the job already
       saw a given commit compares against this, never against the claim's wall-clock time.
     CLAIM_COPIES: The record of what the latest claim copied into the job's `source/` / `context/`.
+    CLAIM_BRANCH_ORIGIN: The record, written at an isolated job's first attempt, of whether its branch existed before
+      that attempt; every later attempt reads it instead of judging the branch afresh.
+    REPORTED_COMMITS: The hashes of the forbidden commits already reported for the job, one per line.
+    PUBLISH_HELD: The marker that the job's still-running spawn was named in the ledger as holding the publish.
+    SPAWNS_GONE: The marker whose time records when no spawn of the orphaned job was proven left running.
+    CLAIM_OVERLAPS: The barred orphans of the job's identity whose spawn still ran when the job was claimed.
   """
 
   # The forensic payload describing a job marked dead.
@@ -1270,6 +1334,17 @@ class JobArtifact:
   CLAIM_HEAD = "claim_head"
   # The record of what the latest claim copied into the job's `source/` / `context/`.
   CLAIM_COPIES = ".claim_copies.json"
+  # The record, written at an isolated job's first attempt, of whether its branch existed before that attempt; every
+  # later attempt reads it instead of judging the branch afresh.
+  CLAIM_BRANCH_ORIGIN = "claim_branch_origin"
+  # The hashes of the forbidden commits already reported for the job, one per line.
+  REPORTED_COMMITS = "reported_commits"
+  # The marker that the job's still-running spawn was named in the ledger as holding the publish.
+  PUBLISH_HELD = "publish_held"
+  # The marker whose time records when no spawn of the orphaned job was proven left running.
+  SPAWNS_GONE = "spawns_gone"
+  # The barred orphans of the job's identity whose spawn still ran when the job was claimed.
+  CLAIM_OVERLAPS = "claim_overlaps"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1302,6 +1377,8 @@ class JobRequestKey:
     BRANCH: The job-scoped branch name a `workspace: branch` expert's spawn runs on; a caller
       dispatching a continuation job passes back the value read off the original dispatch so the
       continuation lands on the same branch instead of a fresh one.
+    BRANCH_FROM: The branch a fresh job branch forks off instead of the base; ignored when the job branch
+      already exists.
   """
 
   # The optional dedup marker that suppresses duplicate dispatches.
@@ -1312,6 +1389,8 @@ class JobRequestKey:
   # passes back the value read off the original dispatch so the continuation lands on the same branch instead of a
   # fresh one.
   BRANCH = "branch"
+  # The branch a fresh job branch forks off instead of the base; ignored when the job branch already exists.
+  BRANCH_FROM = "branch_from"
 
 
 # ----------------------------------------------------------------------------------------

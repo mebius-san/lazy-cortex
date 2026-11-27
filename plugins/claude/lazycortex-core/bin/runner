@@ -3,6 +3,9 @@
 
 Usage: runner <repo-root> [--plugin-dir <path>]...
 
+`<repo-root>` is any directory inside the checkout to drive; without it the checkout `$LAZY_REPO_ROOT`, else the
+working directory, sits in is used. The daemon always runs at that checkout's own root.
+
 `--plugin-dir <path>` (repeatable) points the daemon at a plugin source
 directory (one containing `.claude-plugin/plugin.json` and `bin/`). The
 daemon's routine resolver consults these paths first, falling back to the
@@ -12,7 +15,6 @@ separate-process world.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -43,6 +45,10 @@ from runtime_daemon import run  # noqa: E402
 # via sys.path, and only after the version guard so an old interpreter never parses 3.12-only syntax
 # pylint: disable-next=import-error,wrong-import-position
 from plugin_dirs import set_plugin_dirs  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime
+# via sys.path, and only after the version guard so an old interpreter never parses 3.12-only syntax
+# pylint: disable-next=import-error,wrong-import-position
+from plugin_locator import query_repo_root  # noqa: E402
 
 # one pass over argv: the flag consumes its value, the first bare argument is the repository root
 repo = None
@@ -74,4 +80,5 @@ while i < len(sys.argv):
 
 # the dev plugin dirs are exported before the loop starts so every spawned routine inherits them
 set_plugin_dirs(plugin_dirs)
-run(repo if repo is not None else Path(os.getcwd()))
+# the daemon runs in the checkout the positional root, the dispatcher's environment or the cwd sits in
+run(query_repo_root(repo))

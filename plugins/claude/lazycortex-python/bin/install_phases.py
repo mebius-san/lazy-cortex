@@ -5,14 +5,8 @@ CLI: `python3 install_phases.py phase<N> <consumer_repo_dir>` runs the named pha
 against the consumer repo. Phases are idempotent; safe to re-run.
 
 Phases:
-  phase1 — mirror plugin rules into <consumer>/.claude/rules/
-  phase2 — deploy cfg-py, chk-py, tst-py and cli/mypy/protected_access.py into <consumer>/cli/
-  phase2b — deploy cfg-py, chk-py and tst-py human wrappers into $HOME/.local/bin
-  phase3 — bootstrap consumer pyproject.toml with checker sections
-  phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
-  phase5 — scaffold project overlay guidelines under docs/guidelines/
-  phase6 — record python.env_source when the repo ships an env-bootstrap script
-  phase7 — register the code-reviewer agent as an expert in lazy.settings.json
+  Numbered phases cover the consumer's rules, tool wrappers, pyproject checker sections, overlay guidelines,
+  expert registration and virtual environments; each phase's own docstring states its effect.
 
 Scaffold-template sync and check-style hook registration are not phases: the install skill runs the core CLI
 verb `scaffold sync-plugin` for the templates, and the hook registers itself from the plugin's
@@ -27,6 +21,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tomllib
 from functools import partial
@@ -40,11 +35,18 @@ if TYPE_CHECKING:
 _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from toml_array import append_to_array  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import python_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from venv_spec import VenvSpec  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# location of the plugin tree (this file lives at .../bin/install_phases.py)
+# Location of the plugin tree (this file lives at .../bin/install_phases.py)
 # Allow override via env (Claude Code sets CLAUDE_PLUGIN_ROOT; consumer install → cache path, not dev source).
 # Default fallback resolves to .../plugins/claude/lazycortex-python, the parent of this bin/.
 # Single assignment so PLUGIN_ROOT reads as the module constant it is.
@@ -179,24 +181,25 @@ class Phase1MirrorRules:
 # ----------------------------------------------------------------------------------------
 class Phase2Wrappers:
   """
-  Install phase that writes byte-for-byte copies of the `cfg-py`, `chk-py` and `tst-py` wrapper scripts and
-  the `mypy/protected_access.py` plugin shim into the consumer's `cli/` directory and ensures
-  `.venv/` is listed in the consumer's `.gitignore`.
+  Install phase that writes byte-for-byte copies of the `cfg-py`, `chk-py` and `tst-py` wrapper scripts, the
+  `lazy_python_locator.py` they and the shim locate the plugin through, and the `mypy/protected_access.py` plugin
+  shim into the consumer's `cli/` directory and ensures `.venv/` is listed in the consumer's `.gitignore`.
 
   Guarantees:
     - Leaves a `.gitignore` that already ignores `.venv` byte-for-byte untouched.
 
   Attributes:
     consumer_dir: Root directory of the consumer repository.
-    target_dir: Directory receiving the wrapper scripts and the shim.
+    target_dir: Directory receiving the wrapper scripts, the plugin locator and the shim.
     gitignore: The consumer's `.gitignore` file.
   """
 
   WRAPPERS = (
-    ("cfg-wrapper.sh", "cfg-py"),
-    ("chk-wrapper.sh", "chk-py"),
-    ("tst-wrapper.sh", "tst-py"),
-    ("mypy-protected-access-shim.py", "mypy/protected_access.py"),
+    ("templates/cfg-wrapper.sh", "cfg-py"),
+    ("templates/chk-wrapper.sh", "chk-py"),
+    ("templates/tst-wrapper.sh", "tst-py"),
+    ("templates/mypy-protected-access-shim.py", "mypy/protected_access.py"),
+    ("bin/python_locator.py", "lazy_python_locator.py"),
   )
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -206,8 +209,8 @@ class Phase2Wrappers:
 
   def run(self) -> int:
     """
-    Write the `cfg-py`, `chk-py` and `tst-py` wrappers and the `mypy/protected_access.py` shim to the
-    consumer's `cli/` directory and update `.gitignore`.
+    Write the `cfg-py`, `chk-py` and `tst-py` wrappers, the plugin locator and the `mypy/protected_access.py` shim
+    to the consumer's `cli/` directory and update `.gitignore`.
 
     Guarantees:
       - Leaves a `.gitignore` that already ignores `.venv` byte-for-byte untouched.
@@ -221,14 +224,14 @@ class Phase2Wrappers:
     # ignore line is appended only when genuinely absent.
 
     self.target_dir.mkdir(parents = True, exist_ok = True)
-    for template_name, target_name in self.WRAPPERS:
-      # Templates are path-agnostic: deployed verbatim, they resolve the active
-      # plugin install at exec time. No path is substituted here — that is the
+    for source_rel, target_name in self.WRAPPERS:
+      # The shipped files are path-agnostic: deployed verbatim, they resolve the active
+      # plugin install at exec time through the deployed locator. No path is substituted here — that is the
       # whole point (a baked path goes stale on the next plugin update). Bytes, not text, so no
-      # host turns LF into CRLF: bash rejects a CRLF script and the audit compares the shim bytewise.
+      # host turns LF into CRLF: bash rejects a CRLF script and the audit compares the shim and the locator bytewise.
       target = self.target_dir / target_name
       target.parent.mkdir(parents = True, exist_ok = True)
-      target.write_bytes((PLUGIN_ROOT / "templates" / template_name).read_bytes())
+      target.write_bytes((PLUGIN_ROOT / source_rel).read_bytes())
     self._ensure_venv_gitignored()
     return 0
 
@@ -363,7 +366,7 @@ class Phase3Pyproject:
   CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "protected_access", "pylint", "ruff")
   OPTIONAL_SECTIONS = {"pch": "LAZY_PYTHON_ENABLE_PCH"}
 
-  # the checker section and key whose list install extends instead of leaving alone
+  # The checker section and key whose list install extends instead of leaving alone
   PLUGINS_SECTION = "mypy"
   PLUGINS_KEY = "plugins"
 
@@ -706,7 +709,7 @@ class Phase4Pch:
 class Phase5Overlay:
   """
   Install phase that creates per-topic guideline overlay stub files under the
-  consumer's `docs/guidelines/` directory.
+  consumer's `docs/guidelines/python/` directory.
 
   Guarantees:
     - Never overwrites an overlay file the consumer has already created for a topic.
@@ -716,7 +719,7 @@ class Phase5Overlay:
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
-    self.target_dir: Path = consumer_dir / "docs/guidelines"
+    self.target_dir: Path = consumer_dir / "docs/guidelines/python"
 
   def run(self) -> int:
     """
@@ -1017,12 +1020,259 @@ class Phase7Expert:
     self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
 
 
+# ----------------------------------------------------------------------------------------
+class Phase8VenvRefresh:
+  """
+  Install phase that brings the project venv, and the venv of this host's daemon checkout, up to date.
+
+  Responsibilities:
+    - Configure the consumer's target venv when it is missing or stale, and leave a fresh one untouched.
+    - Find the checkout this host's runtime daemon runs in, from the repository's daemon gate, and do the same for
+      its venv when that venv is a different one.
+    - Print one JSON receipt naming the outcome for both, with the failure output of any refresh that failed.
+
+  Guarantees:
+    - A venv is fresh by the runners' own rule: the checker tools are present and its stamp matches the current
+      requirement inputs; a fresh venv is never changed.
+    - A failed refresh, and a daemon checkout that cannot be determined, are reported in the receipt and make the
+      phase exit 1; neither is ever dropped.
+
+  Attributes:
+    K_PROJECT: Receipt key of the project section.
+    K_DAEMON: Receipt key of the daemon section.
+    K_ROOT: Receipt key of the section's root directory.
+    K_VENV: Receipt key of the section's venv.
+    K_STATE: Receipt key of the section's outcome.
+    K_DETAIL: Receipt key of the section's failure output.
+    K_GATE: Receipt key of the daemon gate verdict.
+    K_CHECKOUT: Receipt key of the daemon checkout.
+    STATE_FRESH: Outcome token for a venv found fresh.
+    STATE_CONFIGURED: Outcome token for a venv configured now.
+    STATE_FAILED: Outcome token for a venv that could not be configured.
+    STATE_SHARED: Daemon outcome token for a venv that is the project's own.
+    STATE_MISSING: Daemon outcome token for a daemon checkout that is gone.
+    STATE_SAME: Daemon outcome token for a daemon running in this checkout.
+    STATE_NONE: Daemon outcome token for no daemon checkout on this host.
+    GATE_OTHER: Daemon gate verdict for a daemon running in another checkout.
+    GATE_HERE: Daemon gate verdict for a daemon running in this checkout.
+    GATE_INVALID: Daemon gate verdict for an invalid gate shape.
+    CORE_PLUGIN: Name of the core plugin that owns the gate verb.
+    CORE_CLI_REL: Path of the core command line inside the core plugin root.
+    GATE_ARGV: Command-line arguments that run the gate verb.
+    GATE_STATE: Field name of the verdict in the gate verb's JSON answer.
+    GATE_PATH: Field name of the checkout path in the gate verb's JSON answer.
+    ENV_REPO_ROOT: Name of the environment variable that names the repository a refresh works in.
+    ENV_PROJECT_DIR: Name of the environment variable a refresh clears.
+
+    consumer_dir: Root directory of the consumer repository being installed into.
+  """
+
+  # Receipt keys: the two sections and their fields
+  K_PROJECT, K_DAEMON = "project", "daemon"
+  K_ROOT, K_VENV, K_STATE, K_DETAIL, K_GATE, K_CHECKOUT = "root", "venv", "state", "detail", "gate", "checkout"
+  # Refresh outcomes: the venv was fresh, was configured now, or could not be configured
+  STATE_FRESH, STATE_CONFIGURED, STATE_FAILED = "fresh", "configured", "failed"
+  # Daemon outcomes besides a refresh: the venv is the project's own, the checkout is gone, the daemon runs in this
+  # checkout, or no daemon checkout on this host
+  STATE_SHARED, STATE_MISSING, STATE_SAME, STATE_NONE = "shared", "missing", "same", "none"
+  # The daemon gate verdicts of the core `daemon-run-here check` verb this phase acts on
+  GATE_OTHER, GATE_HERE, GATE_INVALID = "not-this-checkout", "run-here", "invalid-shape"
+  # The core plugin, its CLI inside the plugin root, and the gate verb's command line
+  CORE_PLUGIN = "lazycortex-core"
+  CORE_CLI_REL = Path("bin") / "lazycortex-core"
+  GATE_ARGV = ( "daemon-run-here", "check", "--json", "--cwd" )
+  # The gate verb's JSON fields
+  GATE_STATE, GATE_PATH = "state", "path"
+  # The environment names a refresh sets or clears, so cfg resolves the intended project
+  ENV_REPO_ROOT, ENV_PROJECT_DIR = "LAZY_REPO_ROOT", "CLAUDE_PROJECT_DIR"
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    """
+    Bind the phase to the consumer repository it refreshes.
+
+    Args:
+      consumer_dir: Root directory of the consumer repository being installed into.
+    """
+    self.consumer_dir: Path = consumer_dir
+
+  @staticmethod
+  def _find_target_venv(checkout: Path) -> Path:
+    """
+    Name the venv a checkout's runners use.
+
+    Args:
+      checkout: Root of the checkout.
+
+    Returns:
+      The checkout's target venv, resolved; the conventional `.venv` at the checkout root when its `pyproject.toml`
+      cannot be read.
+    """
+    # guard: an unreadable pyproject.toml is cfg's to report; the default place stands for the name meanwhile
+    try:
+      return VenvSpec(project_dir = checkout).target_venv().resolve()
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError):
+      return (checkout / ".venv").resolve()
+
+  def _refresh(self, checkout: Path) -> tuple[str, str]:
+    """
+    Bring one checkout's venv up to date by the same rule the project's runners apply.
+
+    Notes:
+      - Configures the venv when it is missing or stale; a fresh venv is left untouched.
+
+    Args:
+      checkout: Root of the checkout whose venv is refreshed.
+
+    Returns:
+      The outcome, `fresh`, `configured` or `failed`, and the failure output (empty unless it failed).
+    """
+    # cfg resolves its project from the repo-root variable, never from a session's project directory
+    env = { key: value for key, value in os.environ.items() if key != self.ENV_PROJECT_DIR }
+    env[self.ENV_REPO_ROOT] = str(checkout)
+
+    # guard: a cfg that cannot be started is a failed refresh, reported with the reason
+    try:
+      # waiver: the shell runner and cfg's own flag, not reusable domain keys
+      done = subprocess.run([ "bash", str(_BIN / "cfg"), "--if-stale" ], cwd = checkout, env = env,
+                            capture_output = True, text = True, check = False)
+    except OSError as error:
+      return self.STATE_FAILED, str(error)
+
+    # cfg names the outcome on its last stdout line
+    answer = done.stdout.strip().splitlines()[-1:]
+
+    # guard: a non-zero exit or any other answer is a failure, reported with cfg's stderr
+    if done.returncode != 0 or answer not in ( [ self.STATE_FRESH ], [ self.STATE_CONFIGURED ] ):
+      return self.STATE_FAILED, done.stderr.strip()
+    return answer[0], ""
+
+  def _refresh_daemon(self, own_venv: Path) -> dict[str, str | None]:
+    """
+    Refresh the venv of this host's daemon checkout when it differs from the project's own.
+
+    Notes:
+      - A daemon checkout that is not on disk is reported, never created.
+
+    Args:
+      own_venv: The project's own target venv, already refreshed.
+
+    Returns:
+      The daemon section of the receipt: the gate verdict, the checkout, its venv, the outcome and the failure
+      detail.
+    """
+    section: dict[str, str | None] = { self.K_GATE: None, self.K_CHECKOUT: None, self.K_VENV: None,
+                                       self.K_STATE: self.STATE_FAILED, self.K_DETAIL: "" }
+
+    # guard: without the core CLI's answer the daemon checkout cannot be determined, and that is reported
+    try:
+      core, _stage = python_locator.plugin_root(self.CORE_PLUGIN, self.consumer_dir,
+                                                sibling_base = PLUGIN_ROOT.parent)
+      done = subprocess.run(
+          [ sys.executable, str(core / self.CORE_CLI_REL), *self.GATE_ARGV, str(self.consumer_dir) ],
+          capture_output = True, text = True, check = False)
+      gate = json.loads(done.stdout) if done.returncode == 0 else None
+    except (python_locator.PluginNotFoundError, OSError, ValueError) as error:
+      section[self.K_DETAIL] = str(error)
+      return section
+
+    # guard: a refused or unreadable answer names no checkout; the verb's own output is the report
+    if not isinstance(gate, dict):
+      section[self.K_DETAIL] = done.stderr.strip() or done.stdout.strip()
+      return section
+
+    # the gate verdict the rest of the decision rests on
+    section[self.K_GATE] = gate.get(self.GATE_STATE)
+
+    # the daemon runs in this very checkout, whose venv was refreshed already
+    if gate.get(self.GATE_STATE) == self.GATE_HERE:
+      section[self.K_STATE] = self.STATE_SAME
+      return section
+
+    # guard: the gate verb reports an invalid `daemon.run_here` shape, so the daemon checkout cannot be determined
+    if gate.get(self.GATE_STATE) == self.GATE_INVALID:
+      section[self.K_DETAIL] = f"daemon.run_here gate verdict: {self.GATE_INVALID}"
+      return section
+
+    # no daemon checkout on this host
+    if gate.get(self.GATE_STATE) != self.GATE_OTHER or not isinstance(gate.get(self.GATE_PATH), str):
+      section[self.K_STATE] = self.STATE_NONE
+      return section
+
+    # the checkout this host's daemon runs in, as the gate names it
+    checkout = Path(gate[self.GATE_PATH]).expanduser().resolve()
+    section[self.K_CHECKOUT] = str(checkout)
+
+    # guard: a gate naming a checkout that is not on disk is reported, never created
+    if not checkout.is_dir():
+      section[self.K_STATE] = self.STATE_MISSING
+      return section
+
+    # a venv the project shares with the daemon checkout was refreshed already
+    venv = self._find_target_venv(checkout)
+    section[self.K_VENV] = str(venv)
+    if venv == own_venv:
+      section[self.K_STATE] = self.STATE_SHARED
+      return section
+
+    # the daemon checkout's own venv, refreshed the same way
+    section[self.K_STATE], section[self.K_DETAIL] = self._refresh(checkout)
+    return section
+
+  def run(self) -> int:
+    """
+    Bring the project venv and the daemon checkout's venv up to date.
+
+    Guarantees:
+      - A venv that is fresh by the runners' own rule (checker tools present, stamp matching the current
+        requirement inputs) is never changed.
+      - A failed refresh, and a daemon checkout that cannot be determined, appear in the receipt with their own
+        output and make the phase exit 1; neither is ever dropped.
+
+    Notes:
+      - Prints one JSON receipt to stdout with a `project` section and a `daemon` section.
+
+    Returns:
+      0 when nothing failed, 1 when a refresh failed or the daemon checkout could not be determined.
+    """
+
+    # Domain(install.reconciliation):
+    # # An install brings the environment up to date
+    # Every install run checks the project's environment and, when it is missing or out of date, sets it up from
+    # the project's requirements; an environment that is current is left exactly as it is. The checkout the
+    # repository's runtime daemon uses on this host has its own environment when it lives elsewhere, and it is
+    # checked and set up the same way, since the jobs the daemon runs only ever use the environment they find. A
+    # setup that fails is reported with its own output and fails the step; it is never passed over.
+
+    # Contract:
+    # A venv that is fresh by the runners' own rule (checker tools present, stamp matching the current requirement
+    # inputs) MUST never be changed.
+
+    # Contract:
+    # A failed refresh, and a daemon checkout that cannot be determined, MUST appear in the receipt with their own
+    # output and make the phase exit 1; neither is ever dropped. The install skill reads the exit code as the step's
+    # outcome.
+
+    # the project's own venv first
+    own_venv = self._find_target_venv(self.consumer_dir)
+    state, detail = self._refresh(self.consumer_dir)
+    project = { self.K_ROOT: str(self.consumer_dir), self.K_VENV: str(own_venv), self.K_STATE: state,
+                self.K_DETAIL: detail }
+
+    # then the daemon checkout this host's gate names
+    daemon = self._refresh_daemon(own_venv)
+
+    # one receipt, and a failure anywhere fails the phase
+    print(json.dumps({ self.K_PROJECT: project, self.K_DAEMON: daemon }))
+    return 1 if self.STATE_FAILED in ( project[self.K_STATE], daemon[self.K_STATE] ) else 0
+
+
 def main() -> int:
   """
   Dispatch a single named phase against a consumer repository directory.
 
   Returns:
-    0 on success, 2 on usage error or unknown phase name.
+    The phase's own exit code — 0 on success, 1 when the phase reports a failure — or 2 on a usage error or an
+    unknown phase name.
   """
   # guard: argv shape — need at least phase + consumer-dir
   if len(sys.argv) < 3:
@@ -1039,6 +1289,7 @@ def main() -> int:
     "phase5": Phase5Overlay,
     "phase6": Phase6EnvSource,
     "phase7": Phase7Expert,
+    "phase8": Phase8VenvRefresh,
   }
   handler = phases.get(phase)
   if handler is None:

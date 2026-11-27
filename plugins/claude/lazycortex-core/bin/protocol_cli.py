@@ -3,9 +3,8 @@ Protocol-envelope audit surface for the `lazycortex-core` CLI.
 
 This module backs the `protocol-audit` subcommand: it audits every reachable protocol file
 against the response envelope through `protocol_envelope.audit` and prints the findings as
-JSON. The repository root follows the convention every other subcommand uses: the
-`LAZY_REPO_ROOT` env var, falling back to the process working directory, overridable
-per-call with `--cwd`.
+JSON. The repository root is the toplevel of the checkout that `--cwd`,
+else `LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself outside git).
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ import json
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from protocol_envelope import audit  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -43,5 +42,5 @@ def cmd_protocol_audit(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # the audit's findings are printed whole; the verb never fails on them
-  print(json.dumps(audit(resolve_repo_root(args.cwd)), ensure_ascii = False))
+  print(json.dumps(audit(query_repo_root(args.cwd)), ensure_ascii = False))
   return 0

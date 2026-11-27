@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /lazy-wiki.query runs in dispatcher mode (seeker + gatherer subagents) when the Agent tool is available, and agentless mode otherwise.
-last_regen: 2026-11-18
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /lazy-wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
@@ -9,8 +9,8 @@ source_skills:
   - lazy-wiki.query
   - lazy-wiki.seeker
   - lazy-wiki.gatherer
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 5ebf789d1de941416557ff120c7b9d3cdfb023d331e3b8819c5d40e258f47228
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: e66bbe59754b79e6082f0331364fa601e1de2ca8c0c79c662556d24da5baa238
 ---
 # Wiki query
 
@@ -26,15 +26,15 @@ Asking a question about your codebase or documentation through `/lazy-wiki.query
 
 ## How it fits together
 
-You invoke `/lazy-wiki.query "<question>"`. The skill first resolves your project's configured answer language once, then decides which mode it's running in: if the agent executing it can call the `Agent` tool — the main session, or a subagent whose own tool list carries it — it runs **dispatcher mode**. If it's a one-shot context with no further fan-out capability (an expert job, or a subagent dispatched without `Agent`), it runs **agentless mode**, doing the same lookup itself because there's nowhere else to put it.
+You invoke `/lazy-wiki.query "<question>"`. Before anything else the skill finds the nearest directory at or above your working directory (within the checkout) that holds `.claude/lazy.settings.json`, and reads the wiki scopes declared there. If the file is missing or no scope is configured, it stops and tells you to run `/lazy-wiki.install` and `/lazy-wiki.configure` first. It then resolves your project's configured answer language once, then decides which mode it's running in: if the agent executing it can call the `Agent` tool — the main session, or a subagent whose own tool list carries it — it runs **dispatcher mode**. If it's a one-shot context with no further fan-out capability (an expert job, or a subagent dispatched without `Agent`), it runs **agentless mode**, doing the same lookup itself because there's nowhere else to put it.
 
 ### Dispatcher mode
 
-**Phase 1 — Seeking entry points.** The skill reads your wiki scope configuration and, for each scope that has a `topics_index` on disk, dispatches a `lazy-wiki.seeker` subagent in parallel. Each seeker receives the question, the resolved language, and the absolute path to its scope's `topics.md`. It reads that index — a structured tree of axis/value/node entries, each with a one-line summary — and returns the nodes most relevant to the question, ranked by apparent relevance with a short reason for each match — a short list of strong candidates (around eight at most), not the whole catalog. When the index shows a state badge on an entry, such as `[spec_stage: draft]`, the seeker copies it in front of the gloss, so you can see a node's state without opening it. The seeker never opens node files; it works entirely from the index. When multiple scopes are configured, all seekers run simultaneously and their results are merged.
+**Phase 1 — Seeking entry points.** The skill reads your wiki scope configuration and, for each scope that has a `topics_index` on disk, dispatches a `lazy-wiki.seeker` subagent in parallel. Each seeker receives the question, the resolved language, and the absolute path to its scope's `topics.md`. It reads that index — a structured tree of axis/value/node entries, each with a one-line summary — and returns the nodes most relevant to the question, ranked by apparent relevance with a short reason for each match — a short list of strong candidates (around eight at most), not the whole catalog. When the index shows a state badge on an entry, such as `[spec_stage: draft]`, the seeker copies it in front of the gloss, so you can see a node's state without opening it. The seeker never opens node files, follows links, or answers the question; it works entirely from the one index it was given, and an empty result is a valid outcome when nothing in that scope is relevant. When multiple scopes are configured, all seekers run simultaneously and their results are merged.
 
 The skill then validates every returned path on disk and rebases it to a repo-relative form. Any path that doesn't exist on disk is dropped and noted so you can see what the seeker suggested but couldn't deliver.
 
-**Phase 2 — Traversal and synthesis.** With the validated entry points in hand, the skill dispatches a single `lazy-wiki.gatherer` subagent, passing the same resolved language along. The gatherer opens each entry-point node in turn, scans its `# See also` section, and decides — from the gloss text alone — whether a linked node is relevant enough to follow. Glosses are one-line descriptions of the link target, maintained by the curator; they let the gatherer skip whole branches without reading them. The gatherer follows relevant links depth-first up to roughly three hops from any seed, also running backlink searches (grep) when "what points to this node" matters for the question. Once the frontier stabilises it writes a synthesised answer with inline source links, then a sources list naming every node it read. When a source's entry point carried a badge, the sources line repeats it after the link (for example `[spec_stage: draft]`), so you know the state of what the answer cites. If nothing relevant turns up, the answer says so plainly and the sources list is empty.
+**Phase 2 — Traversal and synthesis.** With the validated entry points in hand, the skill dispatches a single `lazy-wiki.gatherer` subagent, passing the same resolved language along. The gatherer opens each entry-point node in turn, scans its `# See also` section, and decides — from the gloss text alone — whether a linked node is relevant enough to follow. Glosses are one-line descriptions of the link target, maintained by the curator; they let the gatherer skip whole branches without reading them. Each link is resolved against the folder of the node that contains it, not the repository root. The gatherer is read-only and grounded: every claim in its answer traces to a node it actually read. It follows relevant links depth-first up to roughly three hops from any seed, also running backlink searches (grep) when "what points to this node" matters for the question. Once the frontier stabilises it writes a synthesised answer with inline source links, then a sources list naming every node it read. When a source's entry point carried a badge, the sources line repeats it after the link (for example `[spec_stage: draft]`), so you know the state of what the answer cites. If nothing relevant turns up, the answer says so plainly and the sources list is empty.
 
 **Presenting the result.** The skill surfaces the gatherer's answer and sources verbatim, and appends the entry-point seed — path, gloss, and scope for each point — plus any dropped paths. You can see exactly where the traversal started and whether anything was filtered out.
 

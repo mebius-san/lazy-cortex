@@ -26,8 +26,8 @@ Severity is the shared vocabulary of `lazy-core.audit-contract.md` and nothing e
 Resolution says what kind of change the finding implies, and `/lazy-core.checkup` reads it to decide whether to offer a fix-flow at all:
 
 - **`mechanical`** — the repair follows unambiguously from what the check already read; there is no second defensible answer. Checks: L1 consumer-scope copy absent, L2, L3; Agent B scaffold-registry `plugin_root_var`, path hygiene, Python runtime FAIL, rule-writing 3 (inline-array `paths:`) and 9 (missing template pointer), model routing 4 (orphans) and 5 (gaps), audit-shape S4 (contract not named); Agent D D3, D4, D10 index desync, D11 rows other than `not_a_symlink` / `source_missing`, D13.
-- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4, L6; Agent A oversize rule, oversize `MEMORY.md`, and every non-`PASS` description grade; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17, D18.
-- **`report-only`** — a measurement or an observation with no change expected. Checks: every sizing row, the `total_kb` and `descriptions_total` lines from Agents A and B, the Python-runtime `[INFO]` line, model routing 1 (`_version` provenance), 3 (merged entries) and 7 (env var), every visible-waiver `[INFO]` (execution-discipline, `size-waiver:`, dirty-tree), Agent C H1 and H2 (both clear at the next publish bump — there is no manual route), D1's experts-count line, D3's absent-section lines, and D10's persona-but-empty line.
+- **`selective`** — a repair exists, but which one is right is the operator's call. Checks: L1 missing plugin-source `description:`, L4, L6; Agent A oversize rule, oversize `MEMORY.md`, and every non-`PASS` description grade; Agent B MCP enablement, scaffold-registry `parse_error` / `bad_shape` / `glob_overlap` / `missing_template` / `orphan_key`, naming hygiene, every skill-writing, agent-writing and rule-writing check not listed as mechanical above, dirty-tree write-without-commit, reference-writing 11 and 12, audit-shape S1–S3; Agent D D1, D2, D5, D7, D8, D9, D11 `not_a_symlink` / `source_missing`, D12, D14, D15, D16, D17, D18, D19 `[WARN]`.
+- **`report-only`** — a measurement or an observation with no change expected. Checks: every sizing row, the `total_kb` and `descriptions_total` lines from Agents A and B, the Python-runtime `[INFO]` line, model routing 1 (`_version` provenance), 3 (merged entries) and 7 (env var), every visible-waiver `[INFO]` (execution-discipline, `size-waiver:`, dirty-tree), Agent C H1 and H2 (both clear at the next publish bump — there is no manual route), D1's experts-count line, D3's absent-section lines, D10's persona-but-empty line, and D19's not-scanned `[INFO]` lines.
 
 A check added here is assigned a resolution in the same edit; an unassigned finding counts as `report-only` downstream, which silently drops a real repair out of `/lazy-core.checkup`'s question.
 
@@ -220,7 +220,7 @@ Missing files are a silent no-op — the verb prints a stub with `_version` inta
 1. **Built-ins** — hardcoded list: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch string: bare name.
 2. **User-authored, global** — `$HOME/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
-4. **Plugin-shipped** — for every plugin name `installed_plugins.json` records (plus, in a repo that authors plugins, every `plugins/claude/<name>/` carrying a manifest), glob `<root>/agents/*.md` where `<root>` is what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <name>` prints — the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/<name>/`, and last the `installPath` of the highest-version record in `~/.claude/plugins/installed_plugins.json`; a walk of `$HOME/.claude/plugins/cache/**` is never the route — it keeps every version ever installed and surfaces copies the registry no longer names. Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the registry is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root; a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
+4. **Plugin-shipped** — for every plugin name `installed_plugins.json` records (plus, in a repo that authors plugins, every `plugins/claude/<name>/` carrying a manifest), glob `<root>/agents/*.md` where `<root>` is what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" plugin-root <name>` prints — the `$LAZYCORTEX_PLUGIN_DIRS` entry first, then the dev-vault sibling, then the repo's own `plugins/claude/<name>/`, and last the `installPath` of the highest-version record in `~/.claude/plugins/installed_plugins.json` among those this repo may use (the install-scope filter below); a walk of `$HOME/.claude/plugins/cache/**` is never the route — it keeps every version ever installed and surfaces copies the registry no longer names. Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the registry is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` / `local` scope with a `projectPath` equal to the main checkout of the current repo (what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_locator.py" checkout` prints; a subdirectory or a linked worktree maps to it); a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
 
 **Rule-writing compliance** — see `lazy-core.rule-writing`. File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `plugins/claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
@@ -282,7 +282,7 @@ Scope: `lazy.settings.json[experts]`, the flat `lazy.settings.json[daemon]` and 
 
 **Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
 
-Perform these 18 sub-checks in order:
+Perform these 19 sub-checks in order:
 
 **D1 — `lazy.settings.json[experts]` schema**
 
@@ -508,6 +508,20 @@ The verb prints `{branch_experts, worktree_links, worktree_bootstrap_cmd, gap}` 
 - `gap: true` → `[INFO] expert(s) <comma-joined branch_experts> run in job worktrees that get no execution environment — daemon.git.worktree_links and daemon.git.worktree_bootstrap_cmd are both empty | .claude/lazy.settings.json[daemon.git]`; `fix: list the gitignored paths the jobs need in daemon.git.worktree_links (a plugin install such as /lazy-python.install adds its own), or set daemon.git.worktree_bootstrap_cmd`.
 - `gap: false` → emit nothing.
 
+**D19 — Routine failures bypass the error ledger**
+
+`lazy-core.error-ledger` makes the core error ledger the only failure channel of a routine. Only the executable code a `command` routine runs is checked, never agent or skill text. Run:
+
+```
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" error-ledger-audit)
+```
+
+The verb prints `{findings, scanned, skipped}` (exit 1 with an `error` when the settings file does not parse — that is D3's `[FAIL]`, emit nothing here). A routine whose plugin the repo authors is read, whether or not the machine also installs that plugin: a Python entry with the sibling modules it imports, or a shell script. A plugin the machine installs and the repo does not author is skipped with reason `plugin_cli`.
+
+- `[WARN]` each `findings` entry — `<path>:<line> — <detail> (<kind>) | <path>`; `fix: <fix>`. `<kind>` is `swallowed_failure` (a caught error is printed or logged and the code goes on as a success), `private_error_file` (errors written into a file of the code's own) or `own_notification` (the code sends a notification of its own). A stderr line next to a non-zero exit is not a finding.
+- `[INFO]` each `skipped` entry with reason `not_scanned` — `routine <routine> runs <path>, which the check does not read (not Python or shell, or it does not parse) | <path>`; no route.
+- `skipped` entries with reason `plugin_cli` or `unresolved` → emit nothing (an unresolved plugin is D4's finding).
+
 ### Structured report shape (Agents A, B, C — unchanged)
 
 ```
@@ -600,11 +614,15 @@ plugins_scanned: <n>  warn: <m>
 ### worktree_environment
 - [INFO] expert(s) <keys> run in job worktrees that get no execution environment — daemon.git.worktree_links and daemon.git.worktree_bootstrap_cmd are both empty | .claude/lazy.settings.json[daemon.git]
 
+### error_ledger
+- [WARN] <path>:<line> — <detail> (<kind>) | <path>
+- [INFO] routine <routine> runs <path>, which the check does not read | <path>
+
 ### summary
 pass: <n>  warn: <n>  fail: <n>
 ```
 
-The `aspect_conflicts`, `external_dirs`, `inbox_ownership` and `worktree_environment` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
+The `aspect_conflicts`, `external_dirs`, `inbox_ownership`, `worktree_environment` and `error_ledger` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
 
 ## Phase 3 — Render
 
@@ -767,7 +785,9 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Worktree environment** — one line per `[INFO]` from D18, with its `fix:` route. Rendered despite being `[INFO]` — the finding names a repair. Omit the section when D18 produced no findings.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D18 findings).
+**Error-ledger bypass** — one line per `[WARN]` from D19, each naming file and line and carrying its `fix:` route: exit non-zero, or report through the core `error-record` verb with a cause from a constant — which one fits is the operator's call. Then one line per D19 `[INFO]`. Omit the section when D19 produced no findings.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D19 findings).
 
 ### Logging compliance
 

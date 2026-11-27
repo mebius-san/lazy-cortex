@@ -80,6 +80,8 @@ class ReviewResultValue:
   Attributes:
     APPROVED: A round that closed with no reviewer concerns.
     APPROVED_WITH_CONCERNS: A round that closed accepted, with concerns recorded alongside it.
+    SENT_BACK: A report an operator sent back to its writer; withholds acceptance.
+    SENT_TO_PLAN: A report an operator sent back to the plan; withholds acceptance.
     ACCEPTED: Both terminal values that count as the document being accepted — a coordinator
       reacting to `SpecKey.REVIEW_RESULT` treats either the same way; only a value outside this
       set (a rejection, or the reopened token) withholds acceptance.
@@ -89,6 +91,11 @@ class ReviewResultValue:
   APPROVED = "approved"
   # A round that closed accepted, with concerns recorded alongside it.
   APPROVED_WITH_CONCERNS = "approved-with-concerns"
+  # An operator sent a report back to its writer; not an acceptance. Review's own `ResultValue` carries the same token —
+  # duplicated here because specs never imports review's Python.
+  SENT_BACK = "sent-back"
+  # An operator sent a report back to the plan; not an acceptance. Duplicated from review's `ResultValue` likewise.
+  SENT_TO_PLAN = "sent-to-plan"
   # Both terminal values that count as the document being accepted — a coordinator reacting to
   # `SpecKey.REVIEW_RESULT` treats either the same way; only a value outside this set (a rejection, or the reopened
   # token) withholds acceptance.
@@ -1650,6 +1657,69 @@ class MemberBuildState(StrEnum):
   BUILT = "built"
   REAPPROVED = "reapproved"
   UNBUILT = "unbuilt"
+
+
+# ----------------------------------------------------------------------------------------
+class BuildRegistryKey:
+  """
+  Keys and names of a release's build registry, the `.state/` file that records every build of one release.
+
+  Attributes:
+    FILE_TEMPLATE: The registry file name pattern, with the product key and the release folder name as placeholders.
+    BRANCH_TEMPLATE: The build branch name pattern, with the product key, the release folder name and the build
+      number as placeholders.
+    PRODUCT: The registry's product key.
+    RELEASE: The registry's release folder name.
+    BUILDS: The registry's list of build records, oldest first.
+    BUILD: A record's build number, the value the build wrote into `spec_build`.
+    BRANCH: A record's branch name.
+    BRANCH_FROM: A record's start point — the branch the build started from, or null for the base branch.
+    OUTCOME: A record's outcome, one of `BuildOutcomeKind`.
+    DELETED: A record's flag that its branch is gone from git.
+    MERGED: A record's flag that `prune` deleted its branch because the branch was merged into the base branch.
+  """
+
+  # The file name pattern under `.state/`, the product key and the release folder name as its placeholders.
+  FILE_TEMPLATE = "lazy-spec.builds.{product}.{release}.json"
+  # The pattern of a build's branch name, the product key, the release folder name and the build number its
+  # placeholders.
+  BRANCH_TEMPLATE = "spec/{product}/releases/{release}/build-{build}"
+  # The registry's product key.
+  PRODUCT = "product"
+  # The registry's release folder name.
+  RELEASE = "release"
+  # The registry's list of build records, oldest first.
+  BUILDS = "builds"
+  # A record's build number, the value the build wrote into `spec_build`.
+  BUILD = "build"
+  # A record's branch name.
+  BRANCH = "branch"
+  # A record's start point: the branch the build started from, or null for the base branch.
+  BRANCH_FROM = "branch_from"
+  # A record's outcome, one of `BuildOutcomeKind`.
+  OUTCOME = "outcome"
+  # A record's flag that its branch is gone from git.
+  DELETED = "deleted"
+  # A record's flag that `prune` deleted its branch because the branch was merged into the base branch.
+  MERGED = "merged"
+
+
+# ----------------------------------------------------------------------------------------
+class BuildOutcomeKind(StrEnum):
+  """
+  How one build of a release ended, as its build registry records it.
+
+  Attributes:
+    OPEN: The build has started and no outcome has been recorded for it.
+    ACCEPTED: The build's result was accepted.
+    REJECTED: The build's result was rejected and a later build replaces it.
+    FAILED: The build failed and its branch is abandoned.
+  """
+
+  OPEN = "open"
+  ACCEPTED = "accepted"
+  REJECTED = "rejected"
+  FAILED = "failed"
 
 
 # ----------------------------------------------------------------------------------------

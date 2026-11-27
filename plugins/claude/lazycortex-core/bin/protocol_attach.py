@@ -16,37 +16,44 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import sys
 from pathlib import Path
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import RoutineKey, SettingsKey  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from constants import RoutineKey, SettingsKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+from lazy_settings import load_tracked_section, save_section  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 def _resolve_settings_path(cwd: Path | str | None) -> Path:
   """
-  Resolve the tracked settings-file path from an optional explicit working directory.
+  Resolve the tracked settings file that holds the routines of the repository checkout a call works in.
 
   Args:
-    cwd: Explicit repository root, or `None` to fall back to the `LAZY_REPO_ROOT`
-      environment variable and then the process working directory.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory.
 
   Returns:
-    Path to `<cwd>/.claude/lazy.settings.json` under the resolved working directory.
+    Path to `.claude/lazy.settings.json` at the root of the checkout that directory sits in, where the daemon reads
+    the routines.
   """
-  # pick the repo root: explicit --cwd wins, otherwise the dispatcher's LAZY_REPO_ROOT-or-cwd convention
-  if cwd is not None:
-    root = Path(cwd)
-  else:
-    root = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+  # the routines live at the checkout root of the explicit --cwd, the dispatcher's LAZY_REPO_ROOT or the cwd
   # waiver: filesystem path idiom
-  return root / ".claude" / "lazy.settings.json"
+  return query_repo_root(cwd) / ".claude" / "lazy.settings.json"
 
 
 def add_protocols(routine_name: str, ids: list[str], *, cwd: Path | str | None = None) -> dict:
@@ -67,7 +74,9 @@ def add_protocols(routine_name: str, ids: list[str], *, cwd: Path | str | None =
   Args:
     routine_name: Key under the `routines` section to attach protocols to.
     ids: Protocol reference ids (`<plugin>:<name>`) to union into the routine.
-    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      settings file is the `.claude/lazy.settings.json` at the root of the checkout that directory sits in, where
+      the daemon reads the routines.
 
   Returns:
     Dict with `routine`, `added` (ids appended this call), and `protocols` (the resulting

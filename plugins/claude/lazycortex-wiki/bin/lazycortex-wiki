@@ -38,56 +38,84 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import candidates as _candidates  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import dispatch as _dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import doctor as _doctor  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import domains as _domains  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import explainers as _explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import index as _index  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import mirror as _mirror  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import navigation as _navigation  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import neighbours as _neighbours  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import nodes as _nodes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import prune as _prune  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import relink as _relink  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import scope as _scope  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import structure as _structure  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import structure_map as _structure_map  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import tags as _tags  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import terms as _terms  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import term_dictionary as _term_dictionary  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import term_links as _term_links  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import terms_migrate as _terms_migrate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import textfile as _textfile  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import touch_ledger as _touch_ledger  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import wiki_job_response as _job_response  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import axes as _axes  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import wiki_commit as _wiki_commit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import wiki_locator as _wiki_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # subcommand name -> one-line help; drives argparse registration and dispatch.
@@ -137,6 +165,8 @@ _SUBCOMMANDS = {
   "terms-apply":    "Apply a decided term replacement to one document's prose (the operator picks the direction).",
   "terms-migrate":  "Cut each terms scope's old dictionary file into term files and bring the scope's documents' "
                     "term links and old terms sections in line (--check: exit 0 while work is left).",
+  "terms-recase":   "Bring each terms scope's term-file titles and file names to the letter case of the term's "
+                    "language and move the documents' links to the renamed files (--check: exit 0 while work is left).",
   "terms-sweep":    "List the terms scopes' documents, queue one terms-curator job per directory with --dispatch "
                     "(--mark writes the sweep marker, --include-review opens documents under review; a scope not "
                     "migrated yet is left out), or with --check exit 0 "
@@ -153,9 +183,6 @@ _SUBCOMMANDS = {
   "core-cli":       "Print the absolute path of the resolved lazycortex-core CLI (exit 1 with an error: line "
                     "when core is unreachable).",
 }
-
-# Environment variable name that carries the repository root.
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 # The last-stdout-line key a multi-path worker narrows the daemon's retry unit with
 _FAILED_PATHS_KEY = "failed_paths"
 # Environment variable the daemon exports with the routine's subprocess timeout, in seconds.
@@ -248,7 +275,7 @@ class _ProcessFileRun:
     # it started, so a job still unclaimed at the read sees the node as it stands now whenever it is claimed
     if self._queued_keys is None:
       try:
-        self._queued_keys = _dispatch.CoreDispatch().query_queued_dedup_keys(
+        self._queued_keys = _dispatch.CoreDispatch(repo = self._repo).query_queued_dedup_keys(
           repo = self._repo, expert = _dispatch.CoreDispatch.EXPERT_NAME,
         )
       except (RuntimeError, ValueError):
@@ -298,6 +325,7 @@ class _TermsWrite(NamedTuple):
     refused: Refused operations, each with its zero-based batch position, the operation as sent and the reason.
     skip_fragments: The `skip` fragments that matched no place, in the order sent, by document and by the word of
       the link they keep off it.
+    unsettled: The term lines of an old terms section still standing in a job document, each with its document.
   """
 
   # The outcome of the commit carrying the term files and the documents
@@ -314,6 +342,32 @@ class _TermsWrite(NamedTuple):
   refused: list[dict]
   # The `skip` fragments that matched no place, by document and by the word of the link they keep off it
   skip_fragments: dict[tuple[str, str], list[str]]
+  # The term lines of an old terms section still standing in a job document, each with its document
+  unsettled: list[dict]
+
+
+# ----------------------------------------------------------------------------------------
+# waiver: a named tuple, not a dataclass — test loaders exec this extension-less file without registering it in
+# sys.modules, which a dataclass needs at class creation
+class _TermsLedgerGroup(NamedTuple):
+  """
+  One kind of error a `terms-write` call records in the error ledger, and the incidents it closes.
+
+  Attributes:
+    cause: Stable cause token the errors are recorded under.
+    prefix: Incident-key prefix the errors fold under, before the scope id.
+    errors: Pairs of document path and one-line description of the error recorded under that document.
+    closes: Incident-key prefixes closed for each source of the job under which this kind recorded nothing.
+  """
+
+  # The stable cause token the errors are recorded under
+  cause: str
+  # The incident-key prefix the errors fold under, before the scope id
+  prefix: str
+  # The pairs of document path and one-line description recorded under that document
+  errors: list[tuple[str, str]]
+  # The incident-key prefixes closed for each source under which this kind recorded nothing
+  closes: tuple[str, ...]
 
 
 # ----------------------------------------------------------------------------------------
@@ -680,6 +734,7 @@ class Cli:
   _CMD_TERMS_RESOLVE  = "terms-resolve"
   _CMD_TERMS_WRITE    = "terms-write"
   _CMD_TERMS_MIGRATE  = "terms-migrate"
+  _CMD_TERMS_RECASE   = "terms-recase"
   _CMD_TERMS_SWEEP    = "terms-sweep"
   _CMD_TERMS_SCOPE_CONFIG = "terms-scope-config"
   _CMD_MIRROR_PLAN    = "mirror-plan"
@@ -691,7 +746,9 @@ class Cli:
   _ARG_PATH           = "path"
   _ARG_PATH_HELP      = "File path to resolve (absolute or repo-relative)."
   _ARG_REPO           = "--repo"
-  _ARG_REPO_HELP      = "Repository root (defaults to $LAZY_REPO_ROOT or cwd)."
+  _ARG_REPO_HELP      = ("Directory inside the repository to work in (default: $LAZY_REPO_ROOT, then cwd); the "
+                         "nearest directory above it holding .claude/lazy.settings.json within its checkout is used, "
+                         "else the checkout root.")
   _ARG_NEIGHBOURS_PATH_HELP = "Repo-relative path of the markdown node to list the neighbours of."
   # Error fragment `neighbours` prints in its stdout error object for a path naming no file.
   _MSG_NO_SUCH_FILE    = "no such file"
@@ -778,6 +835,7 @@ class Cli:
 
   # argparse strings for the terms-migrate, terms-sweep and terms-scope-config subcommands.
   _ARG_MIGRATE_CHECK_HELP  = "Write nothing; exit 0 while a scope or a document still needs the migration, else 1."
+  _ARG_RECASE_CHECK_HELP   = "Write nothing; exit 0 while a term title or file name breaks the case canon, else 1."
   _ARG_SWEEP_PATHS         = "paths"
   _ARG_SWEEP_PATHS_HELP    = "Repo-relative documents or directories the sweep is limited to (default: every scope)."
   _ARG_DISPATCH            = "--dispatch"
@@ -1118,6 +1176,10 @@ class Cli:
   _TERMS_OP_FILES    = "files"
   _TERMS_OP_RELINK   = "relink"
   _TERMS_OP_RETARGET = "retarget"
+  # The incidents of refused operations and of whole-batch refusals, closed together for a document holding neither
+  _TERMS_OPERATION_INCIDENTS = (
+    _dispatch.CoreDispatch.INCIDENT_TERMS_PREFIX, _dispatch.CoreDispatch.INCIDENT_TERMS_BATCH_PREFIX,
+  )
   # Operation kinds that change the dictionary itself rather than only the documents
   _TERMS_DICTIONARY_OPS = frozenset({ "add", "extend", "rename", "split" })
   # The most characters of one unmatched `skip` fragment an error-ledger detail shows, and the mark of a cut one
@@ -1192,7 +1254,11 @@ class Cli:
   _OUT_UNMATCHED     = "unmatched"
   _OUT_MERGED        = "merged"
   _OUT_REFUSED       = "refused"
+  _OUT_UNSETTLED     = "unsettled"
   _OUT_RETRY         = "retry"
+  # Keys of one unsettled record: the document and the term line as written
+  _OUT_FILE          = "file"
+  _OUT_LINE          = "line"
 
   # Key of the tag-apply outcome line counting the rewritten nodes.
   _OUT_NODES_CHANGED = "nodes_changed"
@@ -1215,13 +1281,13 @@ class Cli:
     Guarantees:
       - Exit code 0 means the subcommand ran to completion, including its documented skips, and 1 means the
         subcommand itself failed.
-      - For every subcommand except `terms-migrate` and `terms-sweep`, 2 never reports failed work and is
-        reserved for an invocation that could not be run at all, such as a rejected argument vector, an unknown
-        subcommand, or a path that names no file.
-      - The `terms-migrate` and `terms-sweep` subcommands follow the migration runner's exit table instead: 0
-        means the verb did its work or the predicate's condition holds, 1 means there was nothing to do or the
-        condition does not hold, 2 means the verb broke or was refused, and 3 means the verb does not apply to
-        this repository.
+      - For every subcommand except `terms-migrate`, `terms-recase` and `terms-sweep`, 2 never reports failed work
+        and is reserved for an invocation that could not be run at all, such as a rejected argument vector, an
+        unknown subcommand, or a path that names no file.
+      - The `terms-migrate`, `terms-recase` and `terms-sweep` subcommands follow the migration runner's exit table
+        instead: 0 means the verb did its work, had nothing to do, or the predicate's condition holds, 1 means the
+        predicate's condition does not hold, 2 means the verb broke or was refused, and 3 means the verb's run does
+        not apply to this repository.
 
     Args:
       argv: Argument vector to parse; defaults to the process arguments when not supplied.
@@ -1232,14 +1298,15 @@ class Cli:
 
     # Contract:
     # Exit code 0 means the subcommand ran to completion, including its documented skips, and 1 means the
-    # subcommand itself failed. For every subcommand except `terms-migrate` and `terms-sweep`, 2 NEVER reports
-    # failed work: it is reserved for an invocation that could not be run at all, such as a rejected argument
-    # vector, an unknown subcommand, or a path that names no file.
+    # subcommand itself failed. For every subcommand except `terms-migrate`, `terms-recase` and `terms-sweep`,
+    # 2 NEVER reports failed work: it is reserved for an invocation that could not be run at all, such as a
+    # rejected argument vector, an unknown subcommand, or a path that names no file.
 
     # Contract:
-    # The `terms-migrate` and `terms-sweep` subcommands follow the migration runner's exit table instead: 0 means
-    # the verb did its work or the predicate's condition holds, 1 means there was nothing to do or the condition
-    # does not hold, 2 means the verb broke or was refused, and 3 means the verb does not apply to this repository.
+    # The `terms-migrate`, `terms-recase` and `terms-sweep` subcommands follow the migration runner's exit table
+    # instead: 0 means the verb did its work, had nothing to do, or the predicate's condition holds, 1 means the
+    # predicate's condition does not hold, 2 means the verb broke or was refused, and 3 means the verb's run does
+    # not apply to this repository.
 
     # parse the command line and pick out the invoked subcommand
     parser = self._build_parser()
@@ -1301,6 +1368,7 @@ class Cli:
       self._CMD_TERMS_RESOLVE: self._cmd_terms_resolve,
       self._CMD_TERMS_WRITE: self._cmd_terms_write,
       self._CMD_TERMS_MIGRATE: self._cmd_terms_migrate,
+      self._CMD_TERMS_RECASE: self._cmd_terms_recase,
       self._CMD_TERMS_SWEEP: self._cmd_terms_sweep,
       self._CMD_TERMS_SCOPE_CONFIG: self._cmd_terms_scope_config,
       self._CMD_MIRROR_PLAN: self._cmd_mirror_plan,
@@ -1308,7 +1376,7 @@ class Cli:
       self._CMD_STRUCTURE_WATCH_CONFIG: self._cmd_structure_watch_config,
       self._CMD_STRUCTURE_APPLY: self._cmd_structure_apply,
       self._CMD_STRUCTURE_RESOLVE: self._cmd_structure_resolve,
-      self._CMD_CORE_CLI: lambda _args: self._cmd_core_cli(),
+      self._CMD_CORE_CLI: self._cmd_core_cli,
       self._CMD_RENDER_NAVIGATION_RULE: self._cmd_render_navigation_rule,
     }
 
@@ -1338,8 +1406,8 @@ class Cli:
         # neighbours takes the node path and the repo
         sub_parser.add_argument(self._ARG_PATH, help = self._ARG_NEIGHBOURS_PATH_HELP)
         sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
-      elif name == self._CMD_RESOLVE_LANGUAGE:
-        # resolve-language reads only the repo
+      elif name in (self._CMD_RESOLVE_LANGUAGE, self._CMD_CORE_CLI):
+        # resolve-language and core-cli read only the repo
         sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_TEXT:
         # text takes the explainer key, chosen from the published set
@@ -1631,6 +1699,11 @@ class Cli:
         sub_parser.add_argument(self._ARG_CHECK, dest = self._ARG_CHECK_DEST, action = self._ACTION_STORE_TRUE,
                                 help = self._ARG_MIGRATE_CHECK_HELP)
         sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_TERMS_RECASE:
+        # terms-recase takes the predicate switch and the repo
+        sub_parser.add_argument(self._ARG_CHECK, dest = self._ARG_CHECK_DEST, action = self._ACTION_STORE_TRUE,
+                                help = self._ARG_RECASE_CHECK_HELP)
+        sub_parser.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_TERMS_SWEEP:
         # terms-sweep takes optional paths, then either the dispatch switch with its marker switch or the predicate
         sub_parser.add_argument(self._ARG_SWEEP_PATHS, nargs = "*", default = [], help = self._ARG_SWEEP_PATHS_HELP)
@@ -1715,7 +1788,7 @@ class Cli:
     # on the scope's own frontmatter filter.
 
     # resolve the path and print the owning scope, or a null id when none claims it
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     result = _scope.ScopeResolver(repo = repo).resolve_scope_by_path(args.path, apply_filter = not args.globs_only)
     if result is None:
       print(json.dumps({ "scope_id": None }))
@@ -1743,7 +1816,7 @@ class Cli:
       Integer exit code: 0 when the payload was printed, 2 when the path names no file.
     """
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # guard: the path names no file in the repository — nothing to look up
     if not (repo / args.path).is_file():
@@ -1775,7 +1848,7 @@ class Cli:
     # floor rather than an error; the command always exits 0.
 
     # the resolved language code is the whole output
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     print(_explainers.resolve_language(repo))
     return 0
 
@@ -1808,7 +1881,7 @@ class Cli:
     # the command always exits 0.
 
     # an explicit --lang wins over the repo's resolved wiki language
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     lang = args.lang or _explainers.resolve_language(repo)
     print(_explainers.text_for(args.key, _explainers.language_code(lang)))
     return 0
@@ -1829,7 +1902,7 @@ class Cli:
       carries a top-level `error` key); `0` otherwise.
     """
     # union the axes and print the outcome dict
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     result = _axes.ensure_axes(repo, args.axes)
     print(json.dumps(result))
 
@@ -1855,7 +1928,7 @@ class Cli:
       Integer exit code: `1` when the filter JSON does not parse to an object, when the named
       scope does not exist, or when the stored scopes are malformed; `0` otherwise.
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # parse the optional frontmatter predicates; without --filter-json none are seeded
     frontmatter = None
@@ -1976,7 +2049,7 @@ class Cli:
 
     node_path = Path(args.path)
     job_dir = Path(args.job_dir) if args.job_dir else None
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     ledger = _touch_ledger.TouchLedger(path = Path(args.ledger)) if args.ledger else None
 
     # guard: neither --from nor --job-dir names a result file to read
@@ -2335,7 +2408,7 @@ class Cli:
     Returns:
       Integer exit code (0 on success, 1 when the scope is unknown).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: requested scope id not present in settings
@@ -2371,7 +2444,7 @@ class Cli:
     Returns:
       Integer exit code — 0 when nothing drifted, 1 when `--check` found a difference.
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     watch = _structure.StructureWatch(repo = repo)
 
     # without --check the derivation itself is the whole output
@@ -2379,8 +2452,9 @@ class Cli:
       print(json.dumps(watch.build_expected(), indent = 2, sort_keys = True))
       return 0
 
-    # compare each registered structure routine against what the section derives
-    registered = self._load_structure_routines(repo)
+    # compare each registered structure routine against what the section derives; the routine registry is a daemon
+    # section, kept in the checkout toplevel's settings
+    registered = self._load_structure_routines(_wiki_locator.query_repo_root(repo))
     drifted = { name: watch.compute_drift(cfg) for name, cfg in registered.items() }
     drifted = { name: found for name, found in drifted.items() if found }
     print(json.dumps({
@@ -2391,12 +2465,16 @@ class Cli:
     return 1 if drifted else 0
 
 
-  def _cmd_core_cli(self) -> int:
+  def _cmd_core_cli(self, args: argparse.Namespace) -> int:
     """
     Print the absolute path of the `lazycortex-core` CLI this plugin dispatches to.
 
     An agent prompt shipped by this plugin has no fixed address for the core plugin; this verb
-    hands it one. The path is the only stdout output.
+    hands it one, as installed for the repository the call names. The path is the only stdout output.
+
+    Args:
+      args: Parsed arguments; the optional repository directory defaults to `$LAZY_REPO_ROOT`, then the current
+        directory, and the checkout root of that directory is the repository.
 
     Returns:
       Integer exit code — 0 with the path on stdout, 1 with an `error:` line on stderr when no
@@ -2404,7 +2482,7 @@ class Cli:
     """
     # resolve through the plugin's one core-CLI resolver — the verb exists to expose it, not to add a copy
     try:
-      cli = _axes.resolve_core_cli()
+      cli = _axes.resolve_core_cli(_wiki_locator.query_repo_root(args.repo))
     except RuntimeError as error:
       print(f"error: {error}", file = sys.stderr)
       return 1
@@ -2481,7 +2559,7 @@ class Cli:
     # normally with its normal exit code. A commit that landed although a later git step failed counts as a
     # landed commit: the failed step is named on stderr and the verb finishes the same way.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # guard: the install-only switch has no meaning against an installed copy
     if args.create and args.in_place:
@@ -2648,7 +2726,7 @@ class Cli:
     Return every registered routine whose name marks it as a structure scan.
 
     Args:
-      repo: Repository root whose settings hold the routine registry.
+      repo: Root of the checkout whose settings hold the routine registry, the daemon's section.
 
     Returns:
       A mapping of routine name to its config dict; empty when none are registered.
@@ -2699,7 +2777,7 @@ class Cli:
       Integer exit code (0 on success, 1 when the scope is unknown or git cannot produce the delta since the
       anchor).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: requested scope id not present in settings
@@ -2780,7 +2858,7 @@ class Cli:
     # the scope's JSON line lists such nodes under `unreadable` and `failed` respectively, each key
     # present only when non-empty. The scope's other nodes are still dispatched, and the run exits 1.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     resolver = _scope.ScopeResolver(repo = repo)
     scopes = resolver.load_scopes()
 
@@ -2883,7 +2961,7 @@ class Cli:
 
     # queue one classify job per recognised node whose source changed, counting the files the
     # node factory rejects and the nodes left alone apart
-    dispatcher = _dispatch.CoreDispatch()
+    dispatcher = _dispatch.CoreDispatch(repo = repo)
     dispatched = 0
     skipped = 0
     unchanged = 0
@@ -2969,7 +3047,7 @@ class Cli:
     Returns:
       Integer exit code (0 on success, 1 when the scope is unknown).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: requested scope id not present in settings
@@ -3012,7 +3090,7 @@ class Cli:
     Returns:
       Integer exit code (0 on success, 1 when the scope is unknown).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: requested scope id not present in settings
@@ -3054,7 +3132,7 @@ class Cli:
       Integer exit code (0 on success, 1 when the scope is unknown or a configured scope is
       itself named `domains`).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: a configured scope literally named 'domains' would collide with the reserved surface
@@ -3098,7 +3176,7 @@ class Cli:
       Integer exit code (0 on success, 1 when the scope is unknown, a configured scope is itself
       named `domains`, or the alias-map file is missing or not a JSON object).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # locate the alias-map file named on the command line
     alias_path = Path(args.from_file)
@@ -3172,7 +3250,7 @@ class Cli:
     # all is passed over rather than sent for judgement — there is nothing to consolidate, and a request for
     # work with no material only occupies the queue.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: a configured scope literally named 'domains' would collide with the reserved surface
@@ -3210,7 +3288,7 @@ class Cli:
 
         # resolve the core CLI only once a job is actually going out
         if dispatcher is None:
-          dispatcher = _dispatch.CoreDispatch()
+          dispatcher = _dispatch.CoreDispatch(repo = repo)
         dispatcher.dispatch_tag_curator(
           repo = repo,
           surface = surface,
@@ -3367,7 +3445,7 @@ class Cli:
     # from the ledger, the outcome line still reports the canon as applied, with its changed nodes and touched
     # paths, and the verb exits 1 so that the caller learns the ledger is incomplete.
 
-    repo =Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     job_dir = Path(args.job_dir) if args.job_dir else None
 
     # a refusal from a check, raised before the first write, leaves nodes and dictionary untouched
@@ -3743,7 +3821,7 @@ class Cli:
       Integer exit code (0 on success, 1 when the scope is unknown, has no topics_index configured, or its
       index lies outside the repository; nothing is written and the path is named on stderr).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # the file the anchor is written to, wherever the configured path leads: this verb commits nothing, so it
     # writes through a symbolic link; a scope that cannot carry an anchor, or whose index lies outside the
@@ -3925,7 +4003,7 @@ class Cli:
     # never reaches git; one sent to the whole process group reaches git too, and then git's own rollback
     # and the verb's undo apply. Once the commit is made nothing is reverted.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # the anchor is the HEAD the pass ran against, taken before anything is written
     try:
@@ -4170,7 +4248,7 @@ class Cli:
     # A mirror file that cannot be read, or a mirror source that cannot be listed, fails the run with
     # exit 1 the same way: the repairs already applied are still committed.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: no scopes configured at all
@@ -4513,7 +4591,7 @@ class Cli:
       Integer exit code — 0 when every path was dispatched or skipped, 1 when at least one failed or
       was left unstarted, in which case the last stdout line is `{"failed_paths": [...]}` naming them.
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # what the invocation learns once: its time budget, the tag surveys, the jobs already queued
     run = _ProcessFileRun(repo = repo)
@@ -4611,7 +4689,7 @@ class Cli:
     }
 
     # queue the classify job and report it
-    _dispatch.CoreDispatch().dispatch_curator(
+    _dispatch.CoreDispatch(repo = repo).dispatch_curator(
       repo = repo,
       node_path = node_path,
       payload = payload,
@@ -4735,7 +4813,7 @@ class Cli:
     # A node path whose name is not valid UTF-8 can be recorded in the ledger like any other and is no such
     # failure.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # every prune runs before the one commit, so a failed path never blocks the others
     outcomes: list[dict] = []
@@ -4992,7 +5070,7 @@ class Cli:
     # A failed shortlist recall NEVER aborts the dispatch: the job is queued without the
     # shortlist and the curator falls back to judging the whole catalog.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # the node as the command line named it
     node_path = Path(args.path)
@@ -5057,7 +5135,7 @@ class Cli:
     self._attach_candidates(payload, repo, cfg, scope_id, abs_path)
 
     # queue the node's own link job
-    dispatcher = _dispatch.CoreDispatch()
+    dispatcher = _dispatch.CoreDispatch(repo = repo)
     dispatcher.dispatch_curator(
       repo = repo,
       node_path = abs_path,
@@ -5177,7 +5255,7 @@ class Cli:
     # command with exit 1, naming the failure on stderr and printing no plan, so neither is ever read as a
     # plan that retires every doc.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — nothing to plan
@@ -5226,7 +5304,7 @@ class Cli:
     # written. What is written is exactly what was rendered before the first write: one render per run, so a
     # source that changes during the run never yields an index and section notes drawn from two readings.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — no index to build
@@ -5416,7 +5494,7 @@ class Cli:
     # it. The tick still prints its summary, which lists the undispatched groups under `failed_groups`
     # only when there are some, and exits 1.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — the routine fired in an unconfigured repo
@@ -5508,7 +5586,7 @@ class Cli:
 
     # reporting never breaks the work: with no core CLI to report through, the tick goes on
     try:
-      ledger = _dispatch.CoreDispatch()
+      ledger = _dispatch.CoreDispatch(repo = repo)
       if unreadable:
         ledger.report_open(
           repo,
@@ -5601,7 +5679,7 @@ class Cli:
       except OSError as error:
         print(f"{self._CMD_DOMAIN_TICK}: {error}", file = sys.stderr)
         return 1
-      dispatcher = _dispatch.CoreDispatch()
+      dispatcher = _dispatch.CoreDispatch(repo = repo)
       for entry in changed:
         # one group whose job cannot be queued is named and never stops the groups after it
         try:
@@ -5734,7 +5812,7 @@ class Cli:
     # A group dictionary that cannot be found or read, or a code listing git cannot produce, fails the
     # command with exit 1, naming the failure on stderr, and no payload file is written.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — there is no group to write
@@ -5792,7 +5870,7 @@ class Cli:
     # A group dictionary that cannot be found or read, or a code listing git cannot produce, fails the
     # command with exit 1, naming the failure on stderr, and nothing is repaired.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — there is no tree to repair
@@ -5837,7 +5915,7 @@ class Cli:
     Returns:
       Integer exit code (0 when landed, 1 when unconfigured, unreadable, or refused).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — there is no tree to land into
@@ -6013,7 +6091,7 @@ class Cli:
     # be retired, never stops the placement of the other finished jobs in the same pass. A job that was
     # placed but not retired is found placed by the next pass and retired then.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     planner = _domains.DomainPlanner(repo = repo)
 
     # guard: wiki.domains not configured — the routine fired in an unconfigured repo
@@ -6022,7 +6100,7 @@ class Cli:
       return 0
 
     # one pass over the writer's finished, unconsumed jobs
-    dispatcher = _dispatch.CoreDispatch()
+    dispatcher = _dispatch.CoreDispatch(repo = repo)
     expert = _dispatch.CoreDispatch.EXPERT_DOMAIN_WRITER
     landed = 0
     failed: list[str] = []
@@ -6442,7 +6520,7 @@ class Cli:
     Returns:
       Integer exit code (0 when a scope or a noop was printed, 1 on a refused request).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # resolve the job's documents; an unreadable request is reported, never guessed at
     try:
@@ -6497,7 +6575,8 @@ class Cli:
         A call is final only when the marker records the retry as open: it hands nothing back, never rewrites
         the kept copy, and is never refused merely for being a further call, whichever run of the job makes it.
         The first call that hands something back, a refused operation, an `unmatched` entry carrying
-        `skip_unmatched` or an unusable result file, while the retry is not open copies the submitted batch to
+        `skip_unmatched`, an unusable result file or a term line of an old `## Terms` section left standing in
+        a source of the job (`unsettled`), while the retry is not open copies the submitted batch to
         `result/terms.1.json` and records the retry as open, keeping an earlier commit recorded. Once a call of
         the job committed, a later call that changes nothing answers `curated`, and a later call refused as a
         whole for a non-transient reason, whose documents resolved to a scope, answers `curated` too, although
@@ -6508,13 +6587,17 @@ class Cli:
         repository without a commit and a failed rollback write no marker.
       - Each refused operation and each `skip_unmatched` entry, in the first call as well as in a final one, is
         recorded in the error ledger under the cause `terms-operation-refused` and the incident
-        `wiki-terms:<scope id>:<document path>`. A refused `relink` or `retarget` is recorded under each source
-        of the job it names, compared in its plain repo-relative form (`./specs/a.md` is `specs/a.md`) and
-        keyed by the source's own spelling; a named document outside the job gets no incident. An operation
-        that names none of the job's sources is recorded under every source, and a `skip_unmatched` entry under
-        each document it lists. Every call that judged the batch closes both incidents, `wiki-terms:` and
-        `wiki-terms-batch:`, of each of its sources under which it recorded nothing, and never closes the
-        incident of a document that is not its own; a whole-batch refusal closes nothing. The marker, the kept
+        `wiki-terms:<scope id>:<document path>`. Each `unsettled` term line of an old `## Terms` section is
+        recorded under its own cause `terms-legacy-line-unsettled` and the incident
+        `wiki-terms-legacy:<scope id>:<document path>` of the document it stands in. A refused `relink` or
+        `retarget` is recorded under each source of the job it names, compared in its plain repo-relative form
+        (`./specs/a.md` is `specs/a.md`) and keyed by the source's own spelling; a named document outside the
+        job gets no incident. An operation that names none of the job's sources is recorded under every
+        source, and a `skip_unmatched` entry under each document it lists. Every call that judged the batch
+        closes per cause: `wiki-terms:` and `wiki-terms-batch:` of each of its sources under which it recorded
+        no refused operation and no `skip_unmatched` entry, and `wiki-terms-legacy:` of each source in which it
+        left no unsettled line. It never closes the incident of a document that is not its own; a whole-batch
+        refusal closes nothing. The marker, the kept
         copy, `response.json` and the outcome line, printed with a flush, come before any ledger call. A report
         the ledger does not take, or does not take in time, never changes the call's answer or exit code, and
         once one ledger call of a verb call runs out of time, that call sends no further report or close. An
@@ -6559,13 +6642,15 @@ class Cli:
       - A repository with no commit yet is refused as technical, never transient, before any file is written.
       - A batch that changes no term file and no document is a `noop` and makes no commit.
       - The outcome line is `{status, dictionary, operations, commit, category, reason, documents, unmatched,
-        merged, refused, retry}`: `operations` is the accepted count, `refused` lists `{index, operation, reason}`
-        per refused operation, and `retry` is `open` when this call opened the job's retry, `final` when the
-        marker `terms-retry.json` recorded the retry as open when the call began, otherwise null.
+        merged, refused, unsettled, retry}`: `operations` is the accepted count, `refused` lists
+        `{index, operation, reason}` per refused operation, `unsettled` lists one `{file, line}` record per term
+        line of an old `## Terms` section left standing in a job source, and `retry` is `open` when this call
+        opened the job's retry, `final` when the marker `terms-retry.json` recorded the retry as open when the call
+        began, otherwise null.
       - `response.json` is left at the root of the job directory on every outcome: `curated`, carrying `refused`
-        and listing `result/terms.json` (and `result/terms.1.json` when that copy exists), when this call or any
-        earlier call of the job committed; a `noop` carrying `refused`; or an error carrying the category
-        logical, technical or transient.
+        and `unsettled` and listing `result/terms.json` (and `result/terms.1.json` when that copy exists), when this
+        call or any earlier call of the job committed; a `noop` carrying `refused` and `unsettled`; or an error
+        carrying the category logical, technical or transient.
       - A result file the verb cannot use (unreadable, not a JSON object, `operations` not a list of objects) is a
         technical refusal with nothing written.
 
@@ -6629,7 +6714,8 @@ class Cli:
     # A call is final only when the marker records the retry as open: it hands nothing back, never rewrites
     # the kept copy, and is never refused merely for being a further call, whichever run of the job makes
     # it. The first call that hands something back, a refused operation, an `unmatched` entry carrying
-    # `skip_unmatched` or an unusable result file, while the retry is not open copies the submitted batch to
+    # `skip_unmatched`, an unusable result file or a term line of an old `## Terms` section left standing in
+    # a source of the job (`unsettled`), while the retry is not open copies the submitted batch to
     # `result/terms.1.json` and records the retry as open, keeping an earlier commit recorded. Once a call
     # of the job committed, a later call that changes nothing answers `curated`, and a later call refused
     # as a whole for a non-transient reason, whose documents resolved to a scope, answers `curated` too,
@@ -6642,18 +6728,21 @@ class Cli:
     # Contract:
     # Each refused operation and each `skip_unmatched` entry, in the first call as well as in a final one,
     # is recorded in the error ledger under the cause `terms-operation-refused` and the incident
-    # `wiki-terms:<scope id>:<document path>`. A refused `relink` or `retarget` is recorded under each
-    # source of the job it names, compared in its plain repo-relative form (`./specs/a.md` is `specs/a.md`)
-    # and keyed by the source's own spelling; a named document outside the job gets no incident. An
-    # operation that names none of the job's sources is recorded under every source, and a `skip_unmatched`
-    # entry under each document it lists. Every call that judged the batch closes both incidents,
-    # `wiki-terms:` and `wiki-terms-batch:`, of each of its sources under which it recorded nothing, and
-    # never closes the incident of a document that is not its own; a whole-batch refusal closes nothing.
-    # The marker, the kept copy, `response.json` and the outcome line, printed with a flush, come before
-    # any ledger call. A report the ledger does not take, or does not take in time, never changes the
-    # call's answer or exit code, and once one ledger call of a verb call runs out of time, that call
-    # sends no further report or close. An unusable result file with no earlier commit makes no ledger
-    # call.
+    # `wiki-terms:<scope id>:<document path>`. Each `unsettled` term line of an old `## Terms` section is
+    # recorded under its own cause `terms-legacy-line-unsettled` and the incident
+    # `wiki-terms-legacy:<scope id>:<document path>` of the document it stands in. A refused `relink` or
+    # `retarget` is recorded under each source of the job it names, compared in its plain repo-relative form
+    # (`./specs/a.md` is `specs/a.md`) and keyed by the source's own spelling; a named document outside the
+    # job gets no incident. An operation that names none of the job's sources is recorded under every
+    # source, and a `skip_unmatched` entry under each document it lists. Every call that judged the batch
+    # closes per cause: `wiki-terms:` and `wiki-terms-batch:` of each of its sources under which it recorded
+    # no refused operation and no `skip_unmatched` entry, and `wiki-terms-legacy:` of each source in which it
+    # left no unsettled line. It never closes the incident of a document that is not its own; a whole-batch
+    # refusal closes nothing. The marker, the kept copy, `response.json` and the outcome line, printed with
+    # a flush, come before any ledger call. A report the ledger does not take, or does not take in time,
+    # never changes the call's answer or exit code, and once one ledger call of a verb call runs out of
+    # time, that call sends no further report or close. An unusable result file with no earlier commit makes
+    # no ledger call.
 
     # Contract:
     # A termination signal, SIGTERM or SIGINT, during the writes stops the run: every touched path is put
@@ -6665,7 +6754,7 @@ class Cli:
     # then ends with 128 plus the signal number. Both signals are ignored while a rollback runs, and the
     # handlers in place before the call are restored on every path.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     job_dir = Path(args.job_dir)
     dictionary: str | None = None
     scope: _term_dictionary.TermsScope | None = None
@@ -6683,7 +6772,7 @@ class Cli:
       if scope is None:
         # an earlier commit of the job keeps its answer curated; otherwise nothing changed in any call
         if self._is_retry_committed(job_dir):
-          self._write_curated_response(job_dir, [])
+          self._write_curated_response(job_dir, [], [])
         else:
           _job_response.write_response(job_dir, outcome = self._OUTCOME_NOOP)
         print(json.dumps(self._terms_outcome(self._OUTCOME_NOOP, None, 0, commit = None)))
@@ -6715,9 +6804,13 @@ class Cli:
     landed = written.commit.status == _wiki_commit.STATUS_COMMITTED
     committed = landed or self._is_retry_committed(job_dir)
     errors = self._find_all_terms_errors(scope, written)
+    unsettled = [
+      ( entry[self._OUT_FILE], f"legacy terms line left unsettled: {entry[self._OUT_LINE]!r}" )
+      for entry in written.unsettled
+    ]
     if final:
       retry: str | None = self._RETRY_FINAL
-    elif errors:
+    elif errors or unsettled:
       self._open_terms_retry(job_dir, committed = committed)
       retry = self._RETRY_OPEN
     else:
@@ -6730,9 +6823,12 @@ class Cli:
     # this call is a noop when it changed nothing; the job is curated when this call or an earlier one committed
     status = self._OUTCOME_CURATED if landed else self._OUTCOME_NOOP
     if committed:
-      self._write_curated_response(job_dir, written.refused)
+      self._write_curated_response(job_dir, written.refused, written.unsettled)
     else:
-      _job_response.write_response(job_dir, outcome = status, fields = { self._OUT_REFUSED: written.refused })
+      _job_response.write_response(
+        job_dir, outcome = status,
+        fields = { self._OUT_REFUSED: written.refused, self._OUT_UNSETTLED: written.unsettled },
+      )
 
     # the outcome line names what the call changed, what it could not place, what it refused and where the
     # retry stands
@@ -6741,14 +6837,24 @@ class Cli:
     outcome[self._OUT_UNMATCHED] = written.unmatched
     outcome[self._OUT_MERGED] = written.merged
     outcome[self._OUT_REFUSED] = written.refused
+    outcome[self._OUT_UNSETTLED] = written.unsettled
     outcome[self._OUT_RETRY] = retry
     print(json.dumps(outcome), flush = True)
 
-    # the ledger comes last, so a report it does not take never changes the answer
-    self._update_terms_ledger(
-      repo, scope, errors,
-      cause = _dispatch.CoreDispatch.CAUSE_TERMS_REFUSED, prefix = _dispatch.CoreDispatch.INCIDENT_TERMS_PREFIX,
-    )
+    # the ledger comes last, so a report it does not take never changes the answer; the curator's errors and the
+    # old terms-section lines left standing are two failures, each under its own cause and incident
+    self._update_terms_ledger(repo, scope, [
+      _TermsLedgerGroup(
+        cause = _dispatch.CoreDispatch.CAUSE_TERMS_REFUSED, prefix = _dispatch.CoreDispatch.INCIDENT_TERMS_PREFIX,
+        errors = errors,
+        closes = self._TERMS_OPERATION_INCIDENTS,
+      ),
+      _TermsLedgerGroup(
+        cause = _dispatch.CoreDispatch.CAUSE_TERMS_LEGACY_UNSETTLED,
+        prefix = _dispatch.CoreDispatch.INCIDENT_TERMS_LEGACY_PREFIX, errors = unsettled,
+        closes = ( _dispatch.CoreDispatch.INCIDENT_TERMS_LEGACY_PREFIX, ),
+      ),
+    ])
     return 0
 
 
@@ -6790,7 +6896,7 @@ class Cli:
       and self._is_retry_committed(job_dir)
     )
     if kept:
-      self._write_curated_response(job_dir, [])
+      self._write_curated_response(job_dir, [], [])
     else:
       _job_response.write_response(
         job_dir, outcome = _job_response.OUTCOME_ERROR, category = refusal.category, message = refusal.reason,
@@ -6805,15 +6911,16 @@ class Cli:
 
     # a refusal the job's earlier commit outlives is recorded under its own incident of every document of the job
     if kept and scope is not None:
-      self._update_terms_ledger(
-        repo, scope, [ ( rel, f"terms-write refused: {refusal.reason}" ) for rel in scope.sources ],
+      self._update_terms_ledger(repo, scope, [ _TermsLedgerGroup(
         cause = _dispatch.CoreDispatch.CAUSE_TERMS_BATCH_REFUSED,
         prefix = _dispatch.CoreDispatch.INCIDENT_TERMS_BATCH_PREFIX,
-      )
+        errors = [ ( rel, f"terms-write refused: {refusal.reason}" ) for rel in scope.sources ],
+        closes = self._TERMS_OPERATION_INCIDENTS,
+      ) ])
     return 1
 
 
-  def _write_curated_response(self, job_dir: Path, refused: list[dict]) -> None:
+  def _write_curated_response(self, job_dir: Path, refused: list[dict], unsettled: list[dict]) -> None:
     """
     Write the `curated` answer of a job that committed.
 
@@ -6825,12 +6932,13 @@ class Cli:
     Args:
       job_dir: The job's bundle directory.
       refused: The refused operations this call hands back, carried beside the envelope.
+      unsettled: The old terms-section lines this call left standing, carried beside the envelope.
     """
     # the corrected batch, and the first one when the job kept it
     kept = [ self._RESULT_TERMS_FIRST ] if (job_dir / self._RESULT_TERMS_FIRST).is_file() else []
     _job_response.write_response(
       job_dir, outcome = self._OUTCOME_CURATED, result = [ self._RESULT_TERMS, *kept ],
-      fields = { self._OUT_REFUSED: refused },
+      fields = { self._OUT_REFUSED: refused, self._OUT_UNSETTLED: unsettled },
     )
 
 
@@ -6885,51 +6993,50 @@ class Cli:
   def _update_terms_ledger(self,
                            repo: Path,
                            scope: _term_dictionary.TermsScope,
-                           errors: list[tuple[str, str]],
-                           *,
-                           cause: str,
-                           prefix: str) -> None:
+                           groups: list[_TermsLedgerGroup]) -> None:
     """
     Record a call's errors in the core error ledger and close the incidents of its documents that hold none.
 
     Notes:
-      - Each error is recorded under the cause given and the incident `<prefix><scope id>:<document path>` of its
-        document.
-      - Every source of the job under which nothing was recorded has both its incidents closed, the one of refused
-        operations and the one of whole-batch refusals; the incidents of a document outside the job stay untouched.
-      - A report or a close the ledger does not take, or does not take in time, is dropped and never raised; once one
-        runs out of time, the call sends no further one.
+      - Each group's errors are recorded under that group's cause and the incident
+        `<group prefix><scope id>:<document path>` of the document each error concerns.
+      - For each group, every source of the job under which that group recorded nothing has the incidents of that
+        group's `closes` prefixes closed; the incidents of a document outside the job stay untouched.
+      - One ledger dispatcher serves the whole call: a report or a close the ledger does not take, or does not take
+        in time, is dropped and never raised, and once one runs out of time, the call sends no further one.
 
     Args:
       repo: Repository root.
       scope: The terms scope serving the job's documents.
-      errors: Pairs of document path and one-line description of the error recorded under that document.
-      cause: Stable cause token the errors are recorded under.
-      prefix: Incident-key prefix the errors fold under, before the scope id.
+      groups: Kinds of error to record, each with its cause, incident prefix, errors and the incident prefixes it
+        closes.
     """
     # one dispatcher for the whole call, so a ledger call that ran out of time holds back the rest
     try:
-      core = _dispatch.CoreDispatch()
+      core = _dispatch.CoreDispatch(repo = repo)
     # waiver: best-effort boundary — an unreachable core leaves the call's reports undelivered
     except ( RuntimeError, OSError ):
       return
 
-    # each error is recorded under its document's incident, one per scope and document, so a later pass finds it
-    for rel, detail in errors:
-      self._send_terms_report(core, functools.partial(
-        core.report_open, repo, cause = cause, incident = f"{prefix}{scope.scope_id}:{rel}", detail = detail,
-      ))
+    # each error is recorded under its kind's cause and its document's incident, one per scope and document, so a
+    # later pass finds it
+    for group in groups:
+      for rel, detail in group.errors:
+        self._send_terms_report(core, functools.partial(
+          core.report_open, repo, cause = group.cause, incident = f"{group.prefix}{scope.scope_id}:{rel}",
+          detail = detail,
+        ))
 
-    # each document of the job that holds no error closes both its incidents; a document of another job is never
-    # touched
-    recorded = { rel for rel, _ in errors }
-    prefixes = ( _dispatch.CoreDispatch.INCIDENT_TERMS_PREFIX, _dispatch.CoreDispatch.INCIDENT_TERMS_BATCH_PREFIX )
-    for rel in scope.sources:
-      if rel not in recorded:
-        for incident_prefix in prefixes:
-          self._send_terms_report(
-            core, functools.partial(core.close_open_incident, repo, f"{incident_prefix}{scope.scope_id}:{rel}"),
-          )
+    # each document of the job under which a kind recorded nothing closes the incidents that kind names; a document
+    # of another job is never touched
+    for group in groups:
+      recorded = { rel for rel, _ in group.errors }
+      for rel in scope.sources:
+        if rel not in recorded:
+          for incident_prefix in group.closes:
+            self._send_terms_report(
+              core, functools.partial(core.close_open_incident, repo, f"{incident_prefix}{scope.scope_id}:{rel}"),
+            )
 
 
   def _open_terms_retry(self, job_dir: Path, *, committed: bool) -> None:
@@ -7153,7 +7260,8 @@ class Cli:
 
     Returns:
       The commit, the changed documents, the accepted document operations that found no occurrence or whose `skip`
-      a document could not honour, the joined terms, the number of applied operations and the refused operations.
+      a document could not honour, the joined terms, the number of applied operations, the refused operations and
+      the term lines of an old terms section left standing in the job's documents, each with its document.
 
     Raises:
       JobRefusedError: When the batch is refused as a whole, or transient when the commit fails.
@@ -7217,6 +7325,10 @@ class Cli:
         ( result[_term_links.KEY_FILE], word ): fragments for result in results
         for word, fragments in result.get(_term_links.KEY_SKIP_UNMATCHED_FRAGMENTS, {}).items()
       },
+      unsettled = [
+        { self._OUT_FILE: result[_term_links.KEY_FILE], self._OUT_LINE: line } for result in results
+        if result[_term_links.KEY_FILE] in scope.sources for line in result.get(_term_links.KEY_UNSETTLED, [])
+      ],
     )
 
 
@@ -7543,7 +7655,7 @@ class Cli:
     for start in range(0, len(rels), self._INDEX_BATCH):
       # waiver: `surrogateescape` is the stdlib codec error-handler name that keeps undecodable bytes as they are
       listed = subprocess.check_output(
-        [ "git", "diff", "--name-only", "--diff-filter=A", "-z", "--",
+        [ "git", "diff", "--name-only", "--diff-filter=A", "--relative", "-z", "--",
           *self._as_literal(rels[start : start + self._INDEX_BATCH]) ],
         cwd = str(repo), stderr = subprocess.DEVNULL,
       ).decode(self._ENCODING, errors = "surrogateescape")
@@ -7941,7 +8053,7 @@ class Cli:
 
     # reporting never breaks the work: with no core CLI to report through, the run goes on
     try:
-      ledger = _dispatch.CoreDispatch()
+      ledger = _dispatch.CoreDispatch(repo = repo)
       if detail is None:
         ledger.close_open_incident(repo, incident)
       else:
@@ -8107,7 +8219,7 @@ class Cli:
     # With `--check` the verb NEVER writes and exits 0 when work is left and 1 when none is, also when the
     # repository has no terms scopes.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # the settings are read once; the predicate answers from them, the run cuts and passes every scope
     try:
@@ -8125,7 +8237,7 @@ class Cli:
         migration = _terms_migrate.TermsMigration(repo = repo, settings = settings)
         return self._EXIT_DONE if migration.check() else self._EXIT_NOTHING
       reports = _terms_migrate.TermsMigration(
-        repo = repo, settings = settings, core = _dispatch.CoreDispatch(),
+        repo = repo, settings = settings, core = _dispatch.CoreDispatch(repo = repo),
       ).run()
     except ( _terms_migrate.TermsVerbError, *self._UNEXPECTED_FAILURES ) as error:
       print(f"{self._CMD_TERMS_MIGRATE}: {error}", file = sys.stderr)
@@ -8153,6 +8265,53 @@ class Cli:
             ),
             file = sys.stderr,
           )
+    print(json.dumps({ self._OUT_SCOPES: reports }))
+    return self._EXIT_DONE
+
+
+  def _cmd_terms_recase(self, args: argparse.Namespace) -> int:
+    """
+    Bring every terms scope's term files to the letter-case canon, or check whether work is left.
+
+    Syntax: `terms-recase --repo <root> [--check]`. Prints one JSON line
+    `{"scopes": [{"scope", "renamed": [{"from", "to"}], "kept": [{"from", "to"}], "documents", "undecodable",
+    "changed_on_disk"}]}` on stdout; each document set aside or left alone is named on stderr. With `--check`
+    nothing is printed.
+
+    Args:
+      args: Parsed argument namespace; carries `.repo` and `.check`.
+
+    Returns:
+      Integer exit code.
+    """
+
+    repo = _wiki_locator.query_settings_root(args.repo)
+
+    # the settings are read once; the predicate answers from them, the run recases every served scope
+    try:
+      settings = _terms_migrate.TermsSettings.read(repo)
+
+      # guard: without terms scopes there is nothing to recase, which the predicate answers as no work
+      if settings is None:
+        if args.check:
+          return self._EXIT_NOTHING
+        print(f"{self._CMD_TERMS_RECASE}: no terms scopes configured", file = sys.stderr)
+        return self._EXIT_NOT_APPLICABLE
+
+      # guard: the predicate writes nothing and answers whether any work is left
+      recase = _terms_migrate.TermsRecase(repo = repo, settings = settings)
+      if args.check:
+        return self._EXIT_DONE if recase.check() else self._EXIT_NOTHING
+      reports = recase.run()
+    except self._UNEXPECTED_FAILURES as error:
+      print(f"{self._CMD_TERMS_RECASE}: {error}", file = sys.stderr)
+      return self._EXIT_BROKEN
+
+    # a document set aside or left alone is named, never a failure; the outcome line names what each scope got
+    for report in reports:
+      self._name_undecodable(self._CMD_TERMS_RECASE, report[_terms_migrate.KEY_UNDECODABLE])
+      for rel in report[_terms_migrate.KEY_CHANGED_ON_DISK]:
+        print(self._MSG_CHANGED_ON_DISK.format(cmd = self._CMD_TERMS_RECASE, file = rel), file = sys.stderr)
     print(json.dumps({ self._OUT_SCOPES: reports }))
     return self._EXIT_DONE
 
@@ -8248,7 +8407,7 @@ class Cli:
     # Contract:
     # A document that is not valid UTF-8 is named on stderr and is never listed or queued.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # guard: the marker belongs to a whole queued sweep only
     if args.mark and ( not args.dispatch or args.paths ):
@@ -8280,7 +8439,7 @@ class Cli:
         print(f"{self._CMD_TERMS_SWEEP}: no terms scopes configured", file = sys.stderr)
         return self._EXIT_NOT_APPLICABLE
       sweep = _terms_migrate.TermsSweep(
-        repo = repo, settings = settings, core = _dispatch.CoreDispatch() if args.dispatch else None,
+        repo = repo, settings = settings, core = _dispatch.CoreDispatch(repo = repo) if args.dispatch else None,
       )
 
       # the predicate answers and writes nothing
@@ -8374,11 +8533,12 @@ class Cli:
     # The verb prints exactly one of `seeded`, `kept` or `no-scope` and exits 0; it exits 1 only when the seed
     # cannot be written.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # the scope covering the document gets the exclusion when it has none
     try:
-      outcome = _terms_migrate.seed_link_exclude(repo, args.path, args.link_exclude, _dispatch.CoreDispatch())
+      outcome = _terms_migrate.seed_link_exclude(
+          repo, args.path, args.link_exclude, _dispatch.CoreDispatch(repo = repo))
     except self._UNEXPECTED_FAILURES as error:
       print(f"{self._CMD_TERMS_SCOPE_CONFIG}: {error}", file = sys.stderr)
       return self._EXIT_FAILED
@@ -8440,7 +8600,7 @@ class Cli:
     # its normal exit code. A commit that landed although a later git step failed counts as a landed commit:
     # the failed step is named on stderr and the verb finishes the same way, answering `curated`.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     job_dir = Path(args.job_dir)
     watch = _structure.StructureWatch(repo = repo)
     operations: list[dict] = []
@@ -8524,7 +8684,7 @@ class Cli:
     Returns:
       Zero when the resolution is printed, one when the request or the tracked tree cannot be read.
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     profiles = _structure.StructureProfiles(watch = _structure.StructureWatch(repo = repo))
 
     # one job's paths (a rename's new side), or every directory of the tree; a failure is reported, never guessed at
@@ -8709,8 +8869,8 @@ class Cli:
 
     Returns:
       Mapping with `status`, `dictionary`, `operations`, `commit`, `category`, `reason`, `documents`, `unmatched`,
-      `merged`, `refused` and `retry`, the category, reason and retry unset and the documents, unmatched, merged
-      and refused empty.
+      `merged`, `refused`, `unsettled` and `retry`, the category, reason and retry unset and the documents,
+      unmatched, merged, refused and unsettled empty.
     """
     return {
       self._OUT_STATUS:     status,
@@ -8723,6 +8883,7 @@ class Cli:
       self._OUT_UNMATCHED:  [],
       self._OUT_MERGED:     [],
       self._OUT_REFUSED:    [],
+      self._OUT_UNSETTLED:  [],
       self._OUT_RETRY:      None,
     }
 
@@ -8834,7 +8995,7 @@ class Cli:
     # Contract:
     # A refused document is reported on stderr with exit 1 and is NEVER written.
 
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     result = _terms.apply_term(repo, args.path, args.old_term, args.new_term)
 
     # the verb declined to touch the document — the reason is the whole output
@@ -9008,7 +9169,7 @@ class Cli:
       return 1
 
     # the repository the mirror lives in and the commit lands in
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
 
     # apply the plan and commit it; the report doubles as the tick summary printed below. A source that cannot
     # be listed aborts the scope before anything is deleted, and a refused commit puts the mirror back as the
@@ -9074,7 +9235,7 @@ class Cli:
       The fetched engine, or `None` when the scope is unknown, carries no
       mirror block, or the fetch failed (the error is already printed).
     """
-    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    repo = _wiki_locator.query_settings_root(args.repo)
     scopes = _scope.ScopeResolver(repo = repo).load_scopes()
 
     # guard: requested scope id not present in settings

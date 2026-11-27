@@ -3,9 +3,8 @@ Shared-inbox collision surface for the `lazycortex-core` CLI.
 
 This module backs the `inbox-check` subcommand: it runs the install-time shared-inbox guard
 and prints its findings as JSON, exiting non-zero when another checkout on this host drives
-the same physical inbox. The repository root follows the convention every other subcommand
-uses: the `LAZY_REPO_ROOT` env var, falling back to the process working directory,
-overridable per-call with `--cwd`.
+the same physical inbox. The repository root is the toplevel of the checkout that
+`--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself outside git).
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ import json
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from inbox_guard import check_inbox_collision_for_install  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -43,6 +42,6 @@ def cmd_inbox_check(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # the guard's findings are the whole report; any finding at all fails the verb
-  findings = check_inbox_collision_for_install(resolve_repo_root(args.cwd))
+  findings = check_inbox_collision_for_install(query_repo_root(args.cwd))
   print(json.dumps(findings, ensure_ascii = False))
   return 1 if findings else 0

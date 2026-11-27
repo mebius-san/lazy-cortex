@@ -28,6 +28,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -40,7 +43,7 @@ import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-i
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 # pylint: disable-next=import-error,wrong-import-position
-from keys import EnvVar, JobFile, JobKey, JobMarker, Paths, ReviewKey  # noqa: E402
+from keys import EnvVar, JobFile, JobKey, JobMarker, ReviewKey  # noqa: E402
 
 
 # The per-cycle autorun choices stopping a review removes from the frontmatter.
@@ -94,9 +97,6 @@ def _atomic_commit(file_path: Path) -> None:
 def _restore_document(file_path: Path, before: bytes) -> str | None:
   """
   Put a document whose stop commit failed back as it was before the stop.
-
-  Guarantees:
-    - Never raises: a failure to restore is returned as the reason.
 
   Args:
     file_path: The stopped document.
@@ -194,10 +194,11 @@ def _find_repo_root(file_path: Path) -> Path:
     file_path: The reviewed document.
 
   Returns:
-    The nearest ancestor holding a `.git` entry, or the document's own folder when none does.
+    The root of the checkout the document sits in, a linked worktree's own root inside one; the document's own
+    folder when it is not inside a git repository.
   """
-  # the nearest ancestor carrying a `.git` entry is the repository the sidecar lives in
-  return next(( folder for folder in file_path.parents if (folder / Paths.GIT_DIR).exists() ), file_path.parent)
+  # the checkout git names for the document's folder is the repository the sidecar lives in
+  return _review_locator.query_checkout_toplevel(file_path.parent)
 
 
 @dataclass(frozen = True)
@@ -292,7 +293,8 @@ def cancel_review_jobs(file_path: Path) -> JobsCancelResult:
   # document that no longer expects it; the coordinator deciding the document's next move would hand out more work.
   # Stopping therefore cancels the work in flight on the document first, the coordinator's turn before the
   # expert's. The stop goes ahead only when every cancellation is confirmed; if one is not, the review is refused
-  # its stop and stays exactly as it was, since the job may still be running. A cancellation that does not answer
+  # its stop, the jobs after it are not tried and the document is not changed, since the job may still be
+  # running. A job already confirmed cancelled before it stays cancelled and is reported as such. A cancellation that does not answer
   # in time counts as unconfirmed. A job that had already finished is not cancelled at all: it stays tracked so
   # that its result is still collected. Before anything is cancelled the stop looks up which jobs are in flight on
   # the document; when that record exists but cannot be read, or can be read but is not a valid record at all, the
@@ -382,8 +384,10 @@ def _cancel_job(repo: Path, job_id: str) -> _JobAnswer:
     return _JobAnswer()
 
   # guard: without the core CLI, which is what cancels a bundle, the job cannot be stopped
-  if (cli := _git_ops.resolve_core_cli()) is None:
-    return _JobAnswer(failure = f"{_CANCEL_JOB} {job_id}: lazycortex-core CLI not resolvable")
+  try:
+    cli = _git_ops.require_core_cli(repo)
+  except RuntimeError as error:
+    return _JobAnswer(failure = f"{_CANCEL_JOB} {job_id}: {error}")
 
   # every bundle carrying the id is cancelled before the marker is let go
   env = { **os.environ, EnvVar.LAZY_REPO_ROOT: str(repo) }

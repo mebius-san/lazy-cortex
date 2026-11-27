@@ -182,6 +182,7 @@ class Check3ArtifactsPresent:
     ("bin/toi.py", "toi checker"),
     ("bin/pch.py", "pch checker"),
     ("bin/mypy_protected_access.py", "protected-access mypy plugin"),
+    ("bin/python_locator.py", "plugin locator"),
     ("hooks/lazy-python.check-style.sh", "PostToolUse hook"),
     ("hooks/hooks.json", "PostToolUse hook manifest"),
     ("skills/lazy-python.check-style/SKILL.md", "check-style skill"),
@@ -225,7 +226,7 @@ class Check3ArtifactsPresent:
 class Check4Wrappers:
   """
   Verify consumer `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` are deployed, open with a shebang, and have
-  substituted bin paths.
+  substituted bin paths, and that the plugin locator they run is deployed beside them and current.
 
   Attributes:
     consumer_dir: Absolute path to the consumer repository root.
@@ -233,13 +234,18 @@ class Check4Wrappers:
 
   WRAPPERS: tuple = ("cfg-py", "chk-py", "tst-py")
   PLACEHOLDER = re.compile(r'\{\{[A-Z_]+_BIN_PATH\}\}')
+  # Where install deploys the plugin locator in the consumer, beside the wrappers that run it
+  LOCATOR_REL = "cli/lazy_python_locator.py"
+  # The shipped locator the deployed copy must equal byte for byte
+  LOCATOR_SOURCE_REL = "bin/python_locator.py"
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
 
   def run(self) -> dict:
     """
-    Check every wrapper for presence, a leading shebang, and placeholder substitution.
+    Check every wrapper for presence, a leading shebang, and placeholder substitution, and the locator for presence
+    and currency.
 
     Returns:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
@@ -264,7 +270,26 @@ class Check4Wrappers:
       return {"severity": "FAIL", "message": f"wrappers contain unsubstituted placeholders: {broken}"}
     if missing:
       return {"severity": "WARN", "message": f"wrappers missing or no shebang: {missing}"}
-    return {"severity": "PASS", "message": "all wrappers deployed, shebang-led, and substituted"}
+
+    # the locator every wrapper and the shim run, deployed beside the wrappers
+    locator = self.consumer_dir / self.LOCATOR_REL
+
+    # a missing locator leaves the wrappers and the shim unable to locate the plugin
+    if not locator.is_file():
+      return {"severity": "WARN", "message": f"{self.LOCATOR_REL} is missing — run /lazy-python.install"}
+
+    # the locator is deployed verbatim, so any byte difference from the shipped copy is drift
+    if locator.read_bytes() != (PLUGIN_ROOT / self.LOCATOR_SOURCE_REL).read_bytes():
+      return {
+        "severity": "WARN",
+        "message": f"{self.LOCATOR_REL} is stale against the plugin's locator — run /lazy-python.install",
+      }
+
+    # every wrapper and the locator in place
+    return {
+      "severity": "PASS",
+      "message": f"all wrappers deployed, shebang-led, and substituted; {self.LOCATOR_REL} current",
+    }
 
 
 # ----------------------------------------------------------------------------------------
@@ -276,7 +301,7 @@ class Check5Pyproject:
     consumer_dir: Absolute path to the consumer repository root.
   """
 
-  # pch is added by install only when PyCharm is present on the machine, so it is NOT a required section.
+  # The `pch` section is added by install only when PyCharm is present on the machine, so it is NOT a required section.
   REQUIRED: tuple = ("tool.pcf", "tool.toi", "tool.pytest", "tool.mypy", "tool.pylint", "tool.ruff")
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -366,7 +391,7 @@ class Check7Overlay:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
     """
     # mark each topic whose overlay is absent or opens with the wrong header
-    overlay_dir = self.consumer_dir / "docs/guidelines"
+    overlay_dir = self.consumer_dir / "docs/guidelines/python"
     bad: list[str] = []
     for topic in self.TOPICS:
       overlay_file = overlay_dir / f"{topic}_guidelines.md"

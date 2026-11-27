@@ -3,9 +3,8 @@ Reference-resolution surface for the `lazycortex-core` CLI.
 
 This module backs the `resolve-ref` subcommand: it resolves one or more agent / protocol /
 aspect references through `reference_resolver.resolve` and reports each outcome as JSON,
-never raising. The repository root for bare references follows the convention every other
-subcommand uses: the `LAZY_REPO_ROOT` env var, falling back to the process working directory,
-overridable per-call with `--cwd`.
+never raising. The repository root for bare references is the toplevel of the checkout
+that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself outside git).
 """
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ import json
 # waiver: the resolver's domain exception deliberately shadows the builtin name; imported as-is
 from reference_resolver import ReferenceError, resolve  # pylint: disable=import-error,redefined-builtin
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -51,7 +50,7 @@ def resolve_refs(refs: list[str], *, category: str, cwd: Path | str | None = Non
   # is reported inside its row rather than raised — the batch is never aborted midway.
 
   # every reference resolves against the same root, in input order
-  repo = resolve_repo_root(cwd)
+  repo = query_repo_root(cwd)
   rows: list[dict[str, object]] = []
   for ref in refs:
     # guard: a failed resolution becomes its own row and the batch moves on

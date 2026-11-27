@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Install click-to-zoom for mermaid diagram fences in Obsidian; fit-CSS lives in the shared install step, not here.
-last_regen: 2026-11-21
+last_regen: 2026-11-25
 no_diagram: true
 source_skills:
   - lazy-obsidian.diagram-install
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 7f459ba3f2ac3b29e7af35a74456c667e90cbd5837c2147e709496a359b9a148
+source_sha: 88d47d0ab4a4435e3073f0c0cd294cb8c976cd21
+surface_sha: 2ee8f91c32e00405f49cbb853d9f8db37d1027e065f604341af6e8be4ae25047
 ---
 # Diagram rendering
 

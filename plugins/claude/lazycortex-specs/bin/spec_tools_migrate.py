@@ -34,6 +34,9 @@ import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -101,7 +104,6 @@ _CWD_FLAG = "--cwd"
 
 _MD_SUFFIX = ".md"
 _ENCODING = "utf-8"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
 _DECODE_ERRORS = "replace"
@@ -628,9 +630,10 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Command-line arguments, excluding the program name; `--dry-run` reports without writing, `--check` reports
-      without writing and answers through the exit code whether anything is left to migrate, `--cwd` names the
-      repository root (falling back to the `LAZY_REPO_ROOT` environment variable, then the process working
-      directory).
+      without writing and answers through the exit code whether anything is left to migrate, `--cwd` names a
+      directory inside the repository (falling back to the `LAZY_REPO_ROOT` environment variable, then the process
+      working directory); the run works in the nearest directory at or above it, within its checkout, that holds
+      `.claude/lazy.settings.json`, else the checkout's root.
 
   Returns:
     Exit code: with `--check`, 0 when pending work remains and 1 when none does; 0 otherwise; 2 when the migration
@@ -661,12 +664,9 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--cwd", default = None)
   args = parser.parse_args(argv)
 
-  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
   # a check runs dry; any failure exits 2, so no flag ever reads a failure as an answer
   try:
-    result = migrate(repo, dry_run = args.dry_run or args.check)
+    result = migrate(spec_locator.query_settings_root(args.cwd), dry_run = args.dry_run or args.check)
   # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught

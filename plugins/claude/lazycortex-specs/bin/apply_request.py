@@ -168,6 +168,9 @@ if str(_BIN) not in sys.path:
 from summary_render import apply_container_stats  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_paths import (  # noqa: E402
     find_settings_root, read_text, require_plugin_cli, require_valid_settings, resolve_core_cli, spec_content_root,
@@ -251,7 +254,6 @@ class _K:
     SETTINGS_FILE: Filename of the settings file.
     PRODUCTS: Settings key holding the product registry.
     SPEC_PATH: Settings key naming a product's spec directory.
-    GIT_DIR: The `.git` entry checked to detect a repo checkout.
     REQUESTS_DIR: Directory segment holding request files.
     REQUESTS_NOTE: Filename of the requests folder-note.
     ROUTING_H1: Heading marking a request's routing section.
@@ -365,8 +367,6 @@ class _K:
   PRODUCTS = "products"
   # Settings key naming a product's spec directory.
   SPEC_PATH = "spec_path"
-  # The `.git` entry checked to detect a repo checkout.
-  GIT_DIR = ".git"
   # Directory segment holding request files.
   REQUESTS_DIR = "requests"
   # Filename of the requests folder-note.
@@ -531,14 +531,10 @@ def _repo_root(start: Path) -> Path:
     start: Working directory to start the search from.
 
   Returns:
-    The first ancestor (or `start` itself) that contains a `.git` entry; absolute path.
+    The root of the checkout `start` sits in, a linked worktree's own root inside one; `start` itself, resolved,
+    when it is not inside a git repository.
   """
-  cur = start.resolve()
-  while cur != cur.parent:
-    if (cur / _K.GIT_DIR).exists():
-      return cur
-    cur = cur.parent
-  return start.resolve()
+  return spec_locator.query_checkout_toplevel(start)
 
 
 def _resolve_sibling_cli(name: str, repo: Path) -> Path:
@@ -1613,6 +1609,8 @@ class _Apply:
   Attributes:
     file_path: Absolute path to the request markdown file being applied.
     repo: Repository root containing the request file.
+    settings_root: Directory whose `.claude/lazy.settings.json` configures the request: the nearest one above the
+      request file, within its checkout.
     author_name: Git author name used for the atomic commit.
     author_email: Git author email used for the atomic commit.
     specs_cli: Resolved path to the sibling `lazycortex-specs` CLI.
@@ -1647,6 +1645,7 @@ class _Apply:
     """
     self.file_path = file_path.resolve()
     self.repo = _repo_root(self.file_path.parent)
+    self.settings_root = spec_locator.query_settings_root(self.file_path.parent)
     self.author_name = author_name
     self.author_email = author_email
     self.specs_cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_SPECS, self.repo)
@@ -1671,11 +1670,11 @@ class _Apply:
   @property
   def _settings_path(self) -> Path:
     """
-    This repo's tracked settings file — `.claude/lazy.settings.json` under the repo root.
+    The request's tracked settings file — `.claude/lazy.settings.json` under the nearest settings root.
     """
 
     # build the path only — it is checked for existence and named in a commit, never read here
-    return self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
+    return self.settings_root / _K.CLAUDE_DIR / _K.SETTINGS_FILE
 
   def _load_product_record(self, product: str) -> dict:
     """
@@ -1703,7 +1702,7 @@ class _Apply:
     # guard: the product registry is refused outright when the settings cannot be read or do not parse;
     # `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
-      registry = resolve_product.load_products(self.repo)
+      registry = resolve_product.load_products(self.settings_root)
     except (OSError, ValueError) as error:
       _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
 
@@ -1720,7 +1719,7 @@ class _Apply:
       _fail(_K.CAT_LOGICAL, f"product '{product}' has no {_K.SPEC_PATH}")
 
     # the effective record, with every key the product leaves undeclared inherited from its ancestors
-    return resolve_product.effective_record(self.repo, product, products = registry)
+    return resolve_product.effective_record(self.settings_root, product, products = registry)
 
   def _default_product(self) -> str:
     """
@@ -1749,7 +1748,7 @@ class _Apply:
     # guard: the product registry is refused logically when the settings file will not parse;
     # `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
-      registry = resolve_product.load_products(self.repo)
+      registry = resolve_product.load_products(self.settings_root)
     except ValueError as error:
       _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
     keys = sorted(key for key, record in registry.items() if isinstance(record, dict))
@@ -1761,7 +1760,7 @@ class _Apply:
     # the first top-level product wins, falling back to the first of all when every one is nested
     top_level = [
         key for key in keys
-        if not resolve_product.ancestor_chain(self.repo, key, products = registry)
+        if not resolve_product.ancestor_chain(self.settings_root, key, products = registry)
     ]
     return (top_level or keys)[0]
 
@@ -1780,18 +1779,18 @@ class _Apply:
     # the product registry is read first, so a settings failure is never mistaken for a note outside the content
     # root; `ValueError` covers a JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
-      registry = resolve_product.load_products(self.repo)
+      registry = resolve_product.load_products(self.settings_root)
     except (OSError, ValueError):
       # guard: a malformed or unreadable settings file resolves to no product record
       return {}
     try:
-      rel = note.relative_to(spec_content_root(self.repo))
+      rel = note.relative_to(spec_content_root(self.settings_root))
     except ValueError:
       # guard: a note outside the content root is owned by no registered product
       return {}
 
     # the record of the innermost registered product covering the note, empty when none does
-    _key, record = resolve_product.effective_record_by_path(self.repo, rel.as_posix(), products = registry)
+    _key, record = resolve_product.effective_record_by_path(self.settings_root, rel.as_posix(), products = registry)
     return record or {}
 
   def _read_known_kinds(self) -> frozenset[str]:
@@ -1811,7 +1810,7 @@ class _Apply:
     # guard: absent, unreadable or unparseable settings leave only the shipped declarations; `ValueError` covers a
     # JSON syntax error, bytes that are not UTF-8 text and JSON that is not an object
     try:
-      registry = resolve_product.load_products(self.repo)
+      registry = resolve_product.load_products(self.settings_root)
     except (OSError, ValueError):
       return frozenset(kinds)
 
@@ -1851,7 +1850,7 @@ class _Apply:
 
     # the scaffolder lands assets under the content root (`spec.vault_root`, default `specs`),
     # so the note is read back through the same base — `repo / spec_path` misses it
-    folder_note = (spec_content_root(self.repo) / spec_path
+    folder_note = (spec_content_root(self.settings_root) / spec_path
                    / (path or asset_types.default_path(kind, record)) / slug / f"{slug}.md")
 
     # guard: idempotent — an earlier apply attempt already scaffolded this asset
@@ -1859,12 +1858,13 @@ class _Apply:
       return folder_note, spec_path
 
     # the scaffolder run, placed under the operator's folder when the decision named one
-    argv = [ sys.executable, str(self.specs_cli), "scaffold-asset", product, kind, slug ]
+    argv = [ sys.executable, str(self.specs_cli), "scaffold-asset", product, kind, slug,
+             _K.CLI_CWD_FLAG, str(self.settings_root) ]
     if path:
       argv += [ _K.SCAFFOLD_PATH_FLAG, path ]
     res = subprocess.run(
         argv,
-        cwd = str(self.repo),
+        cwd = str(self.settings_root),
         capture_output = True,
         text = True,
         check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
@@ -1884,7 +1884,7 @@ class _Apply:
     except json.JSONDecodeError:
       seeded_group = ""
     if seeded_group:
-      self.spawn_group_notes.append(self.repo / seeded_group)
+      self.spawn_group_notes.append(self.settings_root / seeded_group)
     return folder_note, spec_path
 
   def _read_settings_section(self, section: str) -> dict:
@@ -1904,7 +1904,7 @@ class _Apply:
     """
     res = subprocess.run(
         [ sys.executable, str(_resolve_core(self.repo)), _K.CLI_SETTINGS_GET, section,
-          _K.CLI_CWD_FLAG, str(self.repo) ],
+          _K.CLI_CWD_FLAG, str(self.settings_root) ],
         cwd = str(self.repo), capture_output = True, text = True, check = False, encoding = "utf-8",
         errors = _DECODE_ERRORS,
     )
@@ -1936,7 +1936,7 @@ class _Apply:
     """
     res = subprocess.run(
         [ sys.executable, str(_resolve_core(self.repo)), _K.CLI_SETTINGS_SET, section,
-          _K.CLI_CWD_FLAG, str(self.repo) ],
+          _K.CLI_CWD_FLAG, str(self.settings_root) ],
         input = json.dumps(value), cwd = str(self.repo),
         capture_output = True, text = True, check = False, encoding = "utf-8", errors = _DECODE_ERRORS,
     )
@@ -1963,7 +1963,7 @@ class _Apply:
     # guard: no product encloses the new one — there is nothing to inherit from
     if ancestor_key is None:
       return False
-    inherited = resolve_product.effective_record(self.repo, ancestor_key).get(_K.LANGUAGE)
+    inherited = resolve_product.effective_record(self.settings_root, ancestor_key).get(_K.LANGUAGE)
     return isinstance(inherited, str) and bool(inherited)
 
   def _register_product(self, key: str, spec_path: str) -> None:
@@ -2009,7 +2009,7 @@ class _Apply:
 
     # the nearest registered product enclosing this path — the ancestor a nested product inherits
     # its effective record from; None at the top level
-    ancestor_key, _ancestor = resolve_product.resolve_product_by_path(self.repo, spec_path)
+    ancestor_key, _ancestor = resolve_product.resolve_product_by_path(self.settings_root, spec_path)
 
     # the record carries no `source` block and no empty asset-type or guideline
     # placeholders: a request registers the spec tree only, and the settings are inherited from the
@@ -2068,7 +2068,7 @@ class _Apply:
       return
 
     # the nearest registered product enclosing this path
-    ancestor_key, ancestor = resolve_product.resolve_product_by_path(self.repo, spec_path)
+    ancestor_key, ancestor = resolve_product.resolve_product_by_path(self.settings_root, spec_path)
 
     # guard: the path itself is already somebody's product root — a second key over the same tree
     # would give one folder two level notes and two coordinators, whatever the disk looks like
@@ -2078,7 +2078,7 @@ class _Apply:
             f"under the key '{ancestor_key}'")
 
     # the product's directory on disk, which the remaining guards inspect
-    target = spec_content_root(self.repo) / spec_path
+    target = spec_content_root(self.settings_root) / spec_path
 
     # guard: a folder already carrying a spec folder-note of its own is taken — a level note
     # names another product, a status note names an asset; neither is ground a spawn may claim
@@ -2117,9 +2117,9 @@ class _Apply:
     # the vision seeded through the specs CLI, from the product's own template chain
     res = subprocess.run(
         [ sys.executable, str(self.specs_cli), _K.CLI_SEED_DOC, key,
-          str(note.relative_to(self.repo)), _K.SEED_DOC_FLAG, _K.VISION_DOC_TOKEN,
-          _K.CLI_CWD_FLAG, str(self.repo) ],
-        cwd = str(self.repo), capture_output = True, text = True, check = False, encoding = "utf-8",
+          str(note.relative_to(self.settings_root)), _K.SEED_DOC_FLAG, _K.VISION_DOC_TOKEN,
+          _K.CLI_CWD_FLAG, str(self.settings_root) ],
+        cwd = str(self.settings_root), capture_output = True, text = True, check = False, encoding = "utf-8",
         errors = _DECODE_ERRORS,
     )
 
@@ -2160,13 +2160,13 @@ class _Apply:
     self._register_product(key, spec_path)
 
     # the product's spec root on disk, recorded so the commit carries it
-    folder = spec_content_root(self.repo) / spec_path
+    folder = spec_content_root(self.settings_root) / spec_path
     folder.mkdir(parents = True, exist_ok = True)
     self.spawn_product_dirs.append(folder)
 
     # the product's level note, created or brought up to the level schema; a refused level note ends the apply
     try:
-      note = self.repo / catalog_note.backfill(self.repo, product = key, root = False)[_K.NOTE_KEY]
+      note = self.settings_root / catalog_note.backfill(self.settings_root, product = key, root = False)[_K.NOTE_KEY]
     except scaffold_asset.ScaffoldRefusal as refusal:
       _fail(refusal.category, refusal.message)
 
@@ -2196,7 +2196,7 @@ class _Apply:
     # guard: only the level ladder's own filenames, and only for a file that exists
     if candidate.name not in LevelDoc.BASENAMES or not candidate.is_file():
       return None
-    content_root = spec_content_root(self.repo)
+    content_root = spec_content_root(self.settings_root)
 
     # a product's own level documents sit directly in its spec_path, never deeper
     record = self._record_for_note(candidate)
@@ -2260,7 +2260,7 @@ class _Apply:
     if not parts or any(part in (".", "..") for part in parts):
       return None
     # `spec_path` is content-root-relative, so the token resolves under the content root
-    candidate = spec_content_root(self.repo).joinpath(spec_path, *parts, f"{parts[-1]}{_K.MD_SUFFIX}")
+    candidate = spec_content_root(self.settings_root).joinpath(spec_path, *parts, f"{parts[-1]}{_K.MD_SUFFIX}")
     return candidate if candidate.is_file() else None
 
   def _validate_change_targets(self, spec_path: str,
@@ -2777,7 +2777,7 @@ class _Apply:
 
     # settings that cannot be read as a JSON object refuse the pass before anything is written: every lookup below
     # would otherwise answer from the shipped defaults, and the request would be rejected on that answer
-    require_valid_settings(self.repo)
+    require_valid_settings(self.settings_root)
 
     # the frontmatter status decides whether this pass has anything left to do
     text = read_text(self.file_path)
@@ -2792,7 +2792,7 @@ class _Apply:
     # the `# Routing` section the router wrote is the whole instruction set for this pass
     body = text[fm_end:]
     cls, spawn_targets, attach_targets, routing_text = _parse_routing(
-        body, asset_types.folder_map(self.repo),
+        body, asset_types.folder_map(self.settings_root),
     )
     request_class = cls or values.get(_K.REQUEST_CLASS) or _K.CLASS_UNKNOWN
 

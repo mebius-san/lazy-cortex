@@ -7,7 +7,7 @@ dirty-tree-waiver: "deletes .git/lazy-git.lock under .git/ — never tracked by 
 
 # /lazy-core.git-unlock
 
-Force-delete `<repo>/.git/lazy-git.lock`. The hook's automatic break-the-lock heuristics (dead PID / different host / stale-and-idle) handle most cases. Use this skill only when the lock is genuinely stuck — for example, the holder is alive but you know it has abandoned the staging window.
+Force-delete `lazy-git.lock` in the repository's shared git directory (`<main checkout>/.git/lazy-git.lock`, the same file from a linked worktree). The hook's automatic break-the-lock heuristics (dead PID / different host / stale-and-idle) handle most cases. Use this skill only when the lock is genuinely stuck — for example, the holder is alive but you know it has abandoned the staging window.
 
 ## Execution discipline (MANDATORY — read before any action)
 

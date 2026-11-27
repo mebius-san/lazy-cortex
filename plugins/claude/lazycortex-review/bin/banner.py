@@ -19,6 +19,11 @@ Key invariants enforced here:
   approval checkboxes appear. Every other state never carries one.
 - The ready banner carries ONE approval checkbox when the autorun stopped clean or no validation round has run, and
   the three gestures only when a validation round has run and the autorun did not stop clean.
+- The ready banner of a report class carries exactly two checkboxes, accept and fix, whatever the validation state
+  and the autorun. Whether a banner's boxes read as `accept` / `fix` or as the approve kinds is decided by the
+  document's class, never by the banner text: :func:`ready_gesture_kinds` gives no box a kind when the banner
+  contradicts the class (a report class under a title that is not the report title, a plain class under a report
+  banner), or when both report boxes are ticked at once.
 - Banner is anchored above the first H1 of the body. Mid-body banner-
   shaped callouts (stale, mis-pasted) are ignored by :func:`extract`, and so is
   banner-shaped text inside a code fence above the first H1 (a literal example).
@@ -26,12 +31,13 @@ Key invariants enforced here:
 from __future__ import annotations
 
 import enum
+import functools
 import re
 
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # pylint: disable=import-error,deprecated-module
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import AutorunState, Bucket, LangId, LockitKey, Phase  # pylint: disable=import-error
+from keys import AutorunState, Bucket, LangId, LockitKey, Phase, ReportVerdictKind  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from review_lockit import Lockit  # pylint: disable=import-error
 
@@ -96,6 +102,10 @@ class DispatchState(enum.Enum):
 # every language's banner yields the same kinds and a one-checkbox banner yields the first.
 READY_GESTURE_KINDS: tuple[str, ...] = ( "approve", "approve-autorun", "approve-skip-validation" )
 
+# The machine kinds of a report class's ready banner, in the order its two checkbox lines render:
+# accept the report as it is, or fix by the operator's remarks. Read by position, as above.
+READY_REPORT_GESTURE_KINDS: tuple[str, ...] = ( "accept", "fix" )
+
 
 # --------------------------------------------------------- tag / shape
 
@@ -108,6 +118,24 @@ _TAG_TO_STATE = {
 }
 
 _FIRST_LINE_RE = re.compile(r"^>\s*\[!\w+\][^#\n]*#review/([a-z-]+)\s*$")
+
+# A checkbox line of a banner, painted or as a lockit template holds it; captures the label.
+_BOX_LINE_RE = re.compile(r"^>\s*-\s*\[[^\]\n]*\]\s*(.+?)\s*$")
+
+# A checkbox line of a banner; captures the text between its brackets, the tick.
+_BOX_TICK_RE = re.compile(r"^>\s*-\s*\[([^\]\n]*)\]")
+
+# The character between a ticked checkbox's brackets, compared case-insensitively.
+_TICK_CHAR = "x"
+
+# A banner's first line up to its `#review/` tag; captures the title, past the marker and its fold sign.
+_TITLE_RE = re.compile(r"^>\s*\[!\w+\][-+]?\s*(.*?)\s*#review/")
+
+# The line each writer's verdict puts under a report banner's fix box.
+_VERDICT_LINE_KEYS = {
+    ReportVerdictKind.SUFFICIENT: LockitKey.BANNER_REPORT_FIX_REWORK,
+    ReportVerdictKind.NEW_PLAN: LockitKey.BANNER_REPORT_FIX_REPLAN,
+}
 
 
 # ------------------------------------------------------------ extract
@@ -221,6 +249,93 @@ def extract_block(body: str) -> str:
   return found.group(0)
 
 
+def box_label(line: str) -> str | None:
+  """
+  Return the label of a banner checkbox line.
+
+  Args:
+    line: One line of a banner callout block.
+
+  Returns:
+    The checkbox's label without surrounding whitespace, whatever its tick, or `None` when the line is not a
+    checkbox line.
+  """
+  # a checkbox line carries its label after the bracketed tick
+  match = _BOX_LINE_RE.match(line)
+  return match.group(1) if match else None
+
+
+def ready_gesture_kinds(block: str, *, report: bool) -> tuple[str, ...]:
+  """
+  Return the gesture kinds a ready banner block's checkboxes carry under the document's review class.
+
+  Args:
+    block: A ready banner callout block, as `extract_block` returns it.
+    report: Whether the document's review class is a report class.
+
+  Returns:
+    For a report class, `READY_REPORT_GESTURE_KINDS` when the first line is the report title, whatever fold sign
+    or spacing the operator left, and at most one box is ticked; an empty tuple, so that no box has a kind, when
+    both boxes are ticked at once or the first line is not the report title. For any other class, an empty tuple
+    when the first line is the report title or a box carries a report label, and `READY_GESTURE_KINDS` otherwise.
+  """
+
+  # Decision: the document's class decides which kinds the boxes can carry, never the banner text — a report banner
+  # whose title and labels were rewritten by hand into the approve banner's would otherwise read as approve and
+  # land the build without the operator's accept-or-fix decision
+
+  # Decision: a banner that contradicts the class fires nothing — a report class under a banner that is not the
+  # report banner, or a plain class under a report banner, gives no box a kind, and the next repaint paints the
+  # banner the class calls for
+
+  # Decision: both report boxes ticked at once name no decision — neither box gets a kind, so the operator's double
+  # tick can never be resolved into one of the two by an order of precedence
+
+  first_line_re, report_labels = _report_markers()
+  lines = block.split("\n")
+  is_report_title = first_line_re.match(lines[0]) is not None
+
+  # a report class reads its two decision boxes by position under the report title, unless every one is ticked
+  if report:
+    # guard: a banner that is no longer the report banner fires nothing until it is repainted
+    if not is_report_title:
+      return ()
+    ticks = [
+        match.group(1).strip().lower() == _TICK_CHAR for line in lines[1:] if (match := _BOX_TICK_RE.match(line))
+    ]
+    return () if len(ticks) == len(READY_REPORT_GESTURE_KINDS) and all(ticks) else READY_REPORT_GESTURE_KINDS
+
+  # guard: a report banner, by its title or its box labels, on a plain class fires nothing until it is repainted
+  labels = { match.group(1).casefold() for line in lines[1:] if (match := _BOX_LINE_RE.match(line)) }
+  if is_report_title or labels & report_labels:
+    return ()
+  return READY_GESTURE_KINDS
+
+
+# opt: the locale files do not change while the process runs, so the report recognisers are built once
+@functools.cache
+def _report_markers() -> tuple[re.Pattern[str], frozenset[str]]:
+  """
+  Build the recognisers of a report banner from the shipped lockit.
+
+  Returns:
+    The pattern of a report banner's first line, built from every language's report title with the fold sign
+    and spacing `_FIRST_LINE_RE` tolerates, and the casefolded labels of the report boxes in every language.
+  """
+  titles: set[str] = set()
+  labels: set[str] = set()
+  for lang in LangId:
+    lines = Lockit.text(LockitKey.BANNER_READY_REPORT, lang).splitlines()
+    title = _TITLE_RE.match(lines[0])
+
+    # a template whose first line carries a title adds it to the titles to recognise; its box labels count always
+    if title is not None:
+      titles.add(title.group(1))
+    labels |= { match.group(1).casefold() for line in lines[1:] if (match := _BOX_LINE_RE.match(line)) }
+  alternatives = "|".join(r"\s+".join(map(re.escape, title.split())) for title in sorted(titles))
+  return re.compile(rf"^>\s*\[!\w+\][-+]?\s*(?:{alternatives})\s+#review/ready\s*$"), frozenset(labels)
+
+
 # -------------------------------------------------------- desired_state
 
 
@@ -261,41 +376,45 @@ def _find_callout_block(body: str, header_match: re.Match[str]) -> str:
 
 def _has_unanswered_question(body: str) -> bool:
   """
-  Report whether `body` contains an open question callout with no operator tick.
+  Report whether `body` contains an open question callout, one with no operator tick or with several.
 
   Args:
     body: Document text, scanned outside code fences for open `#review/question` callouts.
 
   Returns:
-    True if at least one unanswered question callout is present, False otherwise.
+    True if at least one question callout carries no ticked option or several, False otherwise.
   """
   # callout-shaped lines inside code fences are body content, never gating callouts, so fences are stripped first
   scan_body = _parser.strip_code_fences(body)
   for match in _QUESTION_OPEN_RE.finditer(scan_body):
     block = _find_callout_block(scan_body, match)
-    if not _TICKED_OPTION_RE.search(block):
+
+    # exactly one tick answers a question: none is still open, and several answer nothing
+    if len(_TICKED_OPTION_RE.findall(block)) != 1:
       return True
   return False
 
 
 def _has_unanswered_candidate(body: str) -> bool:
   """
-  Report whether `body` contains a decision-candidate callout with no operator tick.
+  Report whether `body` contains a decision-candidate callout the operator has not decided.
 
   Args:
     body: Document text, scanned outside code fences for `[!decision-candidate]` callouts.
 
   Returns:
-    True if at least one unanswered `[!decision-candidate]` callout is present, False otherwise.
+    True if at least one `[!decision-candidate]` callout carries no tick or both boxes ticked, False otherwise.
   """
 
   # Domain(review.markup):
   # # Decision-candidate identity and answered state
   # A decision-candidate callout carries no `#review/…` tag; the callout type token itself is
   # its identity. Every candidate is expected to carry the accept/reject option pair; a
-  # candidate counts as answered when any ticked option sits inside that same candidate's own
-  # block — no carve-outs apply, per callout. An unanswered candidate is an operator-facing block that
-  # holds the review banner at "Action needed" exactly like an unanswered question. Callout-
+  # candidate counts as answered only when exactly one of its options is ticked inside that
+  # same candidate's own block — no carve-outs apply, per callout. A candidate with no option
+  # ticked is open, and one with both accept and reject ticked decides nothing, so it stays open
+  # too. An unanswered candidate is an operator-facing block that holds the review banner at
+  # "Action needed" exactly like an unanswered question. Callout-
   # shaped lines that appear inside a code fence are inert body content, never a live candidate.
 
   # same per-callout gate as questions: a candidate is answered only by a tick inside its
@@ -304,7 +423,9 @@ def _has_unanswered_candidate(body: str) -> bool:
   # limit: the accept/reject pair is not verified per candidate, add a shape check if candidates arrive malformed
   for match in _CANDIDATE_OPEN_RE.finditer(scan_body):
     block = _find_callout_block(scan_body, match)
-    if not _TICKED_OPTION_RE.search(block):
+
+    # exactly one tick decides a candidate: none is still open, and accept with reject decides nothing
+    if len(_TICKED_OPTION_RE.findall(block)) != 1:
       return True
   return False
 
@@ -317,6 +438,7 @@ def desired_state(
     domain_ready: bool = True,
     review_phase: str | None = None,
     command_pending: bool = False,
+    verdict_owed: bool = False,
 ) -> State:
   """
   Compute the banner state appropriate for the current tick.
@@ -331,9 +453,9 @@ def desired_state(
       question, an undecided candidate, or a failed `domain_ready` check outranks
       approval; and only once none of those hold does `approved` decide between
       `IN_PROCESS` / `FINALIZING` and the unapproved outcomes.
-    - Returns `State.READY` only for an unapproved document whose `review_phase` is not `main`
-      and that has no pending operator command; the operator is never shown "ready to approve"
-      while a writer round or a command is still owed.
+    - Returns `State.READY` only for an unapproved document whose `review_phase` is not `main`,
+      that has no pending operator command and whose writer owes no verdict; the operator is never
+      shown "ready to approve" while a writer round, a command or a verdict is still owed.
 
   Args:
     body: Full document text, scanned for open questions and decision candidates.
@@ -349,6 +471,8 @@ def desired_state(
     command_pending: Whether the document carries an operator command the coordinator has not yet
       executed. When `approved == False` and the chain is exhausted, `True` yields `IN_PROCESS`
       instead of `READY`.
+    verdict_owed: Whether the document is a report whose writer has no verdict recorded. When
+      `approved == False` and the chain is exhausted, `True` yields `IN_PROCESS` instead of `READY`.
 
   Returns:
     The `State` the banner should display for this tick.
@@ -363,8 +487,9 @@ def desired_state(
 
   # Contract:
   # `State.READY` MUST be returned only for an unapproved document whose `review_phase` is
-  # not `main` and that has no pending operator command. The operator is never shown
-  # "ready to approve" while a writer round or a command is still owed.
+  # not `main`, that has no pending operator command and whose writer owes no verdict. The
+  # operator is never shown "ready to approve" while a writer round, a command or a verdict is
+  # still owed.
 
   # Domain(review.markup):
   # # Banner state priority once the work chain has emptied
@@ -380,7 +505,10 @@ def desired_state(
   # being approved is simply ready for the operator to approve. An unapproved document that
   # is still owed its main writer round, or that carries an operator command nobody has
   # executed yet, is not ready: it reports work in progress, because the operator would
-  # otherwise be asked to approve text that is about to change.
+  # otherwise be asked to approve text that is about to change. A report whose implementer has
+  # not yet given a verdict is not ready either: the operator's decision depends on that
+  # verdict, so the banner waits for the implementer's answer. The same holds after every
+  # operator remark on a report, until the implementer has answered it.
 
   if dispatch_state is not DispatchState.CHAIN_EXHAUSTED:
     return State.IN_PROCESS
@@ -394,9 +522,9 @@ def desired_state(
       return State.IN_PROCESS
     return State.FINALIZING
 
-  # an owed main writer round or an unexecuted operator command keeps the operator waiting;
-  # every other unapproved phase with nothing owed hands the turn over
-  if review_phase == Phase.MAIN or command_pending:
+  # an owed main writer round, an unexecuted operator command or a report's owed verdict keeps the
+  # operator waiting; every other unapproved phase with nothing owed hands the turn over
+  if review_phase == Phase.MAIN or command_pending or verdict_owed:
     return State.IN_PROCESS
   return State.READY
 
@@ -433,28 +561,45 @@ def render(
     autorun_cycles: int | None = None,
     waiting_context: str | None = None,
     lang: str = LangId.EN,
+    report: bool = False,
+    verdict: str | None = None,
 ) -> str:
   """
   Render the callout markdown for `state`.
 
-  - For `State.READY`, one checkbox (`approve the whole document`) is rendered when the autorun stopped clean
+  - For `State.READY` without `report`, one checkbox (`approve the whole document`) is rendered when the autorun
+    stopped clean
     (`autorun` is `clean`, even after a validation round) or when no validation round has run. Three checkboxes
     are rendered in the order of `READY_GESTURE_KINDS` only when a validation round has run (`validation_seen`)
     and the autorun did not stop clean (no autorun, or a `cap` / `question` stop): `approve this and previous
     rounds`, `approve and run to the end without stops`, `approve without further validation`. `approved=True`
     ticks the first box (mirrors frontmatter `review_approved` for visual consistency).
+  - For `State.READY` with `report`, two checkboxes are rendered in the order of `READY_REPORT_GESTURE_KINDS`,
+    whatever `validation_seen` and `autorun` say: `accept as is, without fixes` and `fix by the remarks`.
+    `approved=True` ticks the first box. One line chosen by `verdict` sits under the fix box (`sufficient` states
+    that the same build is reworked, `new-plan` that a new plan and build start; `None` or an unknown value adds
+    none), and two lines above the boxes say that a box ticked together with a new text edit does not fire and
+    that both boxes ticked at once fire neither.
   - For `State.READY` after an autorun stopped (`autorun` is `clean`, `cap` or `question`), the banner opens
     right under its title with `Autorun stopped after {n} cycle(s): {reason}`.
   - For `State.IN_PROCESS`, `waiting_context` enriches the title ("Waiting: validators" etc.);
     unknown or `None` → bare "Waiting". While `autorun` is `running`, the title is followed by
-    `Autorun in progress: {n} cycle(s) done without operator stops.`
+    `Autorun in progress: {n} cycle(s) done without operator stops.` With `report` set and `approved`
+    false, the title is followed by `Waiting for the implementer's answer` in the document's language.
 
   Guarantees:
     - Approval checkbox lines appear in the rendered markup only when `state` is `State.READY`;
       every other state's output never carries one.
-    - For `State.READY`, the markup carries one approval line before any validation round (`validation_seen` is
-      false) and whenever `autorun` is `clean`, and the three gestures in `READY_GESTURE_KINDS` order otherwise
-      (a validation round has run and `autorun` is absent, `cap`, or `question`).
+    - For `State.READY` without `report`, the markup carries one approval line before any validation round
+      (`validation_seen` is false) and whenever `autorun` is `clean`, and the three gestures in
+      `READY_GESTURE_KINDS` order otherwise (a validation round has run and `autorun` is absent, `cap`, or
+      `question`).
+    - For `State.READY` with `report`, the markup carries exactly the two boxes in `READY_REPORT_GESTURE_KINDS`
+      order, the verdict line only for a `sufficient` or `new-plan` verdict, and the same-commit line and the
+      both-ticked line above them.
+    - With `report` false the markup is the same whatever `verdict` is.
+    - For `State.IN_PROCESS` with `report` set and `approved` false, the markup carries the line that the
+      implementer's answer is awaited; with `report` false it never does.
     - The autorun stop line is painted above the approval line(s) for every stop state, `clean` included.
 
   Args:
@@ -468,6 +613,10 @@ def render(
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose; titles stay English, and a language with
       no lockit file renders the English wording throughout.
+    report: Whether the document's class is a report class; selects the two-checkbox `State.READY` banner, and
+      the implementer-waiting line of an unapproved `State.IN_PROCESS` banner.
+    verdict: The report writer's verdict (`sufficient` / `new-plan`) choosing the line under the fix box; any
+      other value, including `None`, adds no line. Ignored unless `report` is set.
 
   Returns:
     Callout markdown string for the given state, ready to embed in the document body.
@@ -478,8 +627,14 @@ def render(
   # `State.READY`. For `State.READY` it MUST carry ONE approval checkbox line before any
   # validation round (`validation_seen` is false) and whenever the autorun stopped clean
   # (`autorun` is `clean`), and the three gestures in `READY_GESTURE_KINDS` order otherwise
-  # (a validation round has run and the autorun is absent, `cap`, or `question`). Every
-  # other state's output MUST NEVER contain an approval checkbox.
+  # (a validation round has run and the autorun is absent, `cap`, or `question`). With
+  # `report` set, `State.READY` MUST instead carry exactly the two boxes in
+  # `READY_REPORT_GESTURE_KINDS` order. Every other state's output MUST NEVER contain an
+  # approval checkbox.
+
+  # Contract:
+  # For `State.IN_PROCESS` with `report` set and `approved` false, the markup MUST carry the line that the
+  # implementer's answer is awaited; with `report` false it MUST NEVER carry it.
 
   # Domain(review.markup):
   # # Approval checkbox scope
@@ -496,6 +651,30 @@ def render(
   # gestures. No other banner state ever renders an approval box — an operator cannot approve
   # mid-round, while a self-running loop is still turning, or once finalizing has already
   # started.
+  # A document of a report class gets a different ready banner whatever the validation state
+  # and the self-running loop: exactly two boxes, always in the same order — accept the report
+  # as it is, without fixes, or fix by the operator's remarks. Under the fix box one line says
+  # what that box will start, chosen by the writer's verdict: when the plan suffices, a rework
+  # of this build; when a new plan is needed, a new plan and a new build; with no verdict, no
+  # line. Above the boxes one line states that a box ticked together with a new text edit does
+  # not fire, because the implementer answers the edit first, and another that both boxes
+  # ticked at once fire neither: the two decisions contradict each other, so neither is taken
+  # and the repaint leaves both open for the operator to tick one. Whether a banner's boxes are
+  # report decisions or approve gestures is decided by the document's review class, never by
+  # the banner's text. A document of a report class never gets the approve banner: its boxes
+  # are always read as the two report decisions, by position, under the report title, which is
+  # recognised however the operator folded the callout or spaced the words of the title. A
+  # banner that contradicts the class fires nothing: on a report-class document, a banner whose
+  # title is no longer the report title, for instance one rewritten by hand into the approve
+  # banner, title and box labels alike, gives no box any decision; on a plain-class document, a
+  # banner carrying the report title or a report box label gives no box any gesture. The next
+  # repaint paints the banner the class calls for, without the tick. While the class cannot be
+  # determined, no box of the ready banner counts as any gesture. A report banner with both
+  # boxes ticked counts as no decision either, under any language.
+  # A report shows no decision box until its implementer has answered: while that answer is
+  # owed, a freshly submitted report and a report whose operator has just written a remark
+  # alike, the banner is the in-process one and says it is waiting for the implementer's
+  # answer, in the document's language. A plain class's banner is unchanged.
 
   # Domain(review.markup):
   # # Autorun status lines
@@ -514,25 +693,40 @@ def render(
   # the ready banner: one box on a clean autorun stop or before any validation round, three otherwise, opened by
   # the stop line of an autorun that ended
   if state is State.READY:
-    ready_key = (
-        LockitKey.BANNER_READY_TRIPLE if validation_seen and autorun != AutorunState.CLEAN
-        else LockitKey.BANNER_READY_SINGLE
-    )
     stop_line = ""
     if autorun in _AUTORUN_STOP_STATES:
       stop_line = Lockit.text(LockitKey.AUTORUN_STOP_LINE, lang).format(
           cycles = cycles, reason = Lockit.text(LockitKey.AUTORUN_STOP_REASON_PREFIX + autorun, lang),
       )
-    return Lockit.text(ready_key, lang).format(tick = "x" if approved else " ", autorun = stop_line)
+    tick = "x" if approved else " "
 
-  # the waiting banner: a phase-enriched title, plus the progress line of an autorun still turning
+    # a report class decides between two boxes whatever the validation state, with the verdict's line under the
+    # fix box and the same-commit rule above both
+    if report:
+      verdict_key = _VERDICT_LINE_KEYS.get(verdict or "")
+      verdict_line = f">   {Lockit.text(verdict_key, lang)}\n" if verdict_key is not None else ""
+      return Lockit.text(LockitKey.BANNER_READY_REPORT, lang).format(
+          tick = tick, autorun = stop_line, verdict = verdict_line,
+          same_commit = Lockit.text(LockitKey.BANNER_REPORT_SAME_COMMIT, lang),
+          both_ticked = Lockit.text(LockitKey.BANNER_REPORT_BOTH_TICKED, lang),
+      )
+    ready_key = (
+        LockitKey.BANNER_READY_TRIPLE if validation_seen and autorun != AutorunState.CLEAN
+        else LockitKey.BANNER_READY_SINGLE
+    )
+    return Lockit.text(ready_key, lang).format(tick = tick, autorun = stop_line)
+
+  # the waiting banner: a phase-enriched title, the implementer-waiting line of an unapproved report, plus the
+  # progress line of an autorun still turning
   template = Lockit.text(LockitKey.BANNER_PREFIX + state.value, lang)
   if state is State.IN_PROCESS:
     running_line = ""
     if autorun == AutorunState.RUNNING:
       running_line = Lockit.text(LockitKey.AUTORUN_RUNNING_LINE, lang).format(cycles = cycles)
+    waiting_line = f"> {Lockit.text(LockitKey.BANNER_REPORT_WAITING, lang)}\n" if report and not approved else ""
     return template.format(
-        title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE), autorun = running_line,
+        title = _WAITING_CONTEXT_LABELS.get(waiting_context or "", _WAITING_BARE),
+        waiting = waiting_line, autorun = running_line,
     )
   return template
 
@@ -586,6 +780,8 @@ def replace_banner(
     autorun_cycles: int | None = None,
     waiting_context: str | None = None,
     lang: str = LangId.EN,
+    report: bool = False,
+    verdict: str | None = None,
 ) -> str:
   """
   Return `body` with its banner replaced (or inserted, if absent).
@@ -611,6 +807,9 @@ def replace_banner(
     autorun_cycles: Autoapprovals done in the current autorun, shown in the autorun line; `None` counts as 0.
     waiting_context: Phase label inserted into the `State.IN_PROCESS` title; `None` yields bare "Waiting".
     lang: Resolved language code for the body prose.
+    report: Whether the document's class is a report class; selects the two-checkbox `State.READY` banner.
+    verdict: The report writer's verdict (`sufficient` / `new-plan`) choosing the line under the report banner's fix
+      box; any other value, including `None`, adds no line.
 
   Returns:
     The body with exactly one banner block, anchored at the top of the content below any leading frontmatter.
@@ -639,6 +838,8 @@ def replace_banner(
       autorun_cycles = autorun_cycles,
       waiting_context = waiting_context,
       lang = lang,
+      report = report,
+      verdict = verdict,
   ) + "\n"
 
   # split off a leading frontmatter block so the banner never lands above it

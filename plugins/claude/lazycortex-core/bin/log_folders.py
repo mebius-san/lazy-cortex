@@ -27,8 +27,12 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_canonical  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from plugin_locator import query_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The resolver's list of every canonical name.
@@ -269,7 +273,8 @@ def main(argv: list[str]) -> int:
   Run the `classify` or `apply` subcommand and print its result as JSON.
 
   Args:
-    argv: Command-line arguments after the script name.
+    argv: Command-line arguments after the script name; `--root` names the run-log folder (default: `.logs/claude`
+      at the root of the checkout `$LAZY_REPO_ROOT`, then the working directory, sits in).
 
   Returns:
     Process exit code; always `0`.
@@ -282,17 +287,19 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   classify_parser = sub.add_parser("classify")
   # waiver: argparse CLI signature, not a domain key
-  classify_parser.add_argument("--root", default = _DEFAULT_ROOT)
+  classify_parser.add_argument("--root", default = None)
   # waiver: argparse CLI signature, not a domain key
   apply_parser = sub.add_parser("apply")
   # waiver: argparse CLI signature, not a domain key
-  apply_parser.add_argument("--root", default = _DEFAULT_ROOT)
+  apply_parser.add_argument("--root", default = None)
   # waiver: argparse CLI signature, not a domain key
   apply_parser.add_argument("--merge", action = "append", default = [])
   # waiver: argparse CLI signature, not a domain key
   apply_parser.add_argument("--delete", action = "append", default = [])
   args = parser.parse_args(argv)
-  root = Path(args.root)
+
+  # the run-log folder: the one named, else the one at the root of the checkout the command works in
+  root = Path(args.root) if args.root else query_repo_root() / _DEFAULT_ROOT
 
   # classify buckets every folder against the live canonical names
   # waiver: argparse CLI signature, not a domain key

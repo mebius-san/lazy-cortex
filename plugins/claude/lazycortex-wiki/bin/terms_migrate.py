@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import Final
 
+  from collections.abc import Callable
+
 
 _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
@@ -84,6 +86,25 @@ KEY_LINKS: Final = "links"
 # Where a dropped chunk of the old dictionary stood.
 DROPPED_PREAMBLE: Final = "preamble"
 DROPPED_AFTER_H1: Final = "after-h1"
+
+# Keys of one recased scope's report and of one rename in it.
+KEY_RENAMED: Final = "renamed"
+KEY_KEPT: Final = "kept"
+KEY_FROM: Final = "from"
+KEY_TO: Final = "to"
+
+# The title line's heading prefix of a term file, and the carriage return a CRLF line ends in before its line feed.
+_TITLE: Final = "# "
+_CR: Final = "\r"
+# The suffix of the temporary name a recased file passes through between its two names.
+_RECASE_SUFFIX: Final = ".recase"
+
+# The git setting that makes paths case-blind, its true value, and the `ls-files` switches for deleted and untracked
+# paths.
+_GIT_IGNORECASE: Final = "core.ignorecase"
+_GIT_TRUE: Final = "true"
+_GIT_DELETED: Final = "--deleted"
+_GIT_OTHERS: Final = "--others"
 
 # Keys of the sweep's dispatch report.
 KEY_DIRECTORIES: Final = "directories"
@@ -873,61 +894,452 @@ class TermsMigration:
     """
     plan = self._build_plan(cfg, directory)
     dropping = self._build_plan(cfg, directory, drop_legacy = True)
-    context = self._settings.build_context(cfg)
 
-    # every document of the scope, documents under review included; refused ones stay as they are, and one that is not
-    # valid UTF-8 is set aside and named instead of stopping the run; a document no curator reads loses its old terms
+    # every document of the scope, documents under review included; a document no curator reads loses its old terms
     # section whole
-    written: list[str] = []
-    undecodable: list[str] = []
-    changed: list[str] = []
-    unmoved: list[dict] = []
-    for rel in list_documents(self._repo, _filter_strings(cfg, _KEY_PATHS)):
-      # the document is read once; those bytes are rendered, searched for links it cannot move and compared before
-      # the write
-      # a document that cannot be read is set aside and named like one that is not valid UTF-8, and the pass
-      # goes on to the next
-      try:
-        data = (self._repo / rel).read_bytes()
-      except OSError as error:
-        print(f"terms: {rel} could not be read, set aside: {error}", file = sys.stderr)
-        undecodable.append(rel)
+    return pass_all_documents(
+      self._repo, list_documents(self._repo, _filter_strings(cfg, _KEY_PATHS)), self._settings.build_context(cfg),
+      plan_of = lambda rel: dropping if self._is_source_excluded(cfg, rel) else plan,
+    )
+
+
+# ----------------------------------------------------------------------------------------
+class GitPathProbe:
+  """
+  What git sees of a repository's paths, read without staging or writing anything.
+  """
+
+  def __init__(self, *, repo: Path) -> None:
+    """
+    Bind the probe to a repository.
+
+    Args:
+      repo: Absolute repository root.
+    """
+    # the repository every git call runs in
+    self._repo = repo
+
+  def is_tracked(self, rel: str) -> bool:
+    """
+    Tell whether git tracks exactly a path.
+
+    Notes:
+      - Runs git.
+
+    Args:
+      rel: Repo-relative posix path.
+
+    Returns:
+      `True` when the index lists the path as written.
+
+    Raises:
+      CalledProcessError: If git cannot list the files.
+    """
+    return bool(self._list_files(rel))
+
+  def is_case_blind(self) -> bool:
+    """
+    Tell whether git on this checkout ignores letter case in paths.
+
+    Notes:
+      - Runs git.
+
+    Returns:
+      `True` when the repository's `core.ignorecase` is true.
+    """
+    result = subprocess.run(
+      [ "git", "config", "--bool", _GIT_IGNORECASE ], cwd = str(self._repo), capture_output = True, text = True,
+      check = False,
+    )
+    return result.stdout.strip() == _GIT_TRUE
+
+  def is_rename_seen(self, old_rel: str, new_rel: str) -> bool:
+    """
+    Tell whether git sees a file moved from one path to another on disk.
+
+    Notes:
+      - Runs git; called once the file stands at its new path.
+
+    Args:
+      old_rel: Repo-relative posix path the file stood at.
+      new_rel: Repo-relative posix path the file stands at now.
+
+    Returns:
+      `True` when git does not track the old path, or lists the old path as deleted and the new one as untracked.
+
+    Raises:
+      CalledProcessError: If git cannot list the files.
+    """
+    # a path git never tracked loses nothing to a rename; a tracked one needs git to see it gone and the new path new
+    return not self.is_tracked(old_rel) or (
+      bool(self._list_files(old_rel, _GIT_DELETED)) and bool(self._list_files(new_rel, _GIT_OTHERS))
+    )
+
+  def _list_files(self, rel: str, *flags: str) -> str:
+    """
+    List one path as `git ls-files` sees it.
+
+    Args:
+      rel: Repo-relative posix path, matched literally.
+      flags: Extra `ls-files` switches choosing which paths are listed.
+
+    Returns:
+      The listing, empty when git lists nothing.
+
+    Raises:
+      CalledProcessError: If git cannot list the files.
+    """
+    return os.fsdecode(subprocess.check_output(
+      [ "git", "ls-files", "-z", *flags, "--", f":(literal){rel}" ], cwd = str(self._repo),
+    ))
+
+
+def _move_twice(source: Path, target: Path) -> None:
+  """
+  Move a file to a new path through a temporary name beside it.
+
+  Args:
+    source: The file.
+    target: The path it moves to.
+
+  Raises:
+    OSError: If a move fails.
+  """
+  # a hidden temporary name, which no term listing reads, carries the file between the two names
+  temporary = target.with_name(f"{_HIDDEN}{target.name}{_RECASE_SUFFIX}")
+  source.rename(temporary)
+  temporary.rename(target)
+
+
+# ----------------------------------------------------------------------------------------
+class TermsRecase:
+  """
+  Migration of terms dictionaries to the letter case of each term's language.
+
+  A term file's title, and the file name derived from it, takes the case its language asks for; the links to a
+  renamed term file follow it, keeping the words they show. A file whose rename git does not see keeps its name,
+  and its links stay.
+  """
+
+  def __init__(self, *, repo: Path, settings: TermsSettings) -> None:
+    """
+    Prepare the recase of one repository.
+
+    Args:
+      repo: Absolute repository root.
+      settings: Terms settings read once for the run.
+    """
+    # the repository, its settings as read once for the run, and git's view of its paths
+    self._repo = repo
+    self._settings = settings
+    self._probe = GitPathProbe(repo = repo)
+
+  def check(self) -> bool:
+    """
+    Tell whether a dictionary still holds a term file whose title or file name breaks the letter-case canon.
+
+    Guarantees:
+      - The check never writes.
+      - A scope that still names its old dictionary file is never counted as work.
+
+    Notes:
+      - Runs git.
+      - A name-only change of a tracked file is not counted while git on this checkout is case-blind, because the
+        rename could not be taken.
+
+    Returns:
+      `True` while a served scope's term file has a title line the canon would change, or a file name the canon
+      would change that a run can take.
+    """
+
+    # Contract:
+    # The check NEVER writes.
+
+    # Contract:
+    # A scope that still names its old dictionary file is never counted as work.
+
+    # a term file the canon retitles is work left, and so is one it renames, unless git on this checkout can never
+    # take that case-only rename of a tracked file
+    blind = self._probe.is_case_blind()
+    return any(
+      entry.retitled or not ( blind and self._probe.is_tracked(self._rel(entry.path)) )
+      for _, _, directory in self._find_all_scopes() for entry in self._find_all_recased(directory)
+    )
+
+  def run(self) -> list[dict]:
+    """
+    Bring every served scope's term files to the letter-case canon and move the links to the renamed ones.
+
+    Guarantees:
+      - Only the title line of a term file changes; every other byte of the file stays.
+      - A term file is renamed only when its name is its title's file name, letter case ignored; any other term file
+        keeps its name.
+      - A link to a renamed term file is moved onto the new name and keeps showing the words it showed.
+      - A scope that still names its old dictionary file is left untouched and gets no report.
+      - Nothing is staged or committed.
+      - Repeating the run changes nothing.
+
+    Notes:
+      - Runs git to see whether each rename registers.
+      - A file whose rename git does not see is moved back to its name; its title stays cased and its links stand.
+
+    Returns:
+      One report per served scope, in configuration order: the scope, the renames as `{from, to}` stems under
+      `renamed`, the files that kept their name for want of a rename git sees as `{from, to}` stems, the new stem
+      being the one the file would have taken, under `kept`, the documents rewritten, the documents set aside as not
+      valid UTF-8, and the documents left alone because they changed on disk during the run.
+
+    Raises:
+      CalledProcessError: If git cannot list the files.
+      OSError: If a term file cannot be written or moved.
+    """
+
+    # Domain(wiki.terms):
+    # # Bringing a dictionary to the letter-case canon
+    # A dictionary written before the letter-case canon is brought to it once. Each term file's title line takes the
+    # case of the term's language, and nothing else in the file changes. A file whose name is its title's file name,
+    # letter case aside, is renamed to the cased title's file name, unless another file already holds that name, and
+    # then both files stay as they are; a file named otherwise keeps its name, and a file with no title line, or one
+    # that cannot be read as text, is left alone. A file the canon renames is moved through a temporary name, so the
+    # file system records a change of path. Git is then asked, without staging anything, whether it sees the old path
+    # deleted and the new one untracked; a path git never tracked always counts as seen. Where git does not see it,
+    # which is a case-only rename of a tracked file on a checkout where git ignores letter case, the file is moved
+    # back: it keeps its name, its title stays cased, and links keep pointing at its name. Such a file is reported
+    # as kept, not renamed. Work is not left over a name-only change of a tracked file while git ignores letter
+    # case, because git on that checkout can never take it. Every link to a renamed file in the scope's documents,
+    # documents under review included, is moved onto the new name, and a link without display text keeps showing the
+    # words it showed, so a reader sees the same sentence. A scope that still holds its old single-file dictionary
+    # waits for its own migration first.
+
+    # Contract:
+    # Only the title line of a term file changes; every other byte of the file stays.
+
+    # Contract:
+    # A term file is renamed only when its name is its title's file name with letter case ignored; any other term
+    # file keeps its name.
+
+    # Contract:
+    # A link to a renamed term file is moved onto the new name and keeps showing the words it showed.
+
+    # Contract:
+    # A scope that still names its old dictionary file is left untouched and gets no report.
+
+    # Contract:
+    # The run NEVER stages or commits anything.
+
+    # Contract:
+    # Repeating the run changes nothing.
+
+    reports: list[dict] = []
+
+    # each served scope's term files are recased first, then its documents follow the renamed ones
+    for scope_id, cfg, directory in self._find_all_scopes():
+      renamed, kept = self._apply_all(directory, self._find_all_recased(directory))
+      passed = self._pass_documents(cfg, directory, renamed) if renamed else {}
+      reports.append({
+        KEY_SCOPE: scope_id,
+        KEY_RENAMED: [ { KEY_FROM: old, KEY_TO: new } for old, new in renamed.items() ],
+        KEY_KEPT: [ { KEY_FROM: old, KEY_TO: new } for old, new in kept.items() ],
+        KEY_DOCUMENTS: passed.get(KEY_DOCUMENTS, []),
+        KEY_UNDECODABLE: passed.get(KEY_UNDECODABLE, []),
+        KEY_CHANGED_ON_DISK: passed.get(KEY_CHANGED_ON_DISK, []),
+      })
+    return reports
+
+  def _find_all_scopes(self) -> list[tuple[str, dict, str]]:
+    """
+    List the served scopes whose dictionary is already a directory of term files.
+
+    Returns:
+      One tuple of scope id, scope settings and dictionary directory per scope, in configuration order.
+    """
+    return [ served for served in self._settings.find_all_served() if _KEY_LEGACY_FILE not in served[1] ]
+
+  def _find_all_recased(self, directory: str) -> list[_Recased]:
+    """
+    Find the term files of a dictionary directory that the letter-case canon changes.
+
+    Args:
+      directory: Repo-relative dictionary directory.
+
+    Returns:
+      One entry per term file whose title or file name the canon changes, in file-name order.
+    """
+    root = self._repo / directory
+
+    # guard: a missing directory holds no term file
+    if not root.is_dir():
+      return []
+
+    # every markdown file directly in the directory with a decodable title line is judged on its own
+    found: list[_Recased] = []
+    for name in sorted(os.listdir(root)):
+      # guard: only a visible term file directly in the directory counts
+      if ( name.startswith(_HIDDEN) or not name.endswith(_term_dictionary.TERM_FILE_SUFFIX)
+           or not (root / name).is_file() ):
         continue
-      document_plan = dropping if self._is_source_excluded(cfg, rel) else plan
-      try:
-        result = _term_links.render_document(
-          self._repo, rel, document_plan, context, allow_review = True, data = data,
-        )
-        links = (
-          _term_links.find_all_unmoved_anchor_links(TextFile(path = self._repo / rel).decode(data), document_plan)
-          if result[_term_links.KEY_STATUS] != _term_links.STATUS_REFUSED else []
-        )
-      except UnicodeDecodeError:
-        undecodable.append(rel)
+      if ( recased := _Recased.read(root / name) ) is not None:
+        found.append(recased)
+    return found
+
+  def _apply_all(self, directory: str, recased: list[_Recased]) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Write the cased title lines and rename the files the canon renames, where git sees the rename.
+
+    Notes:
+      - Runs git, and prints a note to stderr for each file left as it is or kept under its name.
+
+    Args:
+      directory: Repo-relative dictionary directory, for the stderr notes.
+      recased: The term files to change.
+
+    Returns:
+      A pair of maps, each keyed by old stem. The first holds the new stem of each renamed term file. The second
+      holds the stem each file would have taken, for the files whose rename git does not see and that kept their
+      name.
+
+    Raises:
+      CalledProcessError: If git cannot list the files.
+      OSError: If a term file cannot be written or moved.
+    """
+    renamed: dict[str, str] = {}
+    kept: dict[str, str] = {}
+
+    # each file takes its cased title, then moves to its cased name unless another file already holds that name
+    for entry in recased:
+      target = entry.path.with_name(entry.new_stem + _term_dictionary.TERM_FILE_SUFFIX)
+      # guard: a different file already carrying the new name keeps both files as they are
+      if entry.new_stem != entry.stem and target.exists() and not os.path.samefile(entry.path, target):
+        print(f"terms: {directory}/{target.name} already exists, {entry.path.name} left as it is", file = sys.stderr)
+        continue
+      entry.path.write_bytes(entry.data)
+
+      # a file the canon only retitles keeps its name
+      if entry.new_stem == entry.stem:
         continue
 
-      # a link to a heading of the old file where no edit reaches stays as written, and is named
-      if links:
-        unmoved.append({ KEY_FILE: rel, KEY_LINKS: links })
-
-      # guard: nothing to write
-      if result[_term_links.KEY_STATUS] != _term_links.STATUS_APPLIED:
+      # the move goes through a temporary name, so a case-only rename reaches the file system as a change of path;
+      # a rename git does not see is moved back, and the file keeps its name and its links
+      _move_twice(entry.path, target)
+      if self._probe.is_rename_seen(self._rel(entry.path), self._rel(target)):
+        renamed[entry.stem] = entry.new_stem
         continue
+      _move_twice(target, entry.path)
+      kept[entry.stem] = entry.new_stem
+      print(
+        f"terms: git does not see {directory}/{entry.path.name} renamed to {target.name}; the name stays",
+        file = sys.stderr,
+      )
+    return renamed, kept
 
-      # limit: an edit landing between this check and the write is lost, compare and write through one handle then
-      # guard: a document that changed on disk since it was read is someone's edit, left alone and named
-      if (self._repo / rel).read_bytes() != data:
-        changed.append(rel)
-        continue
+  def _rel(self, path: Path) -> str:
+    """
+    Return a path of the repository as a repo-relative posix path.
 
-      # the document takes its new text and is counted as rewritten
-      _term_links.write_document(self._repo, rel, result[_term_links.KEY_TEXT])
-      written.append(rel)
+    Args:
+      path: A path inside the repository.
 
-    # what the pass wrote, set aside, left alone and could not move
-    return {
-      KEY_DOCUMENTS: written, KEY_UNDECODABLE: undecodable, KEY_CHANGED_ON_DISK: changed, KEY_UNMOVED: unmoved,
-    }
+    Returns:
+      The path relative to the repository root, with forward slashes.
+    """
+    return path.relative_to(self._repo).as_posix()
+
+  def _pass_documents(self, cfg: dict, directory: str, renamed: dict[str, str]) -> dict[str, list]:
+    """
+    Move every link of a scope's documents to a renamed term file onto its new name.
+
+    Args:
+      cfg: Settings of the scope.
+      directory: Repo-relative dictionary directory of the scope.
+      renamed: The new stem of each renamed term file, by its old stem.
+
+    Returns:
+      The pass's report keys, as `pass_all_documents` returns them.
+    """
+    # a plan that only follows the renames: it names no word, rejects nothing and touches no old terms section
+    plan = _term_links.LinkPlan(
+      dictionary_dir = directory,
+      terms = _term_dictionary.TermDictionary(path = self._repo / directory).read_terms(),
+      link_retargets = {}, retargets = dict(renamed), word_links = {}, rejected = set(),
+    )
+    return pass_all_documents(
+      self._repo, list_documents(self._repo, _filter_strings(cfg, _KEY_PATHS)), self._settings.build_context(cfg),
+      plan_of = lambda _rel: plan,
+    )
+
+
+# ----------------------------------------------------------------------------------------
+@dataclass(frozen = True)
+class _Recased:
+  """
+  One term file as the letter-case canon rewrites it.
+
+  Attributes:
+    path: The term file.
+    stem: File name stem the file carries now.
+    new_stem: File name stem the file carries once recased.
+    data: The file's bytes with the cased title line.
+    retitled: Whether the canon changes the title line.
+  """
+
+  # The term file
+  path: Path
+  # The file name stem the file carries now
+  stem: str
+  # The file name stem the file carries once recased
+  new_stem: str
+  # The file's bytes with the cased title line
+  data: bytes
+  # Whether the canon changes the title line
+  retitled: bool
+
+  @classmethod
+  def read(cls, path: Path) -> _Recased | None:
+    """
+    Read a term file and work out what the letter-case canon makes of it.
+
+    Notes:
+      - A file that is not valid UTF-8 is treated as one without a title line.
+
+    Args:
+      path: The term file.
+
+    Returns:
+      The recased file, or `None` when it has no title line or the canon changes neither its title nor its name.
+
+    Raises:
+      OSError: If the file cannot be read.
+    """
+    raw = path.read_bytes()
+    stem = path.name[:-len(_term_dictionary.TERM_FILE_SUFFIX)]
+
+    # guard: a file that is not valid UTF-8 has no title line to case
+    try:
+      text = raw.decode(_ENCODING)
+    except UnicodeDecodeError:
+      return None
+
+    # the title line ends at the first line break, a carriage return before it included
+    first, newline, rest = text.partition(_NL)
+    line = first.removesuffix(_CR)
+
+    # guard: a file without a title line is left alone
+    if not line.startswith(_TITLE):
+      return None
+
+    # the title is cased in place, and the name follows only when it is the title's own file name
+    title = line[len(_TITLE):].strip()
+    cased = _term_dictionary.compute_term_title(title)
+    derived = _term_dictionary.term_file_stem(title).casefold() == stem.casefold()
+    new_stem = _term_dictionary.term_file_stem(cased) if derived else stem
+    new_first = first.replace(title, cased, 1)
+
+    # guard: a file the canon changes in neither title nor name is no work
+    if new_first == first and new_stem == stem:
+      return None
+    data = ( new_first + newline + rest ).encode(_ENCODING)
+    return cls(path = path, stem = stem, new_stem = new_stem, data = data, retitled = new_first != first)
+
 
 
 # ----------------------------------------------------------------------------------------
@@ -1471,6 +1883,86 @@ class TermsSweep:
 
 
 # ----------------------------------------------------------------------------------------
+def pass_all_documents(repo: Path,
+                       documents: list[str],
+                       context: _term_links.SyncContext,
+                       *,
+                       plan_of: Callable[[str], _term_links.LinkPlan]) -> dict[str, list]:
+  """
+  Bring the term links and the old terms text of documents in line with the link plan each one receives.
+
+  Notes:
+    - Reads each document once and rewrites in place the ones whose text changes.
+    - A document changed on disk between its reading and its write is not written.
+    - A document that cannot be read at all is set aside and named like one that is not valid UTF-8, and the pass
+      goes on with the next document.
+
+  Args:
+    repo: Absolute repository root.
+    documents: Repo-relative documents to pass, documents under review included.
+    context: Settings-derived facts the pass consults.
+    plan_of: The link plan a document receives, by its repo-relative path.
+
+  Returns:
+    The report keys of the pass. `documents` lists the repo-relative documents that were rewritten, `undecodable` the
+    ones set aside because they are not valid UTF-8, `changed_on_disk` the ones that changed on disk between being
+    read and being written and so were not written, and `unmoved` one `{file, links}` entry per document holding
+    links to headings of an old dictionary file that no link edit reaches.
+  """
+  # every document, documents under review included; refused ones stay as they are, and one that is not valid UTF-8
+  # is set aside and named instead of stopping the run
+  written: list[str] = []
+  undecodable: list[str] = []
+  changed: list[str] = []
+  unmoved: list[dict] = []
+  for rel in documents:
+    # the document is read once; those bytes are rendered, searched for links it cannot move and compared before
+    # the write
+    # a document that cannot be read is set aside and named like one that is not valid UTF-8, and the pass
+    # goes on to the next
+    try:
+      data = (repo / rel).read_bytes()
+    except OSError as error:
+      print(f"terms: {rel} could not be read, set aside: {error}", file = sys.stderr)
+      undecodable.append(rel)
+      continue
+    document_plan = plan_of(rel)
+    try:
+      result = _term_links.render_document(
+        repo, rel, document_plan, context, allow_review = True, data = data,
+      )
+      links = (
+        _term_links.find_all_unmoved_anchor_links(TextFile(path = repo / rel).decode(data), document_plan)
+        if result[_term_links.KEY_STATUS] != _term_links.STATUS_REFUSED else []
+      )
+    except UnicodeDecodeError:
+      undecodable.append(rel)
+      continue
+
+    # a link to a heading of the old file where no edit reaches stays as written, and is named
+    if links:
+      unmoved.append({ KEY_FILE: rel, KEY_LINKS: links })
+
+    # guard: nothing to write
+    if result[_term_links.KEY_STATUS] != _term_links.STATUS_APPLIED:
+      continue
+
+    # limit: an edit landing between this check and the write is lost, compare and write through one handle then
+    # guard: a document that changed on disk since it was read is someone's edit, left alone and named
+    if (repo / rel).read_bytes() != data:
+      changed.append(rel)
+      continue
+
+    # the document takes its new text and is counted as rewritten
+    _term_links.write_document(repo, rel, result[_term_links.KEY_TEXT])
+    written.append(rel)
+
+  # what the pass wrote, set aside, left alone and could not move
+  return {
+    KEY_DOCUMENTS: written, KEY_UNDECODABLE: undecodable, KEY_CHANGED_ON_DISK: changed, KEY_UNMOVED: unmoved,
+  }
+
+
 def list_documents(repo: Path, globs: list[str]) -> list[str]:
   """
   List the tracked documents that match globs and exist in the working tree.

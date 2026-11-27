@@ -5,8 +5,9 @@ This module backs two subcommands. `guard-public-write` records the public scope
 repository's guard config and leaves every other key of an existing file as it is; the recorded scopes change only
 when the caller states the mode: `--scope` globs for subtree-public mode, `--whole-repo` for none.
 `guard-public-files` prints, as one JSON object, the files the public check scans: the tracked files within the
-public scopes, minus encrypted files and skipped paths. The repository root follows the dispatcher convention:
-the `LAZY_REPO_ROOT` env var, falling back to the process working directory, overridable per-call with `--cwd`.
+public scopes, minus encrypted files and skipped paths. The repository root is the toplevel of the
+checkout that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits in (the directory itself
+outside git).
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ import guard_checks  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from guard_checks import CONFIG_FILENAME  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -207,7 +208,7 @@ def cmd_guard_public_write(argv: list[str]) -> int:
   # the merged config's summary is the verb's whole output; a config that does not parse is refused untouched
   try:
     result = write_guard_public(
-      resolve_repo_root(args.cwd), scopes = scopes, waivers = waivers, skip_paths = args.skip_path,
+      query_repo_root(args.cwd), scopes = scopes, waivers = waivers, skip_paths = args.skip_path,
     )
   except json.JSONDecodeError as error:
     print(json.dumps({ _STATUS: _ERROR, "message": f"{CONFIG_FILENAME} is not valid JSON: {error}" }))
@@ -296,7 +297,7 @@ def cmd_guard_public_files(argv: list[str]) -> int:
 
   # the filtered list is the verb's whole output; an unlistable repository is refused
   try:
-    result = find_public_scan_files(resolve_repo_root(args.cwd))
+    result = find_public_scan_files(query_repo_root(args.cwd))
   except RuntimeError as error:
     print(json.dumps({ _STATUS: _ERROR, "message": str(error) }))
     return 1

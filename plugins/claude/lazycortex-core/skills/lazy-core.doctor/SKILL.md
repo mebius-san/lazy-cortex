@@ -83,7 +83,7 @@ Checks the agent performs:
   - `[WARN]` agent referenced in CLAUDE.md but file missing
   - `[WARN]` command listed in CLAUDE.md but file missing
 - **Plugin dependencies** (read `$HOME/.claude/plugins/installed_plugins.json`):
-  - Build the installed-plugin set by stripping the `@<marketplace>` suffix from each top-level key, keeping only entries whose scope applies to this project (same filter the Phase 3 availability probes use: `scope: "user"`, or `scope: "project"` with `projectPath` matching the current repo).
+  - Build the installed-plugin set by stripping the `@<marketplace>` suffix from each top-level key, keeping only entries whose scope applies to this project (same filter the Phase 3 availability probes use: `scope: "user"`, or `scope: "project"` / `"local"` with `projectPath` matching the main checkout of the current repo (what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_locator.py" checkout` prints; a subdirectory or a linked worktree maps to it)).
   - For each installed plugin, read `<installPath>/.claude-plugin/plugin.json` and collect its `dependencies` array (default empty if absent).
   - `[WARN]` for each `<dep>` in that array where `<dep>` is not present in the installed-plugin set. Finding: `plugin <name> requires <dep> but <dep> is not installed — install it via its marketplace entry or remove the dependency`.
 - **Plugin rule sync** (same installed-plugin set as above) — for each installed plugin that ships a `rules/` directory:
@@ -289,7 +289,7 @@ Coordinator-owned inline check (not an Explore agent — it performs a `git fetc
 
 Steps:
 
-1. **Collect installed plugins.** Read `$HOME/.claude/plugins/installed_plugins.json`. Keep only entries whose scope applies to this project: `scope: "user"`, OR `scope: "project"` with `projectPath` equal to the current repo path. Same filter Agent A already uses.
+1. **Collect installed plugins.** Read `$HOME/.claude/plugins/installed_plugins.json`. Keep only entries whose scope applies to this project: `scope: "user"`, OR `scope: "project"` / `"local"` with `projectPath` equal to the main checkout of the current repo (what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_locator.py" checkout` prints; a subdirectory or a linked worktree maps to it). Same filter Agent A already uses.
 2. **Group by marketplace.** Strip the `@<marketplace>` suffix from each top-level key → `{ marketplace → [plugin entries] }`.
 3. **Refresh each referenced marketplace (live).** Read `$HOME/.claude/plugins/known_marketplaces.json` to resolve each marketplace's `source` and `installLocation`. For each:
    - If `source.source == "github"`: run `git -C <installLocation> fetch --quiet origin` with a **5-second timeout** (`timeout 5 git ...` on Linux, `gtimeout 5 git ...` on macOS with coreutils; when neither exists, skip the fetch and read the manifest already checked out). Then read the latest manifest via `git show origin/HEAD:.claude-plugin/marketplace.json`. Non-destructive — working tree untouched, only remote-tracking refs advance.
@@ -463,7 +463,7 @@ Each delegation follows four steps:
 
 **Availability probe — canonical signal set.** A sibling plugin counts as available if **any** of these signals is true (not just the first):
 
-1. `$HOME/.claude/plugins/installed_plugins.json` contains a top-level entry `<plugin>@<marketplace>` whose scope applies to this project (`scope: "user"`, or `scope: "project"` with `projectPath` matching the current repo).
+1. `$HOME/.claude/plugins/installed_plugins.json` contains a top-level entry `<plugin>@<marketplace>` whose scope applies to this project (`scope: "user"`, or `scope: "project"` / `"local"` with `projectPath` matching the main checkout of the current repo (what `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_locator.py" checkout` prints; a subdirectory or a linked worktree maps to it)).
 2. **Local tool mode** — `plugins/claude/<plugin>/.claude-plugin/plugin.json` exists in the current repo (the plugin is authored here; all its skills are reachable via the local path).
 3. **Enabled via settings** — `enabledPlugins["<plugin>@<marketplace>"] === true` in any of `$HOME/.claude/settings.json`, `$HOME/.claude/settings.local.json`, `./.claude/settings.json`, `./.claude/settings.local.json`. This catches the case where the user enabled the plugin via `/plugin install` flow that wrote to settings but where `installed_plugins.json` lacks a matching `projectPath` record (common when multiple machines / Dropbox-synced project paths diverge).
 

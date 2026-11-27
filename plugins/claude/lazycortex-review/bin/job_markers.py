@@ -14,7 +14,8 @@ POSIX path:
         "coordinator_job": "<job id>" | null,
         "active_job":      "<job id>" | null,
         "pending_wake":    "job-done" | null,
-        "last_seen_sha":   "<commit sha>" | null
+        "last_seen_sha":   "<commit sha>" | null,
+        "verdict":         "sufficient" | "new-plan" | null
       }
     }
 
@@ -48,9 +49,14 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from keys import JobMarker, Paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from errors import MarkerStoreCorruptError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -58,7 +64,7 @@ from errors import MarkerStoreCorruptError  # noqa: E402  # pylint: disable=impo
 # never becomes state.
 _FIELDS = (
     JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE,
-    JobMarker.LAST_SEEN_SHA,
+    JobMarker.LAST_SEEN_SHA, JobMarker.VERDICT,
 )
 
 # Maps the `mark-job` CLI's kind token to the entry field it writes.
@@ -540,6 +546,34 @@ def clear(repo: Path, doc: Path) -> None:
   update(repo, doc, dict.fromkeys(_FIELDS))
 
 
+def clear_verdict(repo: Path, doc: Path) -> None:
+  """
+  Drop the verdict recorded for one document, and nothing else.
+
+  Guarantees:
+    - Every other field of the document's entry is kept as it is.
+    - A document with no verdict recorded leaves the sidecar untouched, so no sidecar file appears for it.
+
+  Args:
+    repo: Repository root holding the sidecar.
+    doc: The reviewed document's path.
+
+  Raises:
+    OSError: If a recorded verdict is to be cleared and the sidecar cannot be rewritten as `update` describes.
+  """
+
+  # Contract:
+  # Every other field of the document's entry is kept as it is.
+
+  # Contract:
+  # A document with no verdict recorded leaves the sidecar untouched, so no sidecar file appears for it.
+
+  # guard: nothing recorded, nothing to clear, and the sidecar stays as it is
+  if read(repo, doc)[JobMarker.VERDICT] is None:
+    return
+  update(repo, doc, { JobMarker.VERDICT: None })
+
+
 def main(argv: list[str]) -> int:
   """
   Write one job marker from the command line, printing the resulting entry as JSON.
@@ -548,7 +582,9 @@ def main(argv: list[str]) -> int:
   in place of the id to drop it. Clearing a marker that was never set is a no-op success.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the marker is kept for the checkout that directory
+      sits in.
 
   Returns:
     Exit code: 0 on success; 1 when the sidecar cannot be read, moved aside or written, with one line naming the
@@ -565,7 +601,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--clear", action = "store_true")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
   # guard: exactly one of the two forms must be used — an id, or the explicit clear
@@ -574,11 +610,12 @@ def main(argv: list[str]) -> int:
     sys.stderr.write("mark-job: pass either a job id or --clear, not both and not neither\n")
     return 2
 
-  # a relative `file` resolves against `--repo`; an absolute one is taken as is
+  # a relative `file` resolves against the root of the checkout `--repo`, `$LAZY_REPO_ROOT` or the cwd sits in; an
+  # absolute one is taken as is
   # (pathlib drops the left operand of `/` when the right one is absolute). The document need
   # not exist on disk: the marker is runtime state about a path, and a clear on a document that
   # was just finalized away is exactly the case that must still work.
-  repo = Path(args.repo).resolve()
+  repo = _review_locator.query_repo_root(args.repo)
   try:
     entry = update(repo, repo / args.file, { _FIELD_BY_KIND[args.kind]: None if args.clear else args.job_id })
   # a sidecar that cannot be read, moved aside or written is reported in one line, and nothing is printed

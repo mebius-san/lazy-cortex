@@ -2,7 +2,7 @@
 name: lazy-wiki.domains
 description: "Use when a question needs domain knowledge from code's `Domain(…)` markers — defining a term, looking up a mechanic or formula, or surveying a group of related concepts — and `wiki.domains` is configured. A research skill: it hands back a bounded slice of the domain-spec tree, never the whole tree; regenerating the tree is `/lazy-wiki.domain-sync`."
 research: true
-allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(test -f *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Write
+allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(ls *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Write
 ---
 # lazy-wiki.domains
 
@@ -27,11 +27,13 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Load domains config
 
-`Read` `.claude/lazy.settings.json`. Extract `[wiki][domains]` — a dict carrying `output` (repo-relative output directory, default `docs/domains` when the key is absent or empty).
+Resolve `<settings-root>`, the directory whose settings declare the domain tree, via `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root)` — the nearest directory holding `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer.
+
+`Read` `<settings-root>/.claude/lazy.settings.json`. Extract `[wiki][domains]` — a dict carrying `output` (repo-relative output directory, default `docs/domains` when the key is absent or empty).
 
 If `[wiki][domains]` is absent, not a dict, or empty → outcome `not-configured`; answer *"Domain service not configured — `wiki.domains` is not set up in this repo. Run `/lazy-wiki.configure domains` first."*, mark Phases 2–4 `skipped` with outcome `skipped-per-mode`, and go to the Log step.
 
-Resolve `<repo-root>` via `Bash(git rev-parse --show-toplevel)`. `Bash(test -f <repo-root>/<output>/domains.md)` — absent → outcome `not-configured`; answer *"Domain service not configured — no domain tree at `<output>/domains.md` yet. Run `/lazy-wiki.domain-sync` (or wait for the daemon routine) first."*, mark Phases 2–4 `skipped` with outcome `skipped-per-mode`, and go to the Log step.
+`Bash(ls -d <settings-root>/<output>/domains.md)` — present when the command lists it; absent when it fails with "No such file or directory" → outcome `not-configured`; answer *"Domain service not configured — no domain tree at `<output>/domains.md` yet. Run `/lazy-wiki.domain-sync` (or wait for the daemon routine) first."*, mark Phases 2–4 `skipped` with outcome `skipped-per-mode`, and go to the Log step.
 
 Outcome: `loaded` or `not-configured`.
 
@@ -55,9 +57,9 @@ Outcome: `resolved: <group|term>`.
 **mode=group only.** If the resolved mode is `term`, mark this task `skipped` with outcome `skipped-per-mode` and proceed to Phase 4.
 
 1. Derive the group's folder from its key, mirroring the writer's own layout: every segment of `<group-key>` becomes a directory under `<output>`, and the folder note is the file named like the last segment inside it (`billing.invoices` → `<output>/billing/invoices/invoices.md`).
-2. `Bash(test -f <repo-root>/<folder-note>)` — absent → answer *"Group `<group-key>` is not in the domain tree — it may be new, not yet generated, or misspelled; check `<output>/domains.md` for the group list."*, outcome `no-such-group`, done.
+2. `Bash(ls -d <settings-root>/<folder-note>)` — present when the command lists it; absent when it fails with "No such file or directory" → answer *"Group `<group-key>` is not in the domain tree — it may be new, not yet generated, or misspelled; check `<output>/domains.md` for the group list."*, outcome `no-such-group`, done.
 3. **No `<doc-slug>` given**: `Read` the folder note and return its overview (the prose between the explainer line under the H1 and the first `##` heading) and its `## Documents` list — each line names one document and links its file, enough for the caller to ask for one document narrowly. Never the full body of any document.
-4. **`<doc-slug>` given**: `Bash(test -f <repo-root>/<folder>/<doc-slug>.md)` — absent → answer *"`<doc-slug>` is not a document of `<group-key>` — the folder note's Documents list names them."*, outcome `no-such-doc`. Present → `Read` it.
+4. **`<doc-slug>` given**: `Bash(ls -d <settings-root>/<folder>/<doc-slug>.md)` — present when the command lists it; absent when it fails with "No such file or directory" → answer *"`<doc-slug>` is not a document of `<group-key>` — the folder note's Documents list names them."*, outcome `no-such-doc`. Present → `Read` it.
    - **No `<section>` given**: return the H1 title and the list of `##` headings actually present.
    - **`<section>` given**: match it case-insensitively against the document's `##` headings; no match → answer *"`<section>` is not a section of this document — its sections are <the headings present>."*, outcome `no-such-section`. A match → return that one `##` block (the heading line through the line before the next `##`, or EOF) — nothing else from the file.
 

@@ -167,7 +167,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
     - The section must have an empty line before it.
 - Project-registered sections:
   - A project may register additional class-docstring sections in its `pyproject.toml` via `[tool.pcf] extra_docstring_sections` (section name, list style, order anchor, optional `ref_exempt` flag for sections whose body carries `# ref:` lines consumed by project tooling).
-  - The content rules for such sections live in the project overlay (`docs/guidelines/documenting_guidelines.md`), not in this canon. The checker enforces only order, list style, and the `ref_exempt` shield.
+  - The content rules for such sections live in the project overlay (`docs/guidelines/python/documenting_guidelines.md`), not in this canon. The checker enforces only order, list style, and the `ref_exempt` shield.
   - Order anchors (`after` / `before`) must name a built-in section or a previously declared entry; an unresolved anchor appends the section at the end of the order.
   - Registered sections with `style = "definition"` are skipped by the private-name narrative check (D9), like the built-in definition sections (`Attributes`, `Args`, `Raises`, `Type Parameters`).
 - Notes:
@@ -393,6 +393,7 @@ in the sibling `lazy-python.comment-guidelines.md`.
   - Mandatory when the method can raise exceptions.
   - List exceptions that can propagate to callers and the precise conditions that trigger them.
   - Exclude internal guard exceptions that cannot reach the caller.
+  - Whether an exception can reach the caller is judged by the method's own code paths and contract, and by the guarantees the called members state in their contracts — never by another member's current implementation. An entry whose `raise` today's body of a called property or method happens to make unreachable stays; see the check rule in `### Code Quality Rules` of `lazy-python.coding-guidelines.md`.
   - Style:
     - Must be indented under the section; do not use bullets at column zero.
     - Must not have any bullets, dashes, or other prefixes.

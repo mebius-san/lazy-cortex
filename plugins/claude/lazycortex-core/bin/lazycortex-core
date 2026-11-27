@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 
 # Put the CLI's own directory first on sys.path so its sibling bin-modules resolve by bare name.
 sys.path.insert(0, str(Path(__file__).parent))
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path; the locator is standard-library only, so loading it up front cannot take a subcommand down
+from plugin_locator import query_repo_root  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 # Claude Code puts `<installPath>/bin` of every installed plugin on the session's PATH at
 # startup and never refreshes it, so after `/plugin update` a long-lived session — and every
@@ -67,9 +70,12 @@ USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
          "remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, resolve-language, "
          "routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, "
          "daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard, "
-         "history-append, reconcile-routine, plugin-root, resolve-ref, external-dirs, inbox-check, "
-         "protocol-audit, provider-validate, provider-token, routine-validate, routine-register, "
-         "routine-unregister, routine-show, routine-migrate, install-phase, daemon-run-here, git-lock, recover, "
+         "history-append, reconcile-routine, plugin-root, resolve-ref, guidelines-resolve, external-dirs, "
+         "inbox-check, "
+         "protocol-audit, error-ledger-audit, provider-validate, provider-token, routine-validate, "
+         "routine-register, "
+         "routine-unregister, routine-show, routine-migrate, install-phase, daemon-run-here, daemon-unit, "
+         "git-lock, recover, "
          "list-jobs, routines-bootstrap, memory-reflect, plugin-dirs, agent-models-seed, agent-discover, "
          "permission-edit, "
          "guard-public-write, guard-public-files, mcp-config-drop, context-scan, gitignore-ensure, runtime-gc, "
@@ -317,6 +323,10 @@ class _Arg:
   PLUGIN_KEY_HELP = "e.g. lazycortex-diagram@lazycortex"
   # Help of detect-scope's --cwd.
   DETECT_CWD_HELP = "Project root (default: the git toplevel of the cwd, else the cwd)"
+  # Commitless-continuation flag of dispatch-job.
+  ALLOW_NO_COMMIT = "--allow-no-commit"
+  # Help of --allow-no-commit.
+  ALLOW_NO_COMMIT_HELP = "A continuation of this job may finish with a clean tree and no new commit"
   # Plugin positional of plugin-root.
   PLUGIN = "plugin"
   # Help of the plugin positional.
@@ -374,6 +384,7 @@ class _Field:
     CONTEXT_INLINE: Inline context texts of a dispatch bundle.
     RESULT: Result file names of a dispatch bundle.
     DEDUP_KEY: Dedup key of a dispatch bundle.
+    CAN_COMMIT_IN_REPO: Per-job commit right of a dispatch bundle.
     NAME: Expert name of a lookup-expert request.
     FOUND: Whether lookup-expert found the expert.
     ENTRY: Settings entry lookup-expert found.
@@ -443,6 +454,8 @@ class _Field:
   RESULT = "result"
   # Dedup key of a dispatch bundle.
   DEDUP_KEY = "dedup_key"
+  # Per-job commit right of a dispatch bundle.
+  CAN_COMMIT_IN_REPO = "can_commit_in_repo"
   # Expert name of a lookup-expert request.
   NAME = "name"
   # Whether lookup-expert found the expert.
@@ -623,9 +636,6 @@ class _Probe:
     ENV_REPO_ROOT: Environment variable naming the repository root.
     ENV_GIT_OPTIONAL_LOCKS: git environment variable that turns optional locks off.
     GIT_OPTIONAL_LOCKS_OFF: Value that turns git's optional locks off.
-    GIT: git executable.
-    GIT_REV_PARSE: git sub-verb resolving refs and paths.
-    GIT_SHOW_TOPLEVEL: rev-parse flag printing the checkout's top-level directory.
     DARWIN: `sys.platform` value of macOS.
     LAUNCHCTL: macOS supervisor executable.
     LAUNCHCTL_LIST: launchctl sub-verb describing one unit.
@@ -646,12 +656,6 @@ class _Probe:
   ENV_GIT_OPTIONAL_LOCKS = "GIT_OPTIONAL_LOCKS"
   # Value that turns git's optional locks off.
   GIT_OPTIONAL_LOCKS_OFF = "0"
-  # git executable.
-  GIT = "git"
-  # git sub-verb resolving refs and paths.
-  GIT_REV_PARSE = "rev-parse"
-  # rev-parse flag printing the checkout's top-level directory.
-  GIT_SHOW_TOPLEVEL = "--show-toplevel"
   # `sys.platform` value of macOS.
   DARWIN = "darwin"
   # macOS supervisor executable.
@@ -693,6 +697,7 @@ class _Msg:
     COLLECT_FAILED: collect-job's call into the runtime raised.
     BUNDLE_PARSE: A dispatch bundle that is not JSON.
     BUNDLE_MISSING: A dispatch bundle without a field the runtime requires.
+    BUNDLE_COMMIT_NOT_BOOL: A dispatch bundle whose commit right is not a boolean.
     DISPATCH_FAILED: dispatch-job's call into the runtime raised.
     REPO_ROOT_UNSET: lookup-expert run without the repository root in the environment.
     STDIN_NOT_JSON: lookup-expert's stdin is not JSON.
@@ -729,6 +734,8 @@ class _Msg:
   BUNDLE_PARSE = "bundle parse: {}"
   # A dispatch bundle without a field the runtime requires.
   BUNDLE_MISSING = "missing required bundle field: {}"
+  # A dispatch bundle whose commit right is not a boolean.
+  BUNDLE_COMMIT_NOT_BOOL = "bundle field 'can_commit_in_repo' must be a boolean, got {!r}"
   # dispatch-job's call into the runtime raised.
   DISPATCH_FAILED = "dispatch failed: {}"
   # lookup-expert run without the repository root in the environment.
@@ -786,9 +793,11 @@ _DELEGATED = {
   "add-protocols":         ( "protocol_attach", "cmd_add_protocols" ),
   "index-guard":           ( "index_guard", "main" ),
   "resolve-ref":           ( "reference_cli", "cmd_resolve_ref" ),
+  "guidelines-resolve":    ( "guideline_resolver", "cmd_guidelines_resolve" ),
   "external-dirs":         ( "external_dirs_cli", "cmd_external_dirs" ),
   "inbox-check":           ( "inbox_cli", "cmd_inbox_check" ),
   "protocol-audit":        ( "protocol_cli", "cmd_protocol_audit" ),
+  "error-ledger-audit":    ( "error_ledger_audit", "cmd_error_ledger_audit" ),
   "provider-validate":     ( "provider_cli", "cmd_provider_validate" ),
   "provider-token":        ( "provider_cli", "cmd_provider_token" ),
   "routine-validate":      ( "routine_cli", "cmd_routine_validate" ),
@@ -798,6 +807,7 @@ _DELEGATED = {
   "routine-migrate":       ( "routine_cli", "cmd_routine_migrate" ),
   "install-phase":         ( "install_cli", "cmd_install_phase" ),
   "daemon-run-here":       ( "install_cli", "cmd_daemon_run_here" ),
+  "daemon-unit":           ( "daemon_unit", "cmd_daemon_unit" ),
   "git-lock":              ( "git_lock_cli", "cmd_git_lock" ),
   "recover":               ( "recover_cli", "cmd_recover" ),
   "list-jobs":             ( "jobs_cli", "cmd_list_jobs" ),
@@ -819,29 +829,6 @@ _DELEGATED = {
 
 
 # ----------------------------------------------------------------------------------------
-def _env_repo_root() -> Path:
-  """
-  Return the repository root the environment names, else the process working directory.
-
-  Returns:
-    The repository root.
-  """
-  return Path(os.environ.get(_Probe.ENV_REPO_ROOT, os.getcwd()))
-
-
-def _query_git_toplevel() -> str:
-  """
-  Return the top-level directory of the checkout the process runs in.
-
-  Returns:
-    The checkout's top-level directory, or an empty string outside a checkout.
-  """
-  return subprocess.run([ _Probe.GIT, _Probe.GIT_REV_PARSE, _Probe.GIT_SHOW_TOPLEVEL ],
-                        capture_output = True, text = True, check = False, encoding = _ENCODING,
-                        # waiver: stdlib decode-error mode, not a domain constant
-                        errors = "surrogateescape").stdout.strip()
-
-
 def _print_error(message: str) -> int:
   """
   Report a failure as an error JSON on stdout.
@@ -872,10 +859,10 @@ def _find_newer_cached_cli() -> Path | None:
   if _PLUGIN_CACHE_REL not in here.as_posix():
     return None
 
-  # the install the registry names for this plugin
+  # the install the registry names for this plugin, for the repo the call works in or for the user
   # waiver: lazy sibling import -- the registry reader is needed only on the cache-resident path, before forwarding
-  from lazy_setup import installed_plugin_root
-  installed = installed_plugin_root(_PLUGIN_NAME)
+  from plugin_locator import installed_plugin_root
+  installed = installed_plugin_root(_PLUGIN_NAME, query_repo_root())
 
   # guard: no install record, or the record names this very copy — nothing newer to forward to
   if installed is None or installed.resolve() == here.parent:
@@ -960,7 +947,7 @@ def _cmd_consume_job() -> int:
   # retire the job; any runtime failure is reported, never raised at the caller
   # noinspection PyBroadException
   try:
-    consume_job(_env_repo_root(), *request)
+    consume_job(query_repo_root(), *request)
   except Exception as error:
     return _print_error(_Msg.CONSUME_FAILED.format(error))
   print(json.dumps({ _Field.STATUS: _Token.OK }))
@@ -1008,7 +995,7 @@ def _cmd_retire_jobs() -> int:
   # retire the finished jobs; any runtime failure is reported, never raised at the caller
   # noinspection PyBroadException
   try:
-    retired = retire_completed_jobs(_env_repo_root(), expert, dedup_key)
+    retired = retire_completed_jobs(query_repo_root(), expert, dedup_key)
   except Exception as error:
     return _print_error(_Msg.RETIRE_FAILED.format(error))
   print(json.dumps({ _Field.RETIRED: retired }))
@@ -1043,7 +1030,7 @@ def _cmd_cancel_job() -> int:
     return 1
 
   # the job's repository and address
-  repo = _env_repo_root()
+  repo = query_repo_root()
   expert, job_id = request
 
   # Contract:
@@ -1092,14 +1079,14 @@ def _cmd_collect_job() -> int:
   # read the job's status; any runtime failure is reported, never raised at the caller
   # noinspection PyBroadException
   try:
-    out = collect_job(_env_repo_root(), *request)
+    out = collect_job(query_repo_root(), *request)
   except Exception as error:
     return _print_error(_Msg.COLLECT_FAILED.format(error))
   print(json.dumps(out))
   return 0
 
 
-def _cmd_dispatch_job() -> int:
+def _cmd_dispatch_job(argv: list[str]) -> int:
   """
   Queue an expert job for a sibling plugin from a JSON job bundle.
 
@@ -1107,19 +1094,31 @@ def _cmd_dispatch_job() -> int:
   `{ "expert": "<name>", "payload": {...}, "protocols": [...],
   "source": [{"path": "<repo-relative path>"}, ...], "context": [{"path": "<repo-relative path>"}, ...],
   "source_inline": {filename: text}, "context_inline": {filename: text},
-  "result": [{"path": "result/<filename>"}, ...], "job_id": "...", "dedup_key": "..." }`.
+  "result": [{"path": "result/<filename>"}, ...], "job_id": "...", "dedup_key": "...", "can_commit_in_repo": true }`.
   `source` and `context` name working-tree paths that the pump copies into the job's buckets when it claims the job;
   `source_inline` and `context_inline` carry text that no file holds and are written at dispatch.
+  `can_commit_in_repo` is optional and sets the commit right of this one job, overriding the expert's
+  `can_commit_in_repo` default from `lazy.settings.json`; when absent, the expert's default applies.
 
   Prints `{"job_id": "...", "queue_path": "..."}` on a fresh dispatch and
   `{"job_id": "...", "status": "already-queued"}` on a dedup hit. This is the contract sibling plugins MUST use to
   queue jobs.
 
+  Args:
+    argv: Command-line arguments after the verb; the optional `--allow-no-commit` flag marks a continuation that
+      may finish with a clean tree and no new commit.
+
   Returns:
-    Process exit code: 0 on success, 1 with an error JSON on stdout on a bundle parse or dispatch error.
+    Process exit code: 0 on success, 1 with an error JSON on stdout on a bundle parse or dispatch error, or when a
+    present `can_commit_in_repo` is not a boolean; no job is queued in that case.
   """
   # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
   from expert_runtime import dispatch_job
+
+  # parse the optional commitless-continuation flag
+  parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.DISPATCH_JOB}")
+  parser.add_argument(_Arg.ALLOW_NO_COMMIT, action = _Arg.STORE_TRUE, help = _Arg.ALLOW_NO_COMMIT_HELP)
+  args = parser.parse_args(argv)
 
   # guard: a bundle that is not JSON describes no job
   try:
@@ -1127,11 +1126,16 @@ def _cmd_dispatch_job() -> int:
   except json.JSONDecodeError as error:
     return _print_error(_Msg.BUNDLE_PARSE.format(error))
 
+  # guard: a commit right that is not a boolean would be read as truthy or falsy by accident
+  can_commit_in_repo = bundle.get(_Field.CAN_COMMIT_IN_REPO)
+  if can_commit_in_repo is not None and not isinstance(can_commit_in_repo, bool):
+    return _print_error(_Msg.BUNDLE_COMMIT_NOT_BOOL.format(can_commit_in_repo))
+
   # queue the job; a missing field or any runtime failure is reported, never raised at the caller
   # noinspection PyBroadException
   try:
     out = dispatch_job(
-      _env_repo_root(),
+      query_repo_root(),
       bundle.get(_Field.EXPERT) or "",
       bundle.get(_Field.PAYLOAD) or {},
       protocols = bundle.get(_Field.PROTOCOLS),
@@ -1142,6 +1146,8 @@ def _cmd_dispatch_job() -> int:
       result = bundle.get(_Field.RESULT),
       job_id = bundle.get(_Field.JOB_ID),
       dedup_key = bundle.get(_Field.DEDUP_KEY),
+      can_commit_in_repo = can_commit_in_repo,
+      allow_no_commit = args.allow_no_commit,
     )
   except KeyError as error:
     return _print_error(_Msg.BUNDLE_MISSING.format(error))
@@ -1181,7 +1187,7 @@ def _cmd_lookup_expert() -> int:
   # report the resolved entry, or that there is none
   # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
   from expert_runtime import resolve_expert_entry
-  if entry := resolve_expert_entry(Path(repo), name):
+  if entry := resolve_expert_entry(query_repo_root(repo), name):
     print(json.dumps({ _Field.FOUND: True, _Field.ENTRY: entry }))
   else:
     print(json.dumps({ _Field.FOUND: False }))
@@ -1240,7 +1246,7 @@ def _cmd_memory_reflect_all(argv: list[str]) -> int:
   from lazy_settings import load_section
   # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
   from expert_runtime import dispatch_job
-  repo = _env_repo_root()
+  repo = query_repo_root()
   experts = load_section(repo / _RepoPath.SETTINGS, _Field.SETTINGS_EXPERTS)
 
   # dispatch one reflect job per persona-marked expert, counting every skip and failure
@@ -1318,7 +1324,7 @@ def _cmd_error_record(argv: list[str]) -> int:
   parser.add_argument(_Arg.RESOLVE, action = _Arg.STORE_TRUE)
   parser.add_argument(_Arg.RESOLUTION, default = _Arg.RESOLUTION_DEFAULT)
   args = parser.parse_args(argv)
-  repo = Path.cwd()
+  repo = query_repo_root()
 
   # --resolve closes an incident instead of opening one; cause is meaningless for the close path
   if args.resolve:
@@ -1372,8 +1378,8 @@ def _cmd_reconcile_routine(argv: list[str]) -> int:
 
   Args:
     argv: Argument tail: the routine name, `--cfg-json` with the shipped config object, `--managed` with a
-      comma-separated owned-key list (empty owns nothing), an optional `--cwd` repository root, and `--dry-run` to
-      report the status the call would return and write nothing.
+      comma-separated owned-key list (empty owns nothing), an optional `--cwd` directory inside the repository, and
+      `--dry-run` to report the status the call would return and write nothing.
 
   Returns:
     Process exit code: 0 with `{"status": "registered|refreshed|unchanged"}` on stdout, 1 with
@@ -1401,10 +1407,8 @@ def _cmd_reconcile_routine(argv: list[str]) -> int:
     print(json.dumps({ _Field.STATUS: _Token.STATUS_ERROR, _Field.REASON: _Msg.CFG_NOT_OBJECT }))
     return 1
 
-  # resolve the repository root: the explicit --cwd, else the root the settings path resolves under
-  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
-  from settings_cli import resolve_settings_path
-  repo = Path(args.cwd) if args.cwd is not None else resolve_settings_path(None).parent.parent
+  # resolve the repository root: the checkout the explicit --cwd, the dispatcher's environment or the cwd sits in
+  repo = query_repo_root(args.cwd)
 
   # reconcile the registration; a config the routine schema rejects is reported, never raised
   # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
@@ -1627,7 +1631,7 @@ def _cmd_resume(argv: list[str]) -> int:
     - Idempotent: if the daemon is not halted, nothing changes and the verb exits 0 with `resumed: false`.
 
   Args:
-    argv: Argument tail: an optional repository positional.
+    argv: Argument tail: an optional directory inside the repository.
 
   Returns:
     Process exit code: 0 on a clear or a no-op, 1 when the halt cannot be cleared (still-dirty tree).
@@ -1639,7 +1643,7 @@ def _cmd_resume(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.RESUME}")
   parser.add_argument(_Arg.REPO, nargs = _Arg.OPTIONAL, default = None, help = _Arg.REPO_ROOT_HELP)
   args = parser.parse_args(argv)
-  repo_path = Path(args.repo) if args.repo else _env_repo_root()
+  repo_path = query_repo_root(args.repo)
 
   # Contract:
   # Resuming a daemon that is not halted changes nothing and exits 0 with `resumed: false`,
@@ -1682,7 +1686,7 @@ def _cmd_error_list(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # read the incidents, narrowed to one kind when asked
-  rows = error_ledger.read_incidents(Path.cwd(), state = args.state, since = args.since)
+  rows = error_ledger.read_incidents(query_repo_root(), state = args.state, since = args.since)
   if args.kind:
     rows = [ row for row in rows if row.get(_Field.KIND) == args.kind ]
   print(json.dumps(rows, ensure_ascii = False))
@@ -1695,12 +1699,12 @@ def _cmd_detect_scope(argv: list[str]) -> int:
 
   Resolves the scope from where the plugin is actually enabled (`enabledPlugins` in the project, then the user,
   `settings.json` and `settings.local.json`), falling back to the install record's own scope only when neither
-  settings file enables it. The project root defaults to the git toplevel of the cwd, so a call from any
-  subdirectory resolves the same scope. This is the boundary-legal path for sibling install skills to detect their
-  own scope without importing lazycortex-core Python.
+  settings file enables it. The project root is the toplevel of the checkout that `--cwd`, else `$LAZY_REPO_ROOT`,
+  else the process working directory sits in, so a call from any subdirectory resolves the same scope. This is the
+  boundary-legal path for sibling install skills to detect their own scope without importing lazycortex-core Python.
 
   Args:
-    argv: Argument tail: the plugin key and an optional `--cwd` project root.
+    argv: Argument tail: the plugin key and an optional `--cwd` directory inside the project.
 
   Returns:
     Process exit code 0.
@@ -1714,13 +1718,8 @@ def _cmd_detect_scope(argv: list[str]) -> int:
   parser.add_argument(_Arg.CWD, default = None, help = _Arg.DETECT_CWD_HELP)
   args = parser.parse_args(argv)
 
-  # an explicit root is used as given, the git probe is for the cwd-driven default only
-  if args.cwd is not None:
-    print(detect_install_scope(args.plugin_key, project_root = args.cwd))
-    return 0
-
-  # default root: the cwd's git toplevel, else the cwd itself
-  print(detect_install_scope(args.plugin_key, project_root = _query_git_toplevel() or os.getcwd()))
+  # the project root: the checkout the explicit --cwd, the dispatcher's environment or the cwd sits in
+  print(detect_install_scope(args.plugin_key, project_root = query_repo_root(args.cwd)))
   return 0
 
 
@@ -1729,18 +1728,20 @@ def _cmd_plugin_root(argv: list[str]) -> int:
   Print the directory a plugin's sources are read from.
 
   The directory is the daemon's `LAZYCORTEX_PLUGIN_DIRS` entry, else the dev-vault sibling plugin tree, else the
-  authoring repo's `plugins/claude/<plugin>/` when this checkout ships the plugin, else the install that
-  `installed_plugins.json` records. This is the single implementation every install, audit, and seed skill
-  points at instead of reading `installed_plugins.json` itself.
+  current checkout's `plugins/claude/<plugin>/` when it ships the plugin, else the install that
+  `installed_plugins.json` records for this repo's main checkout or for the whole user. This is the single
+  implementation every install, audit, and seed skill points at instead of reading `installed_plugins.json` itself.
 
   Args:
-    argv: Argument tail: the plugin and an optional `--cwd` checkout root.
+    argv: Argument tail: the plugin and an optional `--cwd` directory inside the checkout.
 
   Returns:
     Process exit code: 0 with one path on stdout, 1 with an `error:` line on stderr when nothing resolves.
   """
   # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
-  from lazy_setup import plugin_root, format_plugin_root_miss
+  from lazy_setup import plugin_root
+  # waiver: lazy sibling import -- one broken subcommand module must not take the whole CLI down
+  from plugin_locator import PluginNotFoundError
 
   # parse the plugin and the optional checkout root
   parser = argparse.ArgumentParser(prog = f"{_PROG} {_Verb.PLUGIN_ROOT}")
@@ -1748,12 +1749,14 @@ def _cmd_plugin_root(argv: list[str]) -> int:
   parser.add_argument(_Arg.CWD, default = None, help = _Arg.PLUGIN_ROOT_CWD_HELP)
   args = parser.parse_args(argv)
 
-  # the checkout root: the explicit --cwd, else the cwd's git toplevel, else the cwd itself
-  root = Path(args.cwd) if args.cwd is not None else Path(_query_git_toplevel() or os.getcwd())
+  # the checkout root: of the explicit --cwd, else of `$LAZY_REPO_ROOT`, else of the cwd
+  root = query_repo_root(args.cwd)
 
   # guard: no stage resolves this plugin; the error line names every stage searched
-  if (report := plugin_root(args.plugin, root, Path.home())) is None:
-    print(format_plugin_root_miss(args.plugin, root, Path.home()), file = sys.stderr)
+  try:
+    report = plugin_root(args.plugin, root)
+  except PluginNotFoundError as error:
+    print(f"error: {error}", file = sys.stderr)
     return 1
 
   # the resolved source root
@@ -1765,9 +1768,9 @@ def _cmd_daemon_pause(argv: list[str]) -> int:
   """
   Create the local pause semaphore so the daemon skips work until resumed.
 
-  Creates `.runtime/daemon.pause` under the repo root (git toplevel of the cwd, or the cwd itself outside a
-  checkout) and prints `{"paused": true, "semaphore": "<path>"}`. Purely local: no settings edit, no commit; the
-  daemon keeps serving metrics and reports itself paused.
+  Creates `.runtime/daemon.pause` under the repo root (the toplevel of the checkout `$LAZY_REPO_ROOT`, else the
+  process working directory, sits in) and prints `{"paused": true, "semaphore": "<path>"}`. Purely local: no settings
+  edit, no commit; the daemon keeps serving metrics and reports itself paused.
 
   Guarantees:
     - Idempotent: pausing an already-paused daemon succeeds and leaves the existing semaphore in place.
@@ -1788,7 +1791,7 @@ def _cmd_daemon_pause(argv: list[str]) -> int:
   # Pausing a daemon that is already paused succeeds and leaves the existing semaphore in place.
 
   # touch the semaphore under the checkout root
-  semaphore = Path(_query_git_toplevel() or os.getcwd()) / RuntimeFile.PAUSE
+  semaphore = query_repo_root() / RuntimeFile.PAUSE
   semaphore.parent.mkdir(parents = True, exist_ok = True)
   semaphore.touch(exist_ok = True)
   print(json.dumps({ _Field.PAUSED: True, _Field.SEMAPHORE: str(semaphore) }))
@@ -1799,7 +1802,8 @@ def _cmd_daemon_resume(argv: list[str]) -> int:
   """
   Remove the local pause semaphore so the daemon resumes on its next wakeup.
 
-  Deletes `.runtime/daemon.pause` under the repo root and prints `{"paused": false, "semaphore": "<path>"}`.
+  Deletes `.runtime/daemon.pause` under the repo root (the toplevel of the checkout `$LAZY_REPO_ROOT`, else the
+  process working directory, sits in) and prints `{"paused": false, "semaphore": "<path>"}`.
 
   Guarantees:
     - Idempotent: resuming a daemon that is not paused is a no-op that still reports success.
@@ -1820,7 +1824,7 @@ def _cmd_daemon_resume(argv: list[str]) -> int:
   # Resuming a daemon that is not paused is a no-op that still reports success.
 
   # remove the semaphore under the checkout root
-  semaphore = Path(_query_git_toplevel() or os.getcwd()) / RuntimeFile.PAUSE
+  semaphore = query_repo_root() / RuntimeFile.PAUSE
   semaphore.unlink(missing_ok = True)
   print(json.dumps({ _Field.PAUSED: False, _Field.SEMAPHORE: str(semaphore) }))
   return 0
@@ -2052,7 +2056,7 @@ def _cmd_runtime_gc(argv: list[str]) -> int:
   args = parser.parse_args(argv)
 
   # one sweep, its summary, and a failing exit when any deletion failed or any journal record was lost
-  summary = sweep(_env_repo_root(), dry_run = args.dry_run)
+  summary = sweep(query_repo_root(), dry_run = args.dry_run)
   print(json.dumps(summary, ensure_ascii = False))
   return 1 if summary[_Field.ERRORS] else 0
 
@@ -2091,6 +2095,7 @@ def _cmd_runtime(repo: Path) -> int:
 
 # Subcommands this CLI implements itself, each taking the argument tail after the verb.
 _LOCAL = {
+  _Verb.DISPATCH_JOB:        _cmd_dispatch_job,
   _Verb.RESUME:              _cmd_resume,
   _Verb.MEMORY_REFLECT_ALL:  _cmd_memory_reflect_all,
   _Verb.ERROR_RECORD:        _cmd_error_record,
@@ -2111,7 +2116,6 @@ _LOCAL = {
 
 # Subcommands that take no arguments and read their whole request as JSON from stdin.
 _STDIN_VERBS = {
-  _Verb.DISPATCH_JOB:  _cmd_dispatch_job,
   _Verb.COLLECT_JOB:   _cmd_collect_job,
   _Verb.CONSUME_JOB:   _cmd_consume_job,
   _Verb.RETIRE_JOBS:   _cmd_retire_jobs,
@@ -2157,7 +2161,7 @@ def main() -> int:
   # the subcommand, its argument tail, and the repository it acts on
   sub = sys.argv[1]
   rest = sys.argv[2:]
-  repo = _env_repo_root()
+  repo = query_repo_root()
 
   # verbs acting on the repository root
   if (repo_verb := _REPO_VERBS.get(sub)) is not None:

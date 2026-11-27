@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.configure
 description: "Use when the user wants to add a wiki scope or change what one covers — paths, axes, exclusions, topics index — or to set up domain specs (`domains`), a foreign-repo mirror (`mirror`), a terms dictionary (`terms`), the structure map (`structure`), or the vault-wide wiki keys (`vault`). Defines coverage only; bootstrapping the plugin is `/lazy-wiki.install`."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(mv *), Bash(test *), Bash(find *), Bash(rm *), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(mv *), Bash(test *), Bash(ls *), Bash(find *), Bash(rm *), Agent
 ---
 # lazy-wiki.configure
 
@@ -33,9 +33,9 @@ This skill has six mutually exclusive branches; exactly one runs per invocation.
 
 ## Phase 1 — Verify install + load settings
 
-Run `Bash(git rev-parse --show-toplevel)` to get `<repo-root>`. `Read` `<repo-root>/.claude/lazy.settings.json`. If the file is absent, abort: *"Run `/lazy-wiki.install` first."* If the file exists but has no `wiki` key, abort: *"Run `/lazy-wiki.install` first — the `wiki` section is missing."* Hold the parsed object in memory.
+Resolve `<settings-root>`, the directory whose settings the wizard edits, via `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root)` — the nearest directory holding `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer. `Read` `<settings-root>/.claude/lazy.settings.json`. If the file is absent, abort: *"Run `/lazy-wiki.install` first."* If the file exists but has no `wiki` key, abort: *"Run `/lazy-wiki.install` first — the `wiki` section is missing."* Hold the parsed object in memory.
 
-**Resolve `<core-cli>` once, here.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" core-cli)` prints its absolute path, and an exit 1 with an `error:` line means core is not installed — abort and say so. Every settings write in every branch below goes through it as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<a/b>' --value '<json>' --cwd <repo-root>)` (`--delete` in place of `--value` removes the key): the verb rewrites one key and leaves every other key of the file as it was, and refuses an unreadable file instead of overwriting it.
+**Resolve `<core-cli>` once, here.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" core-cli)` prints its absolute path, and an exit 1 with an `error:` line means core is not installed — abort and say so. Every settings write in every branch below goes through it as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<a/b>' --value '<json>' --cwd <settings-root>)` (`--delete` in place of `--value` removes the key): the verb rewrites one key and leaves every other key of the file as it was, and refuses an unreadable file instead of overwriting it.
 
 Outcome: `verified`.
 
@@ -148,7 +148,7 @@ Build the scope object:
 
 `tag_axes` is the narrowing held by Phase 5, not a vocabulary of its own — an empty array means the scope uses every axis `wiki.tag_axes` declares. Add `"exclude_paths"` only if the collected array is non-empty. In edit mode carry over `"index_badges"` untouched when the scope on record has it; a new scope gets none. Add `"filter"` as held by Phase 7 — always present, since `folder_note` is seeded there; in edit mode carry over any operator-authored sub-filter the wizard does not collect.
 
-Write it back: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<id>' --value '<scope object as JSON>' --cwd <repo-root>)`.
+Write it back: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<id>' --value '<scope object as JSON>' --cwd <settings-root>)`.
 
 **A moved index keeps its anchor.** When edit mode changed `topics_index` and the old index file exists while the new path does not, move the file with `Bash(mv <old> <new>)` before anything rebuilds it. The index carries the `wiki_synced_sha` anchor that `/lazy-wiki.relink` plans from, and the next scan rebuilds the index in place, keeping that anchor; an index rebuilt from scratch at the new path would start without it and force a full relink of the scope. The old and the new path ride the same commit as the settings change. When the new path already holds a file, leave both alone and name them in the report.
 
@@ -158,7 +158,7 @@ Outcome: `written` (suffixed `+index-moved` when the index file was moved).
 
 The `## Coverage` section of the installed `lazy-wiki.navigation` rule is what every session reads to decide whether a question must route through `/lazy-wiki.query`. It is derived from the scope globs collected above, so it goes stale the moment `paths` or `exclude_paths` change.
 
-Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" render-navigation-rule --in-place --section coverage --commit --subject "chore(wiki): refresh navigation Coverage for scope <id>" --repo <repo-root>)`. The verb finds the installed rule (the repo's `.claude/rules/`, falling back to `~/.claude/rules/`), replaces only the `## Coverage` section with the bullets its `navigation.render_coverage` renders from `wiki.scopes`, and commits the rule when git tracks it. Read the outcome from the `status` of its one-line JSON: `absent` means the rule was never installed (`/lazy-wiki.install` owns that).
+Run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" render-navigation-rule --in-place --section coverage --commit --subject "chore(wiki): refresh navigation Coverage for scope <id>" --repo <settings-root>)`. The verb finds the installed rule (the repo's `.claude/rules/`, falling back to `~/.claude/rules/`), replaces only the `## Coverage` section with the bullets its `navigation.render_coverage` renders from `wiki.scopes`, and commits the rule when git tracks it. Read the outcome from the `status` of its one-line JSON: `absent` means the rule was never installed (`/lazy-wiki.install` owns that).
 
 Outcome: `refreshed`, `unchanged`, or `absent`.
 
@@ -175,7 +175,7 @@ Configures `lazy.settings.json[wiki.domains]` — the section that drives domain
 
 ### Domains 1 — Verify install + load settings
 
-Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. If `wiki.domains` already exists, announce edit mode (persisted values shown, Enter keeps them).
+Same as Phase 1: resolve `<settings-root>`, read `<settings-root>/.claude/lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. If `wiki.domains` already exists, announce edit mode (persisted values shown, Enter keeps them).
 
 Outcome: `verified`.
 
@@ -203,7 +203,7 @@ Context (print before asking):
 - Answers: a repo-relative path — written to `wiki.domains.dictionary`; when the file is absent it is created there now holding only its heading, an existing file is never touched; Enter — the current value kept; re-asked only on the next edit run
 AskUserQuestion (edit mode only): header "Domain dictionary", question "Dictionary path for `wiki.domains` (current: `<current dictionary>`; Enter to keep)?"; free text.
 
-Then **ensure the dictionary exists** — the configurator owns this guarantee: `Bash(test -f <repo-root>/<dictionary>)`; when absent, create it holding exactly one line — `Bash(mkdir -p <dictionary-parent-dir>)`, then `Write` `<repo-root>/<dictionary>` with the content `# Domain groups` followed by a newline — and tell the operator the dictionary was created empty. The rules for its groups live in the python plugin's comment canon and its domain writer, not in this file. An existing file is never touched (idempotent; `/lazy-python.knowledge-sweep` is the other creator and builds a populated one).
+Then **ensure the dictionary exists** — the configurator owns this guarantee: `Bash(ls -d <settings-root>/<dictionary>)` — present when the command lists it, absent when it fails with "No such file or directory"; when absent, create it holding exactly one line — `Bash(mkdir -p <dictionary-parent-dir>)`, then `Write` `<settings-root>/<dictionary>` with the content `# Domain groups` followed by a newline — and tell the operator the dictionary was created empty. The rules for its groups live in the python plugin's comment canon and its domain writer, not in this file. An existing file is never touched (idempotent; `/lazy-python.knowledge-sweep` is the other creator and builds a populated one).
 
 Outcome: `derived` (new mode) / `collected` (edit mode) + `dictionary-<seeded|already-present>`.
 
@@ -246,9 +246,9 @@ Build the section and write it as `lazy.settings.json[wiki.domains]`:
 }
 ```
 
-`Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'domains' --value '<section as JSON>' --cwd <repo-root>)`.
+`Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'domains' --value '<section as JSON>' --cwd <settings-root>)`.
 
-Then refresh the `## Domain coverage` section of the installed `lazy-wiki.navigation` rule: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" render-navigation-rule --in-place --section domain-coverage --commit --subject "chore(wiki): refresh navigation Domain coverage" --repo <repo-root>)` — the verb renders the line from `wiki.domains`, touches nothing else in the rule, and reports `absent` when the rule was never installed (`/lazy-wiki.install` owns that).
+Then refresh the `## Domain coverage` section of the installed `lazy-wiki.navigation` rule: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" render-navigation-rule --in-place --section domain-coverage --commit --subject "chore(wiki): refresh navigation Domain coverage" --repo <settings-root>)` — the verb renders the line from `wiki.domains`, touches nothing else in the rule, and reports `absent` when the rule was never installed (`/lazy-wiki.install` owns that).
 
 Print two pointers (no questions):
 - *"Run `/lazy-wiki.install` to register the `wiki.domain-writer` expert and the domain routines (daemon repos); `/lazy-wiki.domain-sync` is the manual run."*
@@ -269,7 +269,7 @@ Configures the nested `mirror` block of an **existing** scope in `lazy.settings.
 
 ### Mirror 1 — Verify install + pick scope
 
-Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. The scope MUST already exist; when `wiki.scopes` is empty, abort: *"No scopes configured — create one with `/lazy-wiki.configure` first."* Otherwise pick it.
+Same as Phase 1: resolve `<settings-root>`, read `<settings-root>/.claude/lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. The scope MUST already exist; when `wiki.scopes` is empty, abort: *"No scopes configured — create one with `/lazy-wiki.configure` first."* Otherwise pick it.
 
 Context (print before asking):
 - Where: /lazy-wiki.configure mirror · Mirror 1 — Verify install + pick scope; target `lazy.settings.json[wiki.scopes]`
@@ -343,7 +343,7 @@ Set `lazy.settings.json[wiki.scopes][<id>].mirror` to:
 }
 ```
 
-Then add the glob `<mirror_path>/**` to the same scope's `paths` array when it is not already there — the mirror files become nodes only through `paths`, and this wizard owns that wiring (`/lazy-wiki.audit` flags the desync as `mirror-paths-uncovered`). Write both keys: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<id>/mirror' --value '<mirror block as JSON>' --cwd <repo-root>)`, then `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<id>/paths' --value '<paths array as JSON>' --cwd <repo-root>)`. Because `paths` changed, refresh the navigation rule's `## Coverage` exactly as Phase 9 does.
+Then add the glob `<mirror_path>/**` to the same scope's `paths` array when it is not already there — the mirror files become nodes only through `paths`, and this wizard owns that wiring (`/lazy-wiki.audit` flags the desync as `mirror-paths-uncovered`). Write both keys: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<id>/mirror' --value '<mirror block as JSON>' --cwd <settings-root>)`, then `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'scopes/<id>/paths' --value '<paths array as JSON>' --cwd <settings-root>)`. Because `paths` changed, refresh the navigation rule's `## Coverage` exactly as Phase 9 does.
 
 Print two pointers (no questions):
 - *"Re-run `/lazy-wiki.install` to register the daemon schedule routine; the manual run is `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" mirror-sync <id>)` from any session — fetch, sync, commit, and the git-watch `lazy-wiki.scan` picks the changed files up for curation."*
@@ -367,7 +367,7 @@ Configures one scope of `lazy.settings.json[terms.scopes]` — the terms diction
 
 ### Terms 1 — Verify install + pick scope + mode
 
-Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file is absent. When it has no `terms` key, abort: *"Run `/lazy-wiki.install` first — the `terms` section is missing."*
+Same as Phase 1: resolve `<settings-root>`, read `<settings-root>/.claude/lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file is absent. When it has no `terms` key, abort: *"Run `/lazy-wiki.install` first — the `terms` section is missing."*
 
 Context (print before asking):
 - Where: /lazy-wiki.configure terms · Terms 1 — Verify install + pick scope + mode; target `lazy.settings.json[terms.scopes]`
@@ -408,7 +408,7 @@ Outcome: `collected`.
 
 ### Terms 3 — Derive dictionary directory + create
 
-**Nothing is asked here.** New mode takes the shipped default `docs/terms` — a directory in the project's own documentation tree, one markdown file per term. Print one line naming it. `Bash(test -d <repo-root>/<dir>)`; when absent, `Bash(mkdir -p <repo-root>/<dir>)` and `Write` an empty `<repo-root>/<dir>/.gitkeep`, so git tracks the empty directory; Terms 7 commits it. An existing directory is never touched — its term files are the dictionary.
+**Nothing is asked here.** New mode takes the shipped default `docs/terms` — a directory in the project's own documentation tree, one markdown file per term. Print one line naming it. `Bash(ls -d <settings-root>/<dir>)` — present when the command lists it, absent when it fails with "No such file or directory"; when absent, `Bash(mkdir -p <settings-root>/<dir>)` and `Write` an empty `<settings-root>/<dir>/.gitkeep`, so git tracks the empty directory; Terms 7 commits it. An existing directory is never touched — its term files are the dictionary.
 
 Edit mode keeps the `dir` on record and never offers to change it. Print one line naming it. When the operator asks to move the dictionary, refuse and say why: every document of the scope links to the term files at their current path, so a moved directory would leave each of those links pointing at nothing and the new dictionary empty. Moving it is a hand job — the files, the setting and every link together.
 
@@ -454,18 +454,18 @@ Outcome: `collected`.
 
 In edit mode carry over untouched every key the wizard does not collect — `link_exclude` (seeded by a neighbouring plugin or written by the operator) and `legacy_file` when present.
 
-`Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --value '<scope object as JSON>' --cwd <repo-root>)`.
+`Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --value '<scope object as JSON>' --cwd <settings-root>)`.
 
-**Remove.** Count the term files first: `Bash(git ls-files -- '<dir>/*.md')` from `<repo-root>`, and hold the list — the commit below names each path. Delete the `terms.scopes[<id>]` entry with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --delete --cwd <repo-root>)`. Delete the scope's sweep marker: `Bash(test -f <repo-root>/.state/lazy-wiki.terms-sweep.<id>.json)`, and when present `Bash(rm <repo-root>/.state/lazy-wiki.terms-sweep.<id>.json)` — a marker left behind would tell a later scope under the same id that its sweep already ran. Then ask about the directory.
+**Remove.** Count the term files first: `Bash(git ls-files -- '<dir>/*.md')` from `<settings-root>`, and hold the list — the commit below names each path. Delete the `terms.scopes[<id>]` entry with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set terms --key 'scopes/<id>' --delete --cwd <settings-root>)`. Delete the scope's sweep marker: `Bash(ls -d <settings-root>/.state/lazy-wiki.terms-sweep.<id>.json)` — present when the command lists it, absent when it fails with "No such file or directory" — and when present `Bash(rm <settings-root>/.state/lazy-wiki.terms-sweep.<id>.json)` — a marker left behind would tell a later scope under the same id that its sweep already ran. Then ask about the directory.
 
 Context (print before asking):
-- Where: Terms 5 — remove path; target `<repo-root>/<dir>`
+- Where: Terms 5 — remove path; target `<settings-root>/<dir>`
 - Found: `terms.scopes[<id>]` removed from settings; the dictionary directory `<dir>` `<is absent | holds <n> term files>`
 - Why asking: deleting the directory is destructive and nothing in settings can restore its terms
-- Answers: `keep` — the directory stays in the worktree, no longer served; `delete` — the directory `<repo-root>/<dir>` and every term file in it are removed now, the terms are gone; not persisted
+- Answers: `keep` — the directory stays in the worktree, no longer served; `delete` — the directory `<settings-root>/<dir>` and every term file in it are removed now, the terms are gone; not persisted
 AskUserQuestion: header "Dictionary directory", question "Keep the dictionary directory `<dir>` of removed terms scope `<id>` with its `<n>` term files, or delete it?", options `keep` / `delete` with the descriptions above.
 
-On `delete`, first `Bash(find <repo-root>/<dir> -name .git -print -quit)`: any output means a git repository lives inside the directory — stop the removal, name the path the command printed, and leave the directory as it is. Empty output → `Bash(rm -r <repo-root>/<dir>)`, exactly that directory and nothing above it.
+On `delete`, first `Bash(find <settings-root>/<dir> -name .git -print -quit)`: any output means a git repository lives inside the directory — stop the removal, name the path the command printed, and leave the directory as it is. Empty output → `Bash(rm -r <settings-root>/<dir>)`, exactly that directory and nothing above it.
 
 Commit what the removal changed, naming every path: the term files held above and `<dir>/.gitkeep` when `delete` ran and git tracked them, and the marker when git tracked it — `Bash(git commit -m "chore(wiki): remove terms scope <id>" -- <path> <path> …)`. Nothing tracked changed → no commit. The settings removal itself stays uncommitted, as every settings write of this wizard does: a daemon running in another checkout keeps serving the scope until the operator commits and pushes `.claude/lazy.settings.json` and that checkout pulls it — say so in Terms 8.
 
@@ -498,7 +498,7 @@ Three moves, in this order.
 **1. Queue.**
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" terms-sweep --dispatch --mark --scope <id> --repo <repo-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" terms-sweep --dispatch --mark --scope <id> --repo <settings-root>)
 ```
 
 The verb queues one curator job per directory of the new scope's documents, no other scope's, and writes the scope's marker `.state/lazy-wiki.terms-sweep.<id>.json`, also when the scope has no documents. Without the marker the plugin's migration would queue the same sweep again on the next `/lazy-core.setup`. Hold its one JSON line and its exit code for move 3.
@@ -537,7 +537,7 @@ Configures `lazy.settings.json[structure]` — the section that drives the proje
 
 ### Structure 1 — Verify install + load section
 
-Resolve `<repo-root>`, read `lazy.settings.json`; abort with *"Run `/lazy-wiki.install` first."* when the file is absent, or with *"Run `/lazy-wiki.install` first — the `structure` section is missing."* when it has no `structure` key. A non-empty `depth_profiles` means edit mode: persisted values shown, Enter keeps them.
+Resolve `<settings-root>`, read `<settings-root>/.claude/lazy.settings.json`; abort with *"Run `/lazy-wiki.install` first."* when the file is absent, or with *"Run `/lazy-wiki.install` first — the `structure` section is missing."* when it has no `structure` key. A non-empty `depth_profiles` means edit mode: persisted values shown, Enter keeps them.
 
 Outcome: `verified`.
 
@@ -577,7 +577,7 @@ Outcome: `collected`.
 
 ### Structure 4 — Write back
 
-Write the collected `depth_profiles` and `exclude` into `lazy.settings.json[structure]`: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set structure --key 'depth_profiles' --value '<depth_profiles as JSON>' --cwd <repo-root>)`, then `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set structure --key 'exclude' --value '<exclude array as JSON>' --cwd <repo-root>)`.
+Write the collected `depth_profiles` and `exclude` into `lazy.settings.json[structure]`: `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set structure --key 'depth_profiles' --value '<depth_profiles as JSON>' --cwd <settings-root>)`, then `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set structure --key 'exclude' --value '<exclude array as JSON>' --cwd <settings-root>)`.
 
 Outcome: `written`.
 
@@ -596,7 +596,7 @@ The unit of work is not derived. The routines run in the runtime's default `grou
 **Do not compose the value by hand.** It is derived from the section Structure 4 just wrote, and the derivation is code, not judgement — it forces the map's own path into the exclusions whatever the settings say. Read it once:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> structure-watch-config --repo "<repo-root>")
+Bash("${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> structure-watch-config --repo "<settings-root>")
 ```
 
 where `<wiki-cli>` stands for this plugin's own `bin/lazycortex-wiki` file, "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" — Claude Code substitutes the variable with the root this skill's plugin was loaded from, so no lookup is needed. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <wiki-cli> <verb>`: the file carries no exec bit and is not on `PATH`. It prints one JSON object carrying `path_filter`; pass it through verbatim as `<exclude-pathspecs>` below. No grouping key is derived on purpose: the routines run in the runtime's default whole-list mode, one curator job per tick carrying every changed path.
@@ -643,7 +643,7 @@ Configures the three repository-wide keys of `lazy.settings.json[wiki]` — `tag
 
 ### Vault 1 — Verify install + load section
 
-Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. Both keys are seeded by the install, so a section carrying them is the normal case — show each persisted value and let Enter keep it.
+Same as Phase 1: resolve `<settings-root>`, read `<settings-root>/.claude/lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. Both keys are seeded by the install, so a section carrying them is the normal case — show each persisted value and let Enter keep it.
 
 Outcome: `verified`.
 
@@ -710,7 +710,7 @@ Outcome: `language-on-record:<code>`, `language-inherited`, or `language-set:<co
 
 ### Vault 5 — Write back
 
-Write the collected arrays with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'tag_axes' --value '<array as JSON>' --cwd <repo-root>)` and `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'exclude' --value '<array as JSON>' --cwd <repo-root>)`, and — only when Vault 4 collected a code (a step that resolved `inherit` writes no key at all) — `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'language' --value '"<code>"' --cwd <repo-root>)`.
+Write the collected arrays with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'tag_axes' --value '<array as JSON>' --cwd <settings-root>)` and `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'exclude' --value '<array as JSON>' --cwd <settings-root>)`, and — only when Vault 4 collected a code (a step that resolved `inherit` writes no key at all) — `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set wiki --key 'language' --value '"<code>"' --cwd <settings-root>)`.
 
 Outcome: `written`.
 

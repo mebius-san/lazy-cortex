@@ -37,16 +37,24 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_language  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import GateCheckbox, LangId, Section  # noqa: E402
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_lockit import Lockit  # noqa: E402
 
@@ -523,12 +531,12 @@ def main_lockit_text(argv: list[str]) -> int:
       # waiver: argparse CLI signature -- option flag + vault-root default
       "--cwd", type = Path, default = None,
       # waiver: one-off human-facing message -- argparse help text
-      help = "vault root holding .claude/lazy.settings.json (default: cwd)",
+      help = "directory inside the vault holding .claude/lazy.settings.json (default: $LAZY_REPO_ROOT, then cwd)",
   )
   args = parser.parse_args(argv)
 
   # an explicit language wins; then the note's own resolved language; then the repo's
-  vault: Path = (args.cwd or Path.cwd()).resolve()
+  vault: Path = spec_locator.query_settings_root(args.cwd)
   lang: str | None = args.lang
 
   # guard: no explicit language given — fall back to the one resolved for the note the text is meant for

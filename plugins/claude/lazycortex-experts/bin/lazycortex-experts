@@ -19,11 +19,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Usage text printed with no arguments or a help flag
 USAGE = ("usage: lazycortex-experts <subcommand> [args...]\n"
-         "Subcommands: rename-implementer-agent, list-classes")
+         "Subcommands: rename-implementer-agent, unbranch-tester, list-classes")
 
 # Verbs and the module that serves each
 _ROUTES = {
   "rename-implementer-agent": "rename_agent",
+  "unbranch-tester": "unbranch_tester",
   "list-classes": "expert_classes",
 }
 

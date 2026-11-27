@@ -1,7 +1,8 @@
 """
 Staging-window mutex for concurrent Claude Code sessions sharing one checkout.
 
-The lock file lives under `<repo>/.git/lazy-git.lock` and is written atomically as JSON.
+The lock file `lazy-git.lock` lives in the repository's shared git directory, so every linked worktree reaches the
+same one, and is written atomically as JSON.
 Public surface: session and holder identification, config loading, lock inspection, and acquire, release and break
 operations. Defaults are module-level constants; consumer overrides go through `.claude/lazy.settings.json[git]`.
 """
@@ -25,6 +26,15 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # --- Defaults -----------------------------------------------------------------
 
 DEFAULT_ENABLED = True
@@ -36,7 +46,7 @@ DEFAULT_MAX_IDLE_SECONDS = 300.0
 POLL_MIN_MS = 100
 POLL_MAX_MS = 500
 
-LOCK_FILENAME = "lazy-git.lock"  # under <repo>/.git/
+LOCK_FILENAME = "lazy-git.lock"  # under the repository's shared git directory
 
 # Win32 constants for the Windows process-liveness probe.
 _WINDOWS_OS_NAME = "nt"
@@ -127,7 +137,9 @@ class LockState:
     host: Hostname of the holder, used by the different-host break rule.
     branch: Branch the holder is staging onto, surfaced in refusal messages.
     started_at: Wall-clock epoch seconds (UTC) when the lock was first acquired.
-    last_index_mtime: Mtime of `.git/index` at acquire time, used by the stale-and-idle rule.
+    last_index_mtime: Mtime of the holder's index at acquire time, used by the stale-and-idle rule.
+    index_path: Absolute index file of the checkout that acquired the lock; empty for a lock written before the
+      field existed.
   """
   session_id: str
   pid: int
@@ -135,6 +147,7 @@ class LockState:
   branch: str
   started_at: float          # epoch seconds (UTC)
   last_index_mtime: float    # epoch seconds
+  index_path: str = ""
 
 
 @dataclass(frozen = True)
@@ -179,10 +192,21 @@ def _lock_path(repo_root: Path) -> Path:
     repo_root: Absolute path to the root of the repository.
 
   Returns:
-    Path to `<repo_root>/.git/lazy-git.lock`.
+    Path to `lazy-git.lock` in the repository's shared git directory, which a linked worktree shares with the main
+    checkout; under `<repo_root>/.git/` when git names no such directory.
   """
+
+  # Domain(runtime.git-safety):
+  # # One staging lock per repository
+  # A repository has exactly one staging lock, however many working copies of it exist. The lock is kept in the
+  # git directory that every linked worktree shares with the main checkout, so a session staging in any worktree
+  # contends for the same lock as a session staging in any other: all of them commit into one history. Each
+  # checkout, though, stages into an index of its own, so the lock also records the index of the checkout that
+  # holds it. That index, not the index of whichever checkout later asks, shows whether the holder is still staging.
+
+  # one lock per repository: every worktree reaches the same file in the shared git directory
   # waiver: git path idiom, not a domain constant
-  return repo_root / ".git" / LOCK_FILENAME
+  return (plugin_locator.find_git_common_dir(repo_root) or repo_root / ".git") / LOCK_FILENAME
 
 
 # --- Session ID ---------------------------------------------------------------
@@ -342,6 +366,8 @@ def _read_lock(repo_root: Path) -> LockState | None:
       started_at = float(raw["started_at"]),
       # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       last_index_mtime = float(raw["last_index_mtime"]),
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
+      index_path = str(raw.get("index_path", "")),
     )
   except (KeyError, TypeError, ValueError):
     return None
@@ -352,7 +378,7 @@ def _write_lock(repo_root: Path, state: LockState) -> None:
   Persist a lock state for the given repository.
 
   The write is crash-safe: an interrupted call leaves any previously existing lock file
-  intact. The `.git/` directory is created when missing.
+  intact. The directory that holds the lock file is created when missing.
 
   Args:
     repo_root: Absolute path to the root of the repository.
@@ -370,6 +396,7 @@ def _write_lock(repo_root: Path, state: LockState) -> None:
     "branch": state.branch,
     "started_at": state.started_at,
     "last_index_mtime": state.last_index_mtime,
+    "index_path": state.index_path,
   }
   # waiver: stdlib idiom, not a domain constant
   fd, tmp = tempfile.mkstemp(dir = str(path.parent), prefix = ".lazy-git-", suffix = ".tmp")
@@ -449,21 +476,64 @@ def _current_branch(repo_root: Path) -> str:
     return "HEAD"
 
 
-def _index_mtime(repo_root: Path) -> float:
+def _find_index_file(repo_root: Path) -> Path:
   """
-  Return the modification time of the git index file as epoch seconds.
+  Return the index file of a checkout, which a linked worktree keeps in its own git directory.
 
   Args:
-    repo_root: Absolute path to the root of the repository.
+    repo_root: Absolute path to the root of the checkout.
 
   Returns:
-    The epoch-seconds mtime of `.git/index`, or `0.0` when the file does not exist.
+    The checkout's index file, whether or not it exists; under `<repo_root>/.git/` when git names no git directory.
   """
+  # waiver: git path idiom, not a domain constant
+  return (plugin_locator.find_git_dir(repo_root) or repo_root / ".git") / "index"
+
+
+def _read_mtime(path: Path) -> float:
+  """
+  Return a file's modification time as epoch seconds.
+
+  Args:
+    path: The file.
+
+  Returns:
+    The file's mtime, or `0.0` when it does not exist.
+  """
+  # guard: a missing file reads as never modified
   try:
-    # waiver: git path idiom, not a domain constant
-    return (repo_root / ".git" / "index").stat().st_mtime
+    return path.stat().st_mtime
   except FileNotFoundError:
     return 0.0
+
+
+def read_holder_index_mtime(repo_root: Path, state: LockState) -> float:
+  """
+  Return the modification time of the index the lock holder stages into.
+
+  Args:
+    repo_root: Absolute path to the root of the checkout asking.
+    state: The lock state on disk.
+
+  Returns:
+    The mtime of the holder's recorded index; the asking checkout's own index for a lock that records none; `0.0`
+    when that file does not exist.
+  """
+  # the holder's own index, or the asking checkout's for a lock written before the record existed
+  return _read_mtime(Path(state.index_path)) if state.index_path else _read_index_mtime(repo_root)
+
+
+def _read_index_mtime(repo_root: Path) -> float:
+  """
+  Return the modification time of a checkout's own git index as epoch seconds.
+
+  Args:
+    repo_root: Absolute path to the root of the checkout.
+
+  Returns:
+    The epoch-seconds mtime of the checkout's index, or `0.0` when the file does not exist.
+  """
+  return _read_mtime(_find_index_file(repo_root))
 
 
 # --- Inspect ------------------------------------------------------------------
@@ -561,10 +631,11 @@ def evaluate_break(
   Decide whether a held lock qualifies for auto-break under the configured rules.
 
   Rules are applied in fixed order: dead pid, different host, stale-and-idle. The first
-  matching rule wins; when none match the lock is considered actively held.
+  matching rule wins; when none match the lock is considered actively held. The stale-and-idle rule judges the
+  index of the checkout that holds the lock, not the index of the checkout that asks.
 
   Args:
-    repo_root: Absolute path to the root of the repository.
+    repo_root: Absolute path to the root of the checkout that asks.
     state: The lock state currently observed on disk.
     cfg: Configuration that supplies the stale-and-idle thresholds.
     now: Current wall-clock epoch seconds, supplied by the caller for testability.
@@ -579,13 +650,15 @@ def evaluate_break(
   # A held lock is broken automatically under three conditions, tried in a fixed order,
   # where the first match decides the outcome. A lock whose holding session no longer runs
   # on this machine is broken immediately; the session is judged by its long-lived process,
-  # never by the short-lived hook process that happened to write the lock. A lock recorded by a different machine than the
-  # one now asking is broken immediately too, since a dead-process check only means
-  # something on the machine that owns the process table. Otherwise a lock becomes
-  # breakable only once it has both been held past a configured age threshold and shows no
-  # recent staging activity — the index has not advanced past where it stood when last
-  # observed, and has stayed unchanged past a configured idle threshold — so a holder that
-  # is still actively staging keeps its lock no matter how long the staging window is open.
+  # never by the short-lived hook process that happened to write the lock. A lock recorded
+  # by a different machine than the one now asking is broken immediately too, since a
+  # dead-process check only means something on the machine that owns the process table.
+  # Otherwise a lock becomes breakable only once it has both been held past a configured
+  # age threshold and shows no recent staging activity — the index of the checkout that
+  # holds the lock has not advanced past where it stood when last observed, and has stayed
+  # unchanged past a configured idle threshold — so a holder that is still actively staging
+  # keeps its lock no matter how long the staging window is open. A lock written before the
+  # holder's index was recorded is judged by the index of the checkout that asks.
 
   # rule 1, dead PID: the holder process no longer exists on this host
   if not is_pid_alive(state.pid):
@@ -600,7 +673,7 @@ def evaluate_break(
 
   # only a holder past the configured max-hold age can be stale
   if age > cfg.max_hold_seconds:
-    current_index_mtime = _index_mtime(repo_root)
+    current_index_mtime = read_holder_index_mtime(repo_root, state)
 
     # the index has not moved past last_index_mtime AND mtime itself is stale
     index_idle = (
@@ -673,7 +746,8 @@ def _new_lock_state(repo_root: Path, session_id: str) -> LockState:
     host = socket.gethostname(),
     branch = _current_branch(repo_root),
     started_at = time.time(),
-    last_index_mtime = _index_mtime(repo_root),
+    last_index_mtime = _read_index_mtime(repo_root),
+    index_path = str(_find_index_file(repo_root)),
   )
 
 
@@ -877,16 +951,17 @@ def load_config(repo_root: Path) -> StagingConfig:
   """
   Load staging-mutex configuration from the repository's lazy settings.
 
-  Reads the `git` section of `<repo>/.claude/lazy.settings.json` when present; missing
-  keys fall back to module-level defaults. A malformed settings file produces a fully
-  default configuration rather than an error.
+  Reads the `git` section of `.claude/lazy.settings.json` at the root of the checkout the given
+  directory sits in, never a nested project's own file, when present; missing keys fall back to
+  module-level defaults. A malformed settings file produces a fully default configuration rather
+  than an error.
 
   Guarantees:
     - A missing, unreadable, or malformed settings file never raises; the call always
       returns a fully populated `StagingConfig`.
 
   Args:
-    repo_root: Absolute path to the root of the repository.
+    repo_root: Absolute path to the root of the repository, or any directory inside its checkout.
 
   Returns:
     A `StagingConfig` reflecting the merged configuration.
@@ -897,7 +972,8 @@ def load_config(repo_root: Path) -> StagingConfig:
   # returns a fully populated StagingConfig, falling back to module-level defaults for
   # any section or key that cannot be read.
 
-  settings_path = repo_root / _SETTINGS_REL
+  # the `git` section governs the checkout's one shared index, so it lives at the checkout's root
+  settings_path = plugin_locator.query_checkout_toplevel(repo_root) / _SETTINGS_REL
   section: dict = {}
 
   # a settings file present for this repository supplies the staging section

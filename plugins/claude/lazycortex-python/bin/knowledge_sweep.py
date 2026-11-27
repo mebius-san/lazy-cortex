@@ -24,8 +24,12 @@ if TYPE_CHECKING:
 _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import pcf  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import python_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # The three places a sweep scope can come from, and the outcomes of the commit verb
@@ -536,7 +540,7 @@ def _load_settings(repo: Path) -> dict:
   return data if isinstance(data, dict) else {}
 
 
-def resolve_scope(repo: Path, explicit: list[str]) -> Scope:
+def resolve_scope(repo: Path, explicit: list[str], *, settings_root: Path | None = None) -> Scope:
   """
   Select the files a sweep covers.
 
@@ -546,6 +550,8 @@ def resolve_scope(repo: Path, explicit: list[str]) -> Scope:
   Args:
     repo: Repository root.
     explicit: Repo-relative paths named by the operator, empty to use the configured scope.
+    settings_root: Directory whose `.claude/lazy.settings.json` holds the configured code globs, which are relative
+      to it; inside `repo`, and `repo` itself when omitted.
 
   Returns:
     Scope with its sorted files and the source that won.
@@ -571,14 +577,21 @@ def resolve_scope(repo: Path, explicit: list[str]) -> Scope:
     )
   else:
     # walk wiki -> domains -> code, treating any non-object level as unconfigured
-    code: object = _load_settings(repo)
+    owner = settings_root or repo
+    code: object = _load_settings(owner)
     for key in ( "wiki", "domains", "code" ):
       code = code.get(key) if isinstance(code, dict) else None
     globs = [ glob for glob in code if isinstance(glob, str) and glob ] if isinstance(code, list) else []
     if globs:
       source = SOURCE_DOMAINS_GLOBS
-      # `:(glob)` gives `*` a one-component reach and `**` a zero-or-more-components reach
-      candidates = _query_git_paths(repo, "ls-files", "-z", "--", *( f":(glob){glob}" for glob in globs ))
+      # the globs are relative to the directory owning the settings, so git lists them there and every path it
+      # prints is taken back to the repository root; `:(glob)` gives `*` a one-component reach and `**` a
+      # zero-or-more-components reach
+      prefix = owner.resolve().relative_to(repo.resolve())
+      candidates = [
+        (prefix / path).as_posix()
+        for path in _query_git_paths(owner, "ls-files", "-z", "--", *( f":(glob){glob}" for glob in globs ))
+      ]
     else:
       source = SOURCE_ALL_PYTHON
       candidates = _query_git_paths(repo, "ls-files", "-z", "--", "*.py")
@@ -1385,28 +1398,26 @@ def _read_json_arg(arg: str) -> object:
   return json.loads(raw)
 
 
-def _query_repo_root(arg: str) -> Path:
+def _query_repo_root(arg: str | None) -> Path:
   """
-  Find the top-level directory of the git checkout containing a directory.
+  Find the root of the git checkout a sweep works in.
 
   Args:
-    arg: Directory inside the target repository.
+    arg: Directory inside the target repository, or `None` for `$LAZY_REPO_ROOT`, then the working directory.
 
   Returns:
-    Root of the checkout.
+    Root of the checkout that directory sits in, a linked worktree's own root inside one.
 
   Raises:
     SweepRefusedError: If the directory is not inside a git repository.
   """
-  proc = subprocess.run(
-    [ "git", "rev-parse", "--show-toplevel" ], cwd = arg, capture_output = True, text = True, check = False,
-    encoding = "utf-8",
-  )
+  # the root of the checkout the directory sits in; outside git the locator hands back the directory itself
+  root = python_locator.query_repo_root(arg)
 
-  # guard: every verb works inside a git checkout
-  if proc.returncode != 0:
-    raise SweepRefusedError("not_a_repo", detail = f"{arg} is not inside a git repository")
-  return Path(proc.stdout.strip())
+  # guard: every verb works inside a git checkout, which only git can name
+  if python_locator.find_checkout_toplevel(root) is None:
+    raise SweepRefusedError("not_a_repo", detail = f"{arg or root} is not inside a git repository")
+  return root
 
 
 def _snapshot_dictionary(repo: Path, snap: dict) -> Path:
@@ -1451,8 +1462,10 @@ def _cmd_scope(repo: Path, args: argparse.Namespace) -> tuple[int, dict]:
   Raises:
     SweepRefusedError: If git cannot resolve the scope or the snapshot cannot be saved.
   """
-  scope = resolve_scope(repo, list(args.paths))
-  dictionary = pcf.resolve_dictionary(repo)
+  # the settings come from the nearest directory holding them within the checkout, a nested project's own included
+  settings_root = python_locator.query_settings_root(args.repo)
+  scope = resolve_scope(repo, list(args.paths), settings_root = settings_root)
+  dictionary = pcf.resolve_dictionary(settings_root)
   path = save_snapshot(repo, scope, dictionary)
   return _EXIT_OK, {
     "status": "ok", "files": scope.files, "source": scope.source, "dictionary": _rel(repo, dictionary),
@@ -1594,17 +1607,22 @@ def _build_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog = "knowledge_sweep.py", description = "lazy-python.knowledge-sweep verbs")
   verbs = parser.add_subparsers(dest = "verb", required = True)
 
-  # one sub-parser per verb, each taking the repo it works on
+  # the reading verbs: the scope snapshot and the block inventory
   scope = verbs.add_parser("scope", help = "resolve the sweep scope and the dictionary, write the snapshot")
   scope.add_argument("paths", nargs = "*", help = "explicit repo-relative paths; empty uses the configured scope")
   verbs.add_parser("inventory", help = "list Domain and Contract blocks in the snapshot's scope")
+
+  # the writing verbs: dictionary edits, header refiles and the commit
   apply = verbs.add_parser("dictionary-apply", help = "add, rename, remove, or regloss dictionary groups")
   apply.add_argument("ops", help = "ops JSON file, or - for stdin")
   refile = verbs.add_parser("refile-headers", help = "rewrite the group in Domain header lines")
   refile.add_argument("plan", help = "refile plan JSON file, or - for stdin")
   verbs.add_parser("commit", help = "commit what the sweep changed")
+
+  # every verb takes the repo it works on
   for sub in verbs.choices.values():
-    sub.add_argument("--repo", default = ".", help = "directory inside the target repository (default: cwd)")
+    sub.add_argument("--repo", default = None,
+                     help = "directory inside the target repository (default: $LAZY_REPO_ROOT, then the cwd)")
   return parser
 
 
@@ -1616,7 +1634,8 @@ def main(argv: list[str]) -> int:
     - Prints exactly one JSON line on stdout describing the outcome.
 
   Args:
-    argv: Command-line arguments without the program name.
+    argv: Command-line arguments without the program name; `--repo` names a directory inside the target repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory), and the sweep works in the root of its checkout.
 
   Returns:
     Exit code: 0 on success, 1 when the verb is refused, 2 when an input document is malformed.

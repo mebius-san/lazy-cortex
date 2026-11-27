@@ -3,7 +3,7 @@ Logic behind the `lazycortex-specs migrate-notes` verb — brings the spec catal
 current frontmatter shape.
 
 Several keys and rows a note may still carry were retired: the middle rungs of the asset ladder on every asset type
-but a release and a research asset, the asset dependency list and its `blocked` state, the child-wake bookkeeping of
+but a release, the asset dependency list and its `blocked` state, the child-wake bookkeeping of
 a level note, and the `Revise design` launch row. This verb removes or rewrites exactly those, leaving every other
 line of the note as it was, and reports which notes it changed. It never commits.
 """
@@ -30,24 +30,27 @@ if str(_BIN) not in sys.path:
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
-    LEVEL_ROLES, RESEARCH_ASSET_TYPE, AssetState, AssetTypeKey, Gate, GateCheckbox, ReleaseKey, Section, SpecKey,
+    LEVEL_ROLES, AssetState, AssetTypeKey, Gate, GateCheckbox, ReleaseKey, Section, SpecKey,
     SpecMomentKey, SpecStateKey, SpecValue,
 )
 
 
-# The middle rungs of the asset ladder and their moment keys, which only a release and a research asset still carry.
+# The middle rungs of the asset ladder and their moment keys, which only a release still carries.
 _MIDDLE_KEYS = tuple(
     key for gate in ( Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING )
     for key in ( gate, f"{gate}{SpecMomentKey.AT_SUFFIX}" )
 )
 
 # The asset types whose notes keep the middle rungs.
-_MIDDLE_GATE_TYPES = frozenset({ ReleaseKey.ASSET_TYPE, RESEARCH_ASSET_TYPE })
+_MIDDLE_GATE_TYPES = frozenset({ ReleaseKey.ASSET_TYPE })
 
 # The retired keys this verb removes from every note; nothing else in the plugin names them any more.
 _RETIRED_KEYS = ( "spec_depends_on", "spec_coordinator_child_wake_state" )
@@ -76,7 +79,6 @@ _H1_PREFIX = "# "
 
 _LF = "\n"
 _MD_SUFFIX = ".md"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # The exit code of a run that failed, never an answer `--check` gives.
 _EXIT_FAILED = 2
@@ -165,7 +167,7 @@ def _migrate_text(text: str, fm_values: dict) -> str:
     The note text without the retired keys and rows and with a `blocked` state turned to `draft`; the text unchanged
     when it carries none of them.
   """
-  # the middle rungs leave every note but a release's and a research asset's
+  # the middle rungs leave every note but a release's
   if fm_values.get(AssetTypeKey.TYPE, "").strip() not in _MIDDLE_GATE_TYPES:
     for key in _MIDDLE_KEYS:
       text = spec_frontmatter.drop_key(text, key)
@@ -253,9 +255,10 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Command-line arguments, excluding the program name; `--dry-run` reports without writing, `--check` reports
-      without writing and answers through the exit code whether anything is left to migrate, `--cwd` names the
-      repository root (falling back to the `LAZY_REPO_ROOT` environment variable, then the process working
-      directory).
+      without writing and answers through the exit code whether anything is left to migrate, `--cwd` names a
+      directory inside the repository (falling back to the `LAZY_REPO_ROOT` environment variable, then the process
+      working directory); the run works in the nearest directory at or above it, within its checkout, that holds
+      `.claude/lazy.settings.json`, else the checkout's root.
 
   Returns:
     Exit code: with `--check`, 0 when a note would change and 1 when none would; 0 otherwise; 2 when the migration
@@ -280,12 +283,9 @@ def main(argv: list[str]) -> int:
   parser.add_argument("--cwd", default = None)
   args = parser.parse_args(argv)
 
-  # the repo root comes from `--cwd`, else the daemon's env var, else the process cwd
-  repo = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
   # the migration runs, dry under a check; whatever stops it is named on stderr and exits 2
   try:
-    result = migrate(repo, dry_run = args.dry_run or args.check)
+    result = migrate(spec_locator.query_settings_root(args.cwd), dry_run = args.dry_run or args.check)
   # waiver: broad catch is the boundary of the migration step's `applies_when` predicate, which reads exit 1 as
   # "nothing to do"; an uncaught error would exit 1 too, so every failure must leave as exit 2
   except Exception as error:  # pylint: disable=broad-exception-caught

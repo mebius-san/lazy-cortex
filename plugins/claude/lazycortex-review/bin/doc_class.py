@@ -261,3 +261,19 @@ def class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
   if scoped:
     return min(scoped)[2]
   return fallback
+
+
+def is_report_class(settings: dict, repo: Path, file_path: Path) -> bool:
+  """
+  Tell whether the review class one document belongs to is configured as a report class.
+
+  Args:
+    settings: Parsed `lazy.settings.json` contents.
+    repo: Repository root the glob patterns are relative to.
+    file_path: The document to resolve.
+
+  Returns:
+    True only when the class `class_for_file` resolves sets `report` to `true`; a document no class covers and a
+    class without the flag read as False.
+  """
+  return (class_for_file(settings, repo, file_path) or {}).get(JobKey.REPORT) is True

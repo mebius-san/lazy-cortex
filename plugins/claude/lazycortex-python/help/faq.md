@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -22,8 +22,8 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 37c2a9f1f04ebf90997c60fa46efcc014e6df532
-surface_sha: 4eabe96ccdab4ccf8b1eec836cc7df4343152a78ce55a18aafa8c079e28baa5d
+source_sha: 0044ac4308cce96cc832c6dbbbe2042b5ad738d5
+surface_sha: 3aa6bc24a5658a34ae350559a8b1fe971243ec9099a465effce745492a590f21
 ---
 # Frequently asked questions
 
@@ -31,7 +31,9 @@ surface_sha: 4eabe96ccdab4ccf8b1eec836cc7df4343152a78ce55a18aafa8c079e28baa5d
 
 It depends on what you want to pick up. The `cfg-py`, `chk-py` and `tst-py` wrappers self-resolve the active plugin at exec time — they locate the current plugin source each time they run, so they keep working correctly across a `/plugin update` without a re-install. Any new canon rules, updated checker configuration, or new overlay stubs that came with the update do require a re-run of `/lazy-python.install`, because those artifacts land in your project tree only when the install phases run.
 
-A practical rule: re-run `/lazy-python.install` after any plugin update where the release notes mention changes to rules, `pyproject.toml` defaults, or the wrapper scripts themselves. The install is idempotent — it only overwrites the mirrored rule files and adds missing sections; your existing project additions are left untouched.
+A practical rule: re-run `/lazy-python.install` after any plugin update where the release notes mention changes to rules, `pyproject.toml` defaults, or the wrapper scripts themselves. The install is idempotent — it refreshes the plugin-owned mirrors (rules, wrappers, the locator copy, the mypy shim) and adds missing sections to files you own; your existing project additions are left untouched. It also brings the project venv up to date when it is missing or stale (Step 7.8), so a re-run is the quickest way to repair an environment a daemon job could not use.
+
+If the update moved files your repo already carries — for example the overlay folder change described in the overlay question below — the move is a migration step that `/lazy-core.setup` runs after the install chain, not something the install does.
 
 ---
 
@@ -43,27 +45,27 @@ The hook auto-registers from the plugin's `hooks/hooks.json` manifest when the p
 
 ## `/lazy-python.audit` reports Check 1 as FAIL (drift). What does that mean?
 
-One or more of the mirrored rule files under `.claude/rules/lazy-python.*.md` has drifted from the plugin canon — either a manual edit was made to a file that is plugin-managed, or the install was interrupted. Re-run `/lazy-python.install` to restore them. The install intentionally overwrites the mirror; any changes you wanted to make to those rules belong in your project overlay under `docs/guidelines/`, not in the mirrored files themselves.
+One or more of the mirrored rule files under `.claude/rules/lazy-python.*.md` has drifted from the plugin canon — either a manual edit was made to a file that is plugin-managed, or the install was interrupted. Re-run `/lazy-python.install` to restore them. The install intentionally overwrites the mirror; any changes you wanted to make to those rules belong in your project overlay under `docs/guidelines/python/`, not in the mirrored files themselves.
 
 ---
 
 ## `/lazy-python.audit` warns about PyCharm inspect.sh (Check 6). Is that a problem?
 
-Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requires `inspect.sh` from a PyCharm installation, but the other phases — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` — run without it. `pch` is also not part of the `chk-py all` gate; it is a separate, slower manual subcommand (`chk-py pch <file>`). If you do not have PyCharm installed, Check 6 will always be `WARN` and `chk-py pch` will be unavailable. The rest of the pipeline remains fully functional.
+Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requires `inspect.sh` from a PyCharm installation, but the other phases — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` — run without it. Without `[tool.pch]` in `pyproject.toml`, `chk-py pch` skips cleanly; install adds that section only when it finds PyCharm. `pch` is also not part of the `chk-py all` gate; it is a separate, slower manual subcommand (`chk-py pch <file>`). If you do not have PyCharm installed, Check 6 will always be `WARN` and `chk-py pch` will be unavailable. The rest of the pipeline remains fully functional.
 
 ---
 
 ## `/lazy-python.audit` warns about the venv (Check 11). How do I fix it?
 
-Check 11 warns about a recoverable venv problem: the venv it finds is missing checker tools or the two pytest plugins, it is stale against your `pyproject.toml` requirements (its `.lazy-python-cfg` stamp no longer matches, or is absent), `bootstrap-fallback = false` is set and there is no venv, or `uv` is not on `$PATH`. The fix is `cfg-py`, not an install re-run: run it from an interactive session or console (it refuses in protected mode, when `LAZYCORTEX_PROTECTED` is set), after installing `uv` first if that is what is missing (`pip install uv` or the standalone installer). `cfg-py` builds or updates the project venv — `<repo>/.venv` unless `[tool.lazy-python] venv` names another path — from your `pyproject.toml`. A repo with no venv yet reports `PASS` while `uv` is present, because the first `cfg-py`, `chk-py` or `tst-py` run creates it.
+Check 11 warns about a recoverable venv problem: the venv it finds is missing checker tools or the pytest plugins, it is stale against your `pyproject.toml` requirements (its `.lazy-python-cfg` stamp no longer matches, or is absent), `bootstrap-fallback = false` is set and there is no venv, or `uv` is not on `$PATH`. The fix is `cfg-py` (a `/lazy-python.install` re-run also refreshes a stale venv in its Step 7.8): run it from an interactive session or console (it refuses in protected mode, when `LAZYCORTEX_PROTECTED` is set), after installing `uv` first if that is what is missing (`pip install uv` or the standalone installer). `cfg-py` builds or updates the project venv — `<repo>/.venv` unless `[tool.lazy-python] venv` names another path — from your `pyproject.toml`. A repo with no venv yet reports `PASS` while `uv` is present, because the first `cfg-py`, `chk-py` or `tst-py` run creates it.
 
 ---
 
 ## How does `chk-py` decide which Python environment to use?
 
-Every `chk-py` and `tst-py` invocation resolves the venv first, in order: an already-activated `$VIRTUAL_ENV` that carries the checker tools (used as is; nothing is installed into it), then the target venv — the path set as `venv` under `[tool.lazy-python]` in `pyproject.toml` when present, otherwise `<repo>/.venv`. The target venv counts as ready only when it carries the checker tools and its configuration stamp still matches your `pyproject.toml` requirements; editing an unrelated section such as `[tool.ruff]` does not make it stale. When it is missing or stale, the wrapper configures it from `pyproject.toml` on its own: `uv` picks an interpreter that satisfies `requires-python` / `.python-version`, then installs your project dependencies, extras, dependency groups and the checker tools. `cfg-py` does the same on request without running any check. Two opt-outs stop the automatic configure and point you at `cfg-py` instead: protected mode (`LAZYCORTEX_PROTECTED` set) and `bootstrap-fallback = false` under `[tool.lazy-python]`. Once a venv is active, the wrappers separately check `python.env_source` in `.claude/lazy.settings.json` — if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first. The `review` subcommand is the one exception — it skips the venv resolver entirely, since it is pure stdlib by design, so the guideline-review phase also works from pre-commit hooks and CI runners that never set up a venv.
+Every `chk-py` and `tst-py` invocation resolves the venv first, in order: an already-activated `$VIRTUAL_ENV` that carries the checker tools (used as is; nothing is installed into it — one that lacks a tool is passed over, and the wrapper prints which tool is missing before it moves on), then the target venv — the path set as `venv` under `[tool.lazy-python]` in `pyproject.toml` when present, otherwise `<repo>/.venv`. The target venv counts as ready only when it carries the checker tools and its configuration stamp still matches your `pyproject.toml` requirements; editing an unrelated section such as `[tool.ruff]` does not make it stale. When it is missing or stale, the wrapper configures it from `pyproject.toml` on its own: `uv` picks an interpreter that satisfies `requires-python` / `.python-version`, then installs your project dependencies, extras, dependency groups and the checker tools. `cfg-py` does the same on request without running any check. Two opt-outs stop the automatic configure and point you at `cfg-py` instead: protected mode (`LAZYCORTEX_PROTECTED` set) and `bootstrap-fallback = false` under `[tool.lazy-python]`. A daemon job never sets up or repairs its environment: when the venv is missing or stale there, the runner stops and prints the actual cause — no venv, a missing tool, an outdated stamp and what changed, or an interpreter that does not match — and asks the operator to run `/lazy-python.install` or `cfg-py`. Once a venv is active, the wrappers separately check `python.env_source` in the nearest `.claude/lazy.settings.json` — searched from where you run the command up to the root of its checkout, so a plain subdirectory reads its checkout's file, a nested project with a settings file of its own reads that one, and a linked worktree reads its own — and if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first. The `review` subcommand is the one exception — it skips the venv resolver entirely, since it is pure stdlib by design, so the guideline-review phase also works from pre-commit hooks and CI runners that never set up a venv.
 
-`python.env_source` is not something you set by hand: `/lazy-python.install` Step 7 detects a recognised bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) in your repo and records it automatically. Zero or one candidate is handled silently; if more than one is found, install asks once which script to use. A value already on record is never re-asked or overwritten, and no audit check inspects it — recording `python.env_source` is an install-time convenience, not a verified invariant.
+`python.env_source` is not something you set by hand: `/lazy-python.install` Step 7 detects a recognised bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) in your repo and records it automatically, in the same settings file the runners read it from; a relative value is resolved against that file's directory. Zero or one candidate is handled silently; if more than one is found, install asks once which script to use. A value already on record is never re-asked or overwritten, and no audit check inspects it — recording `python.env_source` is an install-time convenience, not a verified invariant.
 
 ---
 
@@ -77,7 +79,7 @@ If `~/.local/bin` isn't on your `$PATH` yet, use the repo-local copy directly wi
 
 ## When should I use `/lazy-python.check-style` versus the PostToolUse hook?
 
-The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surfaces violations inline in the next turn — it is your fast inner loop. `/lazy-python.check-style` is the deeper seven-step review you invoke before committing: it adds a manual pass over semantic issues the automated checkers cannot see (docstring quality, contract consistency, guard-clause coverage, special-comment preservation), then dispatches the full `chk-py all` sweep (which itself ends with the `review` phase) plus `tst-py` to gate the change. Use the hook continuously and `/lazy-python.check-style` at the end of a meaningful edit batch.
+The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surfaces violations inline in the next turn — it is your fast inner loop. `/lazy-python.check-style` is the deeper six-step review you invoke before committing: it adds a manual pass over semantic issues the automated checkers cannot see (docstring quality, contract consistency, guard-clause coverage, special-comment preservation), then runs the `chk-py all` sweep per file, per directory and over the whole project, fixes what is left, and re-verifies with `chk-py all` plus `tst-py`. The guideline review (`chk-py review`) is a separate phase, not part of that sweep. Use the hook continuously and `/lazy-python.check-style` at the end of a meaningful edit batch.
 
 ---
 
@@ -89,7 +91,7 @@ The always-loaded style rule's Verification Order scopes each run by the moment 
 
 ## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
-No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv, and it takes the bare module name (`tst-py core -q`, `tst-py billing -q`), never a file path or a `.py` filename.
+No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, and `pylint` in that order with shared config from `pyproject.toml` (the guideline review, `chk-py review`, is its own subcommand); calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv, and it takes the bare module name (`tst-py core -q`, `tst-py billing -q`), never a file path or a `.py` filename.
 
 ---
 
@@ -105,15 +107,15 @@ It used to, and that's now fixed. mypy applies its own config `exclude` pattern 
 
 ---
 
-## `chk-py all` finished but printed a "review" step at the end. What is that?
+## What is `chk-py review`, and why is it not part of `chk-py all`?
 
-That is the guideline-review phase, `chk-py review` — its own command, deliberately not a step of `chk-py all`, which runs six deterministic checkers and stops. Unlike those six, `review.py` does not run a deterministic tool against your code — it resolves the scope (your current working-tree diff plus untracked files, or explicit paths you pass), collects every applicable canon and overlay layer, and writes a manifest under `.runtime/lazy-python/review/` in your project. It then prints that manifest path and names the `lazy-python.code-reviewer` agent to dispatch against it — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders the findings the agent already produced, and is what actually clears the gate.
+It is the guideline-review phase — its own command, deliberately not a step of `chk-py all`, which runs six deterministic checkers and stops (one review dispatch carries the whole guideline canon, so it runs once per unit of work, not per edit). Unlike those six, `review.py` does not run a deterministic tool against your code — it resolves the scope (your current working-tree diff plus untracked files, or explicit paths you pass), collects every applicable canon and overlay layer, and writes a manifest under `.runtime/lazy-python/review/` in your project. It then prints that manifest path and names the `lazy-python.code-reviewer` agent to dispatch against it — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders the findings the agent already produced, and is what actually clears the gate.
 
 ---
 
-## `chk-py all` is failing with `review: PENDING` even though every other check is clean. How do I clear it?
+## `chk-py review` exits with `review: PENDING` even though every other check is clean. How do I clear it?
 
-A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. That is the only `CHK_REVIEW` value the script reads; there is no `skip`, and a context that cannot dispatch asks the operator rather than exiting 0 with nothing decided. A scope that has not changed since its last real review — neither the reviewed files nor any guideline layer — reuses those findings rather than re-manifesting; editing the canon, your overlay, a Python-scoped rule, or `CLAUDE.md` re-manifests it.
+A pending review fails instead of passing silently: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. That is the only `CHK_REVIEW` value the script reads; there is no `skip`, and a context that cannot dispatch asks the operator rather than exiting 0 with nothing decided. A scope that has not changed since its last real review — neither the reviewed files nor any guideline layer — reuses those findings rather than re-manifesting; editing the canon, your overlay, a Python-scoped rule, or `CLAUDE.md` re-manifests it.
 
 ---
 
@@ -213,7 +215,7 @@ Per the testing canon's *Knowledge-derived tests* section, a changed or added kn
 
 Declare it in `pyproject.toml` under a `[[tool.pcf.extra_docstring_sections]]` table — the section's `name`, its list `style` (`bulleted`, `definition`, or `plain`), and an `after`/`before` anchor naming a built-in or previously declared section to position it relative to. Add `ref_exempt = true` if the section's body carries `# ref:` lines that should be shielded from the phrasing and private-name checks. The shipped `pyproject-defaults.toml` template ships all three `[tool.pcf]` keys as commented-out examples, ready to uncomment and adapt.
 
-Registering the section only tells `chk-py` where it belongs, its list style, and its exemptions — it does not tell anyone what to write inside it. Add the section's actual content rules to `docs/guidelines/documenting_guidelines.md` (the overlay). `lazy-python.docstring-writer` reads both the registration and the overlay on every dispatch and never invents a section your project hasn't declared.
+Registering the section only tells `chk-py` where it belongs, its list style, and its exemptions — it does not tell anyone what to write inside it. Add the section's actual content rules to `docs/guidelines/python/documenting_guidelines.md` (the overlay). `lazy-python.docstring-writer` reads both the registration and the overlay on every dispatch and never invents a section your project hasn't declared.
 
 ---
 
@@ -231,13 +233,13 @@ The D2 check no longer exempts a private label just because the class declares a
 
 ## `chk-py` used to recognize a built-in `Methods` docstring section. Now it's flagged as unregistered. What happened?
 
-`pcf`'s recognized section set dropped `Methods` — it is no longer a checker-recognized docstring section name, following the same project-neutral cleanup that removed the "Generation Rules" / "Value Ranges" defaults (see the previous question). If your project relies on a `Methods` section, register it explicitly via `[[tool.pcf.extra_docstring_sections]]` in `pyproject.toml` — declare its `style` as `bulleted` to match the section's previous behaviour, and add the section's content rules to `docs/guidelines/documenting_guidelines.md`.
+`pcf`'s recognized section set dropped `Methods` — it is no longer a checker-recognized docstring section name, following the same project-neutral cleanup that removed the "Generation Rules" / "Value Ranges" defaults (see the previous question). If your project relies on a `Methods` section, register it explicitly via `[[tool.pcf.extra_docstring_sections]]` in `pyproject.toml` — declare its `style` as `bulleted` to match the section's previous behaviour, and add the section's content rules to `docs/guidelines/python/documenting_guidelines.md`.
 
 ---
 
 ## Should I write docstrings by hand, or always use the agent?
 
-Always use the `lazy-python.docstring-writer` agent. The canon enforces section ordering, a Zero-Tolerance Blocker list, a nine-point semantic Pre-Return Self-Check (checking for algorithm narration, private-internal references, tautological summaries, inventory sentences, etc.), and an overlay merge from `docs/guidelines/documenting_guidelines.md`. Writing docstrings by hand from session memory of the canon reliably misses at least one of those checks. Dispatch the agent and let it own the result.
+Always use the `lazy-python.docstring-writer` agent. The canon enforces section ordering, a Zero-Tolerance Blocker list, a nine-point semantic Pre-Return Self-Check (checking for algorithm narration, private-internal references, tautological summaries, inventory sentences, etc.), and an overlay merge from `docs/guidelines/python/documenting_guidelines.md`. Writing docstrings by hand from session memory of the canon reliably misses at least one of those checks. Dispatch the agent and let it own the result.
 
 ---
 
@@ -387,7 +389,13 @@ Yes, and it shouldn't happen if the overlay is being read correctly. The agent r
 
 ## How do I add project-specific style or testing rules without touching the plugin?
 
-Use the overlay convention. The four overlay stubs under `docs/guidelines/` (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) are where you add project-specific additions. Each overlay file opens with a `# Project additions to <topic>` header that the writer agents, the code-reviewer agent, and `/lazy-python.check-style` recognise. Rules in an overlay override the corresponding canon rule on conflict; they extend it otherwise. If the overlay stubs are missing, re-run `/lazy-python.install` — Phase 5 scaffolds them without overwriting any existing content.
+Use the overlay convention. The four overlay stubs under `docs/guidelines/python/` (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) are where you add project-specific additions. Each overlay file opens with a `# Project additions to <topic>` header that the writer agents, the code-reviewer agent, and `/lazy-python.check-style` recognise. Rules in an overlay override the corresponding canon rule on conflict; they extend it otherwise. If the overlay stubs are missing, re-run `/lazy-python.install` — Step 5 scaffolds them without overwriting any existing content.
+
+---
+
+## My overlay files are still directly under `docs/guidelines/` and the agents ignore them. What happened?
+
+The Python overlays moved from `docs/guidelines/<topic>_guidelines.md` to `docs/guidelines/python/<topic>_guidelines.md` (topics `coding`, `documenting`, `testing`, `checking`), so a second language plugin can scaffold files of the same names without sharing one with Python. The writer agents, the `chk-py review` overlay layer and `/lazy-python.audit` Check 7 now read only the `python/` folder, and the next `/lazy-python.install` scaffolds empty stubs there beside your old files. A migration step moves each old overlay into `docs/guidelines/python/` for you; `/lazy-core.setup` runs it after the install chain. When both an old overlay and a file at the new path exist, the step moves nothing and reports `kept-both` with the pair, because it cannot tell which one you mean to keep — merge them yourself and remove the one you do not want. `docs/guidelines/domain-groups.md` and other language-neutral guides stay where they are.
 
 ---
 
@@ -405,7 +413,7 @@ Check that each overlay file still opens with its canonical `# Project additions
 
 ## The `chk-py` wrapper is missing after install, or the bare `chk-py` command isn't found.
 
-Re-run `/lazy-python.install`. Step 2 deploys `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` into your project root — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. Step 2 also deploys the protected-access mypy shim to `cli/mypy/protected_access.py`, which `pyproject.toml` references by that path, and makes sure your `.gitignore` carries a `.venv/` line for the project venv `cfg-py` builds. If the phase reports `wrappers-deployed-4` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
+Re-run `/lazy-python.install`. Step 2 deploys `cli/cfg-py`, `cli/chk-py` and `cli/tst-py` into your project root, together with the plugin locator copy `cli/lazy_python_locator.py` they use to find the active plugin install — deliberately with no executable bit, since a mode-blind git client (obsidian-git on Android, some Windows checkouts) can strip the bit on pull and used to break the wrapper outright. Run it explicitly instead: `bash ./cli/chk-py all -q`. Step 2 (`wrappers-deployed-4`: three wrappers plus the shim) also deploys the protected-access mypy shim to `cli/mypy/protected_access.py`, which `pyproject.toml` references by that path, and makes sure your `.gitignore` carries a `.venv/` line for the project venv `cfg-py` builds. If the phase reports `wrappers-deployed-4` but the files are still absent, check that `cli/` exists in your project root; the phase creates it if missing.
 
 Step 2b is the separate step that gives you the bare `chk-py` / `tst-py` command from any directory: it deploys `~/.local/bin/cfg-py`, `~/.local/bin/chk-py` and `~/.local/bin/tst-py`, the only files this plugin ever marks executable, since they live outside every repo and no mode-blind client can reach them. Each walks up from your current directory to the nearest `<repo>/cli/chk-py` (or `cfg-py` / `tst-py`) and runs it through `bash`. If `command -v chk-py` fails after Step 2b runs, `~/.local/bin` is not on your `$PATH` — the install reports this as `path-warning` and never edits your shell rc files itself; add the directory to your `$PATH` by hand, or keep using `bash ./cli/chk-py`.
 

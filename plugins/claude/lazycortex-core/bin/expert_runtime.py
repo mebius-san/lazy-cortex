@@ -386,7 +386,8 @@ def dispatch_job(repo: Path,
                  dedup_key: str | None = None,
                  dedup_fingerprint: str | None = None,
                  can_commit_in_repo: bool | None = None,
-                 halt_exempt: bool = False) -> dict:
+                 halt_exempt: bool = False,
+                 allow_no_commit: bool = False) -> dict:
   """
   Create one job bundle atomically and queue it for the pump.
 
@@ -465,6 +466,10 @@ def dispatch_job(repo: Path,
     halt_exempt: When true, `config.json` carries `halt_exempt` and the pump still serves the
       bundle while the system is halted or the tree is dirty. Only a dispatcher whose job is
       the triage of that condition passes it; the key is absent otherwise.
+    allow_no_commit: When true, `config.json` carries `allow_no_commit` and the pump accepts an isolated run that
+      leaves its branch unmoved only when the branch existed before the job's first attempt (a continuation) and
+      the run reports success; a first run on a fresh branch keeps its commit obligation. Only a dispatcher whose
+      continuation may legitimately have nothing to commit passes it; the key is absent otherwise.
 
   Returns:
     `{job_id, queue_path}` on a fresh dispatch, or
@@ -687,6 +692,13 @@ def dispatch_job(repo: Path,
   # key is written only when claimed, so an ordinary bundle stays exactly as it was.
   if halt_exempt:
     cfg_blob[JobConfigKey.HALT_EXEMPT] = True
+
+  # a commitless finish is stamped the same way: only the dispatcher knows that this run continues work whose
+  # durable output already sits on the branch, so it may end with nothing new to commit. Absent means off.
+  if allow_no_commit:
+    cfg_blob[JobConfigKey.ALLOW_NO_COMMIT] = True
+
+  # the snapshot the pump reads at spawn time
   (bundle_dir / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2), encoding = "utf-8")
 
   # request.json is the caller payload plus the dedup key, so a later dispatch can match against it

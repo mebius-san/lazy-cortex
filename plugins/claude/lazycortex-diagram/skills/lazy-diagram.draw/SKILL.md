@@ -24,7 +24,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it". No-ops count only if they produced an explicit outcome word (e.g. `unchanged`, `skipped-below-threshold`, `failed:format-not-supported-for-kind`, `n/a (ascii)`).
 3. **Do not reach Step 8 (Report and log) until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one outcome line per step above. A missing line is a bug; do not render the report with gaps.
-5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every template and scheme lookup (Steps 2, 4, 5) is the single `Bash(ls …)` / `Bash(test -f …)` the step names, written with the `${CLAUDE_PLUGIN_ROOT}` variable form exactly as printed here, and never as a `;`-chained compound command; the permission layer denies an expanded absolute path and the skill dies before Step 6.
+5. **`${CLAUDE_PLUGIN_ROOT}` arrives in this skill's text already expanded to an absolute path.** Never pass that literal to `Bash` — every template and scheme lookup (Steps 2, 4, 5) is the single `Bash(ls …)` the step names, written with the `${CLAUDE_PLUGIN_ROOT}` variable form exactly as printed here, and never as a `;`-chained compound command; the permission layer denies an expanded absolute path and the skill dies before Step 6.
 
 ## Caller contract
 
@@ -131,14 +131,14 @@ Outcome: `resolved kind=<kind> format=<format> source=<pinned-by-caller|heuristi
 
 ### Step 4: Resolve scheme path
 
-- For `format=mermaid`: `Bash(test -f "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json")`. A non-zero exit → propagate `failed:scheme-not-found:<name>` and short-circuit. The skill does not parse the JSON itself; the drawer agent does. The skill only verifies presence so a missing scheme fails fast at the dispatcher rather than inside the agent.
+- For `format=mermaid`: `Bash(ls -d "${CLAUDE_PLUGIN_ROOT}/templates/diagram.mermaid/styles-<scheme|default>.json")`. The scheme is present when the command lists the path; when it fails with "No such file or directory" → propagate `failed:scheme-not-found:<name>` and short-circuit. The skill does not parse the JSON itself; the drawer agent does. The skill only verifies presence so a missing scheme fails fast at the dispatcher rather than inside the agent.
 - For `format=ascii`: skip — ASCII drawers do not consume scheme files.
 
 Outcome: `resolved scheme=<name>` (mermaid) / `n/a (ascii)` / `failed:scheme-not-found:<name>`.
 
 ### Step 5: Format-compatibility check
 
-- `Bash(test -f "${CLAUDE_PLUGIN_ROOT}/templates/diagram.<format>/diagram-<kind>.md")`. A non-zero exit → `failed:format-not-supported-for-kind=<kind> in format=<format>`. Hard fail; do NOT silently switch format. Short-circuit to Step 8.
+- `Bash(ls -d "${CLAUDE_PLUGIN_ROOT}/templates/diagram.<format>/diagram-<kind>.md")`. The template is present when the command lists the path; when it fails with "No such file or directory" → `failed:format-not-supported-for-kind=<kind> in format=<format>`. Hard fail; do NOT silently switch format. Short-circuit to Step 8.
 
 Outcome: `compatible` or `failed:format-not-supported-for-kind`.
 

@@ -1,9 +1,10 @@
 """Local-only git operations for lazy-review.
 
 The module's surface is intentionally narrow: every public function
-either reads the local repository's history for one file or writes
+either reads the local repository's history for one file, writes
 exactly one local commit carrying a single `Doc-Review-Phase` trailer
-under a caller-supplied git author identity. The module NEVER touches
+under a caller-supplied git author identity, or (`author_flags`) builds
+the per-call identity flags such a commit is made with. The module NEVER touches
 the remote (no push / pull / fetch / rebase / reset --hard) — that is
 `lazycortex-core`'s job, run around every routine tick.
 
@@ -50,7 +51,9 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from errors import GitOpsError  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import BotIdentity, EnvVar, JobKey, Paths, Phase, Plugin, Trailer  # pylint: disable=import-error
+from keys import BotIdentity, JobKey, Paths, Phase, Plugin, Trailer  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import review_locator  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -67,12 +70,8 @@ _GIT_TRAILER_RE = re.compile(r"^([A-Za-z][\w-]*):\s*(.*)$")
 # closed by a record separator.
 _GIT_LOG_FORMAT = "%H%x00%an%x00%ae%x00%s%x00%B%x1e"
 
-# Claude Code's install registry, relative to the home directory.
-# waiver: external Claude Code registry path, not an internal key
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
-
-# The directory a repository that authors plugins keeps them under, relative to its root.
-_PLUGIN_TREE_REL = "plugins/claude"
+# The directory holding this plugin's own tree, where a development checkout keeps the sibling plugins.
+_SIBLING_BASE = Path(__file__).resolve().parents[2]
 
 # The entry kinds of git's machine-readable status that describe a tracked file, each with the number of
 # space-separated fields standing before the path: a changed file, a renamed or copied one, an unmerged one.
@@ -196,12 +195,13 @@ def _build_message(
 
   # Domain(review.lifecycle):
   # # Commit phase vocabulary
-  # Every commit the review system makes carries exactly one phase token recording which
-  # step of the review cycle produced it. A mechanical commit — bootstrap, a banner repaint,
+  # Every commit the review loop itself makes carries exactly one phase token recording which
+  # step of the review cycle produced it; the operator's own opt-in and stop commits are plain
+  # operator commits and carry none. A mechanical commit — bootstrap, a banner repaint,
   # a scaffold strip, the coordinator's own history and command writes — carries no writer
   # identity, since no round advanced. A finalize commit closes the cycle and carries no
-  # writer identity either. A commit with no phase token at all was not made by the review
-  # system.
+  # writer identity either. Whatever its kind, every commit the loop makes carries a phase
+  # token naming what kind of commit it is.
 
   # subject first, then the phase trailer set off by a blank line
   parts = [subject]
@@ -212,7 +212,7 @@ def _build_message(
   return "\n".join(parts) + "\n"
 
 
-def _author_flags(author: Mapping[str, str]) -> list[str]:
+def author_flags(author: Mapping[str, str]) -> list[str]:
   """
   Return git `-c` config overrides for a one-shot commit under the named identity.
 
@@ -278,7 +278,7 @@ def _add_and_commit(
   # waiver: git CLI vocabulary
   _run_git(repo, "add", "--", _literal(path.relative_to(repo)))
   _run_git(
-      repo, *_author_flags(author),
+      repo, *author_flags(author),
       # waiver: git CLI vocabulary
       "commit", "-q", "-m", message_text,
       "--", _literal(path.relative_to(repo)), *( _literal(extra) for extra in extra_paths ),
@@ -290,187 +290,67 @@ def _add_and_commit(
 # ------------------------------------------------------- plugin resolution
 
 
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin version string.
-
-  Args:
-    name: Version string as the install registry records it.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(char for char in part if char.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
-def read_installed_plugin_root(name: str) -> Path | None:
-  """
-  Resolve a plugin's installed source root from Claude Code's plugin registry.
-
-  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
-  version that installed the plugin, each naming its `installPath`; the highest recorded version
-  wins.
-
-  Args:
-    name: Plugin name without its `@<marketplace>` suffix.
-
-  Returns:
-    The recorded install root when it exists on disk, else None.
-  """
-
-  # the registry file, never a walk of the plugin cache (it keeps every version ever installed); an unreadable or
-  # malformed one names no install
-  try:
-    data = json.loads((Path.home() / _INSTALLED_PLUGINS_REL).read_text(encoding = "utf-8"))
-  except (OSError, ValueError):
-    return None
-
-  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
-  # waiver: field of Claude Code's external registry schema, not an internal key
-  plugins = data.get("plugins", data) if isinstance(data, dict) else {}
-  records = [
-    rec
-    for key, entries in plugins.items() if key.split("@", 1)[0] == name
-    # waiver: field of Claude Code's external registry schema, not an internal key
-    for rec in (entries or []) if isinstance(rec, dict) and rec.get("installPath")
-  ]
-
-  # guard: the plugin was never installed on this machine
-  if not records:
-    return None
-
-  # the highest recorded version wins, and only when its root is still on disk
-  # waiver: fields of Claude Code's external registry schema, not internal keys
-  best = max(records, key = lambda rec: _version_sort_key(str(rec.get("version", ""))))
-  # waiver: field of Claude Code's external registry schema, not an internal key
-  root = Path(str(best["installPath"]))
-  return root if root.is_dir() else None
-
-
-def resolve_core_cli() -> Path | None:
-  """
-  Find the `lazycortex-core` CLI binary.
-
-  Returns:
-    The path to the resolved binary, preferring `$LAZYCORTEX_PLUGIN_DIRS` over the dev-vault sibling
-    tree and that over the install registry, or `None` when no lookup finds one.
-  """
-  # env stage — the plugin source trees the runtime daemon exports come first
-  for entry in os.environ.get(EnvVar.PLUGIN_DIRS, "").split(os.pathsep):
-    # guard: empty path segment (from a trailing/double pathsep) — skip it
-    if not entry:
-      continue
-    cli = Path(entry) / Paths.BIN_DIR / Plugin.CORE
-    if cli.is_file():
-      return cli
-
-  # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so core's own bin/ is two
-  # levels up and back down the sibling tree; it precedes the registry (§ 2b) so a checkout runs the
-  # sources at hand rather than whatever version happens to be installed
-  sibling = Path(__file__).resolve().parents[2] / Plugin.CORE / Paths.BIN_DIR / Plugin.CORE
-  if sibling.is_file():
-    return sibling
-
-  # registry stage — the install root Claude Code's plugin registry records for core
-  root = read_installed_plugin_root(Plugin.CORE)
-
-  # guard: core was never installed on this machine — nothing further to try
-  if root is None:
-    return None
-  cli = root / Paths.BIN_DIR / Plugin.CORE
-  return cli if cli.is_file() else None
-
-
-def require_core_cli() -> Path:
-  """
-  Resolve the `lazycortex-core` CLI file, or fail.
-
-  Returns:
-    Path of the core CLI file.
-
-  Raises:
-    RuntimeError: When none of the three lookup stages finds a core CLI; the message names all three.
-  """
-  cli = resolve_core_cli()
-
-  # guard: no lookup stage found a binary — whatever the caller needs from core cannot happen
-  if cli is None:
-    raise RuntimeError(
-        "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match, no "
-        "dev-vault sibling tree carries bin/lazycortex-core, and the plugin registry records no "
-        "lazycortex-core install with a bin/lazycortex-core entry."
-    )
-  return cli
-
-
 def resolve_plugin_cli(name: str, *, repo: Path) -> Path:
   """
   Resolve a sibling plugin's CLI file by the plugin's name, or fail.
 
   Guarantees:
-    - The lookup order is fixed: the `$LAZYCORTEX_PLUGIN_DIRS` entries, then the dev-vault sibling plugin tree, then
-      the repository's own plugin tree, then the install registry. The first stage that yields an existing file
-      wins, so a checkout runs the sources at hand and never an installed copy found first.
+    - Sources at hand win: the exported plugin directories, the sibling plugin tree beside this plugin and the
+      current checkout's own plugin tree are never shadowed by an installed copy, and the install used last is one
+      recorded for this repository or the user. Another project's install is never used.
     - When no stage resolves the CLI, the call raises `RuntimeError` naming every stage and where it looked; it
       never returns a fallback path.
 
   Args:
     name: The plugin's name, which is also the file name of its CLI.
-    repo: The repository root whose own plugin tree is searched.
+    repo: Any directory inside the asking repository: its root, a subdirectory, or a linked worktree.
 
   Returns:
     Path of the plugin's CLI file.
 
   Raises:
-    RuntimeError: When no stage finds the CLI file; the message names every stage and where it looked.
+    RuntimeError: When no stage finds the plugin, or the plugin found carries no CLI file; the message names every
+      stage and where it looked, or the missing file.
   """
 
   # Contract:
-  # The lookup order is fixed: the `$LAZYCORTEX_PLUGIN_DIRS` entries, then the dev-vault sibling plugin tree, then
-  # the repository's own plugin tree, then the install registry. The first stage that yields an existing file wins,
-  # so a checkout runs the sources at hand and never an installed copy found first.
+  # Sources at hand are never shadowed by an installed copy, so a checkout runs the plugin it authors; the install
+  # used last is one recorded for this repository or the user, and another project's install is NEVER used.
 
   # Contract:
   # When no stage resolves the CLI, the call raises `RuntimeError` naming every stage and where it looked. It NEVER
   # returns a fallback path.
 
-  # env stage — the plugin source trees the runtime daemon exports come first
-  exported = os.environ.get(EnvVar.PLUGIN_DIRS, "")
-  for entry in exported.split(os.pathsep):
-    # guard: empty path segment (from a trailing/double pathsep) — skip it
-    if not entry:
-      continue
-    cli = Path(entry) / Paths.BIN_DIR / name
-    if cli.is_file():
-      return cli
+  # the shared locator runs every stage; its miss names them all
+  try:
+    root, _stage = review_locator.plugin_root(name, repo, sibling_base = _SIBLING_BASE)
+  except review_locator.PluginNotFoundError as error:
+    raise RuntimeError(f"{name} CLI not resolvable: {error}") from error
 
-  # dev-vault stage — this file sits at plugins/claude/lazycortex-review/bin/, so the sibling plugin's tree is two
-  # levels up
-  sibling = Path(__file__).resolve().parents[2] / name / Paths.BIN_DIR / name
-  if sibling.is_file():
-    return sibling
+  # the CLI file sits in the found root's bin directory
+  cli = root / Paths.BIN_DIR / name
 
-  # repo stage — a repository that authors the plugin carries it under its own plugin tree
-  authored = repo / _PLUGIN_TREE_REL / name / Paths.BIN_DIR / name
-  if authored.is_file():
-    return authored
+  # guard: a plugin root without its CLI file cannot be run
+  if not cli.is_file():
+    raise RuntimeError(f"{name} CLI not resolvable: {cli} is absent from the plugin root found")
+  return cli
 
-  # registry stage — the install root Claude Code's plugin registry records for the plugin
-  root = read_installed_plugin_root(name)
-  installed = None if root is None else root / Paths.BIN_DIR / name
-  if installed is not None and installed.is_file():
-    return installed
 
-  # no stage found the CLI: the raise names each stage and where it looked
-  raise RuntimeError(
-      f"{name} CLI not resolvable: ${EnvVar.PLUGIN_DIRS} ({exported or 'unset'}) yields no {Paths.BIN_DIR}/{name}, "
-      f"the dev-vault sibling {sibling} is absent, the repository tree {authored} is absent, and "
-      f"~/{_INSTALLED_PLUGINS_REL} records no {name} install with a {Paths.BIN_DIR}/{name} entry."
-  )
+def require_core_cli(repo: Path) -> Path:
+  """
+  Resolve the `lazycortex-core` CLI file, or fail.
+
+  Args:
+    repo: Any directory inside the asking repository: its root, a subdirectory, or a linked worktree.
+
+  Returns:
+    Path of the core CLI file.
+
+  Raises:
+    RuntimeError: When no lookup stage finds the core plugin, or the plugin found carries no CLI file; the message
+      names every stage searched, or the missing file.
+  """
+  return resolve_plugin_cli(Plugin.CORE, repo = repo)
 
 
 def read_status(repo: Path, paths: list[Path]) -> list[str]:
@@ -605,37 +485,11 @@ def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
   if not paths:
     return []
 
-  # walk the plugin-dir registry for the obsidian CLI; absence means no repaint here
-  cli = None
-  for entry in os.environ.get(EnvVar.PLUGIN_DIRS, "").split(os.pathsep):
-    # guard: empty segments appear when the variable is unset or ends with a separator
-    if not entry:
-      continue
-    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    candidate = Path(entry) / "bin" / "lazycortex-obsidian"
-    if candidate.is_file():
-      cli = candidate
-      break
-
-  # dev-vault fallback — a checkout runs the sources at hand, never an installed copy (§ 2b);
-  # this file sits at plugins/claude/lazycortex-review/bin/, so the sibling tree is two levels up
-  if cli is None:
-    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    sibling = Path(__file__).resolve().parents[2] / "lazycortex-obsidian/bin/lazycortex-obsidian"
-    if sibling.is_file():
-      cli = sibling
-
-  # registry fallback — a session (hook, skill) has no daemon export to walk
-  if cli is None:
-    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    root = read_installed_plugin_root("lazycortex-obsidian")
-    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
-    installed = None if root is None else root / "bin" / "lazycortex-obsidian"
-    if installed is not None and installed.is_file():
-      cli = installed
-
-  # guard: no obsidian plugin on this host — repaint silently unavailable
-  if cli is None:
+  # guard: an obsidian CLI no stage finds means no repaint here, which is not a failure
+  try:
+    # waiver: sibling plugin's name per dev.plugin-boundaries § 1c, not a domain key
+    cli = resolve_plugin_cli("lazycortex-obsidian", repo = repo)
+  except RuntimeError:
     return []
 
   # run the repaint and read back which notes actually changed
@@ -714,7 +568,7 @@ def commit_mechanical(
     # waiver: git CLI vocabulary
     _run_git(repo, "add", "--", _literal(extra))
 
-  # the mechanical-phase trailer marks the commit as the system's own for the recogniser
+  # the mechanical-phase trailer records which kind of review commit this is; whose commit it is follows its author
   return _add_and_commit(
       repo, path,
       author = author,

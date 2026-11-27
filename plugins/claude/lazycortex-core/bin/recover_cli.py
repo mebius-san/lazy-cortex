@@ -8,8 +8,8 @@ halt, clean the working tree, and triage job bundles.
 Every verb prints a one-word outcome or JSON to stdout and never raises a recovery error at
 the caller: a `RecoverError` or a failed git command becomes an `error: ...` line (or the
 `still-dirty: ...` line `resume` is documented to print) and a non-zero exit. The repository
-root follows the dispatcher convention — `LAZY_REPO_ROOT`, then the process working
-directory, overridable per call with `--cwd`.
+root is the toplevel of the checkout that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory
+sits in (the directory itself outside git).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import recover  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_repo_root  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -428,7 +428,7 @@ def cmd_recover(argv: list[str]) -> int:
   # on empty versus non-empty. On failure the output starts with an `error: ` line and the exit code is 1.
 
   args = _build_parser().parse_args(argv)
-  repo = resolve_repo_root(args.cwd).resolve()
+  repo = query_repo_root(args.cwd)
 
   # halt is read-only: it prints the block the skill branches on and is done before any verb acts
   if args.verb == Verb.HALT:

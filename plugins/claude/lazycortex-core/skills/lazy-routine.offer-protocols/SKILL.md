@@ -22,7 +22,7 @@ Passed as `keyword=value` / flags in the dispatch prompt:
 List both source roots and `Read` each match's frontmatter:
 
 - `plugins/claude/*/references/*.md` — monorepo plugin sources (present only inside the marketplace repo; absent in a consumer install).
-- `<installPath>/references/*.md` for each record in `~/.claude/plugins/installed_plugins.json` — installed plugins, one root per plugin: the `installPath` of its highest recorded version. The plugin cache itself is never globbed: it keeps every version ever installed, so a cache-wide glob offers protocols from stale copies.
+- `<installPath>/references/*.md` for each record in `~/.claude/plugins/installed_plugins.json` — installed plugins, one root per plugin: the `installPath` of its highest version among the records made for the whole user (`scope: user` / `managed`) or for this repo's main checkout (`scope: project` / `local` with that `projectPath`, which `"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/plugin_locator.py" checkout` prints); a record made for another project is never used. The plugin cache itself is never globbed: it keeps every version ever installed, so a cache-wide glob offers protocols from stale copies.
 
 Keep every file whose frontmatter carries `routine_protocol_candidate: true`. For each, record:
 

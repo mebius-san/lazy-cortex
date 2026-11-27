@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through its approved design to its publication in a product release.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved, lazy-spec.flip-gate closes spec_design_done, the operator ticks Start release and a release builds and tests the product, lazy-spec.sync-with-code reconciles code reality and proposes the release's spec_develop_done, and the operator's Publish tick sets the asset's spec_released."
@@ -80,6 +80,7 @@ Approving `design.md` carries three side effects along, none of which need a sep
 - **Cancelling a mandatory document.** `cancelled` is accepted only on a system tech document, a `code-plan` or a `test-plan`. On any other file, `design.md` included, the request is refused with "cancelled not allowed on <file>".
 - **A misplaced `--restamp`.** The optional `--restamp` flag is valid only together with `approved`; it rewrites `spec_approved_at` on a document that is already approved (the coordinators use it when a document comes out of a review approved again). With any other stage it is refused.
 - **Stage-less types.** A document whose type carries no stage (for example a code report, a test report, or `decisions.md`) has nothing to set.
+- **Untyped or undeclared documents.** A document that carries no `spec_doc_type`, or whose type the product's scope does not declare, is refused. Give the document its type (or fix the typo in it) and re-run; a refusal never leaves a half-written stage behind.
 - **A cancelled, halted or released owner.** If the decision transfer on approval is refused because the owning asset is cancelled, halted or released, nothing is written and the document keeps its previous stage; the reason is reported as it stands.
 
 **Verification gate:** open `design.md`'s frontmatter and confirm `spec_stage: approved` and a `spec_approved_at` stamp are present.

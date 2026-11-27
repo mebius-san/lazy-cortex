@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon, then recover it with /lazy-runtime.recover from any of its halt reasons.
-last_regen: 2026-11-21
+last_regen: 2026-11-27
 diagram_spec:
   - anchor: "Install and daemon setup"
     request: "Sequence diagram: User runs /lazy-core.install, which writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections with daemon.enabled false and never touches the daemon; then runs /lazy-core.daemon-setup, answers yes to enabling the daemon and to driving it from this checkout, and the skill installs the supervisor unit."
@@ -16,12 +16,12 @@ source_skills:
   - lazy-core.install
   - lazy-core.daemon-setup
   - lazy-runtime.recover
-source_sha: cd69fa86b85d950d98c1a14d921b11fda9b53b0c
-surface_sha: e0ec3204a219fa3ab6c59fc93404715403cf511bcddcc891863701822779329e
+source_sha: ebfb485e33c56f106f3f0952e6753075e46419f6
+surface_sha: 39edfb37c0474abde36c20f1d23f0149766f3191896ee5350235c9f7fee288d6
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, enable the daemon and its supervisor, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync, a local git failure, a rebase git refuses to start, a repeating bot commit, two checkouts sharing one inbox, a routine config gone invalid, a settings value a routine's own CLI rejects, or a closed subscription rate-limit window.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, enable the daemon and its supervisor, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync, a local git failure, a rebase git refuses to start, a repeating bot commit, two checkouts sharing one inbox, a routine config gone invalid, a settings value a routine's own CLI rejects, a closed subscription rate-limit window, or a job barred from committing that committed on your checkout anyway.
 
 ## Outcome
 
@@ -43,6 +43,8 @@ If the interpreter that qualified is not `python3`, install records it for this 
 
 If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, install resolves them as part of its run. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. After linking them it checks that git cannot see the links, and offers to append the missing ignore lines to `.gitignore` — accept, because links left visible keep the tree dirty and a daemon on this checkout halts with `uncommitted_changes` on its first tick.
 
+One more daemon-related repair install keeps: when the project's daemon is enabled and runs from a different checkout on this host, install brings that checkout's gitignored sandbox and permission files current, and refreshes its supervisor unit through the same unit-sync step `/lazy-core.daemon-setup` uses. It never writes that checkout's tracked files, and it never touches the metrics endpoint.
+
 With the runtime layer in place, decide how you want it driven:
 
 - **By hand, no background process** — run `/lazy-runtime.tick` whenever you want the due routines and job queue processed once; it uses the same primitives and the same serial order a daemon would. Nothing further to set up — skip to Step 3.
@@ -53,7 +55,7 @@ With the runtime layer in place, decide how you want it driven:
 Run `/lazy-core.daemon-setup`. This is the one skill that owns the daemon, and you run it rarely — once per project, or when you move the daemon to another machine or checkout. It stops with a pointer back to `/lazy-core.install` if the repo has no `daemon` section yet. It walks these gates, each answer recorded in the tracked `<repo-root>/.claude/lazy.settings.json` and read first on the next run — a question returns only while nothing is on record:
 
 - **Enable the daemon.** While `daemon.enabled` is `false` it asks whether a background daemon should supervise this project. Answer no and nothing is written and it stops there; routines keep running through `/lazy-runtime.tick`, and a later run asks again because the flag is still `false`.
-- **Pick the driving checkout.** It asks whether this checkout on this machine drives the daemon and records the answer in `daemon.run_here`, a map from hostname to checkout path. Answer no and it records an empty map: no supervisor starts anywhere until a checkout is named. A machine or checkout the map already names is not asked again, and a map left in an old boolean or bare host-list shape is replaced by the answer. A machine or checkout the map does not name gets no supervisor, and the daemon refuses to start there. **The checkout you name must be a git-only clone outside Dropbox** — the daemon refuses to start in any checkout whose resolved path has a component named `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`), printing a one-line refusal and recording a `dropbox_denied` incident instead of ever attempting to run — see **After you're done** below for the fix if your working checkout already lives on Dropbox.
+- **Pick the driving checkout.** It asks whether this checkout on this machine drives the daemon and records the answer in `daemon.run_here`, a map from hostname to checkout path. Answer no and it records an empty map: no supervisor starts anywhere until a checkout is named. A machine or checkout the map already names is not asked again, and a map left in an old boolean or bare host-list shape is replaced by the answer. A machine or checkout the map does not name gets no supervisor, and the daemon refuses to start there. When the map names a different checkout for this machine, the skill does not ask: it prints the path the map names and removes this checkout's own supervisor unit, since a unit for a checkout that must not run here keeps a duplicate daemon alive. Re-pointing the map is a deliberate edit you make yourself. **The checkout you name must be a git-only clone outside Dropbox** — the daemon refuses to start in any checkout whose resolved path has a component named `Dropbox`, starting with `Dropbox` (`Dropbox (Personal)`, `~/Library/CloudStorage/Dropbox…`), or ending in ` Dropbox` (`Auriglaci Dropbox`), printing a one-line refusal and recording a `dropbox_denied` incident instead of ever attempting to run — see **After you're done** below for the fix if your working checkout already lives on Dropbox.
 - **Inbox ownership guard.** Before any supervisor exists, it refuses to go on when two checkouts would end up driving the same physical inbox directory — the duplicate imports are not automatically reversible. It names the other checkout and tells you the two projects' `daemon.run_here` maps must not both name a checkout on this host. Which checkout drives a shared inbox is your decision; the skill never resolves it for you. A checkout the map does not name skips this check, since the daemon already refuses to start there on its own.
 - **Install the supervisor.** It derives everything else itself — a launchd unit on macOS, a systemd user unit on Linux, whether this repo ships plugin sources (dev-mode), and the interpreter the unit runs — and installs the unit, replacing an old basename-only unit for the same checkout. The unit runs the absolute interpreter the skill resolves (an interpreter you pinned for the project if it still exists, otherwise `python3`), and honours any login-shell or env-file options already recorded for the supervisor, so a headless host can still see its token and `PATH`. On a machine or checkout the map does not name, it instead removes this checkout's unit if one is loaded.
 - **Metrics.** Once a supervisor is installed it asks once whether to enable the Prometheus-compatible `/metrics` endpoint. On yes it picks a free loopback port automatically (recorded per machine, not in the tracked file) and refreshes the host's scrape-targets file. On no it records the decline and does not ask again.
@@ -92,7 +94,7 @@ After one polling interval, open `.runtime/state.json` and confirm the `last_run
 
 ### Step 6 — Recover if the daemon halts
 
-The daemon halts on one of eleven named reasons and writes a `daemon_halted` block to `.runtime/state.json` in every case. If you notice jobs stop processing, run:
+The daemon halts on one of twelve named reasons and writes a `daemon_halted` block to `.runtime/state.json` in every case. If you notice jobs stop processing, run:
 
 ```
 /lazy-runtime.recover
@@ -124,6 +126,8 @@ If the daemon is not halted, the skill says so and changes nothing. Otherwise it
 **Config-violation halt (`config_violation`)** — a routine's tick exited with output the daemon read as a rejected settings invariant, typically raised by the same plugin's own CLI the routine drives. The daemon escalates this to a halt because a setting a CLI rejects once will keep being rejected on every future tick. The skill shows you the rejection text from the routine's own incident; fix whatever it names — since the rejection comes from the owning plugin, the setting at fault often lives wherever that plugin reads its own config, not necessarily in the routine entry itself. Re-run the routine's command by hand to confirm the fix, then confirm **resume**.
 
 **Rate-limit halt (`rate_limit`)** — the host-local subscription rate-limit window closed, and the daemon paused rather than burn a spawn against it. Nothing is broken here and no git repair is needed — the daemon lifts this halt itself the moment the window reopens (the skill shows you `resets_at`, the epoch second that happens). Confirm **resume** only if you want the queue moving again before then; the pump's pre-spawn check still refuses to spawn while the shared rate-limit flag holds a live record, so resuming early burns no tokens.
+
+**Forbidden-commit halt (`forbidden_commit`)** — a job dispatched with committing barred nevertheless committed on this checkout under its expert's own identity. The job was closed as failed and its transcript kept in `.experts/.jobs/<expert>/<job_id>/transcript.jsonl`. The skill lists the commits (each with its full hash), the commit the checkout stood at when the first job was claimed, and every job involved. Nothing was reverted, and the daemon publishes nothing until you resume — the commits are local only. Inspect each with `git show --stat <hash>`, then keep the commits or undo them yourself (`git revert <hash>`, or `git reset` while they are unpublished). Before resuming, find out why the expert committed (its protocol, or a sub-skill it ran), or the next such job halts the same way. Resuming releases the publish hold for exactly the jobs the halt listed; a job found later raises the halt again. This halt never clears itself, and it returns after any other halt is lifted until it is resumed.
 
 Once cleanup or manual repair succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required — except after an `inbox_collision` repair, which needs the daemon itself restarted so its once-at-startup collision check runs again.
 

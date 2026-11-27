@@ -27,7 +27,7 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
-from spec_paths import resolve_plugin_cli  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+from spec_paths import find_plugin_cli  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # How a subprocess's undecodable output bytes are read: replaced, so odd output never raises.
@@ -102,8 +102,8 @@ def repaint_paths_checked(repo: Path, paths: list[str]) -> list[str]:
     repaint was unavailable or changed nothing.
 
   Raises:
-    RepaintFailedError: If the worker could not be started, exited non-zero, or printed output that is not a
-      JSON object with a `touched` list.
+    RepaintFailedError: If the obsidian plugin carries no worker, or the worker could not be started, exited
+      non-zero, or printed output that is not a JSON object with a `touched` list.
   """
 
   # Contract:
@@ -118,9 +118,13 @@ def repaint_paths_checked(repo: Path, paths: list[str]) -> list[str]:
   if not paths:
     return []
 
-  # the obsidian CLI through the shared sibling lookup; absence means no repaint here
-  # waiver: sibling plugin's CLI name per dev.plugin-boundaries § 1c, not a domain key
-  cli = resolve_plugin_cli("lazycortex-obsidian", dev_repo = repo)
+  # the obsidian CLI through the shared sibling lookup; absence means no repaint here, a plugin found without its
+  # worker is a failed repaint
+  try:
+    # waiver: sibling plugin's CLI name per dev.plugin-boundaries § 1c, not a domain key
+    cli = find_plugin_cli("lazycortex-obsidian", repo)
+  except RuntimeError as error:
+    raise RepaintFailedError(f"worker not found: {error}") from error
 
   # guard: no obsidian plugin on this host — repaint unavailable, which is not a failure
   if cli is None:

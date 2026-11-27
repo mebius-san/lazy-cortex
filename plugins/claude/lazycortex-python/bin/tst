@@ -16,6 +16,18 @@
 #   tst -q [<module>]    # -q is accepted as a no-op (per lazy-python.style.md mandate)
 #   tst --help           # print this usage
 #
+# Two environment variables change the run; with neither set it is as described above.
+#
+#   LAZYCORTEX_TST_PASSTHROUGH_PY   set to anything but empty or `0`: passthrough mode, for a
+#       project's own test runner that calls this one. Every argument goes to pytest as given —
+#       no module check, no `-q`, no help shortcut; the caller owns what is run and what is
+#       refused. The only addition is the CPU-yield plugin; the re-export dedup plugin is not
+#       loaded, so the set of tests the caller selects is exactly what runs.
+#   LAZYCORTEX_TOOL_PYTEST          path to the pytest executable to run. The venv resolver is
+#       skipped — the caller has chosen its environment — and the directory of that executable
+#       goes first on PATH, the way an activated venv would put it. A path that names no file
+#       is refused.
+#
 # Runs standalone from a bare terminal — CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DATA
 # are not read: the venv resolver (_ensure_venv.sh) derives the project root itself, and
 # configures a missing or stale project venv from pyproject.toml the way `cfg` (cfg-py)
@@ -37,32 +49,61 @@ function print_help() {
   echo "  -q         accepted as no-op (lazy-python.style.md compat)"
   echo "  --help     this help"
   echo
+  echo "environment:"
+  echo "  LAZYCORTEX_TST_PASSTHROUGH_PY   anything but empty or 0: every argument goes to pytest as given"
+  echo "  LAZYCORTEX_TOOL_PYTEST          path to the pytest executable to run instead of the project venv's"
+  echo
 }
 
-# help shortcut
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  print_help
-  exit 0
+# passthrough mode: LAZYCORTEX_TST_PASSTHROUGH_PY set to anything but empty or `0`
+passthrough=0
+if [ -n "${LAZYCORTEX_TST_PASSTHROUGH_PY:-}" ] && [ "${LAZYCORTEX_TST_PASSTHROUGH_PY}" != "0" ]; then
+  passthrough=1
 fi
 
-# parse args: collect non-flag positional, swallow -q
+# the module argument is parsed only when this runner is the endpoint; in passthrough mode the
+# arguments stay untouched in "$@" for pytest
 mod=""
-while [ -n "${1-}" ]; do
-  if [ "$1" = "-q" ]; then
-    shift
-    continue
-  fi
-  if [ -z "$mod" ]; then
-    mod="$1"
-  else
-    echo "tst: unexpected extra arg: $1" >&2
+if [ "$passthrough" -eq 0 ]; then
+  # help shortcut
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     print_help
+    exit 0
+  fi
+
+  # parse args: collect non-flag positional, swallow -q
+  while [ -n "${1-}" ]; do
+    if [ "$1" = "-q" ]; then
+      shift
+      continue
+    fi
+    if [ -z "$mod" ]; then
+      mod="$1"
+    else
+      echo "tst: unexpected extra arg: $1" >&2
+      print_help
+      exit 1
+    fi
+    shift
+  done
+fi
+
+# the pytest to run: the one the caller names, else the one the venv resolver puts on PATH
+pytest_bin="pytest"
+if [ -n "${LAZYCORTEX_TOOL_PYTEST:-}" ]; then
+  # refuse a path that names no file before anything runs, naming the variable and the path
+  if [ ! -f "$LAZYCORTEX_TOOL_PYTEST" ]; then
+    echo "tst: LAZYCORTEX_TOOL_PYTEST names no file: $LAZYCORTEX_TOOL_PYTEST" >&2
     exit 1
   fi
-  shift
-done
+  pytest_bin="$LAZYCORTEX_TOOL_PYTEST"
+  # the caller's environment stands in for the resolved venv: its executables go first on PATH,
+  # so `python` in the env bootstrap below and in the tests is the one beside that pytest
+  export PATH="$(cd "$(dirname "$pytest_bin")" && pwd):${PATH}"
+else
+  source "$script_dir/_ensure_venv.sh"
+fi
 
-source "$script_dir/_ensure_venv.sh"
 # Optional project-env bootstrap (python.env_source) — must run after the venv is
 # active and before pytest is exec'd, in this same shell so exports are inherited.
 source "$script_dir/_ensure_env.sh"
@@ -72,6 +113,16 @@ source "$script_dir/_ensure_env.sh"
 # `-p _pytest_dedup`. It collapses tests collected twice via re-export shims (a test_all.py
 # aggregator + per-package shims) so each test runs once; a no-op in repos without shims.
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$script_dir"
+
+# The CPU-yield plugin sits in the same bin/ and loads the same way, with `-p _pytest_cpu_yield`.
+# It lowers the priority of the pytest process tree (niceness on POSIX, the below-normal priority
+# class on Windows) and caps xdist's automatic worker count at all CPUs but two, so several
+# concurrent test runs leave the machine responsive.
+
+# passthrough mode: the caller's arguments reach pytest as given, with only the CPU-yield plugin added
+if [ "$passthrough" -eq 1 ]; then
+  exec "$pytest_bin" -p _pytest_cpu_yield "$@"
+fi
 
 # `all` and no argument are the same whole-suite run; anything else scopes to tests/<mod>/
 if [ -z "$mod" ] || [ "$mod" = "all" ]; then
@@ -87,4 +138,4 @@ if [ ! -d "$target" ]; then
   exit 1
 fi
 
-exec pytest -q -p _pytest_dedup "$target"
+exec "$pytest_bin" -q -p _pytest_dedup -p _pytest_cpu_yield "$target"

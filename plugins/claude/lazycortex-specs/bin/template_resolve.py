@@ -10,18 +10,27 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
-
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import resolve_product  # pylint: disable=import-error
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-import scaffold_asset  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # waiver: CLI verb and flag tokens -- this module's own argparse surface
@@ -32,8 +41,6 @@ _ARG_CONTEXT = "--context"
 _ARG_PRODUCT = "--product"
 _ARG_TYPE = "--type"
 _ARG_CWD = "--cwd"
-# waiver: the env var the daemon exports for every subprocess it spawns
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _PROG = "lazycortex-specs template"
 # waiver: the two level contexts and the fall-through between them
 _CONTEXT_VAULT = "vault"
@@ -60,7 +67,7 @@ def _alias_for(repo: Path, context: str, product: str) -> str:
   Raises:
     ScaffoldRefusal: When the product is unregistered or the asset type's `alias_of` is invalid.
   """
-  # guard: the catalog root shares the level note with the product context
+  # the catalog root shares the level note with the product context
   if context == _CONTEXT_VAULT:
     return _CONTEXT_PRODUCT
 
@@ -94,8 +101,8 @@ def main(argv: list[str]) -> int:
   parser.add_argument(_ARG_CWD, default = None)
   args = parser.parse_args(argv)
 
-  # the flag, then the daemon-exported env var, then the process cwd — like every sibling verb
-  repo = scaffold_asset.repo_root(Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  # the nearest settings root of the flag, then of the daemon-exported env var, then of the process cwd
+  repo = spec_locator.query_settings_root(args.cwd)
   alias_base = _alias_for(repo, args.context, args.product)
   ancestors = resolve_product.ancestor_chain(repo, args.product) if args.product else []
   layers = scaffold_asset.template_layers(repo, args.context, args.product, args.file,

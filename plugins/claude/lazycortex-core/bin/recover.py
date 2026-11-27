@@ -24,6 +24,8 @@ import subprocess
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import error_ledger  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import commit_guard  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from runtime_daemon import check_working_tree  # pylint: disable=import-error
@@ -66,6 +68,7 @@ MANUAL_FIX_REASONS = {
   "git_rebase_not_started",
   "routine_config_invalid",
   "rate_limit",
+  "forbidden_commit",
 }
 
 
@@ -448,6 +451,11 @@ def resume(repo: Path) -> None:
     - A halt over uncommitted changes is never lifted while the working tree is not known clean: a dirty tree and a
       tree that could not be read both raise `RecoverError` and keep the halt.
 
+  Notes:
+    - Resuming a `forbidden_commit` halt also drops the forbidden-commit records that halt listed, releasing their
+      publish hold; records it did not list, and any record on resuming another halt, stay.
+    - The halt and those records are cleared in one state write.
+
   Args:
     repo: Absolute path to the repository root.
 
@@ -485,7 +493,10 @@ def resume(repo: Path) -> None:
   # guard: a tree that is dirty, or that could not be read, keeps the halt
   if dirt is not None:
     raise RecoverError("working tree still dirty; refusing to resume:\n" + "\n".join(dirt))
-  runtime_state.clear_halted(repo)
+
+  # one write clears the halt and, for a forbidden-commit halt, the records it listed — the operator's verdict on
+  # those commits — so nothing can raise the halt again between the two
+  runtime_state.update(repo, commit_guard.release)
   error_ledger.resolve(repo, f"halt:{repo.name}", resolution = IncidentResolution.RESUMED,
                        kind = IncidentKind.DAEMON_HALT, actor = IncidentActor.RECOVER)
 

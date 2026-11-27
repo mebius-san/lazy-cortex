@@ -11,8 +11,11 @@ Writes (or leaves alone if present) the following pieces of state:
   `reconcile-routine` verb: the keys this plugin owns are corrected to the shipped
   value on every run, every other key the registration carries is the operator's
   and is left as it stands.
-- `<repo>/.experts/.jobs/` and `<repo>/.logs/lazy-review/runs/`
-  directories.
+- `.experts/.jobs/` and `.logs/lazy-review/runs/` directories at the root of the
+  checkout `<repo>` sits in.
+
+`<repo>` is the directory whose `.claude/lazy.settings.json` configures the project: the nearest
+one from the start directory upward within its checkout, the checkout's root when none is nearer.
 
 On a repo installed before the coordinator migration the script also
 retires the `lazy-review.scan` routine, derives `review.watch_root` from
@@ -48,11 +51,17 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from keys import JobKey, Paths, ReviewKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -138,11 +147,17 @@ _COLLECT_ROUTINE = "lazy-review.collect"
 _WATCH_ROUTINE = "lazy-review.coordinator-watch"
 _SANITIZE_ROUTINE = "lazy-review.sanitize"
 
+# The coordinator-watch pathspec: its key in the routine, and the magic prefix and file tail around the watch root
+# waiver: core routine-schema key and git pathspec syntax, external formats rather than domain keys
+_PATH_FILTER, _GLOB_MAGIC, _GLOB_TAIL = "path_filter", ":(glob)", "**/*.md"
+
 # Per-routine list of the config keys this plugin owns — corrected to the shipped value on
 # every install, where every other key the registration carries stays the operator's answer.
 # Owned: the dispatch shape (`type` / `watch`), the CLI verb the routine runs (`command`), and the
 # path mask the watch derives from `review.watch_root` — none of them is a value the operator
-# could have decided, and all of them are values this plugin has changed before. Deliberately NOT
+# could have decided, and all of them are values this plugin has changed before. The path mask is
+# owned jointly by every settings root of the checkout: an install replaces only its own root's
+# entry in it and keeps the others, since one watch routine serves the whole checkout. Deliberately NOT
 # owned: `protocols` (an operator attaches an extra protocol deliberately through the offer verb,
 # and reasserting the shipped list would delete that attachment on the next install — the shipped
 # refs reach a registration that lacks them through the same additive union), `interval_sec`,
@@ -153,7 +168,7 @@ _SANITIZE_ROUTINE = "lazy-review.sanitize"
 # gains the shipped one, which is the case a stale install actually presents.
 _MANAGED_FIELDS = {
     _COLLECT_ROUTINE: ("command",),
-    _WATCH_ROUTINE: ("type", "watch", "path_filter", "command"),
+    _WATCH_ROUTINE: ("type", "watch", _PATH_FILTER, "command"),
     _SANITIZE_ROUTINE: ("type", "command"),
 }
 
@@ -272,17 +287,26 @@ def _resolve_branch(repo: Path, existing: dict) -> str:
 
 def _default_settings(repo: Path, existing: dict) -> dict:
   """
-  Build the settings sections this install seeds into `repo`.
+  Build the settings sections this install seeds for the settings root `repo`.
+
+  Notes:
+    - The coordinator-watch glob is prefixed with the path of `repo` relative to the checkout toplevel, because the
+      routine lives in the toplevel `routines` section and matches pathspecs from the checkout root.
 
   Args:
-    repo: Repository root the install targets.
+    repo: The nearest settings root the install works for.
     existing: The parsed settings object the seed is merged into.
 
   Returns:
     A settings-shaped dict of the `review`, `experts`, and `routines` sections.
   """
   watch_root = _resolve_watch_root(existing)
-  glob_root = "" if watch_root == _REPO_ROOT_WATCH else f"{watch_root}/"
+
+  # the watch matches pathspecs from the checkout's root, where the routines live, so a nested settings root
+  # prefixes its own path to the watch root
+  prefix = repo.resolve().relative_to(_review_locator.query_repo_root(repo)).as_posix()
+  parts = [ part for part in (prefix, watch_root) if part != _REPO_ROOT_WATCH ]
+  glob_root = "".join(f"{part}/" for part in parts)
   return {
       "review": {
           # No `_version` here: the `review` ladder belongs to `lazycortex-core`'s
@@ -344,7 +368,7 @@ def _default_settings(repo: Path, existing: dict) -> dict:
               "type": "git",
               "branch": _resolve_branch(repo, existing),
               "watch": "changed_files",
-              "path_filter": f":(glob){glob_root}**/*.md",
+              _PATH_FILTER: f"{_GLOB_MAGIC}{glob_root}{_GLOB_TAIL}",
               "interval_sec": 60,
               "timeout_sec": 60,
               "filter": {
@@ -374,17 +398,21 @@ def _default_settings(repo: Path, existing: dict) -> dict:
   }
 
 
-def resolve_core_cli() -> Path:
+def resolve_core_cli(repo: Path) -> Path:
   """
   Resolve the `lazycortex-core` CLI file.
+
+  Args:
+    repo: Any directory inside the asking repository: its root, a subdirectory, or a linked worktree.
 
   Returns:
     Path of the core CLI file.
 
   Raises:
-    RuntimeError: When none of the three lookup stages finds a core CLI; the message names all three.
+    RuntimeError: When no lookup stage finds the core plugin, or the plugin found carries no CLI file; the message
+      names every stage searched, or the missing file.
   """
-  return _git_ops.require_core_cli()
+  return _git_ops.require_core_cli(repo)
 
 
 def _run_core_settings(cli: Path, repo: Path, verb: str, *, section: str, payload: dict | None = None) -> object:
@@ -500,7 +528,7 @@ def _reconcile_routines(repo: Path, cfgs: dict) -> dict:
     RuntimeError: When the core CLI cannot be resolved, or a call exits non-zero.
   """
   # the core CLI owns the write; without it the routines would stay on whatever shape they were installed with
-  cli = resolve_core_cli()
+  cli = resolve_core_cli(repo)
   outcomes: dict[str, str] = {}
   for name, cfg in cfgs.items():
     proc = subprocess.run(
@@ -596,23 +624,76 @@ def _merge_defaults(existing: dict, defaults: dict, added: list[str], prefix: st
       _merge_defaults(existing[key], value, added, path)
 
 
+def _query_pathspec_owner(top: Path, entry: str) -> Path | None:
+  """
+  Name the settings root that owns one coordinator-watch pathspec entry.
+
+  Args:
+    top: The checkout toplevel the pathspec is matched from.
+    entry: One recorded pathspec entry.
+
+  Returns:
+    The settings root of the directory the entry watches, or None for an entry of another shape.
+  """
+  # guard: a pathspec of another shape names no settings root
+  if not entry.startswith(_GLOB_MAGIC) or not entry.endswith(_GLOB_TAIL):
+    return None
+
+  # the watched directory, or its nearest existing ancestor within the checkout when it is gone
+  here = top / entry[len(_GLOB_MAGIC):-len(_GLOB_TAIL)]
+  while not here.is_dir() and here != top:
+    here = here.parent
+  return _review_locator.query_settings_root(here)
+
+
+def _merge_path_filter(repo: Path, existing: dict, own: str) -> str | list[str]:
+  """
+  Merge this settings root's coordinator-watch pathspec into the one the checkout's routine already records.
+
+  One watch routine serves every settings root of a checkout, so a root's install replaces only its own earlier
+  pathspec and leaves the pathspecs of the other roots in place.
+
+  Args:
+    repo: The nearest settings root the install works for.
+    existing: The parsed settings object, its `routines` section read from the checkout toplevel.
+    own: The pathspec this settings root watches.
+
+  Returns:
+    The single pathspec when no other settings root has one, else every root's pathspec, this root's last.
+  """
+  # the recorded value, a legacy single string counting as a one-entry list
+  recorded = existing.get(_SettingsKey.ROUTINES, {}).get(_WATCH_ROUTINE, {}).get(_PATH_FILTER)
+  entries = [ recorded ] if isinstance(recorded, str) else [ e for e in recorded or [] if isinstance(e, str) ]
+
+  # only another settings root's entry stays; this root's earlier entry and any entry of another shape, which no
+  # settings root owns, give way to the shipped pathspec
+  top = _review_locator.query_repo_root(repo)
+  owners = { entry: _query_pathspec_owner(top, entry) for entry in entries if entry != own }
+  merged = [ entry for entry, owner in owners.items() if owner is not None and owner != repo.resolve() ]
+  merged.append(own)
+  return merged[0] if len(merged) == 1 else merged
+
+
 def _ensure_settings(repo: Path) -> dict:
   """
   Merge the default lazy-review settings into `repo`'s `.claude` settings file.
 
-  Existing `review` and `experts` keys are left untouched at every depth; only missing keys
-  are added, including sub-fields of an entry that already exists but was only partially
-  written by an earlier install. The one exception is `review.watch_root`, widened until
-  every review class sits under it and never narrowed. Retired registrations from an earlier schema are then
-  removed, and this plugin's three routines are reconciled through the core CLI, which owns
-  the write for those entries.
+  Existing `review` and `experts` keys are left untouched at every depth; only missing keys are added, including
+  sub-fields of an entry that already exists but was only partially written by an earlier install. The one exception
+  is `review.watch_root`, widened until every review class sits under it and never narrowed. Retired registrations
+  from an earlier schema are then removed, and this plugin's three routines are reconciled through the core CLI,
+  which owns the write for those entries. The coordinator-watch routine records the watch pathspec of this settings
+  root together with the pathspecs the checkout's other settings roots already recorded, so installing one root never
+  drops another's.
 
   Notes:
     - The settings file is read and written only through the core CLI; of the `review`, `experts`,
       and `routines` sections, only those that changed are written back.
+    - Core routes each section: the daemon-read sections `experts`, `routines` and `daemon` go to the settings file
+      at the checkout toplevel, and `review` goes to the settings file at the nearest settings root `repo`.
 
   Args:
-    repo: Repository root whose settings file is updated.
+    repo: The nearest settings root the install works for.
 
   Returns:
     A dict with the settings file path, the list of keys that were added, the list of
@@ -625,7 +706,7 @@ def _ensure_settings(repo: Path) -> dict:
   settings_dir = repo / Paths.CLAUDE_DIR
   settings_dir.mkdir(parents=True, exist_ok=True)
   settings_path = settings_dir / Paths.SETTINGS_FILE
-  cli = resolve_core_cli()
+  cli = resolve_core_cli(repo)
 
   # the sections this install reads, exactly as the file carries them; an absent one stays absent
   existing: dict = {}
@@ -644,6 +725,12 @@ def _ensure_settings(repo: Path) -> dict:
   # update needs to correct. Everything else in the `routines` section — the `_version` meta
   # key — still rides the merge.
   cfgs = { name: defaults[_SettingsKey.ROUTINES].pop(name) for name in _MANAGED_FIELDS }
+
+  # the one watch routine serves every settings root of the checkout, so this root's pathspec replaces only its own
+  # earlier entry and every other root's entry stays
+  cfgs[_WATCH_ROUTINE][_PATH_FILTER] = _merge_path_filter(repo, existing, cfgs[_WATCH_ROUTINE][_PATH_FILTER])
+
+  # the shipped defaults fill every absent key, then the recorded settings are migrated to the current shape
   added: list[str] = []
   _merge_defaults(existing, defaults, added)
   migrated = _migrate(existing)
@@ -663,7 +750,7 @@ def _ensure_settings(repo: Path) -> dict:
       write_section(cli, repo, name, value = existing[name])
 
   # after the write, so the core CLI reconciles against the section this install just left
-  # on disk rather than racing it
+  # on disk rather than racing it; the routines live where the daemon reads them
   reconciled = _reconcile_routines(repo, cfgs)
   return {
       "settings_path": str(settings_path), "added_keys": added,
@@ -675,15 +762,24 @@ def install(repo: Path) -> dict:
   """
   Bootstrap the lazy-review directory structure and default settings for a repository.
 
+  Creates the runtime directories at the checkout's root and merges the default settings and routine registrations
+  for the given settings root, keeping the pathspecs other settings roots of the checkout already recorded.
+
   Guarantees:
     - Never overwrites a settings key the repository's settings file already has, at any
       nesting depth; only a missing key is added. Two exceptions: a key this plugin
-      owns on one of the three routines it registers is always set to the shipped value,
-      and `review.watch_root`, which is widened until every review class sits under it and
-      never narrowed.
+      owns on one of the three routines it registers is always set to the shipped value
+      (except the coordinator-watch `path_filter`), and `review.watch_root`, which is
+      widened until every review class sits under it and never narrowed.
+    - The coordinator-watch `path_filter` is shared by every settings root of the checkout: an install
+      replaces only the `:(glob)<prefix>**/*.md` entry of its own settings root, keeps the entries
+      owned by other settings roots, and drops every other entry. It is a plain string when one
+      entry remains, a list otherwise.
 
   Args:
-    repo: Path to the repository root to install into.
+    repo: The nearest settings root installed into: its `.claude/lazy.settings.json` takes the `review` section,
+      while the sections the daemon reads (`experts`, `routines`) and the runtime directories go to the root of the
+      checkout it sits in (the directory itself outside git).
 
   Returns:
     Dict with keys `repo`, `created_dirs`, `settings_path`, `added_keys`, `migrated`, and
@@ -699,13 +795,19 @@ def install(repo: Path) -> dict:
   # Any settings key already present in the repository's settings file, at any nesting
   # depth, is left exactly as recorded; only a missing key is added. Two exceptions: a key
   # this plugin owns on one of the three routines it registers is ALWAYS set to the
-  # shipped value, and `review.watch_root` is widened to the common directory of its recorded
-  # value and every review class glob's root — never narrowed.
+  # shipped value, except the coordinator-watch `path_filter`, and `review.watch_root` is
+  # widened to the common directory of its recorded value and every review class glob's
+  # root — never narrowed.
+  #
+  # The coordinator-watch `path_filter` is shared by every settings root of the checkout.
+  # An install replaces only the `:(glob)<prefix>**/*.md` entry of its own settings root,
+  # keeps the entries owned by other settings roots, and drops every other entry. The result
+  # is a plain string when one entry remains, a list otherwise.
 
   repo = repo.resolve()
   return {
       "repo": str(repo),
-      "created_dirs": _ensure_dirs(repo),
+      "created_dirs": _ensure_dirs(_review_locator.query_repo_root(repo)),
       **_ensure_settings(repo),
   }
 
@@ -715,6 +817,11 @@ def main(argv: list[str]) -> int:
   Run the install bootstrap and print the JSON report to stdout.
 
   A refused settings file prints `{"status": "refused", "reason": ...}` instead of the report.
+
+  Notes:
+    - The settings installed into are the nearest `.claude/lazy.settings.json` from `--cwd`, else from
+      `$LAZY_REPO_ROOT`, else from the working directory, upward within its checkout; the checkout's root when none
+      is nearer. The runtime directories go to the checkout's root.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -729,12 +836,13 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser = argparse.ArgumentParser(prog="lazy-review.install")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--cwd", type=Path, default=Path.cwd())
+  parser.add_argument("--cwd", default = None)
   args = parser.parse_args(argv)
 
-  # a settings file core cannot read or write ends the run as a refusal naming the file, not a traceback
+  # a settings file core cannot read or write ends the run as a refusal naming the file, not a traceback; the
+  # settings are the nearest ones from `--cwd`, else from the dispatcher's repo root, else from the working directory
   try:
-    report = install(args.cwd)
+    report = install(_review_locator.query_settings_root(args.cwd))
   except SettingsRefusedError as refusal:
     print(json.dumps({ "status": "refused", "reason": refusal.reason }))
     return 1

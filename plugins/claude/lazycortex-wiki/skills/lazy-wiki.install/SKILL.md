@@ -54,6 +54,8 @@ Scope = **where the plugin is actually enabled**, not where `/plugin install` la
 2. Interactive run with no `repo=`: `<repo-root>` = `Bash(git rev-parse --show-toplevel)`.
 3. Not in a git repo: fall back to the current working directory — but warn the user.
 
+Then resolve `<settings-root>`, the directory whose `.claude/lazy.settings.json` this install seeds with the plugin's own sections — the nearest one from the start upward within its checkout, the checkout's root when none is nearer: a headless run takes `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root --start <repo-root>)`, an interactive run `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root)`. The sections the daemon reads — `experts`, `agent_models` and `routines` — stay in the settings of `<repo-root>`, the checkout's root, as do the rules and templates directories and `settings.local.json`.
+
 **Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file; `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" core-cli)` prints its absolute path — this plugin's own resolver tries the daemon's `$LAZYCORTEX_PLUGIN_DIRS`, then the dev-vault sibling `plugins/claude/lazycortex-core/`, then the install `~/.claude/plugins/installed_plugins.json` records; exit 1 with an `error:` line means core is not installed — abort and say so. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
@@ -80,9 +82,9 @@ Resolve paths:
 | Scope | Rules dir | `lazy.settings.json` |
 |---|---|---|
 | `user` | `~/.claude/rules/` | `~/.claude/lazy.settings.json` |
-| `project` | `<repo-root>/.claude/rules/` | `<repo-root>/.claude/lazy.settings.json` |
+| `project` | `<repo-root>/.claude/rules/` | `<settings-root>/.claude/lazy.settings.json` (the daemon-read `experts`, `agent_models` and `routines`: `<repo-root>/.claude/lazy.settings.json`) |
 
-The `lazycortex-core` tier SOT (`default-tiers.json`) is located by the seeding primitive itself in Step 7 — this step only resolves the rules dir and target `lazy.settings.json` path from the scope.
+The `lazycortex-core` tier SOT (`default-tiers.json`) is located by the seeding primitive itself in Step 7 — this step only resolves the rules dir and target `lazy.settings.json` path from the scope. Below, `<target-root>` is `~` at user scope or `<settings-root>` at project scope, and `<daemon-root>` is `~` at user scope or `<repo-root>` at project scope.
 
 Outcome: `target-resolved: <settings-path>`.
 
@@ -134,7 +136,7 @@ Outcome (one line per rule): `<name>.md: <state>`, plus the receipt's `counts` l
 
 ## Step 5: Seed wiki + structure + terms settings sections
 
-Read each section from the target file with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get <section> --cwd <target-root>)` (`<target-root>` is `~` at user scope or `<repo-root>` at project scope — the Step 2 split), and write every missing key with one `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<key>' --value '<json>' --cwd <target-root>)` call — the verb writes that one key and leaves every other value in the file as it was. A section absent altogether is seeded key by key the same way. A target file that is not valid JSON makes `settings-set` refuse instead of overwriting it: stop the step and report it.
+Read each section from the target file with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get <section> --cwd <target-root>)` (`<target-root>` is `~` at user scope or `<settings-root>` at project scope — the Step 2 split), and write every missing key with one `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set <section> --key '<key>' --value '<json>' --cwd <target-root>)` call — the verb writes that one key and leaves every other value in the file as it was. A section absent altogether is seeded key by key the same way. A target file that is not valid JSON makes `settings-set` refuse instead of overwriting it: stop the step and report it.
 
 Ensure the `wiki` key exists. If absent, seed:
 
@@ -192,7 +194,7 @@ Outcome: `wiki-section: <seeded|already-present>` (with `tag_axes: <seeded|alrea
 Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" ensure-axes doc-kind --repo <target-root>)
 ```
 
-`<target-root>` is `~` at user scope or `<repo-root>` at project scope — same split Step 2's table resolves `lazy.settings.json` from (the CLI builds `<target-root>/.claude/lazy.settings.json`). Omitting it would let the primitive fall back to `$LAZY_REPO_ROOT`-or-cwd, which at user scope is the wrong file — this install skill runs from whatever directory the operator invoked it in, not from `~`.
+`<target-root>` is `~` at user scope or `<settings-root>` at project scope — same split Step 2's table resolves `lazy.settings.json` from (the CLI builds `<target-root>/.claude/lazy.settings.json`). Omitting it would let the primitive fall back to `$LAZY_REPO_ROOT`-or-cwd, which at user scope is the wrong file — this install skill runs from whatever directory the operator invoked it in, not from `~`.
 
 The primitive writes `wiki.tag_axes` and nothing else — no scope is read or written, and there is no scope-targeting flag. The union is idempotent: an already-declared axis keeps its position, is never duplicated, and the settings file is not rewritten at all. The call prints `{"status": "added", "added_axes": ["doc-kind"]}` when the vocabulary grew, or `{"status": "unchanged"}` when it already carried the axis. It is load-bearing from the very first run — the vocabulary belongs to the repository, so it exists before any scope does.
 
@@ -208,7 +210,7 @@ The `agent-models-seed` verb seeds the `agent_models.lazycortex` group with ever
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazycortex-wiki --scope <scope> --cwd <repo-root>)
 ```
 
-`<scope>` is the value resolved in Step 1 (`project` or `user`); `--cwd <repo-root>` is passed at both scopes — it fixes the repository the verb resolves the core tier table from, and `--scope user` still writes `~/.claude/lazy.settings.json`. The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 10 report. Act on the `outcome`:
+`<scope>` is the value resolved in Step 1 (`project` or `user`); `--cwd <repo-root>` is passed at both scopes — it fixes the repository the verb resolves the core tier table from, and `--scope user` still writes `~/.claude/lazy.settings.json`. The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `converted` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 10 report. Act on the `outcome`:
 
 - `sot-missing` → abort the install (`lazycortex-core` not installed) — same FAIL as Step 2's defaults check.
 - any other refusal → stop the step and relay its `message`; write no seed lines.
@@ -225,7 +227,7 @@ The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing con
 
 ### Expert (always registered)
 
-Every expert entry below is read and written by its own key, never as the whole `experts` section, and only through the core verbs (Step 3) — never `Write` or `Edit` on `lazy.settings.json`. `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts --key <expert-key> --cwd <target-root>)` prints the entry on record, or `null` when there is none; on `null`, `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key <expert-key> --value '<entry-json>' --cwd <target-root>)` writes the shipped entry and touches no other expert. A non-zero exit of `settings-get` means `lazy.settings.json` does not parse: write nothing, stop the step with outcome `settings-unparseable`, and name the file in the report. The verb creates the section with its version stamp when it is absent; an entry on record gets no write. Apply these absent-only semantics for the `wiki.curator` key:
+Every expert entry below is read and written by its own key, never as the whole `experts` section, and only through the core verbs (Step 3) — never `Write` or `Edit` on `lazy.settings.json`. `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-get experts --key <expert-key> --cwd <daemon-root>)` prints the entry on record, or `null` when there is none; on `null`, `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key <expert-key> --value '<entry-json>' --cwd <daemon-root>)` writes the shipped entry and touches no other expert. A non-zero exit of `settings-get` means `lazy.settings.json` does not parse: write nothing, stop the step with outcome `settings-unparseable`, and name the file in the report. The verb creates the section with its version stamp when it is absent; an entry on record gets no write. Apply these absent-only semantics for the `wiki.curator` key:
 
 ```json
 "wiki.curator": {
@@ -302,7 +304,7 @@ State `experts.wiki.tag-curator: <seeded|kept-local>`.
 Register each of the five routines below through the core `reconcile-routine` verb rather than writing the JSON into the file by hand. `<name>` is the routine's key in the block below and `<cfg-json>` its object body, placeholders filled:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<cfg-json>' --managed type,watch,command,expert,request,path_filter,git_author --cwd <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<cfg-json>' --managed type,watch,command,expert,request,path_filter,git_author --cwd <daemon-root>)
 ```
 
 The verb prints `{"status": "registered|refreshed|unchanged"}` and exits 0, or `{"status": "error", "reason": …}` and exits 1 when the merged entry fails the routine schema — report that routine as `failed: <reason>` and continue with the next.
@@ -391,7 +393,7 @@ The curator dispatch carries the plugin's own `lazy-wiki.tag-curator-protocol` s
 Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → seed the expert with absent-only semantics, through the same keyed `settings-get` / `settings-set experts --key wiki.domain-writer` pair as the curators above, and register the three routines through the core `reconcile-routine` verb exactly as the five above:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<cfg-json>' --managed type,watch,command,cron,git_author --cwd <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<cfg-json>' --managed type,watch,command,cron,git_author --cwd <daemon-root>)
 ```
 
 `cron` is this plugin's own here and not the operator's: the weekly full pass is insurance against a missed wake, not a cadence anyone tunes, and the pair only works when the two schedules stay apart. `git_author` is owned because every check across the runtime reads it to tell a system commit from a person's. `interval_sec`, `timeout_sec` and `priority` stay outside the list. Report each of the three as `registered`, `refreshed`, or `unchanged`.
@@ -411,7 +413,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-j
 
 No `can_commit_in_repo` here, unlike the curators: the writer returns its files through the job's `result/` and never touches the working tree, so the pump's no-commit clause is exactly its contract. The `lazy-wiki.domain-collect` routine below lands the files, refreshes the index, and commits.
 
-**An existing entry loses the flag.** Absent-only seeding leaves a `wiki.domain-writer` entry composed by an earlier release carrying `can_commit_in_repo: true`, which keeps the pump's no-commit clause out of the writer's prompt. That key is this plugin's own knowledge, not an operator choice, so when the existing entry carries it, remove that one key with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key 'wiki.domain-writer/can_commit_in_repo' --delete --cwd <target-root>)` and leave every other key as it is; report `flag-dropped`, otherwise nothing.
+**An existing entry loses the flag.** Absent-only seeding leaves a `wiki.domain-writer` entry composed by an earlier release carrying `can_commit_in_repo: true`, which keeps the pump's no-commit clause out of the writer's prompt. That key is this plugin's own knowledge, not an operator choice, so when the existing entry carries it, remove that one key with `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> settings-set experts --key 'wiki.domain-writer/can_commit_in_repo' --delete --cwd <daemon-root>)` and leave every other key as it is; report `flag-dropped`, otherwise nothing.
 
 **Routines**:
 
@@ -462,7 +464,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> add-protocols --routine lazy-wik
 Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` through the core `reconcile-routine` verb:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine lazy-wiki.mirror-sync.<scope-id> --cfg-json '<cfg-json>' --managed type,command,git_author --cwd <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine lazy-wiki.mirror-sync.<scope-id> --cfg-json '<cfg-json>' --managed type,command,git_author --cwd <daemon-root>)
 ```
 
 `cron` is deliberately outside the list here, unlike the domain pair: how often a mirror re-fetches its source is a judgement about that source, and an operator who slowed a noisy one down must keep the answer. `command` is owned because the scope id it carries is the routine's whole identity, and `git_author` because the mirror family commits under one identity that authorship checks key on. Report each scope's routine as `registered`, `refreshed`, or `unchanged`.
@@ -485,7 +487,7 @@ The three structure-scan routines (`lazy-wiki.structure-scan`, `lazy-wiki.struct
 For each of the three names, read whether it is registered:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> routine-show <name> --cwd <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> routine-show <name> --cwd <daemon-root>)
 ```
 
 `absent` → outcome `skipped-not-registered`; nothing is written — a missing routine is `/lazy-wiki.configure structure`'s to create. `present` → derive the filter once for the run:
@@ -497,20 +499,20 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki"
 The command prints one JSON object carrying `path_filter` and nothing else. Pass it through verbatim as the shipped config, owning that one key. Probe first — the dry run reports the status the write would return and touches nothing:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <target-root> --dry-run)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <daemon-root> --dry-run)
 ```
 
 `unchanged` → report the routine as `unchanged` and issue no write. `refreshed` → apply with the same arguments minus `--dry-run`:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '<printed object>' --managed path_filter --cwd <daemon-root>)
 ```
 
 `lazy-wiki.structure-scan` and `lazy-wiki.structure-scan-deletes` also carry `pair_renames: true`: the family moves a renamed path through its own `lazy-wiki.structure-scan-renames` job, so the added-files and deleted-files routines must not see the same rename again as an addition and a deletion. Run before that, a curate job enters the new path afresh, and the rename job no longer carries a moved directory's description over to its new name. A registration made before the key existed is brought current here. For each of those two names that `routine-show` reported `present`, probe, then apply on `refreshed` exactly as above:
 
 ```
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '{"pair_renames": true}' --managed pair_renames --cwd <target-root> --dry-run)
-Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '{"pair_renames": true}' --managed pair_renames --cwd <target-root>)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '{"pair_renames": true}' --managed pair_renames --cwd <daemon-root> --dry-run)
+Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> reconcile-routine <name> --cfg-json '{"pair_renames": true}' --managed pair_renames --cwd <daemon-root>)
 ```
 
 Every other key stays as the configure wizard or the operator wrote it — `watch`, `expert`, `request`, `protocols`, the cadence keys. A retired grouping key (`group_globs`, a boolean `group`) is not this step's business: `lazy-wiki.audit` reports it and the core `routine-migrate` verb rewrites it. Report each present routine as `refreshed` or `unchanged`, whichever the verb returned.

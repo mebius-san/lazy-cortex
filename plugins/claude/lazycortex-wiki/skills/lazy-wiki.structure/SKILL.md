@@ -2,7 +2,7 @@
 name: lazy-wiki.structure
 description: "Use when an agent doing research (an architect deciding where a new file belongs, any expert asking 'where does X live in this repo') needs the project's structure map, or when the operator asks to resync `docs/structure.md` after files moved. `query [<path>]` returns just the slice under `<path>`; `rebuild` rewrites the map."
 research: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(test -f *), Bash(mkdir -p *), Bash(date -u *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(ls *), Bash(mkdir -p *), Bash(date -u *)
 ---
 # lazy-wiki.structure
 
@@ -23,11 +23,13 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Load structure config
 
-`Read` `.claude/lazy.settings.json` (and `.claude/lazy.settings.local.json` when present — scalars from local override tracked, arrays union). Extract the `structure` section: `depth_profiles` (map of class name → `{paths: [<glob>, ...], depth: "file"|"dir"|"brief"}`) and `exclude` (array of glob strings never described).
+Resolve `<settings-root>`, the directory whose settings configure the map, via `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root)` — the nearest directory holding `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer.
+
+`Read` `<settings-root>/.claude/lazy.settings.json` (and `<settings-root>/.claude/lazy.settings.local.json` when present — scalars from local override tracked, arrays union). Extract the `structure` section: `depth_profiles` (map of class name → `{paths: [<glob>, ...], depth: "file"|"dir"|"brief"}`) and `exclude` (array of glob strings never described).
 
 If the `structure` key is absent entirely, abort: *"No `structure` section — run `/lazy-wiki.install` first."* An absent or empty `depth_profiles` is valid, not an error: every directory resolves to `unclassified` until `/lazy-wiki.configure structure` populates the classes.
 
-Resolve the repo root via `Bash(git rev-parse --show-toplevel)`, then resolve the language the map's own prose is written in, once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)`. Carry the returned code into every `Agent(subagent_type: "Explore", …)` fan-out prompt of Phase 3 step 4 as `language=<code>` — a dispatched subagent cannot read the settings for itself — and write the directory and file descriptions you compose yourself in it. Directory names, file names, and glob patterns stay verbatim.
+Resolve the language the map's own prose is written in, once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <settings-root>)`. Carry the returned code into every `Agent(subagent_type: "Explore", …)` fan-out prompt of Phase 3 step 4 as `language=<code>` — a dispatched subagent cannot read the settings for itself — and write the directory and file descriptions you compose yourself in it. Directory names, file names, and glob patterns stay verbatim.
 
 Outcome: `loaded` or `no-section`.
 
@@ -51,7 +53,7 @@ Outcome: `resolved: <rebuild|query>`.
 **mode=rebuild only.** If the resolved mode is `query`, mark this task `skipped` with outcome `skipped-per-mode` and proceed to Phase 4.
 
 1. Enumerate the tracked tree: `Bash(git ls-files)`. Drop every path matching a glob in `exclude` (this always includes `docs/structure.md` itself — describing the map inside the map is meaningless).
-2. Take every directory's depth from `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" structure-resolve --all --repo <repo-root>)`. It prints `{"paths": [{"path", "depth"}], "map_present"}`, one entry per directory the map describes, with exclusions already applied; a non-zero exit is reported and the rebuild stops. The class rule lives once, in that verb, so a rebuild and the curator's incremental entries cannot disagree on a depth. `unclassified` is a distinct case, not a `dir`-depth class (step 3 below).
+2. Take every directory's depth from `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" structure-resolve --all --repo <settings-root>)`. It prints `{"paths": [{"path", "depth"}], "map_present"}`, one entry per directory the map describes, with exclusions already applied; a non-zero exit is reported and the rebuild stops. The class rule lives once, in that verb, so a rebuild and the curator's incremental entries cannot disagree on a depth. `unclassified` is a distinct case, not a `dir`-depth class (step 3 below).
 3. Describe by depth:
    - **`file`** — one entry for the directory (its one-line role) plus one nested entry per **load-bearing** file underneath (entry point, registry, contract, a config whose semantics aren't obvious from its name) — judge "load-bearing" yourself, do not enumerate every file.
    - **`dir`** — one line for the directory, one to two sentences, no per-file lines.
@@ -68,7 +70,7 @@ Outcome: `rebuilt: <directory-count> directories` or `skipped-per-mode`.
 
 **mode=query only.** If the resolved mode is `rebuild`, mark this task `skipped` with outcome `skipped-per-mode` and proceed to Logging.
 
-`Bash(test -f docs/structure.md)` — absent → answer *"No structure map yet — run `/lazy-wiki.structure rebuild` first."* and stop here (outcome `no-map`).
+`Bash(ls -d docs/structure.md)` — present when the command lists it; absent when it fails with "No such file or directory" → answer *"No structure map yet — run `/lazy-wiki.structure rebuild` first."* and stop here (outcome `no-map`).
 
 Empty `<path>` (top-level query) → `Read` only the first, unindented level of bullets — the directories directly under the repo root — and return that list. Never read the whole file.
 

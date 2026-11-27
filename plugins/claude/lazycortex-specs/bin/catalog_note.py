@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -35,21 +34,32 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import BOOL_FALSE, LEVEL_GATE_ORDER, Section, SpecHaltKey, SpecKey, SpecValue  # noqa: E402
 
@@ -122,13 +132,11 @@ _ARG_VERB = "verb"
 _ARG_PRODUCT = "product"
 _ARG_ROOT = "--root"
 _ARG_CWD = "--cwd"
-# waiver: the env var the daemon exports for every subprocess it spawns
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 # waiver: one-off human-facing messages -- argparse help text and one stderr refusal line
 _HELP_VERB = "The level-note verb to run"
 _HELP_PRODUCT = "Product compound-key whose level note is backfilled; omit for --root"
 _HELP_ROOT = "Target the catalog root note instead of a product's own"
-_HELP_CWD = "Repository to run against; defaults to $LAZY_REPO_ROOT, then the process cwd"
+_HELP_CWD = "Directory inside the repository to run against; defaults to $LAZY_REPO_ROOT, then the process cwd"
 _ERR_TARGET = "name exactly one of <product> or --root\n"
 
 
@@ -483,9 +491,8 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(_ERR_TARGET)
     return 2
 
-  # the flag, then the daemon-exported env var, then the process cwd;
+  # the nearest settings root of the flag, then of the daemon-exported env var, then of the process cwd;
   # a headless caller standing in another checkout would otherwise seed a catalog there
-  start = Path(args.cwd or os.environ.get(_ENV_REPO_ROOT) or Path.cwd())
-  result = backfill(scaffold_asset.repo_root(start), product = args.product, root = args.root)
+  result = backfill(spec_locator.query_settings_root(args.cwd), product = args.product, root = args.root)
   print(json.dumps(result))
   return 0

@@ -1,21 +1,29 @@
 """
-Resolve the product guideline paths a review writer dispatch carries.
+Resolve the guideline paths a review writer dispatch carries.
 
 Per `lazy-spec.config-protocol.md` § `products[<key>].guidelines`, a product's guidelines are
 keyed by the dispatched role token plus the wildcard `"*"`, and an asset type's own
-`guidelines` reach every job on an asset of that type whatever the role. The effective list is
+`guidelines` reach every job on an asset of that type whatever the role. The declared list is
 the ordered union catalog-wide `spec.guidelines` first, then the enclosing products outermost
 first, then the owning product's own — role paths, then the asset type's, then the wildcard
-set, a path already listed never repeated.
+set.
+
+The declared list goes through core's `guidelines-resolve` verb (`lazy-core.guidelines-contract.md`),
+which puts the canon every enabled plugin declares for the role ahead of it, resolves
+`<plugin>:<name>` keys to absolute paths into the plugin tree, keeps repo paths repo-relative,
+and drops repeats. The plugin canon depends on the role alone, so the verb runs on every
+document, inside a product or not.
 
 The coordinator (`lazy-review.coordination-playbook.md` Chapter 4) reaches this module through
 the `guidelines-context` CLI verb before every main or barrier (`validation` / `terminal`)
-writer dispatch — never before `doc_doctor`'s repair dispatch — and folds the returned paths
-into that dispatch's `context`. The expert reads the real files in the working tree; nothing is
-copied here.
+writer dispatch — never before `doc_doctor`'s repair dispatch. The writer dispatch folds the
+repo-relative paths into the dispatch's `context` and lists the absolute ones in the payload's
+`guidelines`. The expert reads the real files; nothing is copied here.
 """
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,7 +43,11 @@ import decisions_context  # noqa: E402  # pylint: disable=import-error,wrong-imp
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from keys import CoreCommand  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _SPEC_SECTION_KEY = "spec"
@@ -49,6 +61,17 @@ _EXPERT_KEY_SEP = "."
 
 # The warning a refused spec content root leaves in place of the guidelines, filled with the refusal.
 _ROOT_REFUSED_TEMPLATE = "guidelines not collected: {error}"
+# The warning a declared path with no file behind it leaves when core cannot check it.
+_NOT_FOUND_TEMPLATE = "guideline not found: {rel}"
+# The warning a core resolve that could not run leaves, filled with the reason.
+_RESOLVE_FAILED_TEMPLATE = "plugin guidelines not resolved: {error}"
+# The core `guidelines-resolve` flags, and the stdin key carrying the caller's entries.
+_ROLE_FLAG = "--role"
+_CWD_FLAG = "--cwd"
+_BASE_FLAG = "--base"
+_DECLARED_KEY = "declared"
+# The key of core's error answer naming why the verb refused.
+_ERROR_KEY = "error"
 
 PATHS_KEY = "paths"
 WARNINGS_KEY = "warnings"
@@ -171,6 +194,104 @@ def _collect_type_paths(chain: list[dict], asset_type: str) -> list[str]:
   return []
 
 
+def _run_resolve(root: Path, role: str, declared: list[str]) -> dict[str, list[str]]:
+  """
+  Ask core's `guidelines-resolve` for the files `role` reads on top of `declared`.
+
+  Args:
+    root: The repository the job works in.
+    role: The job's role token.
+    declared: The caller's guideline entries, in the caller's order.
+
+  Returns:
+    Core's answer: `paths` and `warnings`, both lists of strings.
+
+  Raises:
+    RuntimeError: When no core CLI is resolvable, the verb exits non-zero, or its answer is not the
+      `{paths, warnings}` shape.
+  """
+  # no core CLI reachable raises — the caller reports it instead of the plugin canon; the declared paths are
+  # relative to the settings root, so core checks them there
+  cli = _git_ops.require_core_cli(root)
+  proc = subprocess.run(
+      [ sys.executable, str(cli), CoreCommand.GUIDELINES_RESOLVE, _ROLE_FLAG, role, _CWD_FLAG, str(root),
+        _BASE_FLAG, str(root) ],
+      input = json.dumps({ _DECLARED_KEY: declared }),
+      capture_output = True, text = True, check = False, encoding = "utf-8",
+      # waiver: stdlib decode-error mode, not a domain constant
+      errors = "replace",
+  )
+
+  # the verb answers JSON on stdout in both outcomes; an unparsable answer reads as no answer
+  try:
+    answer = json.loads(proc.stdout)
+  except json.JSONDecodeError:
+    answer = None
+
+  # guard: a refusal names its reason in `error`, else on stderr
+  if proc.returncode != 0:
+    reason = answer.get(_ERROR_KEY) if isinstance(answer, dict) else None
+    reason = reason or proc.stderr.strip() or "no reason given"
+    raise RuntimeError(f"{CoreCommand.GUIDELINES_RESOLVE} exited {proc.returncode}: {reason}")
+
+  # guard: a success always answers two lists of strings; anything else is a broken wire
+  paths = answer.get(PATHS_KEY) if isinstance(answer, dict) else None
+  warnings = answer.get(WARNINGS_KEY) if isinstance(answer, dict) else None
+  if not isinstance(paths, list) or not isinstance(warnings, list) or not _is_str_list(paths + warnings):
+    raise RuntimeError(f"{CoreCommand.GUIDELINES_RESOLVE} answered no {{paths, warnings}} object")
+
+  # core's answer, as the caller reads it
+  return { PATHS_KEY: paths, WARNINGS_KEY: warnings }
+
+
+# waiver: `value` is a field of core's JSON answer and may be any JSON value; the body narrows it
+def _is_str_list(value: object) -> bool:
+  """
+  Tell whether a JSON value is a list of strings.
+
+  Args:
+    value: The value to check.
+
+  Returns:
+    True for a list whose every item is a string.
+  """
+  return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _resolve(root: Path, role: str, declared: list[str], warnings: list[str]) -> dict[str, list[str]]:
+  """
+  Resolve the declared guidelines with the enabled plugins' canon for `role` ahead of them.
+
+  Args:
+    root: The repository the declared paths are relative to.
+    role: The job's role token.
+    declared: The caller's guideline paths, in the caller's order.
+    warnings: Warnings the caller already holds; they come first in the answer.
+
+  Returns:
+    The `{paths, warnings}` map. When core cannot resolve, `paths` holds the declared paths that are files and
+    `warnings` names each missing one and the failure.
+  """
+
+  # the core verb owns the plugin layer, key resolution and dedup
+  try:
+    answer = _run_resolve(root, role, declared)
+  except RuntimeError as error:
+    # the declared paths are still checked here, so only the plugin canon is missing from the answer
+    unique = list(dict.fromkeys(declared))
+    return {
+        PATHS_KEY: [ rel for rel in unique if (root / rel).is_file() ],
+        WARNINGS_KEY: [
+            *warnings,
+            *( _NOT_FOUND_TEMPLATE.format(rel = rel) for rel in unique if not (root / rel).is_file() ),
+            _RESOLVE_FAILED_TEMPLATE.format(error = error),
+        ],
+    }
+
+  # core answered: its lists follow the warnings the caller already holds
+  return { PATHS_KEY: answer[PATHS_KEY], WARNINGS_KEY: [ *warnings, *answer[WARNINGS_KEY] ] }
+
+
 def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   """
   Resolve the guideline paths a writer of `expert` carries while working on `doc_path`.
@@ -178,18 +299,25 @@ def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   Guarantees:
     - A declared guideline path that does not resolve to a file is always reported in
       `warnings`, never silently dropped.
-    - Paths come back role-specific first, then the asset type's, then the wildcard set, with
-      a path already listed never repeated.
+    - Paths come back with the enabled plugins' canon for the role first, then the product's
+      role-specific paths, then the asset type's, then the wildcard set, with a path already
+      listed never repeated.
+    - The plugin canon depends only on the role: it is resolved on every document, also with
+      no settings file, unreadable settings, a refused spec content root, or no product
+      covering the document, unless core cannot resolve, where the next guarantee applies and
+      no canon comes back.
+    - When core cannot resolve, the declared paths that are files still come back, and one
+      warning names the failure.
 
   Args:
     doc_path: Absolute path to the document under review.
     expert: The dispatched expert's composed key; its role part selects the role guidelines.
 
   Returns:
-    A map with `paths` — repo-relative paths of every declared guideline that resolves to a
-    file, in the order the guarantee states — and `warnings` naming every declared path that
-    does not. Both empty outside a registered product, and when the settings cannot be read; a refused spec content
-    root leaves `paths` empty and `warnings` holding one warning naming the refusal.
+    A map with `paths` — the plugin canon first, absolute, then the declared entries that resolve, in declared
+    order, each `<plugin>:<name>` key as an absolute path and each repo path repo-relative — and `warnings`
+    naming every entry that does not resolve. Outside a registered product, and when the settings cannot be
+    read, only the plugin canon is in `paths`; a refused spec content root adds one warning naming the refusal.
   """
 
   # Contract:
@@ -197,30 +325,44 @@ def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   # always reported back in `warnings` for the coordinator to log.
 
   # Contract:
-  # Paths MUST come back role-specific first, then the asset type's own, then the wildcard set,
-  # with a path already listed never repeated.
+  # Paths MUST come back plugin canon first, then role-specific, then the asset type's own, then
+  # the wildcard set, with a path already listed never repeated.
+
+  # Contract:
+  # The role's plugin canon MUST be returned on every document, with or without settings, readable
+  # settings, a spec content root, or a covering product, unless core cannot resolve, per the next
+  # contract.
+
+  # Contract:
+  # When core cannot resolve, the declared guideline paths that are files MUST still be returned, in
+  # declared order and without repeats; each declared path that is not a file is reported in `warnings`,
+  # and one more warning names the failure.
 
   # Domain(review.dispatch):
   # # Guidelines context for a review writer
-  # A writer dispatched on a document inside a registered product follows the guidelines the
-  # product declares for the role it is playing, then the guidelines that belong to the kind
-  # of asset the document describes whatever the role — a content record's schema reaches
-  # its designer and its data writer alike — and finally the guidelines that apply to every
-  # role. Enclosing products contribute theirs before the owning product's own, and the
-  # catalog-wide set comes before all of them.
+  # A writer first follows the canon every plugin enabled in the repository declares for the
+  # role it is playing, whatever document it works on. On a document inside a registered
+  # product it then follows the guidelines the product declares for that role, then the
+  # guidelines that belong to the kind of asset the document describes whatever the role — a
+  # content record's schema reaches its designer and its data writer alike — and finally the
+  # guidelines that apply to every role. Enclosing products contribute theirs before the owning
+  # product's own, and the catalog-wide set comes before all of them.
+
+  # the role the expert plays selects both the plugin canon and the declared role guidelines
+  role = role_of(expert)
 
   # the settings file above the document is the only record of products and their guidelines
   settings_root = decisions_context.find_settings_root(doc_path.parent)
 
-  # guard: no settings file above the document — nothing declares a guideline for it
+  # guard: no settings file above the document — only the plugin canon reaches it
   if settings_root is None:
-    return { PATHS_KEY: [], WARNINGS_KEY: [] }
+    return _resolve(doc_path.parent, role, [], [])
 
   # guard: the merged `spec` and `products` sections; an unreadable settings layer declares nothing
   try:
     data = _core_settings.read_merged_sections(settings_root, _SPEC_SECTION_KEY, _PRODUCTS_KEY)
   except SettingsReadError:
-    return { PATHS_KEY: [], WARNINGS_KEY: [] }
+    return _resolve(settings_root, role, [], [])
 
   # the catalog-wide section, empty when the settings carry none or no mapping
   spec_cfg = data.get(_SPEC_SECTION_KEY)
@@ -230,30 +372,23 @@ def collect(doc_path: Path, expert: str) -> dict[str, list[str]]:
   try:
     content_root = _core_settings.spec_content_root(settings_root, spec_cfg)
   except SettingsReadError as error:
-    return { PATHS_KEY: [], WARNINGS_KEY: [ _ROOT_REFUSED_TEMPLATE.format(error = error) ] }
+    return _resolve(settings_root, role, [], [ _ROOT_REFUSED_TEMPLATE.format(error = error) ])
 
   # every product whose root covers the document, outermost first, is a layer of guidelines
   chain = _build_product_chain(data, content_root, doc_path.parent)
 
-  # guard: no registered product covers the document — no guidelines reach it
+  # guard: no registered product covers the document — only the plugin canon reaches it
   if not chain:
-    return { PATHS_KEY: [], WARNINGS_KEY: [] }
+    return _resolve(settings_root, role, [], [])
 
   # the catalog-wide layer stands before every product's own, outermost first after it
   raw_layers = [ spec_cfg.get(_GUIDELINES_KEY), *(record.get(_GUIDELINES_KEY) for record in chain) ]
   layers: list[dict] = [ layer for layer in raw_layers if isinstance(layer, dict) ]
   declared = (
-      _collect_role_paths(layers, role_of(expert))
+      _collect_role_paths(layers, role)
       + _collect_type_paths(chain, _read_asset_type(doc_path))
       + _collect_role_paths(layers, _WILDCARD_ROLE)
   )
 
-  # a path that doesn't resolve is a warning, never a silent drop
-  paths: list[str] = []
-  warnings: list[str] = []
-  for rel in dict.fromkeys(declared):
-    if (settings_root / rel).is_file():
-      paths.append(rel)
-    else:
-      warnings.append(f"guideline not found: {rel}")
-  return { PATHS_KEY: paths, WARNINGS_KEY: warnings }
+  # core puts the plugin canon ahead, checks every path and warns on each that does not resolve
+  return _resolve(settings_root, role, declared, [])

@@ -31,6 +31,15 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # Dropbox names every displaced version `<name> (<owner>'s conflicted copy <date>...)`; the
 # glob keys on the invariant middle so an owner rename or a numbered suffix still matches.
 _CONFLICTED_COPY_GLOB = "index (*conflicted copy*"
@@ -44,29 +53,6 @@ _INDEX_LOCK_NAME = "index.lock"
 
 # Staging name for the atomic restore — written fully, then renamed over the live index.
 _STAGING_NAME = "index-guard.tmp"
-
-
-def _git_common_dir(repo_root: Path) -> Path | None:
-  """
-  Resolve the repository's common git directory, where the shared index lives.
-
-  Args:
-    repo_root: Absolute path to the repository root.
-
-  Returns:
-    The absolute common git dir, or None when `repo_root` is not a git repository.
-  """
-  probe = subprocess.run(
-    [ "git", "rev-parse", "--git-common-dir" ],
-    cwd = repo_root, check = False, capture_output = True, text = True, encoding = "utf-8",
-    # waiver: stdlib decode-error mode, not a domain constant
-    errors = "surrogateescape",
-  )
-
-  # guard: not a repository — nothing to heal
-  if probe.returncode != 0:
-    return None
-  return (repo_root / probe.stdout.strip()).resolve()
 
 
 def _matches_head(repo_root: Path, index_file: Path) -> bool:
@@ -129,7 +115,7 @@ def guard_index(repo_root: Path) -> dict:
   # against. Only when neither the newest copy nor the live index agrees with the last commit are
   # all copies left untouched, since nothing here can rank one over the other.
 
-  git_dir = _git_common_dir(repo_root)
+  git_dir = plugin_locator.find_git_common_dir(repo_root)
 
   # guard: not a repository — nothing to heal
   if git_dir is None:
@@ -196,7 +182,7 @@ def guard_index(repo_root: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
   """
-  CLI entry point: heal the current repository's index and print a one-line JSON report.
+  CLI entry point: heal the index of the repository checkout the command works in and print a one-line JSON report.
 
   Args:
     argv: Unused; present for dispatcher-signature uniformity.
@@ -205,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     Process exit code — always 0; a repository without healable state is a healthy outcome.
   """
   del argv
-  report = guard_index(Path.cwd())
+  report = guard_index(plugin_locator.query_repo_root())
   print(json.dumps({ "op": "index-guard", **report }))
   return 0
 

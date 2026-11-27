@@ -23,11 +23,14 @@ Discovery primitive for the `lazy-core.setup` install chain and its headless twi
 
 Enablement is the union of `enabledPlugins` in `.claude/settings.json` and
 `.claude/settings.local.json` under the repo; `installed_plugins.json` under the home directory
-resolves an install path only, never enablement.
+resolves an install path only, never enablement, and only from records made for this repo's main
+checkout or for the whole user.
 
 `guard` judges a dirty working tree before a headless run writes anything. Every dirty path is
-sorted into one of three buckets: `conflicts` — under a prefix the install chain writes to
-(`WRITE_SCOPE`), so running would overwrite the operator's work; `ignored` — under a prefix the
+sorted into one of three buckets: `conflicts` — under a root the install chain writes to (its write
+scope: the fixed roots of `WRITE_SCOPE` plus the spec content root, `spec.vault_root` in the repo's
+`.claude/lazy.settings.json`, `specs` when unset or unreadable; the report lists it as `write_scope`),
+so running would overwrite the operator's work; `ignored` — under a prefix the
 caller declared with `--ignore`, the operator's own work-in-progress the run must leave alone;
 `outside` — anywhere else, none of the chain's business. The verdict is `conflict` when the
 first bucket is non-empty, `clean` when nothing is dirty, and `dirty-allowed` otherwise — the
@@ -38,18 +41,20 @@ file (default `<repo>/.runtime/lazy-setup-guard.json`) for `verify`.
 `snapshot` records the same file for an interactive run that refuses nothing: every dirty path is
 fingerprinted, under the chain's write scope or not, and the report names the file and the paths.
 
-`verify` runs after the writes: it re-reads the tree, reports as `touched` every dirty path the
-snapshot did not know (the run's own writes, `new` marking the untracked ones — the commit
-pathspec), and as `violations` every snapshot path whose fingerprint changed (the run wrote
-into the operator's work). The verdict is `ok` only when there are no violations; a caller
-commits nothing otherwise.
+`verify` runs after the writes and judges only paths under the same write scope: it re-reads the tree,
+reports as `touched` every dirty path there the snapshot did not know (the run's own writes, `new`
+marking the untracked ones — the commit pathspec), and as `violations` every snapshot path there
+whose fingerprint changed (the run wrote into the operator's work). Paths outside the write scope
+that changed or appeared since the snapshot are the operator working alongside the run: they are
+listed as `outside`, never committed and never blocking. The verdict is `ok` only when there are
+no violations; a caller commits nothing otherwise.
 
-`plugin-root` prints the one directory a plugin's sources are read from, resolved in the
-order every skill must follow and none may reorder: the `$LAZYCORTEX_PLUGIN_DIRS` entry for the plugin,
-then the dev-vault sibling beside core's own plugin tree, then the repo's own `plugins/claude/<plugin>/`
-when the repo authors the plugin, and last the install `installed_plugins.json` records. The plugin name
-may carry its `@<marketplace>` suffix. Exit status 1 and an `error:` line naming every searched stage when
-no stage resolves.
+`plugin-root` prints the one directory a plugin's sources are read from, resolved by the shared plugin
+locator in the order every skill must follow and none may reorder: the `$LAZYCORTEX_PLUGIN_DIRS` entry for
+the plugin, then the dev-vault sibling beside core's own plugin tree, then the current checkout's own
+`plugins/claude/<plugin>/`, and last the install `installed_plugins.json` records for this repo's main
+checkout or for the whole user. The plugin name may carry its `@<marketplace>` suffix. The verb exits 1 with
+an `error:` line naming every searched stage when no stage resolves.
 """
 
 from __future__ import annotations
@@ -60,10 +65,12 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from frontmatter_parser import parse_frontmatter  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import plugin_locator  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -71,15 +78,9 @@ if TYPE_CHECKING:
 
 
 # waiver: external Claude Code filesystem locations, not reusable domain keys
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
-# waiver: external Claude Code filesystem locations, not reusable domain keys
 _SETTINGS_FILES = (".claude/settings.json", ".claude/settings.local.json")
 # waiver: external Claude Code manifest field names, not internal keys
 _ENABLED_PLUGINS = "enabledPlugins"
-# waiver: external Claude Code manifest field names, not internal keys
-_INSTALL_PATH = "installPath"
-# waiver: external Claude Code manifest field name, not an internal key
-_VERSION = "version"
 # waiver: repo layout of a plugin-authoring vault, not a reusable domain key
 _DEV_ROOT, _DEV_MANIFEST = "plugins/claude", ".claude-plugin/plugin.json"
 # waiver: plugin layout, not a reusable domain key
@@ -97,20 +98,26 @@ _INSTALL_SUFFIX = ".install"
 # waiver: the one installer every chain runs first — it seeds what the others read
 _FIRST_INSTALL = "lazy-core.install"
 # waiver: report vocabulary shared with the skill and the agent
-_NOT_INSTALLED = "plugin not installed on this machine"
-# Verdict words of the plugin-root miss line, right after the plugin ref
-_MISS_VERDICT = "not installed"
+_NOT_INSTALLED = "plugin not installed for this repo or the user"
 # waiver: JSON report keys read by the skill and the agent
 _K_DISPATCH, _K_PHASE, _K_LAST = "dispatch", "phase", "last"
 
 # Decision: the prefixes the install chain and the checkup repairs write to are fixed here, not
 # derived per run — a headless agent needs the verdict BEFORE any installer runs, and every
 # installer documents its writes under these roots (`.claude/` mirrors and settings, the
-# plugin-authoring tree, Obsidian and git-hook bootstraps, run logs, daemon state, `.gitignore`).
+# plugin-authoring tree, Obsidian and git-hook bootstraps, run logs, daemon state, tracked
+# migration stamps, the Python runner wrappers, `pyproject.toml` and guideline overlays, the
+# git and lazy ignore/attribute files). The one root an operator can move, the spec content
+# root, is read from the repo's settings on every call and added to these.
 
 # waiver: repo-relative roots the install chain owns, not reusable domain keys
 WRITE_SCOPE = (
-    ".claude/", "plugins/claude/", ".obsidian/", ".githooks/", ".experts/", ".logs/", ".runtime/", ".gitignore")
+    ".claude/", "plugins/claude/", ".obsidian/", ".githooks/", ".experts/", ".logs/", ".runtime/", ".state/",
+    "cli/", "docs/guidelines/", ".gitignore", ".gitattributes", ".lazyignore", "pyproject.toml")
+# waiver: the lazycortex settings file and the spec plugin's content-root key (lazycortex-specs `spec_paths`)
+_LAZY_SETTINGS_REL, _SPEC_SECTION, _SPEC_ROOT_KEY = ".claude/lazy.settings.json", "spec", "vault_root"
+# waiver: the spec plugin's default content root (lazycortex-specs `spec_paths.DEFAULT_VAULT_ROOT`)
+_DEFAULT_SPEC_ROOT = "specs"
 # waiver: machine-local daemon state dir, gitignored by lazy-core.install
 _SNAPSHOT_REL = ".runtime/lazy-setup-guard.json"
 # waiver: guard verdict vocabulary shared with the two headless agents
@@ -125,12 +132,8 @@ _RENAME_STATUSES = "RC"
 _VERB_DISCOVER, _VERB_GUARD, _VERB_VERIFY, _VERB_ROOT = "discover", "guard", "verify", "plugin-root"
 # waiver: argparse sub-command name, a surface string rather than a domain key
 _VERB_SNAPSHOT = "snapshot"
-# waiver: the daemon's plugin-dir export (dev.plugin-boundaries § 1c), an environment name
-_PLUGIN_DIRS_ENV = "LAZYCORTEX_PLUGIN_DIRS"
-# waiver: provenance words of a resolved plugin root, read by the skills' reports
-_SRC_REPO, _SRC_ENV, _SRC_SIBLING, _SRC_CACHE = "repo", "env", "sibling", "cache"
 # The directory holding core's own plugin tree; in a dev vault its other children are the sibling plugins
-_SIBLING_ROOT = Path(__file__).resolve().parents[2]
+_SIBLING_BASE = Path(__file__).resolve().parents[2]
 
 
 def _read_json(path: Path) -> dict:
@@ -141,12 +144,12 @@ def _read_json(path: Path) -> dict:
     path: File to read.
 
   Returns:
-    The parsed object, or an empty dict when the file is missing or not valid JSON.
+    The parsed object, or an empty dict when the file is missing, not UTF-8 text, or does not hold a JSON object.
   """
   try:
     # waiver: stdlib encoding idiom
     data = json.loads(path.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
+  except (OSError, UnicodeDecodeError, json.JSONDecodeError):
     return {}
   return data if isinstance(data, dict) else {}
 
@@ -176,67 +179,6 @@ def read_enabled_plugins(repo: Path) -> set[str]:
 
   # keep the switched-on keys, stripped of their `@<marketplace>` suffix
   return { key.split("@", 1)[0] for key, enabled in merged.items() if enabled }
-
-
-def read_install_paths(home: Path) -> dict[str, Path]:
-  """
-  Read the machine's plugin registry into a map of plugin name to cached source root.
-
-  Args:
-    home: Home directory holding `.claude/plugins/installed_plugins.json`.
-
-  Returns:
-    Plugin name to the `installPath` of its highest recorded version; plugins with no record are absent.
-  """
-  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
-  data = _read_json(home / _INSTALLED_PLUGINS_REL)
-  # waiver: external Claude Code manifest field name, not an internal key
-  plugins = data.get("plugins", data)
-
-  # the highest recorded version wins — records differ by version, each naming its own cache dir,
-  # and the registry keeps a stale record for every project that last installed an older one;
-  # one plugin installed from two marketplaces has two keys, so records are pooled by bare name first
-  pooled: dict[str, list[dict]] = {}
-  for key, entries in plugins.items():
-    records = [ rec for rec in entries or [] if isinstance(rec, dict) and rec.get(_INSTALL_PATH) ]
-    pooled.setdefault(key.split("@", 1)[0], []).extend(records)
-  return {
-    name: Path(str(max(records, key = _version_key)[_INSTALL_PATH]))
-    for name, records in pooled.items() if records
-  }
-
-
-def installed_plugin_root(name: str, home: Path | None = None) -> Path | None:
-  """
-  Resolve a plugin's installed source root from Claude Code's plugin registry.
-
-  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
-  version that installed the plugin, each naming its `installPath`; the highest recorded version
-  wins. The plugin cache itself is never searched: it keeps every version ever installed, so a walk
-  across it returns copies the registry no longer names.
-
-  Args:
-    name: Plugin name without its `@<marketplace>` suffix.
-    home: Home directory holding the registry; the current user's when omitted.
-
-  Returns:
-    The recorded install root when it exists on disk, else None.
-  """
-  root = read_install_paths(home or Path.home()).get(name)
-  return root if root is not None and root.is_dir() else None
-
-
-def _version_key(record: dict) -> tuple[int, ...]:
-  """
-  Order a registry record by its recorded version.
-
-  Args:
-    record: One `installed_plugins.json` record.
-
-  Returns:
-    The dotted version as integers; a missing or non-numeric segment counts as 0.
-  """
-  return tuple(int(part) if part.isdigit() else 0 for part in str(record.get(_VERSION, "")).split("."))
 
 
 def find_dev_plugins(repo: Path) -> dict[str, Path]:
@@ -319,9 +261,11 @@ def _order_key(entry: dict) -> tuple:
   )
 
 
-def discover(repo: Path, home: Path) -> dict:
+def discover(repo: Path, home: Path | None = None, *, settings_root: Path | None = None) -> dict:
   """
   Build the install chain for a repo.
+
+  Cached sources count only from installs made for the repo's main checkout or for the whole user.
 
   Guarantees:
     - `skills` is ordered by phase band, the band's `lazy_setup_last` skill closing it, with
@@ -330,7 +274,9 @@ def discover(repo: Path, home: Path) -> dict:
 
   Args:
     repo: Repo root the chain targets.
-    home: Home directory whose plugin registry resolves cached sources.
+    home: Home directory whose plugin registry resolves cached sources; the default registry when omitted.
+    settings_root: Directory whose `.claude/settings.json` and `.claude/settings.local.json` say which plugins are
+      enabled; None for the repo root.
 
   Returns:
     The report described in the module docstring.
@@ -346,12 +292,12 @@ def discover(repo: Path, home: Path) -> dict:
 
   # both source kinds, in-repo first
   dev = find_dev_plugins(repo)
-  cached = read_install_paths(home)
+  cached = plugin_locator.installed_plugin_roots(repo, home)
 
-  # resolve every enabled plugin to one source root, reporting the ones this machine lacks
+  # resolve every enabled plugin to one source root, reporting the ones not installed for this repo or the user
   roots: dict[str, Path] = {}
   skipped: list[dict] = []
-  for plugin in sorted(read_enabled_plugins(repo)):
+  for plugin in sorted(read_enabled_plugins(settings_root or repo)):
     root = dev.get(plugin) or cached.get(plugin)
     if root is None:
       # waiver: JSON report keys read by the skill and the agent
@@ -381,7 +327,7 @@ def discover(repo: Path, home: Path) -> dict:
   }
 
 
-def dirty_paths(repo: Path) -> list[str]:
+def read_dirty_paths(repo: Path) -> list[str]:
   """
   List the repo-relative paths git reports as modified, added, deleted, renamed, or untracked.
 
@@ -428,6 +374,46 @@ def _is_under(path: str, prefixes: tuple[str, ...] | list[str]) -> bool:
   return any(path == p or path.startswith(p if p.endswith("/") else p + "/") for p in prefixes)
 
 
+def read_write_scope(repo: Path) -> tuple[str, ...]:
+  """
+  List the roots the install chain writes to in a repo: the fixed ones and the repo's spec content root.
+
+  Guarantees:
+    - The result holds every fixed root of `WRITE_SCOPE` followed by exactly one spec content root, written as a
+      `<root>/` prefix strictly below the repo.
+    - The call never raises on an absent, unparseable or non-object settings file, nor on an unset or non-string
+      value.
+    - A value naming the repo root, an absolute path or one containing `..` yields the default `specs/`, so a repo
+      whose spec plugin would refuse the value never widens the scope to the whole repo or beyond it.
+
+  Args:
+    repo: Repo root holding `.claude/lazy.settings.json`.
+
+  Returns:
+    `WRITE_SCOPE` followed by the spec content root as a `<root>/` prefix; the default `specs/` when the settings
+    file is absent or unparseable, or the value is unset, not a string, or not a sub-directory of the repo.
+  """
+
+  # Contract:
+  # The result MUST hold every fixed root of `WRITE_SCOPE` followed by exactly one spec content root, written as a
+  # `<root>/` prefix strictly below the repo. The call NEVER raises on an absent, unparseable or non-object settings
+  # file, nor on an unset or non-string value. A value naming the repo root, an absolute path or one containing `..`
+  # yields the default `specs/`, so a repo whose spec plugin would refuse the value never widens the scope to the
+  # whole repo or beyond it.
+
+  # the configured root, when the settings name one
+  spec = _read_json(repo / _LAZY_SETTINGS_REL).get(_SPEC_SECTION)
+  value = spec.get(_SPEC_ROOT_KEY) if isinstance(spec, dict) else None
+  parts = PurePosixPath(value).parts if isinstance(value, str) else ()
+
+  # guard: the spec plugin refuses the repo root, an absolute path and `..`, so it never writes there
+  if not parts or PurePosixPath(*parts).is_absolute() or ".." in parts:
+    parts = (_DEFAULT_SPEC_ROOT,)
+
+  # the fixed roots, then the spec root in the prefix form `_is_under` reads
+  return (*WRITE_SCOPE, PurePosixPath(*parts).as_posix() + "/")
+
+
 def _fingerprint(repo: Path, rel: str) -> str:
   """
   Fingerprint the current content of one repo-relative path.
@@ -467,9 +453,10 @@ def guard(repo: Path, ignore: list[str], snapshot: Path) -> dict:
   """
 
   # sort every dirty path into its bucket, the ignore prefixes first
-  dirty = [ path for path in dirty_paths(repo) if path != _relate_snapshot(repo, snapshot) ]
+  scope = read_write_scope(repo)
+  dirty = [ path for path in read_dirty_paths(repo) if path != _relate_snapshot(repo, snapshot) ]
   ignored = [ path for path in dirty if _is_under(path, ignore) ]
-  conflicts = [ path for path in dirty if path not in ignored and _is_under(path, WRITE_SCOPE) ]
+  conflicts = [ path for path in dirty if path not in ignored and _is_under(path, scope) ]
   outside = [ p for p in dirty if p not in ignored and p not in conflicts ]
   verdict = _V_CONFLICT if conflicts else (_V_CLEAN if not dirty else _V_ALLOWED)
 
@@ -480,7 +467,7 @@ def guard(repo: Path, ignore: list[str], snapshot: Path) -> dict:
   return {
       # waiver: JSON report keys read by the two headless agents
       "verdict": verdict, "dirty": dirty, "conflicts": conflicts, "ignored": ignored, "outside": outside,
-      "write_scope": list(WRITE_SCOPE), "snapshot": str(snapshot),
+      "write_scope": list(scope), "snapshot": str(snapshot),
   }
 
 
@@ -490,7 +477,7 @@ def save_snapshot(repo: Path, target: Path) -> dict:
 
   Guarantees:
     - Every dirty path but the snapshot file itself is fingerprinted, under the chain's write scope or not, in the
-      format `verify` reads.
+      format `verify` reads, so no operator path is later read as the run's own write.
 
   Args:
     repo: Repo root.
@@ -501,12 +488,13 @@ def save_snapshot(repo: Path, target: Path) -> dict:
   """
 
   # Contract:
-  # Every dirty path but the snapshot file MUST be recorded with its fingerprint, whatever root it sits under; the
-  # migrate skill commits a path dirty after the snapshot as the install chain's write, so a path missing here would
-  # turn the operator's work into a commit.
+  # Every dirty path but the snapshot file MUST be recorded with its fingerprint, whatever root it sits under.
+  # `verify` reads a write-scope path the snapshot does not list as the run's own write, which the callers commit,
+  # so a missing one would turn the operator's work into a commit; it lists an outside path only when it differs
+  # from its recorded fingerprint, so a missing one would be reported as changed by the run.
 
   # every dirty path but the snapshot's own file, which the next write replaces
-  dirty = [ path for path in dirty_paths(repo) if path != _relate_snapshot(repo, target) ]
+  dirty = [ path for path in read_dirty_paths(repo) if path != _relate_snapshot(repo, target) ]
   _write_snapshot(repo, dirty, target)
 
   # the report names the file the next skill is handed
@@ -553,10 +541,15 @@ def verify(repo: Path, snapshot: Path) -> dict:
   Compare the tree after a run with the guard's snapshot.
 
   Guarantees:
-    - `touched` holds only paths the snapshot did not list, so an operator's dirty file never
-      enters the commit pathspec, and the snapshot file itself never does either.
-    - `violations` holds every recorded path whose fingerprint changed, including one that a
-      revert made clean again; the snapshot file is never one, even when an older snapshot recorded it.
+    - `touched` and `violations` hold only paths under the chain's write scope; a path outside it never
+      enters the commit pathspec and never blocks the run.
+    - `touched` holds only write-scope paths the snapshot did not list, so an operator's dirty file never
+      enters the commit pathspec.
+    - `violations` holds every recorded write-scope path whose fingerprint changed, including one that a
+      revert made clean again.
+    - `outside` holds the paths outside the write scope that changed or appeared since the snapshot; a
+      recorded outside path whose fingerprint is unchanged is not listed.
+    - The snapshot file itself is never listed anywhere, even when an older snapshot recorded it.
 
   Args:
     repo: Repo root.
@@ -565,16 +558,24 @@ def verify(repo: Path, snapshot: Path) -> dict:
   Returns:
     The report described in the module docstring.
   """
-  before = _read_json(snapshot)
+
+  # Contract:
+  # `touched` and `violations` MUST hold only paths under the write scope. A path outside it, changed or new since
+  # the snapshot, is listed in `outside` instead and never enters the commit pathspec or blocks the run.
+
   # a snapshot kept inside the repo shows up as dirty itself and never counts as a write, nor as a violation when an
   # older snapshot recorded it
+  before = _read_json(snapshot)
   snapshot_rel = _relate_snapshot(repo, snapshot)
   recorded: list[str] = [ path for path in before.get(_K_DIRTY) or [] if path != snapshot_rel ]
   fingerprints: dict = before.get(_K_FINGERPRINTS) or {}
 
-  # the run's own writes are the dirty paths the snapshot did not know; untracked ones need `add -N`
-  after = dirty_paths(repo)
-  touched = [ p for p in after if p not in recorded and p != snapshot_rel ]
+  # the run's own writes are the dirty paths the snapshot did not know that fall under the write scope, untracked
+  # ones needing `add -N`; a new path outside the scope is the operator's and goes to `outside`
+  scope = read_write_scope(repo)
+  after = read_dirty_paths(repo)
+  appeared = [ p for p in after if p not in recorded and p != snapshot_rel ]
+  touched = [ p for p in appeared if _is_under(p, scope) ]
   tracked = set(subprocess.run(
       [ "git", "-C", str(repo), "--literal-pathspecs", "ls-files", "-z", "--", *touched ],
       check = True, capture_output = True,
@@ -584,94 +585,59 @@ def verify(repo: Path, snapshot: Path) -> dict:
       errors = "surrogateescape",
   ).split("\0")) if touched else set()
   new = [ p for p in touched if p not in tracked ]
-  violations = [ p for p in recorded if _fingerprint(repo, p) != fingerprints.get(p) ]
 
-  # the report the agents read; any violation blocks the commit
+  # only a recorded path under the write scope can be the run's write into operator work; a change elsewhere is the
+  # operator working alongside the run, reported beside the paths that appeared outside the scope
+  changed = [ p for p in recorded if _fingerprint(repo, p) != fingerprints.get(p) ]
+  violations = [ p for p in changed if _is_under(p, scope) ]
+  outside = sorted({ *(p for p in changed if p not in violations), *(p for p in appeared if p not in touched) })
+
+  # the report the agents read; any violation blocks the commit, an outside path never does
   return {
       # waiver: JSON report keys read by the two headless agents
       "verdict": _V_VIOLATED if violations else _V_OK, "touched": touched, "new": new, "violations": violations,
+      "outside": outside,
   }
 
 
-def plugin_root(plugin: str, repo: Path, home: Path) -> dict | None:
+def plugin_root(plugin: str, repo: Path, home: Path | None = None) -> dict:
   """
   Resolve the directory a plugin's sources are read from.
 
   Guarantees:
     - Stages run in a fixed order: the exported plugin directories, then the dev-vault sibling, then the
-      authoring repo's own tree, then the install registry. The first hit wins, and no stage is reordered
+      current checkout's own tree, then the install registry. The first hit wins, and no stage is reordered
       or skipped.
+    - When no stage finds the plugin, the call raises `plugin_locator.PluginNotFoundError` naming every stage
+      searched; it never returns None or a fallback.
 
   Args:
     plugin: Plugin name, with or without its `@<marketplace>` suffix.
-    repo: Repo root whose authored plugins are checked.
-    home: Home directory whose plugin registry resolves the installed copy.
+    repo: Any directory of the repo the caller works in: its root, a subdirectory or a worktree.
+    home: Home directory whose plugin registry resolves the installed copy; the default registry when omitted.
 
   Returns:
-    `{"plugin", "root", "source"}` with `source` one of `env` / `sibling` / `repo` / `cache`, or None when no
-    stage resolves.
+    `{"plugin", "root", "source"}` with `source` one of `env` / `sibling` / `repo` / `cache`.
+
+  Raises:
+    plugin_locator.PluginNotFoundError: No stage resolves the plugin; the message names every stage searched.
   """
-  name = plugin.split("@", 1)[0]
 
   # Contract:
-  # The stages run export, then dev-vault sibling, then the authoring repo's tree, then the install
+  # The stages run export, then dev-vault sibling, then the current checkout's tree, then the install
   # registry, and the first hit wins; every skill that reads a plugin's sources relies on this order,
   # so no caller may reorder or skip a stage.
 
-  # stage one: the daemon's export, matched on the directory name
-  for entry in filter(None, os.environ.get(_PLUGIN_DIRS_ENV, "").split(os.pathsep)):
-    candidate = Path(entry)
-    if candidate.name == name and (candidate / _DEV_MANIFEST).is_file():
-      return _root_report(name, candidate, _SRC_ENV)
+  # Contract:
+  # When no stage finds the plugin, the call MUST raise `plugin_locator.PluginNotFoundError` naming every
+  # stage searched; it NEVER returns None or a fallback, because callers handle exactly that error.
 
-  # stage two: the dev-vault sibling beside core's own plugin tree
-  sibling = _SIBLING_ROOT / name
-  if (sibling / _DEV_MANIFEST).is_file():
-    return _root_report(name, sibling, _SRC_SIBLING)
+  # the shared locator runs the stages; core's own plugin tree sits beside its dev-vault siblings
+  root, source = plugin_locator.plugin_root(plugin, repo, sibling_base = _SIBLING_BASE, home = home)
 
-  # stage three: the authoring repo's own tree
-  dev = find_dev_plugins(repo).get(name)
-  if dev is not None:
-    return _root_report(name, dev, _SRC_REPO)
-
-  # stage four: the install the machine's plugin registry records
-  cached = installed_plugin_root(name, home)
-  return _root_report(name, cached, _SRC_CACHE) if cached is not None else None
-
-
-def format_plugin_root_miss(plugin: str, repo: Path, home: Path) -> str:
-  """
-  Compose the error line for a plugin no stage of `plugin_root` resolves.
-
-  Args:
-    plugin: Plugin name, with or without its `@<marketplace>` suffix.
-    repo: Repo root whose authored plugins were checked.
-    home: Home directory whose plugin registry was read.
-
-  Returns:
-    One `error:` line naming every stage searched and the location each one looked at.
-  """
-  name = plugin.split("@", 1)[0]
-  return (f"error: {plugin} {_MISS_VERDICT}: searched ${_PLUGIN_DIRS_ENV} "
-          f"({os.environ.get(_PLUGIN_DIRS_ENV, '') or 'unset'}), the dev-vault sibling "
-          f"{_SIBLING_ROOT / name}, the repo tree {repo / _DEV_ROOT / name}, and the install registry "
-          f"{home / _INSTALLED_PLUGINS_REL}")
-
-
-def _root_report(name: str, root: Path, source: str) -> dict:
-  """
-  Shape one plugin-root resolution as the report the CLI prints.
-
-  Args:
-    name: Bare plugin name.
-    root: Resolved source directory.
-    source: Which stage resolved it.
-
-  Returns:
-    The report object.
-  """
+  # the report the CLI prints and the skills read
   # waiver: JSON report keys read by the skills
-  return { "plugin": name, "root": str(root.resolve()), "source": source }
+  return { "plugin": plugin.split("@", 1)[0], "root": str(root), "source": source }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -722,13 +688,15 @@ def main(argv: list[str] | None = None) -> int:
   # waiver: argparse surface strings, not reusable domain keys
   root.add_argument("plugin", help = "plugin name, with or without its @<marketplace> suffix")
   # waiver: argparse surface strings, not reusable domain keys
-  root.add_argument("--repo", default = None, help = "repo root checked for authored sources (default: the cwd)")
+  root.add_argument("--repo", default = None, help = "directory inside the repo checked for authored sources "
+                    "(default: $LAZY_REPO_ROOT, then the cwd)")
   # waiver: argparse surface strings, not reusable domain keys
   root.add_argument("--home", default = None, help = "home directory (default: the current user's)")
   args = parser.parse_args(argv)
 
-  # the repo comes from the argument every verb but `plugin-root` requires; that verb falls back to the cwd
-  repo = Path(args.repo).resolve() if getattr(args, "repo", None) else Path.cwd().resolve()
+  # the repo is the checkout the argument every verb but `plugin-root` requires sits in; that verb falls back to the
+  # dispatcher's environment, then the cwd
+  repo = plugin_locator.query_repo_root(getattr(args, "repo", None))
 
   # guard: a repo path that is not a directory is a usage error, not an empty chain
   if not repo.is_dir():
@@ -736,21 +704,22 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
   # the home resolves the cached copies; only `discover` and `plugin-root` take it explicitly
-  home = Path(args.home).resolve() if getattr(args, "home", None) else Path.home()
+  home = Path(args.home).resolve() if getattr(args, "home", None) else None
 
   # emit the requested report; `discover` and `plugin-root` resolve against the named home
   if args.verb == _VERB_DISCOVER:
     # guard: a band with two closers is a failure the caller must see, not a chain
     try:
-      report: dict | None = discover(repo, home)
+      report = discover(repo, home, settings_root = plugin_locator.query_settings_root(args.repo))
     except ValueError as error:
       print(f"error: {error}", file = sys.stderr)
       return 1
   elif args.verb == _VERB_ROOT:
-    report = plugin_root(args.plugin, repo, home)
     # guard: an unresolved plugin is a failure the caller must see, not an empty report
-    if report is None:
-      print(format_plugin_root_miss(args.plugin, repo, home), file = sys.stderr)
+    try:
+      report = plugin_root(args.plugin, repo, home)
+    except plugin_locator.PluginNotFoundError as error:
+      print(f"error: {error}", file = sys.stderr)
       return 1
   else:
     target = Path(args.snapshot).resolve() if args.snapshot else repo / _SNAPSHOT_REL

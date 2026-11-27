@@ -24,10 +24,20 @@ import subprocess
 import sys
 from datetime import date
 from fnmatch import fnmatch
+from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # waiver: filesystem filename idiom (guard opt-in / waivers config file), not a domain constant
@@ -443,19 +453,12 @@ def find_repo_root(cwd: str | None = None) -> str | None:
     cwd: Directory to resolve from; the process cwd when omitted.
 
   Returns:
-    The repository root path, or None when `cwd` is not inside a git repository or the
-    `git` binary is unavailable.
+    The root path of the checkout `cwd` sits in, a linked worktree's own root inside one; None when `cwd` is not
+    inside a git repository or the `git` binary is unavailable.
   """
-  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
-  try:
-    root = os.fsdecode(subprocess.check_output(
-      [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL,
-      cwd = cwd,
-    )).strip()
-  except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError, OSError):
-    return None
-  return root or None
+  # the checkout's own root, a linked worktree's included; None where git names none
+  top = plugin_locator.find_checkout_toplevel(Path(cwd) if cwd else Path.cwd())
+  return str(top) if top is not None else None
 
 
 def _parse_raw_names(raw: str) -> list[str]:

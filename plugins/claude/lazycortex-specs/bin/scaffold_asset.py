@@ -10,8 +10,8 @@ flow for operator-invoked use; this primitive owns the deterministic
 scaffold + stage-stamp step it used to perform via Step 5.
 
 CLI: `scaffold-asset <product> <asset_type> <slug> [--doc <name>:<spec_doc_type>]
-[--doc ...] [--path <dir>] [--target <folder>/<slug>] [--target ...] [--cwd <repo>]`. There is no built-in category map and no default
-document layout — the `--doc` list is the produced document set in full, and
+[--doc ...] [--path <dir>] [--target <folder>/<slug>] [--target ...] [--cwd <dir>]`. There is no built-in category
+map and no default document layout — the `--doc` list is the produced document set in full, and
 a call naming none scaffolds the folder and its folder-note alone.
 
 Inputs read:
@@ -82,6 +82,9 @@ import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -142,7 +145,7 @@ class Keys:
     ARG_PATH: CLI flag overriding the folder the asset lands in.
     DOC_TOKEN_SEP: Separator inside a `--doc` value.
     ARG_SLUG: CLI positional argument name for the asset slug.
-    ARG_CWD: CLI flag overriding the repo root.
+    ARG_CWD: CLI flag naming a directory inside the repository whose nearest settings root is used.
     ARG_TARGET: CLI repeatable flag naming one asset a change modifies, as `<folder>/<slug>`.
     HELP_PRODUCT: CLI help text for the product argument.
     HELP_TYPE: CLI help text for the type argument.
@@ -153,7 +156,6 @@ class Keys:
     HELP_TARGET: CLI help text for the `--target` flag.
     OUT_FILE: Output JSON key naming a produced doc's repo-relative path.
     OUT_STAGE: Output JSON key naming a produced doc's initial stage.
-    GIT_DIR: The `.git` entry checked to detect a repo checkout.
   """
 
   # Settings key holding the product registry.
@@ -240,7 +242,7 @@ class Keys:
   DOC_TOKEN_SEP = ":"
   # CLI positional argument name for the asset slug.
   ARG_SLUG = "slug"
-  # CLI flag overriding the repo root.
+  # CLI flag naming a directory inside the repository whose nearest settings root is used.
   ARG_CWD = "--cwd"
   # CLI repeatable flag naming one asset a change modifies, as `<folder>/<slug>`.
   ARG_TARGET = "--target"
@@ -255,15 +257,13 @@ class Keys:
   # CLI help text for the slug argument.
   HELP_SLUG = "Asset slug (lowercase-with-hyphens)"
   # CLI help text for the `--cwd` flag.
-  HELP_CWD = "Override repo root"
+  HELP_CWD = "Directory inside the repository (default: $LAZY_REPO_ROOT, then the cwd)"
   # CLI help text for the `--target` flag.
   HELP_TARGET = "Asset the change modifies, as <folder>/<slug> under spec_path; repeatable, kept in order"
   # Output JSON key naming a produced doc's repo-relative path.
   OUT_FILE = "file"
   # Output JSON key naming a produced doc's initial stage.
   OUT_STAGE = "stage"
-  # The `.git` entry checked to detect a repo checkout.
-  GIT_DIR = ".git"
 
 
 # The citation key's line in a template's frontmatter, in any YAML spelling.
@@ -297,24 +297,6 @@ class ScaffoldRefusal(Exception):
     # the two halves of the CLI's error object
     self.category = category
     self.message = message
-
-
-def repo_root(cwd: Path) -> Path:
-  """
-  Resolve the repo root from a working directory, falling back to cwd when not in a repo.
-
-  Args:
-    cwd: Working directory to start the search from.
-
-  Returns:
-    The first ancestor (or `cwd` itself) that contains a `.git` entry; absolute path.
-  """
-  cur = cwd.resolve()
-  while cur != cur.parent:
-    if (cur / Keys.GIT_DIR).exists():
-      return cur
-    cur = cur.parent
-  return cwd.resolve()
 
 
 def _plugin_root() -> Path:
@@ -942,12 +924,14 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Subcommand argv tail (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]
-      [--target <folder>/<slug> ...] [--cwd <repo>]`).
+      [--target <folder>/<slug> ...] [--cwd <dir>]`), where `--cwd` names the directory inside the repository
+      from which the nearest settings root is searched (default: `$LAZY_REPO_ROOT`, then the cwd).
 
   Returns:
     Process exit code: `0` on success, `1` on logical error, `2` on argparse failure.
   """
-  # the three positionals name the asset; --doc names each produced document; --cwd pins the repo
+  # the three positionals name the asset; --doc names each produced document; --cwd names where the settings
+  # root is searched from
   parser = argparse.ArgumentParser(prog = Keys.PROG)
   parser.add_argument(Keys.ARG_PRODUCT, help = Keys.HELP_PRODUCT)
   parser.add_argument(Keys.ARG_TYPE, help = Keys.HELP_TYPE)
@@ -964,11 +948,10 @@ def main(argv: list[str]) -> int:
   # later, by the coordinator's launch checkboxes, never by the scaffold itself
   layout = [ parse_doc_token(token) for token in args.doc ]
 
-  # the repo root pins every path; the scaffold itself takes the parsed arguments
-  repo = Path(args.cwd).resolve() if args.cwd else repo_root(Path.cwd())
-  print(json.dumps(
-      scaffold(repo, args.product, args.asset_type, args.slug, layout = layout, path = args.path or "",
-               targets = args.target)))
+  # the nearest settings root pins every path; the scaffold itself takes the parsed arguments
+  result = scaffold(spec_locator.query_settings_root(args.cwd), args.product, args.asset_type, args.slug,
+                    layout = layout, path = args.path or "", targets = args.target)
+  print(json.dumps(result))
   return 0
 
 

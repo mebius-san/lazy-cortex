@@ -67,6 +67,9 @@ import resolve_language  # noqa: E402  # pylint: disable=import-error,wrong-impo
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
@@ -710,13 +713,14 @@ def _clone_dir(repo: Path, repo_key: str) -> Path:
   Resolve one source's gitignored working-clone directory.
 
   Args:
-    repo: Repository root.
+    repo: The project's settings root, inside the checkout whose root keeps the clone.
     repo_key: The configured source's key.
 
   Returns:
-    `<repo>/.runtime/lazy-specs/upstreams/<repo-key>`.
+    `.runtime/lazy-specs/upstreams/<repo-key>` under the root of the checkout `repo` sits in.
   """
-  return repo / _K.RUNTIME_CLONE_ROOT / repo_key
+  # runtime state belongs to the checkout, never to a nested project inside it
+  return spec_locator.query_repo_root(repo) / _K.RUNTIME_CLONE_ROOT / repo_key
 
 
 def _has_clone_origin_mismatch(clone_dir: Path, url: str) -> bool:
@@ -2513,12 +2517,13 @@ def _load_cursor(repo: Path) -> int:
   Read the fetch phase's continuation cursor.
 
   Args:
-    repo: Repository root.
+    repo: The project's settings root, inside the checkout whose root keeps the cursor.
 
   Returns:
     The persisted cursor index, or `0` when absent/malformed.
   """
-  path = repo / _K.CURSOR_FILE
+  # runtime state belongs to the checkout, never to a nested project inside it
+  path = spec_locator.query_repo_root(repo) / _K.CURSOR_FILE
 
   # guard: no cursor persisted yet — start from the beginning
   if not path.is_file():
@@ -2534,10 +2539,11 @@ def _save_cursor(repo: Path, cursor: int) -> None:
   Persist the fetch phase's continuation cursor.
 
   Args:
-    repo: Repository root.
+    repo: The project's settings root, inside the checkout whose root keeps the cursor.
     cursor: The next tick's starting index into the ordered unit list.
   """
-  path = repo / _K.CURSOR_FILE
+  # runtime state belongs to the checkout, never to a nested project inside it
+  path = spec_locator.query_repo_root(repo) / _K.CURSOR_FILE
   path.parent.mkdir(parents = True, exist_ok = True)
   path.write_text(json.dumps({ _CURSOR_KEY: cursor }), encoding = "utf-8")
 
@@ -3463,7 +3469,10 @@ def main(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog = _K.PROG)
   parser.add_argument(_K.ARG_CWD, default = None)
   args = parser.parse_args(argv)
-  repo = Path(args.cwd).resolve() if args.cwd else spec_paths.find_settings_root(Path.cwd())
+
+  # the project whose settings configure the tick: the nearest settings within the checkout; its runtime state
+  # still lands under the checkout root
+  repo = spec_locator.query_settings_root(args.cwd)
 
   # settings that cannot be read as a JSON object refuse the tick: it never runs as if nothing were configured,
   # and never against a content root the settings did not name
@@ -3494,11 +3503,15 @@ def main_doctor(argv: list[str]) -> int:
     SystemExit: `argparse` rejects an unrecognised flag or a missing option value (exit `2`).
     subprocess.CalledProcessError: In `--apply` mode, staging or committing a released unit fails.
   """
+  # the verb's flags: the directory inside the repository and the apply switch
   parser = argparse.ArgumentParser(prog = _K.DOCTOR_PROG)
   parser.add_argument(_K.ARG_CWD, default = None)
   parser.add_argument(_K.ARG_APPLY, action = _K.ACTION_STORE_TRUE)
   args = parser.parse_args(argv)
-  repo = Path(args.cwd).resolve() if args.cwd else spec_paths.find_settings_root(Path.cwd())
+
+  # scan, or apply, against the project whose settings configure the upstreams: the nearest settings within the
+  # checkout
+  repo = spec_locator.query_settings_root(args.cwd)
   print(json.dumps(doctor_apply(repo) if args.apply else doctor_scan(repo)))
   return 0
 

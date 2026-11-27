@@ -54,13 +54,13 @@ If a test correctly reflects documented behavior but fails against the current i
 # Test Class Rules
 
 - Class name: `Test` + production class name (e.g., `TestParser`).
-- Inherit from the project-specific base test class — the overlay (`docs/guidelines/testing_guidelines.md` and `CLAUDE.md` `## Testing`) declares which base class to use for which production-class category (for example plain classes versus subclasses of a shared framework base). If the overlay is silent, fall back to the canonical `<YourBaseTest>` placeholder used in `lazy-python.testing-guidelines.md` and ask the user.
+- Inherit from the project-specific base test class — the overlay (`docs/guidelines/python/testing_guidelines.md` and `CLAUDE.md` `## Testing`) declares which base class to use for which production-class category (for example plain classes versus subclasses of a shared framework base). If the overlay is silent, fall back to the canonical `<YourBaseTest>` placeholder used in `lazy-python.testing-guidelines.md` and ask the user.
 - Class docstring: starts with `"Test unit for "`. Summary line only, no sections, in the multi-line quote form the format checker requires (`"""`, newline, the summary line, newline, `"""`) — a single-line `"""Test unit for X."""` is a D1 finding.
 
 # Test Method Rules
 
 - Naming: `test_init`, `test_prop__name`, `test_feature__variation`.
-- Max 35 characters. No production class name repetition in method name.
+- Max 37 characters. No production class name repetition in method name.
 - Double underscore `__` separates feature from variation — only use if multiple cases exist.
 - Method docstring: starts with `"Test that "`. Summary line only, no sections, in the same multi-line quote form as the class docstring.
 
@@ -104,7 +104,7 @@ For every class under test, cover **all 9 categories**. Do not skip any.
 # Zero-Tolerance Blockers
 
 - No tests without assertion messages.
-- No test method names exceed 35 characters.
+- No test method names exceed 37 characters.
 - No production class name is repeated in test method names.
 - No public or protected behaviour covered only by direct tests of private helpers — it is always tested through the public API.
 - No hardcoded magic numbers without a comment explaining the value.
@@ -131,8 +131,8 @@ Read the canonical guidelines from the plugin (always — never skip on the assu
 
 Then read the project overlay if it exists (overlay overrides canon on conflict):
 
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/testing_guidelines.md`
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/checking_guidelines.md`
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/testing_guidelines.md`
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/checking_guidelines.md`
 
 Then read the consumer's `${CLAUDE_PROJECT_DIR}/CLAUDE.md` `## Testing` section if present — this is the third overlay layer for project-wide notes that don't belong to a single topic, and is where the project declares its base test class mapping.
 

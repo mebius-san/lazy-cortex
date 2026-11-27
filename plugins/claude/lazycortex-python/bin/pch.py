@@ -18,10 +18,20 @@ import tempfile
 import xml.etree.ElementTree as ET
 # noinspection PyCompatibility
 import tomllib
+from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import python_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # Hardcoded exclusions that should never be scanned
@@ -59,7 +69,7 @@ SEVERITY_MAP = {
 # ----------------------------------------------------------------------------------------
 def load_config() -> dict:
   """
-  Load configuration from pyproject.toml.
+  Load configuration from the nearest `pyproject.toml` between the working directory and its checkout's root.
 
   Guarantees:
     - Returns an empty mapping, never raises, when 'pyproject.toml' is missing or the '[tool.pch]' table
@@ -73,13 +83,16 @@ def load_config() -> dict:
   # NEVER raises for a missing 'pyproject.toml' or an absent '[tool.pch]' table; both cases return an
   # empty mapping.
 
-  config_path = 'pyproject.toml'
+  # the nearest project config from the working directory up to the checkout root, so a nested subproject keeps
+  # its own
+  found = python_locator.find_nearest_dir(Path.cwd(), 'pyproject.toml')
+
   # guard: no pyproject.toml — no configuration to load
-  if not os.path.exists(config_path):
+  if found is None:
     return {}
 
   # tomllib needs a binary handle; the whole file is parsed to reach one nested table
-  with open(config_path, 'rb') as fle:
+  with open(found / 'pyproject.toml', 'rb') as fle:
     data = tomllib.load(fle)
 
   # an absent [tool.pch] table means "defaults" — an empty mapping is the neutral config
@@ -568,7 +581,7 @@ def main() -> None:
   """
   Entry point for the PyCharm inspection runner CLI tool.
 
-  Parse arguments, run PyCharm inspections, and report findings.
+  Run PyCharm inspections on the requested path and report findings.
 
   Guarantees:
     - Exits the process with status 1 only when inspect.sh cannot be located or the inspection run fails
@@ -576,6 +589,10 @@ def main() -> None:
       are found.
     - The sandbox directory is always removed before this function returns or the process exits, even
       when the inspection run fails.
+
+  Notes:
+    - The project is the nearest directory holding `pyproject.toml` between the working directory and its checkout's
+      root, else that checkout's root, whichever directory the run starts from.
   """
 
   # Contract:
@@ -594,8 +611,12 @@ def main() -> None:
                       help = 'exclude files or directories containing this substring')
   args = parser.parse_args()
 
-  # normalize module path: strip leading ./ so it matches XML output paths
-  module_path = args.path.removeprefix('./')
+  # the project is the nearest directory holding `pyproject.toml` from the working directory up to the checkout
+  # root, else that root; the target, named from the working directory, is taken relative to the project so it
+  # matches the XML output paths
+  project_dir = str(python_locator.find_nearest_dir(Path.cwd(), 'pyproject.toml')
+                    or python_locator.query_checkout_toplevel(Path.cwd()))
+  module_path = os.path.relpath(os.path.realpath(args.path), project_dir)
 
   # the inspection runs through PyCharm's own launcher script
   inspect_sh = find_inspect_sh()
@@ -603,9 +624,6 @@ def main() -> None:
   if inspect_sh is None:
     print('pch: PyCharm inspect.sh not found. Set PYCHARM_HOME or install PyCharm.', file = sys.stderr)
     sys.exit(1)
-
-  # resolve project directory (cli/chk cd's to project root before invoking)
-  project_dir = os.path.abspath('.')
 
   # resolve inspection profile
   profile_path = os.path.join(project_dir, '.idea', 'inspectionProfiles', 'Project_Default.xml')

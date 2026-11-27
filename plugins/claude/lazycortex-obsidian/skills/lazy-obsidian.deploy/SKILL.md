@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.deploy
 description: "Run on a checkout whose vault config is missing or stale — a fresh clone of a vault repo, a machine that never opened this vault, a teammate setting up from the repo alone — or when the operator asks to deploy / restore / rebuild the Obsidian config. The sibling `/lazy-obsidian.capture` records the manifest this rebuilds from."
-allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(test *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(ls *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
 argument-hint: "[<repo-root>]"
 dirty-tree-waiver: "writes only into `.obsidian/`, which the manifest workflow keeps gitignored; on a vault that still tracks it, restoring the operator's own recorded config is theirs to commit"
 ---
@@ -31,13 +31,13 @@ Optional positional argument: the vault repo root. Omitted means the current rep
 ## Step 1 — Locate the manifest
 
 - `repo_root = git rev-parse --show-toplevel` (or the passed argument).
-- `test -f <repo_root>/.obsidian.manifest.json` — absent → **FAIL**: "No `.obsidian.manifest.json` at `<repo_root>` — run `/lazy-obsidian.capture` on a machine that has this vault configured."
+- `Bash(ls -d <repo_root>/.obsidian.manifest.json)` — present when the command lists it; absent when it fails with "No such file or directory" → **FAIL**: "No `.obsidian.manifest.json` at `<repo_root>` — run `/lazy-obsidian.capture` on a machine that has this vault configured."
 
 Outcome: `manifest: <repo_root>/.obsidian.manifest.json`.
 
 ## Step 2 — Guard an existing vault
 
-`test -d <repo_root>/.obsidian` — absent is the normal case (fresh checkout); proceed with outcome `fresh`.
+`Bash(ls -d <repo_root>/.obsidian)` — present when the command lists it, absent when it fails with "No such file or directory". Absent is the normal case (fresh checkout); proceed with outcome `fresh`.
 
 Present means the checkout already has a configured vault, and deploy would overwrite its config files with the manifest's. Ask once:
 

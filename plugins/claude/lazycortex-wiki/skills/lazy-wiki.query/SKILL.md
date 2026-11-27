@@ -2,7 +2,7 @@
 name: lazy-wiki.query
 description: "Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope. A research skill: it hands back a bounded matched slice of the wiki graph, so the topic index never enters the calling context."
 research: true
-allowed-tools: Read, Grep, Agent, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test -f *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
+allowed-tools: Read, Grep, Agent, Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(ls *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
 ---
 # lazy-wiki.query
 
@@ -30,13 +30,15 @@ This skill has 4 ordered steps, run in either mode. The executing agent MUST NOT
 
 ## Phase 1 — Load wiki config
 
-`Read` `.claude/lazy.settings.json`. Extract `wiki.scopes` — the map of scope-id → config (each carries `topics_index`).
+Resolve `<settings-root>`, the directory whose settings declare the scopes, via `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/wiki_locator.py" settings-root)` — the nearest directory holding `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer.
+
+`Read` `<settings-root>/.claude/lazy.settings.json`. Extract `wiki.scopes` — the map of scope-id → config (each carries `topics_index`).
 
 If the file is absent or `wiki.scopes` is empty, abort: *"No wiki scopes configured — run `/lazy-wiki.install` and `/lazy-wiki.configure` first."*
 
-Resolve the repo root via `Bash(git rev-parse --show-toplevel)`. For each scope, the index's absolute path is `<repo-root>/<topics_index>`.
+For each scope, the index's absolute path is `<settings-root>/<topics_index>`.
 
-Resolve the answer's language once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <repo-root>)`. Carry the returned code into every seeker and gatherer dispatch prompt as `language=<code>` — a dispatched subagent cannot read the settings for itself — and write your own Phase 4 prose in it.
+Resolve the answer's language once, here: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-wiki" resolve-language --repo <settings-root>)`. Carry the returned code into every seeker and gatherer dispatch prompt as `language=<code>` — a dispatched subagent cannot read the settings for itself — and write your own Phase 4 prose in it.
 
 Outcome: `loaded` (or `no-scopes`).
 
@@ -44,16 +46,16 @@ Outcome: `loaded` (or `no-scopes`).
 
 ### Dispatcher mode (Agent tool available)
 
-For each scope whose `topics_index` exists on disk (`Bash(test -f <abs-index-path>)`), dispatch a seeker — **in parallel** (issue the `Agent` calls in a single message):
+For each scope whose `topics_index` exists on disk (`Bash(ls -d <abs-index-path>)` lists it; a failure with "No such file or directory" means it does not), dispatch a seeker — **in parallel** (issue the `Agent` calls in a single message):
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.seeker",
-      prompt: "question=<the question verbatim>, scope_id=<id>, topics_index_abs_path=<abs-index-path>, repo_root=<repo-root>. Read only that index; return the entry-points block per your contract.")
+      prompt: "question=<the question verbatim>, scope_id=<id>, topics_index_abs_path=<abs-index-path>, repo_root=<settings-root>. Read only that index; return the entry-points block per your contract.")
 ```
 
 If no scope has a `topics_index` on disk, skip to Phase 4 with an empty entry-point set and note it.
 
-Collect each seeker's `### selected` lines into one merged list, tagging each with its `scope_id`. **Validate every path on disk AND rebase it to repo-relative** before passing it on. The seeker returns each `<rel-link>` *verbatim from the index*, i.e. relative to the index file's directory — NOT relative to the repo root (the two differ whenever `topics_index` is not at the repo root). So: the index dir is `<repo-root>/<dirname(topics_index)>`; the node is at `<repo-root>/<dirname(topics_index)>/<rel-link>`. `Bash(test -f <that absolute path>)`. The **repo-relative** path to carry forward is `<dirname(topics_index)>/<rel-link>` (drop a leading `./`). This is what the gatherer receives, so its `repo_root`-based resolution is correct.
+Collect each seeker's `### selected` lines into one merged list, tagging each with its `scope_id`. **Validate every path on disk AND rebase it to repo-relative** before passing it on. The seeker returns each `<rel-link>` *verbatim from the index*, i.e. relative to the index file's directory — NOT relative to the repo root (the two differ whenever `topics_index` is not at the repo root). So: the index dir is `<settings-root>/<dirname(topics_index)>`; the node is at `<settings-root>/<dirname(topics_index)>/<rel-link>`. `Bash(ls -d <that absolute path>)` — the node is on disk when the command lists it, missing when it fails with "No such file or directory". The **repo-relative** path to carry forward is `<dirname(topics_index)>/<rel-link>` (drop a leading `./`). This is what the gatherer receives, so its `repo_root`-based resolution is correct.
 
 Drop any path that fails the test and record it as `dropped: <path> (not on disk)`.
 
@@ -61,7 +63,7 @@ If the merged-and-validated set is empty, proceed to Phase 4 noting `no-entry-po
 
 ### Agentless mode (no Agent tool)
 
-For each scope whose `topics_index` exists on disk (`Bash(test -f <abs-index-path>)`), `Read` the index yourself — this is the one context in which reading `topics.md` directly is correct (per `lazy-wiki.navigation` § When to query). Pick the entry points a seeker would: the node paths whose gloss addresses the question, tagged with their `scope_id`. Paths come from the index verbatim, so they're already on disk; no separate validation pass is needed. An index entry may carry `[<key>: <value>]` badges between the link and the gloss, such as `[spec_stage: draft]`; keep them with the gloss of each entry point you pick, exactly as a seeker copies them.
+For each scope whose `topics_index` exists on disk (`Bash(ls -d <abs-index-path>)` lists it; a failure with "No such file or directory" means it does not), `Read` the index yourself — this is the one context in which reading `topics.md` directly is correct (per `lazy-wiki.navigation` § When to query). Pick the entry points a seeker would: the node paths whose gloss addresses the question, tagged with their `scope_id`. Paths come from the index verbatim, so they're already on disk; no separate validation pass is needed. An index entry may carry `[<key>: <value>]` badges between the link and the gloss, such as `[spec_stage: draft]`; keep them with the gloss of each entry point you pick, exactly as a seeker copies them.
 
 If no scope has a `topics_index` on disk, proceed to Phase 4 with an empty entry-point set.
 
@@ -75,7 +77,7 @@ Dispatch exactly one gatherer with the question and the merged, validated entry 
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.gatherer",
-      prompt: "question=<the question verbatim>. entry_points=<JSON array of {scope_id, path, gloss}>. repo_root=<repo-root>. Traverse from these entry points per your contract and return the answer block.")
+      prompt: "question=<the question verbatim>. entry_points=<JSON array of {scope_id, path, gloss}>. repo_root=<settings-root>. Traverse from these entry points per your contract and return the answer block.")
 ```
 
 If Phase 2 produced no entry points, skip the dispatch and carry an empty answer into Phase 4.

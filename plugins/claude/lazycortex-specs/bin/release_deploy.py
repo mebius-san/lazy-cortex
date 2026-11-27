@@ -27,23 +27,28 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import history_journal  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import release_version  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import HistoryEvent, ReleaseConfigKey  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 _ENCODING = "utf-8"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 # The bot identity this verb commits under
 DEPLOY_NAME = "lazy-spec.release-deploy"
@@ -212,8 +217,9 @@ def main(argv: list[str]) -> int:
   """
   Run one deploy target of a release's product and journal the outcome on the release note.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
-  directory.
+  The run works in the nearest directory, within its checkout, that holds `.claude/lazy.settings.json`, searched
+  upward from the directory the `LAZY_REPO_ROOT` environment variable names, else the process working directory;
+  the checkout's root when none holds it.
 
   Notes:
     - Prints the JSON summary of `to_dict` on stdout, or a refusal when the product declares no such target.
@@ -235,7 +241,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option name
   parser.add_argument("--build", type = int, default = None)
   args = parser.parse_args(argv)
-  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  repo = spec_locator.query_settings_root()
   note = (repo / args.note).resolve()
 
   # guard: the note names the release; nothing to journal on without it

@@ -53,6 +53,8 @@ import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import note_ops as _note_ops  # type: ignore # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: `plugins/claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
 # `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
@@ -198,6 +200,9 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
     - Refreshing the History explainer line touches only the review-owned `# History` section; a
       History example inside a code fence and every other byte of the body stay as they are.
     - The body's line endings, LF or CRLF, are kept.
+    - Opening a document that carries no `review_round` yet, a fresh cycle, clears the verdict recorded for it in
+      the marker sidecar, so the cycle starts without the verdict of the cycle that closed before it; a document
+      that carries a round, in its loop or parked by a stop, keeps its verdict.
     - Opening clears `review_skip_validation`, `review_autorun`, and `review_autorun_cycles`
       from the frontmatter, so each review cycle starts without the previous cycle's choices.
 
@@ -208,6 +213,12 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
   Returns:
     `True` if anything changed; `False` if the file was already opted-in and fully bootstrapped
     (idempotent re-run).
+
+  Raises:
+    ParseError: If the document has an opening frontmatter fence with no matching closing fence.
+    OSError: If the document cannot be read, or the verdict recorded in the marker sidecar cannot be read or
+      cleared.
+    RuntimeError: If a settings file is found for the edit-marker style but no core CLI is resolvable.
   """
 
   # Domain(review.lifecycle):
@@ -227,6 +238,17 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
   # the edits run on LF text; the document's own ending comes back once, on write
   text = _atomic_io.read_text(file_path)
   new_text, ending = _atomic_io.to_lf(text)
+
+  # Contract:
+  # Opening a document that carries no `review_round`, a fresh cycle, clears the verdict recorded for it in the
+  # marker sidecar; a document that carries a round, in its loop or parked by a stop, keeps its verdict.
+
+  # a document with no round opens a fresh cycle, which carries no verdict of the cycle that closed before it;
+  # a document that has a round is in its loop or parked by a stop, and keeps the verdict of the cycle it is in
+  if ReviewKey.ROUND not in _fm.parse(new_text)[0]:
+    _job_markers.clear_verdict(_finalize.query_repo_root_for(file_path), file_path)
+
+  # the document enters its loop, and the keys seeded below are read from the result
   new_text = _fm.set_field(new_text, ReviewKey.ACTIVE, True)
   meta, _ = _fm.parse(new_text)
 

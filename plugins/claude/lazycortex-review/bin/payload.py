@@ -17,6 +17,8 @@ Request shape (matches the trimmed protocol contract in
       "edit_marker_style": "simple | diff | criticmarkup | html",
       "decisions": ["<repo-relative path>", ...],
                   # writer modes only; the decisions registries, read from the working tree
+      "guidelines": ["<absolute path>", ...],
+                  # writer modes only; the enabled plugins' canon for the role, read in place
       "owned_section": "<H1 title>"   # section-writer only
     }
 

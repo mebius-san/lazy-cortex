@@ -523,7 +523,7 @@ def _is_cascade_fold(text: str, fm_end: int, *, asset_dir: Path, repo_root: Path
   # guard: a collector that will not import, or a catalog root that cannot be read, leaves the target unknown, so
   # the job is no fold and the landing below decides its fate
   try:
-    target = _load_collector().foreign_target(repo_root / _JOBS_BASE / expert / job_id, asset_dir)
+    target = _load_collector().find_foreign_target(repo_root / _JOBS_BASE / expert / job_id, asset_dir)
   except (ImportError, OSError, ValueError) as error:
     sys.stderr.write(f"gate-tick: fold check {expert}/{job_id}: {error}\n")
     return False

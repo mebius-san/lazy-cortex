@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Build root links from spec documents to the product's code files and resolve product dependencies, so every spec link opens the file it names.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the two skills compose"
   request: "Show how lazy-spec.source-url and lazy-spec.resolve-dependency work: lazy-spec.source-url takes a repo-relative path, returns a root link [name](/path) for a file or the backticked path for a folder; lazy-spec.resolve-dependency classifies an entry as product or external, reads the product record from lazy.settings.json[products] for a product entry and returns a spec wikilink, and returns the spec_url and dev_url of an external entry as-is. Output is a link or a dep record."

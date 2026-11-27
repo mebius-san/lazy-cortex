@@ -20,8 +20,19 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 DEFAULT_VAULT_ROOT = "specs"
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
+# The tracked cross-machine state corner at the repository root.
+_STATE_DIR = ".state"
 _SPEC_SECTION = "spec"
 _VAULT_ROOT_KEY = "vault_root"
 _PARENT_SEGMENT = ".."
@@ -36,14 +47,10 @@ _SETTINGS_REFUSAL = "the spec content root cannot be resolved: {error}"
 _REASON_REPO_ROOT = "names the repository root"
 _REASON_ABSOLUTE = "is an absolute path"
 _REASON_PARENT = "climbs out through `..`"
-# waiver: sibling-plugin CLI env contract per dev.plugin-boundaries § 1c
-_ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
-# waiver: external Claude Code registry path and record keys, not internal keys
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
-_REG_PLUGINS = "plugins"
-_REG_VERSION = "version"
-_REG_INSTALL_PATH = "installPath"
+# The directory a plugin keeps its published CLI in
 _BIN_DIR = "bin"
+# The directory holding this plugin's own tree, where a development checkout keeps its neighbours too
+_SIBLING_BASE = Path(__file__).resolve().parents[2]
 # The core plugin, whose CLI every caller of `resolve_core_cli` reaches.
 _CORE_CLI_NAME = "lazycortex-core"
 # The core verb and flags that print one settings section as the runtime sees it: the tracked file with the local
@@ -54,8 +61,6 @@ _MERGED_SCOPE = "merged"
 _CWD_FLAG = "--cwd"
 # How long one merged-settings read may take before it counts as failed.
 _CORE_TIMEOUT_S: float = 60
-# The plugin tree a checkout that authors the plugins carries them under.
-_PLUGIN_TREE_REL = Path("plugins") / "claude"
 _TMP_SUFFIX = ".tmp"
 _ENCODING = "utf-8"
 _WRITE_MODE = "w"
@@ -102,21 +107,32 @@ class SettingsSyntaxError(SettingsError, json.JSONDecodeError):
 
 def find_settings_root(start: Path) -> Path:
   """
-  Walk up from `start` to the nearest dir holding `.claude/lazy.settings.json`.
+  Find the nearest directory holding `.claude/lazy.settings.json`, never above the checkout root.
+
+  Guarantees:
+    - The search never leaves the checkout `start` sits in; a settings file above the checkout root is never found,
+      and a linked worktree's own root counts as that checkout's root.
+    - Outside git no search happens at all: the answer is `start` itself, resolved, even when an ancestor holds the
+      settings file.
 
   Args:
     start: Directory to begin the upward search from.
 
   Returns:
-    The first ancestor (inclusive) containing the settings file; `start`
-    resolved when none is found.
+    The first directory, `start` included, that holds the settings file within the checkout; the checkout root when
+    none does; `start` itself, resolved, outside git.
   """
-  cur = start.resolve()
-  for cand in [ cur, *cur.parents ]:
-    # guard: first dir carrying the settings file is the settings-root
-    if (cand / _SETTINGS_REL).is_file():
-      return cand
-  return cur
+
+  # Contract:
+  # The search NEVER leaves the checkout `start` sits in: a settings file above the checkout root is never found,
+  # and a linked worktree's own root counts as that checkout's root.
+
+  # Contract:
+  # Outside git no search happens at all: the answer is `start` itself, resolved, even when an ancestor holds
+  # the settings file.
+
+  # the nearest settings root at or above the start within its checkout, else the checkout's root
+  return spec_locator.query_settings_root(start)
 
 
 def require_settings_root(start: Path) -> Path:
@@ -124,17 +140,20 @@ def require_settings_root(start: Path) -> Path:
   Find the nearest directory holding `.claude/lazy.settings.json`, refusing when there is none.
 
   Args:
-    start: Directory to begin the upward search from.
+    start: Directory to begin the search from.
 
   Returns:
-    The first ancestor (inclusive) containing the settings file.
+    The directory `find_settings_root` answers for `start`, which holds the settings file: the nearest one at or
+    above `start` within its checkout, or the checkout root.
 
   Raises:
-    FileNotFoundError: When no ancestor of `start` holds the settings file.
+    FileNotFoundError: If the directory that lookup answers holds no settings file, as when the only file sits above
+      the checkout root, or anywhere above `start` outside git, where no search happens.
   """
   root = find_settings_root(start)
 
-  # guard: the lenient lookup falls back to `start` itself, which may hold no settings file at all
+  # guard: the lenient lookup falls back to the checkout root inside git and to `start` itself outside it, either
+  # of which may hold no settings file at all
   if not (root / _SETTINGS_REL).is_file():
     raise FileNotFoundError(f"no {_SETTINGS_REL.as_posix()} at or above {start.resolve()}")
   return root
@@ -327,123 +346,6 @@ def spec_content_root(settings_root: Path) -> Path:
   return settings_root / _vault_root_value(settings_root)
 
 
-def _version_sort_key(name: str) -> tuple[int, ...]:
-  """
-  Build a numeric sort key for a plugin version string.
-
-  Args:
-    name: Version string as the plugin registry records it.
-
-  Returns:
-    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
-  """
-  out: list[int] = []
-  for part in name.split("."):
-    digits = "".join(c for c in part if c.isdigit())
-    out.append(int(digits) if digits else 0)
-  return tuple(out)
-
-
-def installed_plugin_root(name: str, *, home: Path | None = None) -> Path | None:
-  """
-  Resolve a plugin's installed source root from Claude Code's plugin registry.
-
-  The registry (`~/.claude/plugins/installed_plugins.json`) records one entry per project and
-  version that installed the plugin, each naming its `installPath`; the highest recorded version
-  wins. The plugin cache is never searched.
-
-  Args:
-    name: Plugin name without its `@<marketplace>` suffix.
-    home: Keyword-only home directory holding the registry; the current user's when omitted.
-
-  Returns:
-    The recorded install root when it exists on disk, else None.
-  """
-
-  # the registry as it stands on disk; an unreadable one records nothing
-  registry = (home or Path.home()) / _INSTALLED_PLUGINS_REL
-  try:
-    data = json.loads(registry.read_text(encoding = "utf-8"))
-  except (OSError, ValueError):
-    return None
-
-  # the registry nests its map under `plugins` in newer files and is the map itself in older ones
-  plugins = data.get(_REG_PLUGINS, data) if isinstance(data, dict) else {}
-
-  # every recorded install of this plugin, under any marketplace suffix
-  records = [
-    rec
-    for key, entries in plugins.items() if key.split("@", 1)[0] == name
-    for rec in (entries or []) if isinstance(rec, dict) and rec.get(_REG_INSTALL_PATH)
-  ]
-
-  # guard: the plugin was never installed on this machine
-  if not records:
-    return None
-
-  # the highest recorded version wins, and only while its install root is still on disk
-  best = max(records, key = lambda rec: _version_sort_key(str(rec.get(_REG_VERSION, ""))))
-  root = Path(str(best[_REG_INSTALL_PATH]))
-  return root if root.is_dir() else None
-
-
-def resolve_plugin_cli(name: str, *, dev_repo: Path | None = None) -> Path | None:
-  """
-  Locate a sibling plugin's CLI binary by name.
-
-  Lets a plugin's bin script reach another plugin's published CLI without assuming a fixed
-  install layout; each caller applies its own error handling to a missing result. Lookup order: the
-  plugin-dirs environment (exported by the daemon), the dev-vault sibling beside this plugin's own
-  tree, the given repository's own plugin tree, and last the sibling's install root read from Claude
-  Code's plugin registry (`installed_plugin_root`).
-
-  Guarantees:
-    - When both the plugin-dirs environment and the plugin registry carry a matching CLI, the
-      plugin-dirs environment's copy is returned.
-
-  Args:
-    name: Name of the CLI binary to look for under each plugin directory's `bin/` folder.
-    dev_repo: Repository root whose own plugin tree is searched before the registry, or None to skip it.
-
-  Returns:
-    The resolved binary path, or None when none of the lookup stages carries the named CLI.
-  """
-
-  # Contract:
-  # When both the plugin-dirs environment and the plugin registry carry a matching CLI,
-  # the plugin-dirs environment's copy is returned.
-
-  for entry in os.environ.get(_ENV_PLUGIN_DIRS, "").split(os.pathsep):
-    # guard: empty path segment (trailing/double pathsep) — skip it
-    if not entry:
-      continue
-    cli = Path(entry) / _BIN_DIR / name
-    if cli.is_file():
-      return cli
-
-  # dev-vault sibling — this file sits at plugins/claude/lazycortex-specs/bin/, so a neighbour's own
-  # bin/ is two levels up and back down; it precedes the registry (§ 2b) so a checkout runs the
-  # sources at hand rather than whatever version happens to be installed
-  sibling = Path(__file__).resolve().parents[2] / name / _BIN_DIR / name
-  if sibling.is_file():
-    return sibling
-
-  # the caller's checkout, when it authors the plugins — a dev tree of its own, still before the registry
-  if dev_repo is not None:
-    in_repo = dev_repo / _PLUGIN_TREE_REL / name / _BIN_DIR / name
-    if in_repo.is_file():
-      return in_repo
-
-  # registry fallback — the last stage, for a consumer install with no daemon export and no dev tree
-  root = installed_plugin_root(name)
-
-  # guard: no registry record for the sibling — nothing further to try
-  if root is None:
-    return None
-  cli = root / _BIN_DIR / name
-  return cli if cli.is_file() else None
-
-
 def require_plugin_cli(name: str, repo: Path) -> Path:
   """
   Find a required sibling plugin's CLI binary or raise.
@@ -456,40 +358,78 @@ def require_plugin_cli(name: str, repo: Path) -> Path:
     Absolute path to the resolved binary.
 
   Raises:
-    RuntimeError: When no lookup stage finds a binary, naming every stage searched.
+    RuntimeError: When no lookup stage finds the plugin, or the plugin found carries no such binary; the message
+      names every stage searched, or the missing path.
   """
 
   # Domain(plugin.boundaries):
-  # # Reaching a neighbouring plugin's binary: sources at hand first, the install registry last
+  # # A required neighbouring plugin's binary
   # Before a neighbouring plugin's published command can be run as a subprocess, its binary has
-  # to be found. The search tries four places in a fixed order and takes the first hit. First,
-  # the plugin directories a spawning process was handed. Second, the neighbour's own source
-  # sitting right beside this plugin in a development checkout. Third, the plugin tree of the
-  # repository the caller works in. Last, the install that Claude Code's plugin registry
-  # records for the neighbour. The installed plugin cache is never walked: it keeps every
-  # version ever installed, so its newest directory need not be the version this machine has
-  # enabled; only the registry names that one.
-  # The order puts sources ahead of installs on purpose. A checkout that authors the plugins
-  # must run the sources at hand, not whichever version happens to be installed, or a stale
-  # copy would silently answer in place of the code being developed. The registry stays the
-  # final stage so that a consumer install, which has no spawning process's directory list and
-  # no development tree, still reaches the neighbour.
-  # The neighbour is required. When no place yields a binary, the lookup fails and names every
-  # place it searched, rather than carrying on without the neighbour.
+  # to be found: the neighbour's plugin is located the way every plugin locates one, and the
+  # binary is then taken from that plugin's own command folder.
+  # The neighbour is required. When no place yields the plugin, or the plugin found carries no
+  # such binary, the lookup fails and says what was searched or which binary is missing, rather
+  # than carrying on without the neighbour.
 
-  # env-declared plugin dirs, then the dev-vault sibling beside this plugin, then this repo's own
-  # plugin tree, and only then the install the plugin registry records (§ 2b: registry last)
-  cli = resolve_plugin_cli(name, dev_repo = repo)
-  if cli is not None:
-    return cli
+  # the shared locator runs the stages in order and names every one of them on a miss
+  try:
+    root, _stage = spec_locator.plugin_root(name, repo, sibling_base = _SIBLING_BASE)
+  except spec_locator.PluginNotFoundError as error:
+    raise RuntimeError(f"{name} CLI not resolvable: {error}") from error
+  return _require_published_cli(root, name)
 
-  # no stage found a binary — name every stage searched, the two dev-tree locations by path
-  raise RuntimeError(
-      f"{name} CLI not resolvable: ${_ENV_PLUGIN_DIRS} and the plugin registry yield no match, "
-      f"{repo / _PLUGIN_TREE_REL / name / _BIN_DIR / name} is absent from this repo and "
-      f"{Path(__file__).resolve().parents[2] / name / _BIN_DIR / name} is absent beside "
-      f"this plugin"
-  )
+
+def find_plugin_cli(name: str, repo: Path) -> Path | None:
+  """
+  Find an optional sibling plugin's CLI binary.
+
+  Guarantees:
+    - When both the plugin-dirs environment and the plugin registry carry a matching CLI, the plugin-dirs
+      environment's copy is returned.
+
+  Args:
+    name: Name of the CLI binary to look for under each plugin directory's `bin/` folder.
+    repo: The repository root whose own plugin tree is searched.
+
+  Returns:
+    Absolute path to the resolved binary, or None when no lookup stage finds the plugin.
+
+  Raises:
+    RuntimeError: When the plugin is found but its root carries no such binary.
+  """
+
+  # Contract:
+  # When both the plugin-dirs environment and the plugin registry carry a matching CLI, the plugin-dirs
+  # environment's copy is returned.
+
+  # the same stages as a required lookup; a plugin found nowhere is simply not on this host
+  try:
+    root, _stage = spec_locator.plugin_root(name, repo, sibling_base = _SIBLING_BASE)
+  except spec_locator.PluginNotFoundError:
+    return None
+  return _require_published_cli(root, name)
+
+
+def _require_published_cli(root: Path, name: str) -> Path:
+  """
+  Name a found plugin's published CLI binary, or fail when the plugin carries none.
+
+  Args:
+    root: The plugin root the lookup found.
+    name: Name of the CLI binary under the root's `bin/` folder.
+
+  Returns:
+    Absolute path to the binary.
+
+  Raises:
+    RuntimeError: When the root carries no such binary; the message names the path.
+  """
+  cli = root / _BIN_DIR / name
+
+  # guard: a plugin root without its published CLI cannot answer
+  if not cli.is_file():
+    raise RuntimeError(f"{name} CLI not resolvable: {cli} is absent from the plugin root found at {root}")
+  return cli
 
 
 def resolve_core_cli(repo: Path) -> Path:
@@ -503,7 +443,8 @@ def resolve_core_cli(repo: Path) -> Path:
     Absolute path to the resolved `lazycortex-core` binary.
 
   Raises:
-    RuntimeError: When no lookup stage finds a binary, naming every stage searched.
+    RuntimeError: When no lookup stage finds the plugin, or the plugin found carries no such binary; the message
+      names every stage searched, or the missing path.
   """
   return require_plugin_cli(_CORE_CLI_NAME, repo)
 
@@ -687,6 +628,24 @@ def resolve_wikilink(target: str, settings_root: Path) -> Path:
   """
   vault_path = settings_root / f"{target}{_MD}"
   return vault_path if vault_path.is_file() else spec_content_root(settings_root) / f"{target}{_MD}"
+
+
+def state_file(repo: Path, name: str) -> Path:
+  """
+  Return the path of a checkpoint file in the tracked state corner of a repository.
+
+  Notes:
+    - Does not create the file or its directory.
+
+  Args:
+    repo: The repository root.
+    name: The checkpoint file name, `<namespace>.<name>.json`.
+
+  Returns:
+    The absolute location the checkpoint file has, or would have, in the repository.
+  """
+  # the corner sits flat at the repository root, one file per checkpoint
+  return repo / _STATE_DIR / name
 
 
 def read_text(path: Path) -> str:

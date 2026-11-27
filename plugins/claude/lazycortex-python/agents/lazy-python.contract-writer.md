@@ -48,7 +48,7 @@ Read, always — never skip on the assumption they are loaded:
 
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.comment-guidelines.md` — the Contract Comments section is the format canon; the Marker Comments section carries the standalone-block rule.
 - `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md` — the Method/Class docstring rules govern the `Guarantees` / `Subclassing` sections.
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md` — project overlay, overrides canon on conflict.
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/documenting_guidelines.md` — project overlay, overrides canon on conflict.
 
 Outcome: `guidelines-loaded`.
 

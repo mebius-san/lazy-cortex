@@ -67,6 +67,12 @@ NOT_BUNDLED_REASON = (
 COMMUNITY_NOT_ARRAY_REASON = "`{path}` is not a JSON array; cannot register `{pid}` safely."
 OVERRIDES_INVALID_REASON = "Cannot merge overrides for `{pid}`: {error}"
 WRITE_FAILED_REASON = "Could not install `{pid}` binaries ({error}); the vault plugin was restored from backup."
+CHECKOUT_ROOT_REASON = (
+  "`{path}` is a git working-tree root, not an Obsidian config directory; pass `{expected}`. Nothing written."
+)
+
+# The entry that marks a directory as a git working-tree root, a directory or a file alike
+GIT_ENTRY = ".git"
 
 # Warnings
 FROM_CACHE_WARNING = "`{pid}`: upstream unavailable ({error}); installed the cached bundle"
@@ -422,8 +428,8 @@ def install(vault: Path, plugin_id: str, *, bundled: bool, dry_run: bool) -> Ins
     The outcomes, warnings, and vault-relative paths written.
 
   Raises:
-    PluginInstallRefusedError: If the id is unsafe, cannot be resolved, the overrides or community list are unusable,
-      or writing the bundle fails.
+    PluginInstallRefusedError: If the vault is a git working-tree root instead of the Obsidian config directory, the
+      id is unsafe, cannot be resolved, the overrides or community list are unusable, or writing the bundle fails.
   """
 
   # Contract:
@@ -446,6 +452,10 @@ def install(vault: Path, plugin_id: str, *, bundled: bool, dry_run: bool) -> Ins
   # Contract:
   # The override block is re-merged into the plugin's settings file on every run,
   # whether or not the bundle files changed.
+
+  # guard: a checkout root passed for its config directory would get the plugin written beside the sources
+  if (vault / GIT_ENTRY).exists():
+    raise PluginInstallRefusedError(CHECKOUT_ROOT_REASON.format(path = vault, expected = vault / VaultPath.OBSIDIAN))
 
   # guard: an id that is not a plain name would write outside the plugins directory
   if not vault_manifest.is_safe_name(plugin_id):

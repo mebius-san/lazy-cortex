@@ -68,14 +68,14 @@ Every status call the skill reads uses `--porcelain=v1 -z`: entries are separate
 
 **Install-chain writes, before the first step.** Without `--snapshot`, or when no plugin has an applicable step, the install-chain outcome is `skipped`. Otherwise the install chain has just rewritten files a step may also write, and a step would refuse them as dirty; they are committed first:
 
-- Run `Bash(test -f "<snapshot>")`. A non-zero exit is the install-chain outcome `failed: snapshot-missing: <snapshot>`, and the two bullets below are not run; the steps still run, and those whose `writes` meet a file the install chain changed end `failed: dirty`.
+- Run `Bash(ls -d "<snapshot>")`. The snapshot is present when the command lists it; a failure with "No such file or directory" is the install-chain outcome `failed: snapshot-missing: <snapshot>`, and the two bullets below are not run; the steps still run, and those whose `writes` meet a file the install chain changed end `failed: dirty`.
 - Run exactly:
 
    ```
    Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazy_setup.py" verify "<repo-root>" --snapshot "<snapshot>")
    ```
 
-   `touched` lists every path dirty now that was clean in the snapshot — the install chain's writes; `new` repeats the untracked ones. A path dirty in the snapshot is the operator's work and is never in `touched`, even when `violations` names it because the install chain changed it too; it stays uncommitted, and a step whose `writes` meet it ends `failed: dirty`.
+   `touched` lists every path dirty now that was clean in the snapshot — the install chain's writes; `new` repeats the untracked ones. A path dirty in the snapshot is the operator's work and is never in `touched`, even when `violations` names it because the install chain changed it too; it stays uncommitted, and a step whose `writes` meet it ends `failed: dirty`. `touched` and `violations` judge only paths under the install chain's write scope; `outside` lists the paths outside it that changed or appeared since the snapshot — the operator's work, not the install chain's: they are never committed, never fail the outcome, and are named under the report table.
 - An empty `touched` is the outcome `none`. Otherwise register each `new` path, one call per path, `Bash(git -C "<repo-root>" add -N -- "<path>")`, then commit every `touched` path by name:
 
    ```
@@ -108,7 +108,7 @@ Then per step:
 
    and append `bin/lazycortex-<short>` to the root it prints. A non-zero exit is `failed: plugin-root: <stderr>`, with nothing written.
 4. **Run `## Steps`.** Execute the numbered steps in order, one command per `Bash` call, exactly as written apart from the CLI path resolved above and the `<repo-root>` placeholder, which stands for the resolved root, quotes kept. Never write a path outside `writes`, never ask the operator, never improvise a command the step does not name. A command that exits 3 ends the step with `not-applicable`: the rest of `## Steps` is not run and `## Done when` is not checked. A command that exits any other non-zero code ends the step with `failed: step <k>: <stderr>`, `<k>` being the step's number in `## Steps`. Keep the last non-empty stdout line of the last command the step ran as the step's **closing line**; it is quoted in the report.
-5. **Check `## Done when`.** Verify every condition with read-only calls — the verb the condition names, `Read` of a file it names, or `Bash(test -e "<repo-root>/<path>")` for a path it says is present or absent — `<repo-root>` substituted as in item 4. A condition is never checked through a file search: the condition names its paths. A condition that does not hold is `failed: not-done: <condition>`.
+5. **Check `## Done when`.** Verify every condition with read-only calls — the verb the condition names, `Read` of a file it names, or `Bash(ls -d "<repo-root>/<path>")` for a path it says is present or absent (the path is present when the command lists it, absent when it fails with "No such file or directory") — `<repo-root>` substituted as in item 4. A condition is never checked through a file search: the condition names its paths. A condition that does not hold is `failed: not-done: <condition>`.
 6. **Collect the step's changes.** Run both status commands from item 1 again, whatever items 3–5 ended in:
    - the `writes`-restricted one: since it printed nothing before the step, every path it prints now is the step's own change inside `writes` — the **inside paths**;
    - the unrestricted one: every path it prints that is not in the before-snapshot and not among the inside paths is a write outside `writes` — the **outside paths**.
@@ -179,6 +179,7 @@ Under the table, one line per `applied` step, in run order, quoting its closing 
 
 Then, in this order, each line only when it applies:
 
+- A non-empty `outside` from the install-chain verify: `Left uncommitted, outside the install chain's write scope: <paths>.`
 - At least one `failed: dirty: <paths>`: `Commit or clean <paths>, then re-run /lazy-core.setup.` — one line per dirty step, naming its paths.
 - At least one `invalid` entry: `Plugin <plugin> has an unreadable migration file or stamp (<path>); it stays unstamped until the plugin ships a fix.`
 - At least one `applied` step: `Restart open Claude Code sessions and the runtime daemon so they pick up the migrated state.`

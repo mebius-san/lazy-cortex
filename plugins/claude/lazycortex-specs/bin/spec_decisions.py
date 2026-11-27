@@ -43,6 +43,9 @@ import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 import note_commit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -97,7 +100,7 @@ class _K:
     ASSET_TYPE: Frontmatter key naming an asset's kind, read for the category of an asset
       sitting straight at the product root, where no group folder names one.
     TYPE_UNKNOWN: The `spec_asset_type` sentinel written before anybody judged the kind.
-    GIT_DIR: The `.git` entry marking a repo root / holding the exclusive lock file.
+    GIT_DIR: The `.git` directory the exclusive lock file falls back to when git names no git directory.
     TAG_PROTECTED: The `#protected/` H1-section owner-tag prefix (cross-plugin owned sections).
     TAG_EXPERT: The `#expert/` H1-section owner-tag prefix (review-cycle-scoped sections).
     NUMBER: A parsed record's `D-NNN` integer field.
@@ -148,7 +151,7 @@ class _K:
   ASSET_TYPE = "spec_asset_type"
   # The `spec_asset_type` sentinel written before anybody judged the kind.
   TYPE_UNKNOWN = "unknown"
-  # The `.git` entry marking a repo root / holding the exclusive lock file.
+  # The `.git` directory the exclusive lock file falls back to when git names no git directory.
   GIT_DIR = ".git"
   # The `#protected/` H1-section owner-tag prefix (cross-plugin owned sections).
   TAG_PROTECTED = "#protected/"
@@ -447,27 +450,28 @@ def _nearest_asset_dir(start: Path, product_root: Path) -> Path | None:
 
 def _git_repo_root(start: Path) -> Path:
   """
-  Walk up from `start` to the nearest ancestor holding a `.git` entry.
+  Return the root of the checkout a directory sits in.
+
+  Args:
+    start: Any directory inside the checkout.
 
   Returns:
-    The first ancestor (inclusive) carrying `.git`; `start` itself when none is found.
+    The checkout's root, a linked worktree's own root inside one; `start` itself, resolved, outside git.
   """
-  cur = start.resolve()
-  while cur != cur.parent:
-    # the first ancestor carrying `.git` is the repo root
-    if (cur / _K.GIT_DIR).exists():
-      return cur
-    cur = cur.parent
-  return start.resolve()
+  return spec_locator.query_checkout_toplevel(start)
 
 
 def _lock_file_path(decisions_path: Path) -> Path:
   """
   Derive the exclusive lock file path for a `decisions.md` registry file.
 
-  The lock lives under the enclosing repo's `.git/` (never inside the spec content tree — a
-  worktree file would make the tree dirty and could trip the daemon's clean-tree guard), named
-  from a hash of the registry file's own repo-relative path so distinct registries never collide.
+  The lock lives in the git directory of the checkout holding the registry — a linked worktree's own git
+  directory inside one, never inside the spec content tree, where a file would make the tree dirty and could trip
+  the daemon's clean-tree guard — named from a hash of the registry file's own repo-relative path so distinct
+  registries never collide. Outside git it lives under `<root>/.git/`.
+
+  Args:
+    decisions_path: The `decisions.md` registry file the lock guards.
 
   Returns:
     The lock file path.
@@ -482,7 +486,7 @@ def _lock_file_path(decisions_path: Path) -> Path:
   except ValueError:
     rel_str = str(target)
   digest = hashlib.sha1(rel_str.encode()).hexdigest()[:16]
-  return repo / _K.GIT_DIR / f"lazy-decide-{digest}.lock"
+  return (spec_locator.find_git_dir(repo) or repo / _K.GIT_DIR) / f"lazy-decide-{digest}.lock"
 
 
 @contextmanager

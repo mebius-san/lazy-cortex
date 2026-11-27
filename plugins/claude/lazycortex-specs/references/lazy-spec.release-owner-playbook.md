@@ -34,6 +34,8 @@ While either holds the row down, `# Status brief` says so in plain words: which 
 
 ## 4. `Revise architecture`
 
+Ticked together with `Review architecture.md`, it fires neither: both are unticked and `# Status brief` asks for one (`lazy-spec.coordination-playbook.md`, "Ticks that contradict each other fire neither").
+
 The architecture is the product's and is one for all its releases: it is brought up to date here, on the product note, when an approved design is not covered yet — never inside a release. The row hangs whether or not a release is open.
 
 On the tick, read `architecture.behind` from `release-delta` and write ONE `> [!todo] #review/command` callout into `architecture.md` naming the start document of every asset listed there, telling the writer to bring the architecture up to date with those approved designs and to change nothing else. Then open the document's review at the writer round with `Skill(lazycortex-review:lazy-review.start, "<doc>")`. The review's coordinator carries the command out as the round's input (`lazy-review.doc-review-protocol.md`), and the review then runs as any other. The tick dispatches no job, and the callout is the second of the two writes this coordinator ever makes into a document's body, beside the one `Resolve here` makes.

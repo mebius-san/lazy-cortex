@@ -23,21 +23,29 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import note_explainers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_doc_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_keys import (  # noqa: E402
     GATE_ROW_ORDER, LEVEL_ROLES, AssetTypeKey, ConflictCallout, Gate, GateCheckbox, GateRowGroup, LevelDoc,
@@ -66,8 +74,6 @@ _ADDED = "added"
 _REMOVED = "removed"
 _KEPT = "kept"
 _CHANGED = "changed"
-# The env var the daemon exports for every subprocess it spawns
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 
 
 # ----------------------------------------------------------------------------------------
@@ -646,9 +652,9 @@ def layout_section(section_lines: list[str], stages: dict[str, str], lang: str) 
   # rebuild, publish, revise, or any other first word — sit together in one callout titled by that verb exactly as
   # the rows write it, whatever language the note is written in. The callout lists one checkbox per
   # row in ladder order, and the callouts themselves follow the ladder position of their first row. The explanation
-  # is written once, at the bottom of the callout, never per row: write, review, start, rebuild and publish rows
-  # carry a fixed explanation of what a tick does, in the note's language, and any other verb keeps the distinct
-  # explanations its rows brought along. A ticked row is the operator's gesture and stays in its verb's callout as a
+  # is written once, at the bottom of the callout, never per row: write, review, revise, start, build, test,
+  # rebuild and publish rows carry a fixed explanation of what a tick does, in the note's language, and any other verb keeps
+  # the distinct explanations its rows brought along. A ticked row is the operator's gesture and stays in its verb's callout as a
   # ticked checkbox. An older note that kept every row in a block of its own is read the same way and folded into
   # this shape.
 
@@ -769,18 +775,28 @@ def layout_body(body: str, stages: dict[str, str], lang: str) -> str:
   return _LF.join([ *lines[:head], *layout_section(lines[head:end], stages, lang), *lines[end:] ])
 
 
-def _drop_rows(section: list[str], doomed: set[int], tail: list[str]) -> None:
+def drop_rows(section: list[str], doomed: set[int], tail: list[str]) -> None:
   """
   Remove launch rows from a `# Gates` section in place.
 
   A removed row takes only its checkbox line; a gate callout left without any checkbox goes whole, and with it the
   blank line before it when nothing but a blank line or the end of the body follows it.
 
+  Guarantees:
+    - Only the doomed rows' lines, the callouts they leave without a checkbox and the blank line before such a
+      callout go; every other line keeps its bytes and its order.
+
   Args:
     section: Lines of the `# Gates` section, edited in place.
     doomed: Indices of the rows' checkbox lines (or callout lines, for a callout carrying no checkbox) to remove.
     tail: The body's lines after the section, consulted for what follows a callout closing the section.
   """
+
+  # Contract:
+  # Only the doomed rows' lines, a gate callout left without a checkbox, and the blank line before such a callout go;
+  # every other line MUST keep its bytes and its order. The review-row reconciliation and the legacy-gates migration
+  # build their byte-preservation promises on this.
+
   # every callout from the back, so earlier indices stay valid while later lines go
   for start, end in reversed(_find_all_gate_spans(section)):
     rows = _parse_callout_rows(section, start, end)
@@ -909,7 +925,7 @@ def reconcile(body: str, wanted: list[str], lang: str, *,
       doomed.add(row.line)
 
   # drop the doomed rows, and every callout they leave empty
-  _drop_rows(section, doomed, tail)
+  drop_rows(section, doomed, tail)
 
   # every wanted document without a row yet, each named once, in the order it is wanted
   added = [ file for file in dict.fromkeys(wanted) if file not in kept ]
@@ -928,8 +944,9 @@ def main(argv: list[str]) -> int:
   """
   Bring the `Review <doc>` launch rows of a spec folder note in line with the documents it owes one.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
-  directory.
+  The run works in the nearest directory, within its checkout, that holds `.claude/lazy.settings.json`, searched
+  upward from the directory the `LAZY_REPO_ROOT` environment variable names, else the process working directory;
+  the checkout's root when none holds it.
 
   Notes:
     - Rewrites the note on disk only when its body changed; an up-to-date note keeps its bytes and modification time.
@@ -954,8 +971,8 @@ def main(argv: list[str]) -> int:
     sys.stderr.write(f"no such note: {note}\n")
     return 2
 
-  # the root comes from the daemon-exported env var, else from the process cwd
-  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  # the root is the nearest settings root of the daemon-exported env var, else of the process cwd
+  repo = spec_locator.query_settings_root()
 
   # guard: a note outside the resolved root is a caller error -- its owning product cannot be resolved
   if not note.is_relative_to(repo):

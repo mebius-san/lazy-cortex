@@ -24,11 +24,13 @@ import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-posi
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# The tracked state corner and the checkpoint file names, current and pre-convention.
-_STATE_DIR = ".state"
+# The checkpoint file names, current and pre-convention.
 _FILE_TEMPLATE = "lazy-spec.sync-{key}.json"
 _LEGACY_TEMPLATE = "spec-sync-{key}.json"
 
@@ -145,7 +147,7 @@ def _state_path(repo: Path, template: str, product: str) -> Path:
   Returns:
     The path of the checkpoint file in the repository's tracked state directory.
   """
-  return repo / _STATE_DIR / template.format(key = product)
+  return spec_paths.state_file(repo, template.format(key = product))
 
 
 def load_migrated_checkpoint(repo: Path, product: str) -> CheckpointRead:
@@ -279,8 +281,9 @@ def main(argv: list[str]) -> int:
   Notes:
     - `read <product>` prints `product`, `path`, `checkpoint` and `renamed_from`.
     - `write <product> [--head SHA] [--today YYYY-MM-DD]` prints `product`, `path` and `touched_paths`.
-    - A refusal prints `status` `refused` with `reason` and `product`; the repository is the settings root found from
-      the current directory.
+    - A refusal prints `status` `refused` with `reason` and `product`; the run works in the nearest directory,
+      within its checkout, that holds `.claude/lazy.settings.json`, searched upward from `$LAZY_REPO_ROOT`, else the
+      current directory; the checkout's root when none holds it.
     - Never commits.
 
   Args:
@@ -300,7 +303,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + default
   parser.add_argument("--today", default = None)
   args = parser.parse_args(argv)
-  repo = spec_paths.find_settings_root(Path.cwd())
+  repo = spec_locator.query_settings_root()
 
   # one JSON line per action; a refusal is printed and carried by the exit code
   try:

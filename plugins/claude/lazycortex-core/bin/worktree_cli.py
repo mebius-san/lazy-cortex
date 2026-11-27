@@ -94,7 +94,9 @@ def add_worktree_link(rel: str, *, cwd: Path | str | None = None) -> LinkOutcome
 
   Args:
     rel: The repo-relative path to add.
-    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      settings file is the `.claude/lazy.settings.json` at the root of the checkout that directory sits in, where
+      the daemon reads it.
 
   Returns:
     `LinkOutcome.ADDED` when the path was appended, `LinkOutcome.PRESENT` when it was already listed.
@@ -117,7 +119,7 @@ def add_worktree_link(rel: str, *, cwd: Path | str | None = None) -> LinkOutcome
     raise ValueError(refusal)
 
   # the tracked layer only, so the write never leaks the local overlay into the shared file
-  path = resolve_settings_path(cwd)
+  path = resolve_settings_path(cwd, section = SettingsKey.DAEMON)
   daemon = load_tracked_section(path, SettingsKey.DAEMON)
 
   # only an absent or null git block starts empty; any other value of the wrong shape stays the operator's
@@ -146,7 +148,9 @@ def read_worktree_env(*, cwd: Path | str | None = None) -> WorktreeEnvRecord:
   Tell whether experts that run in job worktrees get neither carried links nor a bootstrap command there.
 
   Args:
-    cwd: Repository root override; resolves the settings file under `<cwd>/.claude/`.
+    cwd: Directory inside the repository, or `None` for `LAZY_REPO_ROOT`, else the process working directory; the
+      settings file is the `.claude/lazy.settings.json` at the root of the checkout that directory sits in, where
+      the daemon reads it.
 
   Returns:
     An answer naming the experts with `workspace: branch`, the configured links and bootstrap command, and
@@ -165,7 +169,7 @@ def read_worktree_env(*, cwd: Path | str | None = None) -> WorktreeEnvRecord:
   # preparation command; with neither configured, every gitignored tool the job needs is missing there.
 
   # the effective view, as the pump reads both layers
-  path = resolve_settings_path(cwd)
+  path = resolve_settings_path(cwd, section = SettingsKey.DAEMON)
   experts = load_section(path, SettingsKey.EXPERTS)
   daemon = load_section(path, SettingsKey.DAEMON)
 

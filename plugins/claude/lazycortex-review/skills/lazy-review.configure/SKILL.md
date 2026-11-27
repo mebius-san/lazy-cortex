@@ -1,7 +1,7 @@
 ---
 name: lazy-review.configure
 description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Requires `/lazy-review.install` to have run first."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(test -f *), Bash(mktemp), Bash(rm -f *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(ls *), Bash(mktemp), Bash(rm -f *), Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 ---
 # lazy-review.configure
 
@@ -29,7 +29,7 @@ Every collecting phase first inspects the in-memory settings loaded in Phase 1. 
 
 ## Phase 1 — Verify install + load settings
 
-Probe the settings file with `Bash(test -f .claude/lazy.settings.json)`. If it is absent, abort with the message *"run `/lazy-review.install` first"* and stop.
+Resolve the directory whose settings the wizard edits — the nearest `.claude/lazy.settings.json` from the working directory upward within its checkout, the checkout's root when none is nearer — with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/review_locator.py" settings-root)`, and hold the printed path as `<settings-root>`. Probe the settings file with `Bash(ls -d <settings-root>/.claude/lazy.settings.json)`: it is present when the command lists it, absent when it fails with "No such file or directory". If it is absent, abort with the message *"run `/lazy-review.install` first"* and stop.
 
 Otherwise resolve `<core-cli>` — the core plugin's `bin/lazycortex-core` file — with `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-review" core-cli)`, which prints its absolute path (exit 1 means core is not installed: abort and say so). Read the two sections the wizard works on through the core CLI and hold them in memory:
 
@@ -159,6 +159,10 @@ Outcome: `collected` (asked) or `read-from-record` (every writer group reused fr
 
 A class entry may carry an optional `protocols` list — plugin-namespaced reference ids (e.g. `lazycortex-specs:lazy-spec.expert-signals-protocol`) the review coordinator folds into every writer dispatch for documents of that class, on top of the doc-review protocol and the `review.protocols` section-level defaults. The wizard never asks for it: the list is seeded by the plugin that owns the document kind (its install skill), and read-first preserves whatever is on record.
 
+### Class-level `report` (not asked, preserved)
+
+A class entry may carry `report: true`: its documents are reports on finished work, and their review is a discussion that closes on one of two decision boxes, `accept` or `fix`, instead of an approve. The main writer answers the operator's remarks in a `#review/discussion` block and returns a `plan_verdict` with every main round (coordination playbook § 3, "Report classes"). Any other value, and an absent key, read as a plain class. The wizard never asks for it: the key is seeded by the plugin that owns the document kind (its install skill). Read-first preserves whatever is on record: `configure-apply` keeps a recorded `report` key on a replace, as it keeps `protocols`.
+
 ## Phase 4 — Pick edit_marker_style
 
 If `review.edit_marker_style` is already recorded — reuse it silently (read-first). Otherwise:
@@ -190,7 +194,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-revie
 
 Delete the scratch file with `Bash(rm -f <payload-file>)` once the verb has answered, whatever it answered.
 
-The verb writes the class into `review.classes` (a recorded entry with the same token is replaced and keeps its `protocols`), never overwrites a recorded `edit_marker_style`, and then runs the install bootstrap, which widens `review.watch_root` until this class's documents reach the coordinator's watch — it never narrows it — and re-derives the watch's `path_filter`. It prints one JSON line: `status` (`written` / `unchanged`), `class_token`, `watch_root`, `path_filter`, `written_sections`. `status: "refused"` (exit 1) carries a `reason` — relay it and stop.
+The verb writes the class into `review.classes` (a recorded entry with the same token is replaced and keeps its `protocols` and its `report` key), never overwrites a recorded `edit_marker_style`, and then runs the install bootstrap, which widens `review.watch_root` until this class's documents reach the coordinator's watch — it never narrows it — and re-derives the watch's `path_filter`. It prints one JSON line: `status` (`written` / `unchanged`), `class_token`, `watch_root`, `path_filter`, `written_sections`. `status: "refused"` (exit 1) carries a `reason` — relay it and stop.
 
 Then invoke `/lazy-review.audit` and surface its findings.
 

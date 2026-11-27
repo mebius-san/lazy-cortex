@@ -161,17 +161,17 @@ The daemon reads two flat top-level sections — `daemon` and `routines`. Each c
 
 ### `daemon.supervisor` block fields
 
-The `supervisor` key (nested under the flat `daemon` section) is optional and records install-time choices about how the supervisor unit (launchd plist / systemd service) was rendered. The daemon process itself does not read this block — it is consumed by `/lazy-core.daemon-setup` when (re-)rendering the unit.
+The `supervisor` key (nested under the flat `daemon` section) is optional and records install-time choices about how the supervisor unit (launchd plist / systemd service) was rendered. The daemon process itself does not read this block — the core `daemon-unit sync` verb reads `login_shell` and `env_files` from it when it (re-)renders the unit, called by `/lazy-core.daemon-setup` and by `/lazy-core.install` Step 13.6.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `dev_mode` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--dev-mode`. The shim then scans `<repo-root>/plugins/claude/*/.claude-plugin/plugin.json` and injects one `--plugin-dir <plugin-root>` per match before the runner's positional repo-root. The runner consults those paths first and falls back to the plugin cache. Useful when this repo IS the authoring vault for the plugins the daemon needs — local source edits take effect without a `/plugin update` cycle. |
+| `dev_mode` | bool | `false` | A record `/lazy-core.daemon-setup` keeps of whether the checkout authors plugins. The unit does not follow it: `daemon-unit sync` derives the same fact from the checkout itself (a `plugins/claude/*/.claude-plugin/plugin.json` exists) and then invokes `lazy.runtime.sh` with `--dev-mode`. The shim then scans `<repo-root>/plugins/claude/*/.claude-plugin/plugin.json` and injects one `--plugin-dir <plugin-root>` per match before the runner's positional repo-root. The runner consults those paths first and falls back to the plugin cache. Useful when this repo IS the authoring vault for the plugins the daemon needs — local source edits take effect without a `/plugin update` cycle. |
 | `login_shell` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--login-shell`. The shim re-execs itself through a login shell (`$SHELL -lc`, default `/bin/zsh`) so the daemon inherits the operator's login environment (`.zprofile` / `.zshrc` → `CLAUDE_CODE_OAUTH_TOKEN` + full PATH). See § Headless hosts below. |
 | `env_files` | `[string]` | `[]` | A list of env-file paths. Each is rendered as a `--env-file <path>` flag on the shim invocation; the shim sources each (`set -a; . <path>; set +a`) so its exported vars reach the runner → daemon → `claude`. A leading `~` is expanded by the shim. Surgical alternative to `login_shell` when only a token file is needed, not a full login PATH. |
 
 `LAZYCORTEX_PYTHON` — absolute interpreter derived by `/lazy-core.daemon-setup` and exported by the supervisor unit to the shim, which starts the runner through it. It lives nowhere but the unit file: an interactive session runs skills and hooks as `"${LAZYCORTEX_PYTHON:-python3}"` and resolves `python3` from its own `PATH`.
 
-`dev_mode`, `login_shell`, and `env_files` are install-skill state, not runtime config — changing them in `lazy.settings.json` does NOT affect the running daemon. To apply a change, re-run `/lazy-core.daemon-setup` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
+`dev_mode`, `login_shell`, and `env_files` are install-skill state, not runtime config — changing them in `lazy.settings.json` does NOT affect the running daemon. To apply a change, re-run `/lazy-core.daemon-setup` (or `/lazy-core.install` from another checkout of the project on this host): `daemon-unit sync` re-renders the unit and reloads the supervisor when the unit changed.
 
 ### Headless hosts: giving the daemon a login environment
 
@@ -206,10 +206,10 @@ The `command` / `expert`+`request` choice is the EITHER/OR dispatch contract enf
 
 ## 4. Plugin resolution
 
-The first element of `command` is a plugin name. The daemon (`resolve_routine_command` in `runtime_daemon.py`) resolves it at runtime to `<root>/bin/<plugin>`, where `<root>` is found in this order:
+The first element of `command` is a plugin name. The daemon (`resolve_routine_command` in `plugin_dirs.py`) resolves it at runtime to `<root>/bin/<plugin>`, where `<root>` is found in this order:
 
 1. A dev-plugin directory registered via `--plugin-dir` / `LAZYCORTEX_PLUGIN_DIRS` whose manifest names the plugin, when one exists.
-2. Otherwise the `installPath` of the highest-version `<plugin>@<marketplace>` record in Claude Code's install registry, `~/.claude/plugins/installed_plugins.json`. Versions are compared numerically component by component — the dotted version is split on `.` and each numeric component becomes an integer, so `10.0.0` outranks `9.1.1`; string comparison is never used. The plugin cache (`~/.claude/plugins/cache/`) is never walked: it keeps every version ever installed, so its newest directory is not necessarily the one this machine has enabled.
+2. Otherwise the `installPath` of the highest-version `<plugin>@<marketplace>` record in Claude Code's install registry, `~/.claude/plugins/installed_plugins.json`, among the records made for the whole user (`scope: user` / `managed`) or for the main checkout of the daemon's repo (`scope: project` / `local` with that `projectPath`); a record made for another project is never used. The lookup is `plugin_locator.installed_plugin_root`. Versions are compared numerically component by component — the dotted version is split on `.` and each numeric component becomes an integer, so `10.0.0` outranks `9.1.1`; string comparison is never used. The plugin cache (`~/.claude/plugins/cache/`) is never walked: it keeps every version ever installed, so its newest directory is not necessarily the one this machine has enabled.
 3. Assert `<root>/bin/<plugin>` exists; otherwise the routine fails with `FileNotFoundError`.
 
 **Always-installed semantics**: no pin syntax. The daemon always runs the version the install registry records for the plugin.
@@ -326,7 +326,7 @@ Both helpers are idempotent and use the atomic write path in `lazy_settings.py`.
 
 ## 9. State persistence
 
-**Extracted — see `lazy-core.state-schema.md`.** The `<repo>/.runtime/state.json` schema (`last_run`, `git_watch`, `daemon_halted`), the ten halt reasons with their recovery paths, the unpushed-consume record, and what survives a daemon restart all live in that sibling, next to the halt invariants of § 10 that write them. Read it when a daemon is halted, or when reasoning about state that outlives a restart.
+**Extracted — see `lazy-core.state-schema.md`.** The `<repo>/.runtime/state.json` schema (`last_run`, `git_watch`, `daemon_halted`), the twelve halt reasons with their recovery paths, the unpushed-consume record, and what survives a daemon restart all live in that sibling, next to the halt invariants of § 10 that write them. Read it when a daemon is halted, or when reasoning about state that outlives a restart.
 
 ---
 

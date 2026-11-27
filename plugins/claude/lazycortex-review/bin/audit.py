@@ -29,9 +29,11 @@ import doc_class as _doc_class  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import note_ops as _note_ops  # type: ignore  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import review_locator as _review_locator  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from errors import SettingsReadError  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from keys import Bucket, JobKey, Phase, Position, ReviewStatus, Style, Tag  # pylint: disable=import-error
+from keys import Bucket, JobKey, Paths, Phase, Position, ReviewStatus, Style, Tag  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -293,13 +295,14 @@ def _check_override_globs(settings: dict, findings: list[dict]) -> None:
            OVERRIDE_GLOB_DEPTH_TEMPLATE.format(label = label, repair = OVERRIDE_GLOB_REPAIR_ROUTE))
 
 
-def _collect_review_files(repo_root: Path, paths: list[str]) -> list[Path]:
+def _collect_review_files(settings_root: Path, paths: list[str]) -> list[Path]:
   """
-  Walk `repo_root` and collect every file whose repo-relative path matches any glob in `paths`.
+  Walk `settings_root` and collect every file whose path relative to `settings_root` matches any glob in `paths`.
 
   Args:
-    repo_root: Repository root the glob patterns are relative to.
-    paths: Glob patterns (e.g. `"request/*.md"`) a matching file's repo-relative path must satisfy.
+    settings_root: Directory whose `.claude/lazy.settings.json` the audit reads, the nearest settings root; the glob
+      patterns are relative to it.
+    paths: Glob patterns (e.g. `"request/*.md"`) a matching file's path relative to `settings_root` must satisfy.
 
   Returns:
     Absolute paths of matching files, in filesystem walk order.
@@ -309,14 +312,14 @@ def _collect_review_files(repo_root: Path, paths: list[str]) -> list[Path]:
   # what is on disk, so a document the operator has not committed yet is checked before its first
   # commit routes it into the loop
 
-  # walk the tree once, collecting every file whose repo-relative path matches a glob
+  # walk the tree once, collecting every file whose path relative to the settings root matches a glob
   matches: list[Path] = []
-  for base, subdirs, files in os.walk(str(repo_root)):
+  for base, subdirs, files in os.walk(str(settings_root)):
     # dot-folders (.git, .claude, .logs, .experts, ...) never hold review documents
     subdirs[:] = [sub for sub in subdirs if not sub.startswith(".")]
     for name in files:
       full = Path(base) / name
-      rel = full.relative_to(repo_root).as_posix()
+      rel = full.relative_to(settings_root).as_posix()
 
       # the same matcher the router uses: right-anchored `PurePath.match` for a plain glob, where
       # `*` never crosses `/`, and a repo-root-anchored match with `**` spanning any number of
@@ -327,13 +330,14 @@ def _collect_review_files(repo_root: Path, paths: list[str]) -> list[Path]:
   return matches
 
 
-def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -> None:
+def _check_callout_tags(settings_root: Path, settings: dict, findings: list[dict]) -> None:
   """
   Collect every `#review/<tag>` callout across the documents matched by `review.classes[].paths`
   and FAIL on any tag outside the closed vocabulary.
 
   Args:
-    repo_root: Repository root `review.classes[].paths` glob patterns are relative to.
+    settings_root: Directory whose `.claude/lazy.settings.json` the audit reads, the nearest settings root; the
+      `review.classes[].paths` glob patterns are relative to it.
     settings: Parsed `lazy.settings.json` contents.
     findings: Mutable findings list to append to.
   """
@@ -349,7 +353,7 @@ def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -
     # itself is already reported by _check_all's own class_i_paths check
     if not isinstance(paths, list) or not paths or any(not isinstance(item, str) for item in paths):
       continue
-    for file_path in _collect_review_files(repo_root, paths):
+    for file_path in _collect_review_files(settings_root, paths):
       # a file matched by more than one class is scanned only once
       if file_path in seen:
         continue
@@ -381,19 +385,20 @@ def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -
           continue
         # waiver: one-off human-facing message
         _add(findings, ReviewStatus.FAIL, "callout-tag-unknown",
-             f'{file_path.relative_to(repo_root).as_posix()}:{callout["line"]}'
+             f'{file_path.relative_to(settings_root).as_posix()}:{callout["line"]}'
              f' unknown callout tag "{tag}"'
              f" — expected one of {sorted(_VALID_CALLOUT_TAGS)}")
 
 
-def _check_all(settings: dict, findings: list[dict], *, repo_root: Path) -> None:
+def _check_all(settings: dict, findings: list[dict], *, settings_root: Path) -> None:
   """
   Apply all audit rules to a parsed settings dict.
 
   Args:
     settings: Parsed `lazy.settings.json` contents.
     findings: Mutable findings list to append to.
-    repo_root: Repository root that `review.classes[].paths` globs are resolved against.
+    settings_root: Directory whose `.claude/lazy.settings.json` the audit reads, the nearest settings root; the
+      `review.classes[].paths` globs are resolved against it.
   """
   # the configured edit-marker style must be one of the supported styles
   style = settings.get(JobKey.REVIEW, {}).get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
@@ -503,23 +508,26 @@ def _check_all(settings: dict, findings: list[dict], *, repo_root: Path) -> None
   _check_override_globs(settings, findings)
   _check_watch_root(settings, findings)
 
-  # the callout-tag vocabulary check reads the class-routed documents on disk under repo_root
-  _check_callout_tags(repo_root, settings, findings)
+  # the callout-tag vocabulary check reads the class-routed documents on disk under settings_root
+  _check_callout_tags(settings_root, settings, findings)
 
 
 def run(settings_path: Path) -> dict:
   """
-  Audit the merged review settings of the repository that `settings_path` locates and return a findings bundle.
+  Audit the merged review settings of the project that `settings_path` locates and return a findings bundle.
 
-  The tracked `.claude/lazy.settings.json` with the local overlay `.claude/lazy.settings.local.json` merged
-  on is audited; the file at `settings_path` is never read, only checked for existence.
+  The tracked `.claude/lazy.settings.json` with the local overlay `.claude/lazy.settings.local.json` merged on is
+  audited as core sees it; the file at `settings_path` is never read, only checked for existence.
 
   Guarantees:
     - The result's `level` is `FAIL` when any finding is `FAIL`, `WARN` when none is `FAIL` but at
       least one is `WARN`, and `PASS` only when every finding is `PASS`.
 
+  Notes:
+    - Core routes the daemon-read `experts` section to the checkout toplevel; `review` is read at the settings root.
+
   Args:
-    settings_path: Path of the settings file, used only to locate the repository root, which is the parent of
+    settings_path: Path of the settings file, used only to locate the settings root, which is the parent of
       the file's directory; a missing file yields one `FAIL` finding named `settings_present`.
 
   Returns:
@@ -527,7 +535,7 @@ def run(settings_path: Path) -> dict:
     finding records).
 
   Raises:
-    RuntimeError: If no core CLI resolves; raised by `core_settings.read_merged_sections` and not caught here.
+    RuntimeError: If no core CLI is resolvable.
   """
 
   # Contract:
@@ -542,22 +550,24 @@ def run(settings_path: Path) -> dict:
          f"missing {settings_path} — run /lazy-review.install first")
     return _bundle(findings)
 
-  # the classic layout is <repo_root>/.claude/lazy.settings.json (Paths.CLAUDE_DIR /
-  # Paths.SETTINGS_FILE), so the settings file's grandparent is the repo root
-  repo_root = settings_path.parent.parent
+  # the classic layout is <settings_root>/.claude/lazy.settings.json (Paths.CLAUDE_DIR /
+  # Paths.SETTINGS_FILE), so the settings file's grandparent is the nearest settings root, which may be a nested
+  # project below the checkout root
+  settings_root = settings_path.parent.parent
 
   # the review and experts sections as core's own readers see them, overlay merged on, so a value
-  # set only in the local overlay is audited, not missed
+  # set only in the local overlay is audited, not missed; `experts`, which the daemon reads, comes from the
+  # checkout's root
   try:
-    settings: dict = _core_settings.read_merged_sections(repo_root, JobKey.REVIEW, JobKey.EXPERTS)
+    settings: dict = _core_settings.read_merged_sections(settings_root, JobKey.REVIEW, JobKey.EXPERTS)
   except SettingsReadError as error:
     # guard: a settings layer core cannot read is the one finding, and nothing below can run without it
     # waiver: one-off human-facing message
     _add(findings, ReviewStatus.FAIL, "settings_parse", f"unreadable settings: {error}")
     return _bundle(findings)
 
-  # every check runs against the merged view, and the callout check reads documents under the repo root
-  _check_all(settings, findings, repo_root = repo_root)
+  # every check runs against the merged view, and the callout check reads documents under the settings root
+  _check_all(settings, findings, settings_root = settings_root)
   return _bundle(findings)
 
 
@@ -588,7 +598,9 @@ def main(argv: list[str]) -> int:
   Run the audit and print the JSON report to stdout.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name: an optional `--settings` path; without it the
+      nearest `.claude/lazy.settings.json` from `$LAZY_REPO_ROOT`, else the working directory, upward within its
+      checkout is audited, the checkout root's when none is nearer.
 
   Returns:
     Exit code: 0 for PASS, 1 for WARN, 2 for FAIL.
@@ -599,13 +611,19 @@ def main(argv: list[str]) -> int:
       # waiver: argparse CLI signature, not a domain key
       "--settings",
       type = Path,
-      default = Path(".claude/lazy.settings.json"),
+      default = None,
       # waiver: one-off human-facing message
-      help = "path to the tracked .claude/lazy.settings.json; it only locates the repo root (the parent of "
-             "its directory), whose merged settings, the tracked file with the local overlay merged on, are audited",
+      help = "path to the tracked .claude/lazy.settings.json; it only locates the settings root (the parent of "
+             "its directory, possibly a nested project below the checkout root), whose merged settings, the tracked "
+             "file with the local overlay merged on, are audited "
+             "(default: the nearest one from $LAZY_REPO_ROOT, else the cwd, upward within its checkout)",
   )
   args = parser.parse_args(argv)
-  report = run(args.settings.resolve())
+
+  # without an explicit file, the settings audited are the nearest ones within the checkout the command runs in
+  settings = args.settings if args.settings is not None else (
+      _review_locator.query_settings_root() / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE)
+  report = run(settings.resolve())
   print(json.dumps(report, indent = 2))
   return {ReviewStatus.PASS: 0, ReviewStatus.WARN: 1, ReviewStatus.FAIL: 2}[report[JobKey.LEVEL]]
 

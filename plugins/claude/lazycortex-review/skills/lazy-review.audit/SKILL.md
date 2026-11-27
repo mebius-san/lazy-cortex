@@ -22,7 +22,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Run audit script
 
-`"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit.py" --settings .claude/lazy.settings.json`. The `--settings` path only locates the repo root, the parent of the file's directory; the script audits that repo's merged settings, the tracked `.claude/lazy.settings.json` with `.claude/lazy.settings.local.json` merged on. The script prints a JSON record `{level: PASS|WARN|FAIL, findings: [{severity, check, message}, ...]}` and exits 0/1/2 respectively.
+`"${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/audit.py"`. Without `--settings` the script audits the nearest `.claude/lazy.settings.json` from the working directory upward within its checkout (the checkout root's when none is nearer); an explicit `--settings <path>` only locates the repo root, the parent of the file's directory. Either way the script audits that root's merged settings, the tracked `.claude/lazy.settings.json` with `.claude/lazy.settings.local.json` merged on. The script prints a JSON record `{level: PASS|WARN|FAIL, findings: [{severity, check, message}, ...]}` and exits 0/1/2 respectively.
 
 Outcome: `audited`.
 

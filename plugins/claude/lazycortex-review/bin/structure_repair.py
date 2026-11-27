@@ -17,22 +17,33 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import edit_markup as _edit_markup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import finalize as _finalize  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 import parser as _parser  # noqa: E402  # pylint: disable=import-error,wrong-import-position,deprecated-module
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from errors import ParseError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from keys import Tag  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -794,7 +805,8 @@ def main(argv: list[str]) -> int:
     - Nothing is ever committed.
 
   Args:
-    argv: Command-line arguments: the file, then optional `--check` and `--repo <root>`.
+    argv: Command-line arguments: the file, then optional `--check` and `--repo <dir>`, a directory inside the
+      repository (default: `$LAZY_REPO_ROOT`, then the working directory).
 
   Returns:
     Exit code: 0 for a clean or repaired document, 1 for a missing file, 2 for an unknown edit-marker style, 3 for
@@ -816,11 +828,12 @@ def main(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog = _PROG)
   parser.add_argument(_ARG_FILE)
   parser.add_argument(_ARG_CHECK, action = _STORE_TRUE)
-  parser.add_argument(_ARG_REPO, default = ".")
+  parser.add_argument(_ARG_REPO, default = None)
   args = parser.parse_args(argv)
 
-  # resolve the file against --repo; an absolute file argument wins over the repo root
-  file_path = (Path(args.repo).resolve() / args.file).resolve()
+  # resolve the file against the root of the checkout `--repo`, `$LAZY_REPO_ROOT` or the cwd sits in; an absolute
+  # file argument wins over that root
+  file_path = (_review_locator.query_repo_root(args.repo) / args.file).resolve()
 
   # guard: only an existing file has a structure to repair
   if not file_path.is_file():

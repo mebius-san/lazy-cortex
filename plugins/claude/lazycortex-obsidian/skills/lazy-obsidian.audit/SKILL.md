@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.audit
 description: "Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or a checkout pulled onto a new machine. Delegated from `lazy-core.doctor` Phase 3. Read-only; repairs are `/lazy-obsidian.capture` or `/lazy-obsidian.deploy`."
-allowed-tools: Read, Write, Glob, Grep, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
+allowed-tools: Read, Write, Glob, Grep, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(ls *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Agent
 argument-hint: "(no arguments — runs the vault-manifest drift check)"
 ---
 # lazycortex-obsidian audit
@@ -23,7 +23,7 @@ This skill has 2 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Vault manifest drift
 
-Only when the repo carries a vault manifest — `test -f <repo_root>/.obsidian.manifest.json`. Absent → outcome `no-manifest`, skip the phase (the vault predates `/lazy-obsidian.capture`, or this checkout is not a vault).
+Only when the repo carries a vault manifest — `Bash(ls -d <repo_root>/.obsidian.manifest.json)` lists it; when the command fails with "No such file or directory" it is absent. Absent → outcome `no-manifest`, skip the phase (the vault predates `/lazy-obsidian.capture`, or this checkout is not a vault).
 
 ```
 "${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" drift <repo_root>

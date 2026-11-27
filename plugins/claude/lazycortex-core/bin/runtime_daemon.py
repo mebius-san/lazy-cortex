@@ -26,9 +26,12 @@ from pathlib import Path
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from lazy_settings import load_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_setup import installed_plugin_root  # pylint: disable=import-error
+# pylint: disable-next=import-error
+from plugin_locator import find_git_common_dir, installed_plugin_root, query_repo_root
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import error_ledger  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import commit_guard  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import cron  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -190,7 +193,8 @@ _DURATION_UNITS = { "s": 1, "m": 60, "h": 3600, "d": 86400 }
 # Usage text the script prints for `-h` / `--help`.
 _USAGE = (
   "Usage: runtime_daemon.py [<repo-root>]\n\n"
-  "Drive the lazycortex runtime daemon against <repo-root> (default: the current directory)."
+  "Drive the lazycortex runtime daemon at the root of the checkout <repo-root> sits in\n"
+  "(default: the checkout $LAZY_REPO_ROOT, else the current directory, sits in)."
 )
 
 
@@ -237,17 +241,21 @@ def _git_common_dir(repo_root: Path) -> Path:
     originating checkout's git directory when `repo_root` is a linked worktree.
 
   Raises:
+    FileNotFoundError: When the path does not exist.
     subprocess.CalledProcessError: When git cannot answer for this path — no repository, or no git.
   """
-  # `--path-format=absolute` is required: the bare form answers relative to the caller's cwd, and a
-  # relative `core.hooksPath` is resolved by git against the hook's cwd, not the repository
-  out = subprocess.check_output(
-    [ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" ],
-    cwd = repo_root, text = True, encoding = "utf-8",
-    # waiver: stdlib decode-error mode, not a domain constant
-    errors = "surrogateescape",
-  )
-  return Path(out.strip())
+  # guard: a path that does not exist fails instead of resolving to something
+  if not repo_root.is_dir():
+    raise FileNotFoundError(f"no such repository directory: {repo_root}")
+
+  # the shared locator names the directory, absolute, whichever worktree asks
+  found = find_git_common_dir(repo_root)
+
+  # guard: git cannot answer for this path, which every caller treats as a failed git command
+  if found is None:
+    # waiver: git CLI vocabulary, not domain constants
+    raise subprocess.CalledProcessError(128, [ "git", "rev-parse", "--git-common-dir" ])
+  return found
 
 
 def _operator_hooks_dir(repo_root: Path) -> Path:
@@ -1473,6 +1481,14 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
       rather than an earlier routine's already-committed work. The end-of-iteration push at the
       close of the whole iteration still runs afterward — it covers commits that land between
       routines, such as an asynchronous job the pump kicked off.
+    - While forbidden-commit records stand in the runtime state, including one a routine raised in its own
+      process during this pass, the pass publishes nothing: neither the per-routine publish nor the tail publish.
+    - Before the per-routine publish of a run that moved `HEAD`, and always before the tail publish, the claimed jobs
+      barred from committing whose claimant is gone are judged, so a commit a killed pump's job left behind is found
+      and halts the daemon before anything publishes.
+    - A publish is also held while the spawn of such a judged job may still be running, as it may still commit.
+    - At the start of an iteration with no standing halt, remaining forbidden-commit records raise the
+      `forbidden_commit` halt again.
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -1544,6 +1560,12 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
     # do not early-return on halt — routines with `ignore_halt: true` (typically the autonomous
     # doctor) still need to run so they can triage and fix whatever caused the halt; `due_routines`
     # filters out non-ignore_halt routines based on the `system_stuck` flag
+
+  # a forbidden commit outlives whatever stop came after it: once no halt stands, its halt is raised again
+  # waiver: daemon error/trigger token, not an internal key
+  if halt is None and commit_guard.reraise(repo_root, triggered_by = "_commit_guard", on_halt = record_halt):
+    state = runtime_state.load(repo_root)
+    halt = state.get(StateKey.DAEMON_HALTED)
 
   # reconcile the in-memory halt gauge with the on-disk block on every iteration: the gauge is a
   # set-only signal on the halt path, so a cleared halt (auto-recover above, external recover, or a
@@ -1656,7 +1678,9 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
   # process in flight, and reading or committing over it would silently discard someone else's
   # work, while a copy nobody could read gives no proof that it is safe. A tree not known clean
   # when a cycle begins simply defers every routine that has not deliberately opted into running
-  # through trouble, with no halt recorded, so the cycle resumes cleanly the moment the tree is
+  # through trouble, except the queue-driving pump, which still runs because the recovery routines'
+  # work is dispatched as queued jobs; the pump in turn serves only jobs marked as triage of the
+  # stuck condition. No halt is recorded, so the cycle resumes cleanly the moment the tree is
   # known clean again. A tree left dirty by a routine that started with a clean one is judged
   # differently: that dirt is the routine's own unfinished output, and the runtime halts
   # immediately rather than letting later work build on a half-committed, unreviewed state —
@@ -1812,6 +1836,12 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
         halted_this_iter = True
         break
 
+    # a commit a barred job landed waits for the operator: the halt its routine raised in its own process
+    # ends the pass before anything publishes it
+    if _is_publish_held(repo_root, head_before, triggered_by = name):
+      halted_this_iter = True
+      break
+
     # a routine that committed and left the tree clean is published at once, so a later routine's
     # push conflict discards only its own commits and never this one's; the tail push below still
     # covers commits that land between routines (an asynchronous job of the pump, for one). The
@@ -1822,8 +1852,10 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
         break
 
   # a halted iteration leaves the tree alone rather than pushing partial work; a manual tick
-  # (push=False) never publishes — commits stay local until the operator says otherwise
-  if not halted_this_iter and push:
+  # (push=False) never publishes — commits stay local until the operator says otherwise; nor does any
+  # pass while a barred job's commit waits for the operator
+  # waiver: daemon error/trigger token, not an internal key
+  if not halted_this_iter and push and not _is_publish_held(repo_root, None, triggered_by = "_git_post"):
     _publish_tick(repo_root, state, daemon.get(DaemonKey.GIT))
 
   # loop-detect — bound the cost of a buggy state machine that commits forever as the same bot;
@@ -1832,6 +1864,50 @@ def run_iteration(repo_root: Path, *, push: bool = True, only: str | None = None
   # within the recent window. Volume alone never trips it — only the same content repeating does.
   if StateKey.DAEMON_HALTED not in state:
     _loop_detect_check(repo_root, state, settings_path)
+
+
+def _is_publish_held(repo_root: Path, head_before: str | None, *, triggered_by: str) -> bool:
+  """
+  Report whether a found forbidden commit keeps the daemon from publishing local commits.
+
+  When `HEAD` moved since `head_before`, or `head_before` is None, every claimed job whose claimant is gone is
+  judged first, so a commit a killed pump's job left behind is found before anything publishes it, and a spawn of
+  such a job that may still be running holds the publish, as it may still commit.
+
+  Notes:
+    - May record forbidden commits, raise the `forbidden_commit` halt and open its incident.
+    - A judgement that raises is recorded as a `daemon_error` incident with cause `internal_exception`, and the
+      publish is held.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    head_before: The `HEAD` commit before the work whose commits would be published, or None when unknown.
+    triggered_by: Routine or step name a raised halt records as its trigger.
+
+  Returns:
+    True while a forbidden-commit record stands, while a judged job's spawn may still be running, or when the
+    judgement failed; False otherwise.
+  """
+
+  # Domain(runtime.git-safety):
+  # # A forbidden commit is never published
+  # A commit landed by a job that had no right to commit stays in the local checkout until the operator has
+  # judged it. Publishing it would hand it to every other clone, and a publish that meets a conflict discards
+  # local commits, so either way the operator would lose the choice of keeping or undoing it. The hold lasts
+  # until the operator resumes, whatever other stop came and went meanwhile, and a job whose runner was killed
+  # before it could judge the run is judged before any publish. A judgement that could not be made holds the
+  # publish too.
+
+  # a moved branch may carry a commit of a job whose runner never got to judge it
+  try:
+    moved = head_before is None or _read_head_sha(repo_root) != head_before
+    running = moved and commit_guard.sweep_orphaned(repo_root, triggered_by = triggered_by, on_halt = record_halt)
+    return running or commit_guard.is_held(repo_root)
+  # waiver: whatever the judgement raises leaves it unmade, and an unmade judgement must hold the publish
+  except Exception as error:  # pylint: disable=broad-exception-caught
+    # waiver: daemon error/trigger token, not an internal key
+    _record_daemon_error(repo_root, "internal_exception", error)
+    return True
 
 
 def _read_head_sha(repo_root: Path) -> str | None:
@@ -1947,15 +2023,15 @@ def _plugin_roots() -> list[Path]:
   return out
 
 
-def _newer_core_runner() -> Path | None:
+def _newer_core_runner(repo: Path) -> Path | None:
   """
   Resolve the `lazycortex-core` runner the install registry names when it is not the running one.
 
-  The own-code fingerprint compares file *contents* at the paths the process actually loaded, which
-  never change for a plugin-cache install: an update writes a fresh `<version>/` directory and leaves
-  the running one untouched. Without this check a cache-installed daemon keeps running the version it
-  started on until an operator restarts it by hand. The registry's `installPath` is compared against
-  the running version directory instead of bytes.
+  Lets a cache-installed daemon notice a newer installed version of core, which a source checkout never needs.
+  Only installs made for the repo's main checkout or for the whole user count.
+
+  Args:
+    repo: The repository the daemon serves; only installs made for its main checkout or for the user count.
 
   Returns:
     Path to the registry-named version's runner entrypoint, or `None` when this process runs from a
@@ -1966,7 +2042,8 @@ def _newer_core_runner() -> Path | None:
   # # Adopting a newer version without an operator restart
   # The autonomous runtime is expected to pick up a newer version of its own core the moment one
   # becomes available, without an operator having to notice and restart it by hand. It looks for
-  # that newer version among every already-installed copy sharing its identity and, once it finds
+  # that newer version among the installed copies sharing its identity that were made for its own
+  # repository or for the whole user, never another project's, and, once it finds
   # one newer than the one it is currently running, restarts itself at the next safe boundary
   # between cycles of work rather than mid-cycle. The check is skipped for as long as the runtime
   # is halted over a condition that needs a human to look at it first — restarting would risk
@@ -1980,7 +2057,7 @@ def _newer_core_runner() -> Path | None:
   if PLUGIN_CACHE_REL not in here.as_posix():
     return None
   # waiver: this plugin's own registry name, the one identity the self-restart check is about
-  installed = installed_plugin_root("lazycortex-core")
+  installed = installed_plugin_root("lazycortex-core", repo)
 
   # guard: the registry records no install, or names the version already running
   if installed is None or installed.resolve() == here.parent:
@@ -2851,7 +2928,7 @@ def run(repo_root: Path) -> None:
           _restart_in_place()
       restart_halt = runtime_state.load(repo_root).get(StateKey.DAEMON_HALTED)
       if not restart_halt or restart_halt.get(HaltKey.REASON) == HaltReason.RATE_LIMIT:
-        newer_runner = _newer_core_runner()
+        newer_runner = _newer_core_runner(repo_root)
         if newer_runner is not None or fp.has_changed():
           _log_routine_result(repo_root, {
             TickResultKey.NAME: "_self_restart", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
@@ -3887,7 +3964,7 @@ def _refresh_disk_gauges(repo_root: Path) -> None:
 
 def main(argv: list[str]) -> None:
   """
-  Run the daemon against the repository named on the command line, or the current directory.
+  Run the daemon against the checkout the command line names, else the one the environment names.
 
   Serve as the script's command-line entry: a help flag shows the usage text, and any other option is refused
   instead of being taken as a repository path.
@@ -3912,8 +3989,9 @@ def main(argv: list[str]) -> None:
     print(f"unexpected argument: {argv[0]}", file = sys.stderr)
     sys.exit(2)
 
-  # the positional root, or the cwd when the supervisor starts the daemon inside the checkout
-  run(Path(argv[0]) if argv else Path(os.getcwd()))
+  # the checkout the positional root sits in, else the environment's or the cwd's when the supervisor starts the
+  # daemon inside the checkout
+  run(query_repo_root(argv[0] if argv else None))
 
 
 if __name__ == "__main__":

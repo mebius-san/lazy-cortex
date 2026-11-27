@@ -33,19 +33,25 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from errors import SettingsReadError  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from keys import BotIdentity, JobKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
-# the coordinator's expert name and fallback identity — the registered settings entry wins
+# The coordinator's expert name; its registered settings identity wins over the shipped fallback.
 _COORDINATOR_EXPERT = "review.coordinator"
-_FALLBACK_EMAIL = "review.coordinator@bot.invalid"
 
 
 # ----------------------------------------------------------------------------------------
@@ -83,7 +89,7 @@ def _append_history(repo: Path, file_path: Path, lines: tuple[str, ...]) -> None
   if not lines:
     return
   # no core CLI reachable raises — the line cannot land, and a silent skip would lose it
-  cli = _git_ops.require_core_cli()
+  cli = _git_ops.require_core_cli(repo)
   for line in lines:
     proc = subprocess.run(
         [sys.executable, str(cli), _HistoryWire.VERB, str(file_path), _HistoryWire.LINE_FLAG, line],
@@ -97,12 +103,15 @@ def _append_history(repo: Path, file_path: Path, lines: tuple[str, ...]) -> None
       raise RuntimeError(f"history-append refused: {proc.stderr.strip() or proc.stdout.strip()}")
 
 
-def _coordinator_author(repo: Path) -> dict:
+def _coordinator_author(settings_root: Path) -> dict:
   """
   Resolve the coordinator's git author identity from the consumer's settings.
 
+  Notes:
+    - Core routes the daemon-read `experts` section to the checkout toplevel, whatever `settings_root` is.
+
   Args:
-    repo: Repository root whose settings are read.
+    settings_root: The document's nearest settings root.
 
   Returns:
     Mapping with `name` and `email` keys — the registered `git_author` of the
@@ -114,7 +123,7 @@ def _coordinator_author(repo: Path) -> dict:
   """
   # the identity core and the pump know the coordinator by — the merged view, local overlay included
   try:
-    experts = _core_settings.read_merged_sections(repo, JobKey.EXPERTS)[JobKey.EXPERTS]
+    experts = _core_settings.read_merged_sections(settings_root, JobKey.EXPERTS)[JobKey.EXPERTS]
   except SettingsReadError:
     experts = {}
   # waiver: 'git_author' is lazy.settings.json's own wire-shape key, not a keys.py-promoted constant
@@ -122,7 +131,7 @@ def _coordinator_author(repo: Path) -> dict:
 
   # guard: an entry without both fields would half-apply — fall back whole
   if not isinstance(author, dict) or not author.get(JobKey.NAME) or not author.get(JobKey.EMAIL):
-    return {JobKey.NAME: _COORDINATOR_EXPERT, JobKey.EMAIL: _FALLBACK_EMAIL}
+    return {JobKey.NAME: _COORDINATOR_EXPERT, JobKey.EMAIL: BotIdentity.COORDINATOR_EMAIL}
   return {JobKey.NAME: author[JobKey.NAME], JobKey.EMAIL: author[JobKey.EMAIL]}
 
 
@@ -191,8 +200,8 @@ def commit_doc(
   if not status and not history and not extras:
     return {"committed": False}
   sha = _git_ops.commit_mechanical(
-      repo, file_path, author = _coordinator_author(repo), message = subject,
-      extra_paths = tuple(extra_paths),
+      repo, file_path, author = _coordinator_author(_core_settings.query_settings_root_for(file_path)),
+      message = subject, extra_paths = tuple(extra_paths),
   )
   # waiver: 'committed'/'sha' are this verb's own wire-shape keys, printed for the coordinator to read
   return {"committed": True, "sha": sha}
@@ -203,7 +212,9 @@ def main(argv: list[str]) -> int:
   Commit one review document's wake state and print the result as JSON.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the document is committed in the checkout that
+      directory sits in.
 
   Returns:
     Exit code: `0` on success (including the clean no-op), `2` when `git status` fails, when a `--history` line
@@ -217,15 +228,16 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--subject", required = True)
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--also", action = "append", default = None)
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--history", action = "append", default = None)
   args = parser.parse_args(argv)
 
-  # `file` resolves against `--repo` unless it's already absolute, mirroring the other verbs
-  repo = Path(args.repo).resolve()
+  # `file` resolves against the root of the checkout `--repo`, `$LAZY_REPO_ROOT` or the cwd sits in, unless it is
+  # already absolute
+  repo = _review_locator.query_repo_root(args.repo)
   file_path = (repo / args.file).resolve()
 
   # guard: a missing document is the caller's error — nothing to commit and nothing to create

@@ -45,9 +45,17 @@ _UNICODE_ESCAPE = re.compile(r"\\u[0-9a-fA-F]{4}")
 _NEW_FILE_INDENT = 2
 
 
+
+# ----------------------------------------------------------------------------------------
 class _Outcome:
   """
-  Stdout wire-shape outcomes returned by `ensure_permission_allow`.
+  Stdout wire-shape outcomes of the `permission-allow` subcommand, for a write and for a `--check` probe.
+
+  Attributes:
+    ADDED: The pattern was missing and has been written into the allow list.
+    ALREADY_PRESENT: The pattern was already in the allow list; nothing was written.
+    PRESENT: Check mode: the pattern is in the allow list.
+    ABSENT: Check mode: the pattern is not in the allow list.
   """
 
   # The pattern was missing and has been written into the allow list.
@@ -60,9 +68,16 @@ class _Outcome:
   ABSENT = "absent"
 
 
+
+# ----------------------------------------------------------------------------------------
 class _SettingsKey:
   """
   Top-level keys this helper reads/writes in the target settings JSON.
+
+  Attributes:
+    PERMISSIONS: The top-level permissions block of a Claude Code settings file.
+    ALLOW: The allow-pattern list inside the permissions block.
+    ASK: The ask-pattern list inside the permissions block.
   """
 
   # The top-level permissions block of a Claude Code settings file.
@@ -78,6 +93,16 @@ class _SettingsKey:
 class _ReportKey:
   """
   Field names of the report a permission edit prints.
+
+  Attributes:
+    STATUS: The edit's outcome word.
+    ALLOW_ADDED: Names newly added to the allow list.
+    ASK_ADDED: Names newly added to the ask list.
+    MOVED_TO_ASK: Names moved from the allow list to the ask list.
+    REMOVED: Names removed from either list.
+    PATH: The settings file the edit concerns.
+    INVALID: Names the verb refused.
+    MESSAGE: A one-line explanation of a refusal.
   """
 
   # The edit's outcome word.
@@ -103,6 +128,12 @@ class _ReportKey:
 class _EditStatus:
   """
   Outcome words of a permission edit.
+
+  Attributes:
+    WRITTEN: The file was rewritten.
+    UNCHANGED: The call would change nothing; nothing was written.
+    DRY_RUN: The call would change the file; nothing was written.
+    ERROR: The call was refused before any write, or its write left an MCP tool in both lists.
   """
 
   # The file was rewritten.
@@ -115,9 +146,20 @@ class _EditStatus:
   ERROR = "error"
 
 
+
+# ----------------------------------------------------------------------------------------
 class _CliMeta:
   """
   Argparse metadata for the `permission-allow` subcommand.
+
+  Attributes:
+    PROG: The program name shown in `--help` output.
+    ARG_PATH: The positional argument naming the settings file.
+    ARG_PATTERN: The positional argument naming the allow pattern.
+    HELP_PATH: The help text of the settings-file argument.
+    HELP_PATTERN: The help text of the allow-pattern argument.
+    ARG_CHECK: The flag selecting check mode.
+    HELP_CHECK: The help text of the check-mode flag.
   """
 
   # The program name shown in `--help` output.
@@ -222,11 +264,11 @@ def cmd_permission_allow(argv: list[str]) -> int:
     Process exit code: `0` on success, `2` on argument-parse failure.
   """
   # the settings path and the pattern are positional; `--check` turns the call into a probe
-  parser = argparse.ArgumentParser(prog=_CliMeta.PROG)
-  parser.add_argument(_CliMeta.ARG_PATH, help=_CliMeta.HELP_PATH)
-  parser.add_argument(_CliMeta.ARG_PATTERN, help=_CliMeta.HELP_PATTERN)
+  parser = argparse.ArgumentParser(prog = _CliMeta.PROG)
+  parser.add_argument(_CliMeta.ARG_PATH, help = _CliMeta.HELP_PATH)
+  parser.add_argument(_CliMeta.ARG_PATTERN, help = _CliMeta.HELP_PATTERN)
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument(_CliMeta.ARG_CHECK, action="store_true", help=_CliMeta.HELP_CHECK)
+  parser.add_argument(_CliMeta.ARG_CHECK, action = "store_true", help = _CliMeta.HELP_CHECK)
   args = parser.parse_args(argv)
 
   # the parsed path and pattern every mode works on
@@ -241,9 +283,16 @@ def cmd_permission_allow(argv: list[str]) -> int:
   return 0
 
 
-def _render_like(data: dict, original: str | None) -> str:
+def render_like(data: dict, original: str | None) -> str:
   """
   Render a settings object in the layout of the text it was read from.
+
+  Guarantees:
+    - An existing file's layout is kept: its indent unit (a one-line file stays on one line, compact if it was),
+      the order of its keys as given in `data`, its spelling of non-ASCII text (raw unless the file only uses
+      unicode escapes) and whether it ends with a newline.
+    - A file that does not exist yet (`original` is `None`) is rendered with a two-space indent and a trailing
+      newline.
 
   Args:
     data: Settings object to render.
@@ -253,6 +302,13 @@ def _render_like(data: dict, original: str | None) -> str:
     The JSON text, with the original's indent unit, its spelling of non-ASCII text and its trailing newline;
     a new file gets a two-space indent and a trailing newline.
   """
+
+  # Contract:
+  # The rendered text keeps the layout of an existing file: its indent unit (a one-line file stays on one line,
+  # compact if it was), the order of its keys as given in `data`, its spelling of non-ASCII text (raw, unless
+  # the file only uses unicode escapes) and whether it ends with a newline. A file that does not exist yet
+  # (`original` is `None`) is rendered with a two-space indent and a trailing newline.
+
   # a file the edit creates has no layout of its own to keep, so it takes the default one
   if original is None:
     return json.dumps(data, indent = _NEW_FILE_INDENT) + "\n"
@@ -394,7 +450,7 @@ def apply_permission_edit(path: Path, *, allow: Sequence[str] = (), ask: Sequenc
     if key in perms or values:
       perms[key] = values
   data[_SettingsKey.PERMISSIONS] = perms
-  runtime_state.atomic_write_text(path, _render_like(data, original))
+  runtime_state.atomic_write_text(path, render_like(data, original))
 
   # the file is read back, and an MCP tool left in both lists fails the edit; the operator's
   # other entries are not this writer's to judge

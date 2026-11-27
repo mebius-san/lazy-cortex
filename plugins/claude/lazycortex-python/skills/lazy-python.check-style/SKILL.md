@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Python check-style — seven-step review
 
-Deep style + docstring review for modified Python files in the current change set. Invoke after a meaningful edit batch and before committing — the run pairs manual inspection (categories the automated checkers cannot see) with the full `chk-py` + `tst-py` gate, and ends with a re-verify pass. Reads canonical guidelines from `${CLAUDE_PLUGIN_ROOT}/references/` and the project overlay from `${CLAUDE_PROJECT_DIR}/docs/guidelines/` on every run — neither is cached across invocations.
+Deep style + docstring review for modified Python files in the current change set. Invoke after a meaningful edit batch and before committing — the run pairs manual inspection (categories the automated checkers cannot see) with the full `chk-py` + `tst-py` gate, and ends with a re-verify pass. Reads canonical guidelines from `${CLAUDE_PLUGIN_ROOT}/references/` and the project overlay from `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/` on every run — neither is cached across invocations.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -33,8 +33,8 @@ Read the canonical guidelines from the plugin (always — never skip on the assu
 
 Then read the project overlay if it exists (overlay overrides canon on conflict):
 
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/coding_guidelines.md`
-- `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md`
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/coding_guidelines.md`
+- `${CLAUDE_PROJECT_DIR}/docs/guidelines/python/documenting_guidelines.md`
 
 Then read the project's `${CLAUDE_PROJECT_DIR}/CLAUDE.md` `## Style` section if present — this is the third overlay layer for project-wide notes that don't belong to a single topic.
 

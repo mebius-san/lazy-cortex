@@ -5,9 +5,9 @@ This module backs the `git-lock` subcommand the `lazy-core.git-status` and
 `lazy-core.git-unlock` skills call instead of embedding Python. `git-lock status` prints the
 operator-facing report of the staging-window mutex — disabled, dormant under pathspec
 discipline, free, or held with liveness and breakability — and `git-lock break` force-deletes
-the lock. The repository root follows the dispatcher convention (`LAZY_REPO_ROOT`, then the
-process working directory, overridable with `--cwd`) and is then widened to the git toplevel
-so a call from a subdirectory still finds `.git/`.
+the lock. The report's index-touched line measures the index of the checkout that holds the lock. The repository
+root is the toplevel of the checkout that `--cwd`, else `LAZY_REPO_ROOT`, else the process working directory sits
+in; the lock itself lives in the git directory every worktree of the repository shares.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import time
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import staging_lock  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from repo_root import resolve_git_toplevel  # pylint: disable=import-error
+from plugin_locator import query_repo_root  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -32,6 +32,8 @@ _OWNER_SELF, _OWNER_PEER = "this session", "peer"
 def _print_status(repo: Path) -> None:
   """
   Print the staging-lock report for one repository.
+
+  The index-touched line measures the index of the checkout that holds the lock, not of the one that reports.
 
   Args:
     repo: Git toplevel whose lock and guard configuration are reported.
@@ -60,8 +62,6 @@ def _print_status(repo: Path) -> None:
 
   # a held lock reports age, index activity, liveness, and whether the auto-break rules would clear it
   now = time.time()
-  # waiver: git's own index file location, not a domain key
-  index = repo / ".git" / "index"
   # the guard's own break-rule probe, so the report matches what the guard itself would decide
   breakable, reason = staging_lock.evaluate_break(repo, state, cfg, now = now)
   # waiver: operator-facing report lines, verbatim from the git-status skill
@@ -69,7 +69,7 @@ def _print_status(repo: Path) -> None:
   print(f"Branch:      {state.branch}")
   print(f"Held for:    {int(now - state.started_at)}s")
   print(f"Index touched: "
-        f"{int(now - max(state.last_index_mtime, index.stat().st_mtime if index.exists() else 0.0))}s ago")
+        f"{int(now - max(state.last_index_mtime, staging_lock.read_holder_index_mtime(repo, state)))}s ago")
   # waiver: operator-facing report wording, verbatim from the git-status skill
   print(f"Liveness:    PID alive={staging_lock.is_pid_alive(state.pid)}, "
         f"host={'this' if state.host == socket.gethostname() else f'other({state.host})'}")
@@ -102,7 +102,7 @@ def cmd_git_lock(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
-  repo = resolve_git_toplevel(args.cwd)
+  repo = query_repo_root(args.cwd)
 
   # `status` prints the read-only report and never touches the lock file
   if args.action == "status":

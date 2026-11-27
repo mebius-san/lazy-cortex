@@ -58,6 +58,10 @@ from spec_keys import CoordinatorTrigger, JobMarker, PluginErrorCause  # noqa: E
 # waiver: same deferred sibling import as above
 # pylint: disable-next=import-error,wrong-import-position
 import error_report  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+# pylint: disable-next=import-error,wrong-import-position
+import spec_locator  # noqa: E402
 
 
 # The core CLI verb that cancels an expert job, and the variable naming the repository the core CLI acts on.
@@ -1073,7 +1077,9 @@ def main(argv: list[str]) -> int:
   success. `--wake` raises or clears the pending wake instead of touching a job field.
 
   Args:
-    argv: Command-line arguments, excluding the program name.
+    argv: Command-line arguments, excluding the program name; `--repo` names a directory inside the repository
+      (default: `$LAZY_REPO_ROOT`, then the working directory); the marker is kept for the checkout that directory
+      sits in.
 
   Returns:
     Exit code: 0 on success, 2 when neither a value nor `--clear` was given, or both were; 1 when
@@ -1091,7 +1097,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--clear", action = "store_true")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
   # guard: exactly one of the two forms must be used — a value, or the explicit clear
@@ -1118,11 +1124,12 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"mark-job: expected a JSON object, got {args.value!r}\n")
         return 1
 
-  # `note` resolves against `--repo` unless it is already absolute, mirroring every other verb
+  # `note` resolves against the checkout `--repo`, else `$LAZY_REPO_ROOT`, else the cwd sits in, unless it is
+  # already absolute
   # (pathlib drops the left operand of `/` when the right one is absolute). The note need not
   # exist on disk: the marker is runtime state about a path, and a clear on a note that was just
   # deleted is exactly the case that must still work.
-  repo = Path(args.repo).resolve()
+  repo = spec_locator.query_repo_root(args.repo)
   try:
     entry = update(repo, repo / args.note, { field: value })
   except ValueError as error:

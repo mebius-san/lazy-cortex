@@ -3,7 +3,7 @@ Plugin directory registry and routine-command resolution.
 
 Holds the dev-plugin source directories the runtime daemon prefers over installed plugins, and turns a
 routine's `[plugin, *args]` command into a runnable interpreter invocation: a registered dev directory
-first, then the install root the machine's plugin registry records.
+first, then the install root the machine's plugin registry records for the repo or the user.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from lazy_setup import installed_plugin_root, read_install_paths  # pylint: disable=import-error
+from plugin_locator import installed_plugin_root, registry_path  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from shebang_exec import argv_for  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -50,23 +50,6 @@ def is_cache_root(path: Path) -> bool:
     True when the directory is named like a version (`9.1.1`), which only a cache install is.
   """
   return _VERSION_DIR_RE.fullmatch(path.name) is not None
-
-
-def read_installed_plugin_roots(home: Path) -> list[Path]:
-  """
-  List the installed source root of every plugin the machine's plugin registry records.
-
-  Reads `~/.claude/plugins/installed_plugins.json`, where the highest recorded version of each
-  plugin names its root; the plugin cache is never walked, since it keeps every version ever
-  installed.
-
-  Args:
-    home: Home directory holding the registry.
-
-  Returns:
-    One root per plugin name that exists on disk, sorted by plugin name; empty when nothing is installed.
-  """
-  return [ root for _name, root in sorted(read_install_paths(home).items()) if root.is_dir() ]
 
 
 def set_plugin_dirs(dirs: list[Path]) -> None:
@@ -146,23 +129,27 @@ def _resolve_in_plugin_dir(plugin_dir: Path, plugin_name: str) -> Path | None:
   return primary if primary.is_file() else None
 
 
-def resolve_routine_command(cmd: list[str]) -> list[str]:
+def resolve_routine_command(cmd: list[str], repo: Path) -> list[str]:
   """
   Resolve a `[plugin, *args]` command vector to a runnable `[bin_path, *args]` invocation.
 
   Consults dev-plugin source directories registered via `set_plugin_dirs` first, then falls back to
   the install root Claude Code's plugin registry (`~/.claude/plugins/installed_plugins.json`)
-  records for the plugin; the plugin cache is never walked.
+  records for the plugin, for the repo's main checkout or for the whole user; the plugin cache is
+  never walked.
 
   Guarantees:
     - A registered dev-plugin directory for the named plugin always takes precedence over the
       installed copy of the same plugin.
-    - When resolution falls back to the registry, the highest recorded version's `installPath` is
-      selected, compared numerically component by component rather than as strings.
+    - When resolution falls back to the registry, the highest version's `installPath` among the records
+      made for the repo's main checkout or for the user is selected, compared numerically component by
+      component; another project's record is never selected.
+    - The plugin cache is never walked.
 
   Args:
     cmd: Routine command vector whose first element is the plugin name and the rest are arguments
       passed through unchanged.
+    repo: Any directory of the repo the routine runs for: its root, a subdirectory or a worktree.
 
   Returns:
     A new list where the first element is the interpreter that runs the plugin's bin entrypoint, the
@@ -178,8 +165,9 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   # Contract:
   # A registered dev-plugin directory for `cmd[0]` always takes precedence over the installed copy
   # of the same plugin. When resolution falls back to the install registry, the `installPath` of
-  # the highest recorded version is the one resolved, compared numerically component by component;
-  # the plugin cache is never walked.
+  # the highest version among the records made for the repo's main checkout or for the user is the
+  # one resolved, compared numerically component by component; another project's record is never
+  # used, and the plugin cache is never walked.
 
   plugin = cmd[0]
 
@@ -189,13 +177,13 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
     if bin_path is not None:
       return argv_for(bin_path, *cmd[1:])
 
-  # otherwise the install root the plugin registry records
-  root = installed_plugin_root(plugin)
+  # otherwise the install root the plugin registry records for this repo or the user
+  root = installed_plugin_root(plugin, repo)
 
   # guard: plugin missing from both dev-plugin paths and the install registry
   if root is None:
     raise FileNotFoundError(
-      f"plugin not recorded in ~/.claude/plugins/installed_plugins.json and no matching --plugin-dir for: {plugin}"
+      f"plugin not recorded in {registry_path()} for {repo} or the user, and no matching --plugin-dir for: {plugin}"
     )
 
   # the installed root's entry point, named after the plugin

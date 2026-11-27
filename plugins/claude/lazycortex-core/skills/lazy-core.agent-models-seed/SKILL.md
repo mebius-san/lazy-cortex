@@ -22,7 +22,9 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core"
 
 With no `repo` in `args`, drop `--cwd <repo>`; the verb then targets `$LAZY_REPO_ROOT` or the cwd, which under a `repo=`-targeted run is the coordinator's repo.
 
-The `agent-models-seed` verb owns the tier table lookup, the per-key comparison and the write; it prints one JSON line. Exit 0 carries `outcome` (`seeded-N`, `unchanged`, `no-entries`), `sot` (the tier table it read) and `entries` (`{dispatch, tier, state, previous}` with `state` one of `added`, `unchanged`, `refreshed`, `kept-local`). Exit 1 carries a refusal `outcome` — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` — and a `message`. The outcome of this skill is the verb's `outcome`; never report a seed the verb did not answer.
+The `agent-models-seed` verb owns the tier table lookup, the per-key comparison and the write; it prints one JSON line. Exit 0 carries `outcome` (`seeded-N`, `unchanged`, `no-entries`), `sot` (the tier table it read) and `entries` (`{dispatch, tier, state, previous}` with `state` one of `added`, `unchanged`, `converted`, `refreshed`, `kept-local`). Exit 1 carries a refusal `outcome` — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` — and a `message`. The outcome of this skill is the verb's `outcome`; never report a seed the verb did not answer.
+
+A bare string in the group is the operator's pin and stays `kept-local`, with one exception: a seed written before seeds recorded their origin. A bare value equal to the key's current shipped tier is converted to the seed object and reported `converted`, `previous` naming the bare value. A bare value equal to a tier that key held earlier in `default-tiers.json` history — read only when the table sits in a git checkout — is converted and moved to the current tier, reported `refreshed`. With the history unreachable, only the current-tier match converts.
 
 ## Report
 

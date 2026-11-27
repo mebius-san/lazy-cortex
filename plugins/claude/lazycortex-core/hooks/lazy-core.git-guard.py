@@ -66,6 +66,8 @@ import index_guard  # noqa: E402  # pylint: disable=import-error,wrong-import-po
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookKey, HookName  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -218,19 +220,11 @@ def _repo_root() -> Path | None:
   Return the absolute root of the current git repository, or None when unavailable.
 
   Returns:
-    The repository root as a `Path`, with undecodable bytes of the checkout path kept as surrogate
-    escapes, or None when the current directory is not inside a git
-    repository or the `git` binary is missing.
+    The root of the checkout the current directory sits in as a `Path`, a linked worktree's own root inside one,
+    with undecodable bytes of the checkout path kept as surrogate escapes; None when the current directory is not
+    inside a git repository or the `git` binary is missing.
   """
-  # the path is taken as bytes and decoded here: text mode would turn a carriage return inside it into a line feed
-  try:
-    out = os.fsdecode(subprocess.check_output(
-      [ "git", "rev-parse", "--show-toplevel" ],
-      stderr = subprocess.DEVNULL,
-    )).strip()
-  except (subprocess.CalledProcessError, FileNotFoundError):
-    return None
-  return Path(out) if out else None
+  return plugin_locator.find_checkout_toplevel(Path.cwd())
 
 
 def _emit_deny(reason: str) -> None:
@@ -534,7 +528,7 @@ def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict, *, event
   # guard: only a commit or a history-sync verb against this repo can leave the index behind
   if not commit_ran and not sync_ran:
     return 0
-  git_dir = _git_dir(repo)
+  git_dir = plugin_locator.find_git_dir(repo)
 
   # guard: mid merge / rebase / cherry-pick a full index is legitimate (the verb may have failed)
   if git_dir is not None and _is_mid_operation(git_dir):
@@ -569,18 +563,18 @@ def _is_this_repo_target(repo: Path, repo_dir: str) -> bool:
     repo_dir: The `-C` value taken from the command line, absolute or relative to the cwd.
 
   Returns:
-    True when `repo_dir` resolves into the same repository, False when it names a different
-    checkout. An unresolvable path counts as different — the hook then leaves it alone rather
-    than judging a repository it cannot see.
+    True when `repo_dir` sits in the same checkout as `repo`, False when it names a different
+    checkout, a linked worktree of the same repository included. An unresolvable path counts as different —
+    the hook then leaves it alone rather than judging a repository it cannot see.
   """
-  # waiver: git CLI vocabulary, not domain constants
-  probe = _git_at(Path(repo_dir) if Path(repo_dir).is_absolute() else Path.cwd() / repo_dir,
-                  "rev-parse", "--show-toplevel", errors = _PATH_ERRORS)
+  # the root of the checkout the target sits in, relative targets taken from the cwd
+  target = Path(repo_dir) if Path(repo_dir).is_absolute() else Path.cwd() / repo_dir
+  top = plugin_locator.find_checkout_toplevel(target)
 
   # guard: cannot resolve the target — treat as a foreign repository
-  if probe.returncode != 0:
+  if top is None:
     return False
-  return Path(probe.stdout.strip()).resolve() == repo.resolve()
+  return top == repo.resolve()
 
 
 def _has_existing_path(repo: Path, segment: git_cmdline.GitSegment) -> bool:
@@ -650,7 +644,7 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb != "commit":
     return None
-  git_dir = _git_dir(repo)
+  git_dir = plugin_locator.find_git_dir(repo)
 
   # guard: mid merge / rebase / cherry-pick — git itself refuses a partial commit there
   if git_dir is not None and _is_mid_operation(git_dir):
@@ -721,50 +715,19 @@ def _in_linked_worktree(cwd: Path) -> bool:
     cwd: Directory to resolve from.
 
   Returns:
-    True when the resolved `--git-dir` differs from `--git-common-dir`; False otherwise,
-    including when either resolution fails.
+    True when the checkout's own git directory differs from the one every worktree of the repository shares;
+    False otherwise, and when either directory cannot be named.
   """
-  # `--path-format=absolute` would need git >= 2.31 (the marketplace-wide git floor is 2.10), so both
-  # possibly-relative results are resolved against cwd before comparison instead
-  # waiver: git CLI vocabulary, not domain constants
-  own = _git_at(cwd, "rev-parse", "--git-dir", errors = _PATH_ERRORS)
-  # waiver: git CLI vocabulary, not domain constants
-  common = _git_at(cwd, "rev-parse", "--git-common-dir", errors = _PATH_ERRORS)
+  # the checkout's own git directory and the one every worktree shares, both from the shared locator
+  own = plugin_locator.find_git_dir(cwd)
+  common = plugin_locator.find_git_common_dir(cwd)
 
   # guard: resolution failed — treat as the primary checkout so the guard stays in force
-  if own.returncode != 0 or common.returncode != 0:
+  if own is None or common is None:
     return False
-  own_path = Path(own.stdout.strip())
-  common_path = Path(common.stdout.strip())
 
-  # relative outputs resolve against the directory the probe ran in
-  if not own_path.is_absolute():
-    own_path = (cwd / own_path).resolve()
-  if not common_path.is_absolute():
-    common_path = (cwd / common_path).resolve()
-  return own_path.resolve() != common_path.resolve()
-
-
-def _git_dir(cwd: Path) -> Path | None:
-  """
-  Resolve the absolute path of the git directory governing `cwd`.
-
-  Args:
-    cwd: Directory to resolve from — the repository root on the PreToolUse path, or the
-      operator working directory reported by Claude Code at Stop event time.
-
-  Returns:
-    Absolute `Path` to the git dir (`.git`, a linked worktree dir, or a custom GIT_DIR), or None
-    when `cwd` is not inside a git repository.
-  """
-  # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "rev-parse", "--git-dir", errors = _PATH_ERRORS)
-
-  # guard: cwd is not inside a git repository
-  if r.returncode != 0:
-    return None
-  p = Path(r.stdout.strip())
-  return p if p.is_absolute() else (cwd / p).resolve()
+  # a linked worktree keeps its own git directory apart from the shared one
+  return own != common
 
 
 def _is_conflict_resolution_only(repo: Path, segment: git_cmdline.GitSegment) -> bool:
@@ -780,7 +743,7 @@ def _is_conflict_resolution_only(repo: Path, segment: git_cmdline.GitSegment) ->
     names is currently an unmerged index entry; False otherwise, including for an `add` that
     names no path at all.
   """
-  git_dir = _git_dir(repo)
+  git_dir = plugin_locator.find_git_dir(repo)
 
   # guard: outside a transactional operation there are no conflicts to resolve
   if git_dir is None or not _is_mid_operation(git_dir) or not segment.pathspecs:
@@ -977,7 +940,7 @@ def _handle_stop(payload: dict) -> int:
   """
   # the operator cwd is the only repo reference a Stop payload carries
   cwd = Path(payload.get("cwd") or ".").resolve()
-  git_dir = _git_dir(cwd)
+  git_dir = plugin_locator.find_git_dir(cwd)
 
   # guard: not inside a git repository
   if git_dir is None:
@@ -992,15 +955,13 @@ def _handle_stop(payload: dict) -> int:
     return 0
 
   # resolve the repository root whose config holds the per-repo kill-switch
-  # waiver: git CLI vocabulary, not domain constants
-  r = _git_at(cwd, "rev-parse", "--show-toplevel", errors = _PATH_ERRORS)
+  repo = plugin_locator.find_checkout_toplevel(cwd)
 
   # guard: cannot resolve repo root — fail open
-  if r.returncode != 0:
+  if repo is None:
     return 0
 
   # this nag belongs to the mutex row alone — every other configuration ends the turn freely
-  repo = Path(r.stdout.strip()).resolve()
   cfg = staging_lock.load_config(repo)
 
   # guard: guard disabled for this repo

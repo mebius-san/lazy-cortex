@@ -21,6 +21,9 @@ as JSON and fixes nothing — repairing a broken note is the
 coordinator's own job, done through its pen and through `note-set-key`. Its result also carries
 the note's `job_markers` sidecar entry, so a reader that used to find the two markers in
 frontmatter still gets them from one call.
+
+`question-clear-ticks` unticks a coordinator question whose ticked options contradict each other and leaves
+a notice under it.
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from collections.abc import Mapping
 
 
 _BIN = Path(__file__).resolve().parent
@@ -61,6 +64,9 @@ import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-impor
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
@@ -98,6 +104,9 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
     SpecStateKey,
     SpecTargetsKey,
 )
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+from spec_lockit import Lockit  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
 # ----------------------------------------------------------------------------------------
@@ -400,6 +409,276 @@ _OPTIONAL_PROTECTED_MARKERS = {
 _AUTHOR_NAME = "lazy-spec.note-set-key"
 _AUTHOR_EMAIL = f"{_AUTHOR_NAME}@bot.invalid"
 
+# The lockit key of the line written under a question whose contradicting ticks were cleared.
+MULTI_TICKED_KEY = "question.multi-ticked"
+
+# The closing lines both coordinator personas sign their own `[!question]` callouts with, each the callout's last
+# quoted line; the one set every reader of a coordinator question recognises it by.
+QUESTION_SIGNATURES = frozenset({ "> — spec.coordinator", "> — spec.catalog-coordinator" })
+# A `[!question]` callout's head line.
+_QUESTION_HEAD_RE = re.compile(r"^>\s*\[!question\]")
+# Any callout's head line.
+_ANY_CALLOUT_HEAD_RE = re.compile(r"^>\s*\[!")
+# An option line of a callout; captures its tick and its text.
+_OPTION_LINE_RE = re.compile(r"^(?P<open>>\s*-\s*\[)(?P<tick>[^\]\n]*)(?P<close>\]\s*)(?P<text>.*)$")
+# The tick character of a ticked option, compared case-insensitively.
+_TICK = "x"
+# A routing option attaching the request to an asset or a level document; captures the repo-relative path.
+_ROUTING_ATTACH_RE = re.compile(r"^attach\s+(\S+)")
+# A routing option spawning a change onto assets; captures the comma-separated targets.
+_ROUTING_CHANGE_RE = re.compile(r"^spawn\s+change\s+\S+.*?\btargets=(\S+)")
+# The `product=` field of a change-spawn routing option; captures the product key.
+_ROUTING_PRODUCT_RE = re.compile(r"\bproduct=(\S+)")
+# The suffix of a markdown file an attach path names.
+_NOTE_SUFFIX = ".md"
+# The characters an option's text may be wrapped in, stripped before it is read as a routing line.
+_OPTION_WRAP = "` "
+# The product-record key holding a product's repo-relative spec path.
+_SPEC_PATH = "spec_path"
+# The prefix of an asset key whose product cannot be resolved, so it never equals a repo-relative path.
+_UNRESOLVED_PREFIX = "unresolved:"
+
+
+def _attach_target(path: str) -> str:
+  """
+  Name what an attach routing option settles.
+
+  Args:
+    path: The repo-relative path the attach line names.
+
+  Returns:
+    The asset folder when the path is an asset's folder-note, named like its folder; the path itself otherwise, a
+    level document or a folder named directly.
+  """
+  folder, _sep, name = path.rpartition("/")
+
+  # a folder-note is named like the folder it opens, and that folder is the asset
+  if name.endswith(_NOTE_SUFFIX) and name.removesuffix(_NOTE_SUFFIX) == folder.rpartition("/")[2]:
+    return folder
+  return path
+
+
+def _default_product(roots: Mapping[str, str]) -> str | None:
+  """
+  Name the product a change-spawn that names none lands in.
+
+  Args:
+    roots: Product key to the product's repo-relative spec path.
+
+  Returns:
+    The alphabetically first product whose spec path no other product's encloses; the alphabetically first product
+    when every one is enclosed; `None` for an empty mapping.
+  """
+  top = [
+      key for key, path in roots.items()
+      if not any(other != key and path.startswith(f"{root}/") for other, root in roots.items())
+  ]
+  return min(top or roots, default = None)
+
+
+def _routing_assets(option: str, roots: Mapping[str, str]) -> list[str] | None:
+  """
+  Name the assets a routing option settles, each as one comparable key.
+
+  A change target is resolved against the spec path of its product, the `product=` one or else the default product.
+
+  Args:
+    option: The text of one option line, past its checkbox.
+    roots: Product key to the product's repo-relative spec path.
+
+  Returns:
+    The repo-relative paths the option settles; a change target whose product has no known spec path is keyed by
+    its product and token, so it equals only the same target of the same product. `None` when the option is not an
+    attach or a change-spawn routing line.
+  """
+  text = option.strip(_OPTION_WRAP)
+
+  # an attach names its target by a repo-relative path
+  if attach := _ROUTING_ATTACH_RE.match(text):
+    return [ _attach_target(attach.group(1).strip(_OPTION_WRAP)) ]
+
+  # a change-spawn names its assets by paths relative to its product, the named one or the default
+  if change := _ROUTING_CHANGE_RE.match(text):
+    named = _ROUTING_PRODUCT_RE.search(text)
+    product = named.group(1).strip(_OPTION_WRAP) if named else _default_product(roots)
+    root = roots.get(product) if product is not None else None
+    tokens = [ token.strip("/") for token in change.group(1).strip(_OPTION_WRAP).split(",") if token ]
+    return [ f"{root}/{token}" if root else f"{_UNRESOLVED_PREFIX}{product}:{token}" for token in tokens ]
+  return None
+
+
+def product_roots(repo: Path) -> dict[str, str]:
+  """
+  Read each registered product's spec path, the roots routing options are resolved against.
+
+  Args:
+    repo: The repository root holding `.claude/lazy.settings.json`.
+
+  Returns:
+    Product key to its repo-relative spec path; empty when the settings cannot be read or register no product.
+  """
+  # an unreadable registry resolves no product, so change targets are compared by their own product and token
+  try:
+    registry = resolve_product.load_products(repo)
+  except ValueError:
+    return {}
+  return {
+      key: str(record[_SPEC_PATH]).strip("/") for key, record in registry.items()
+      if isinstance(record, dict) and record.get(_SPEC_PATH)
+  }
+
+
+def ticks_contradict(options: list[str], roots: Mapping[str, str] | None = None) -> bool:
+  """
+  Judge whether the ticked options of one coordinator question contradict each other.
+
+  Guarantees:
+    - One ticked option, or none, never contradicts.
+    - Routing options ticked once for each of several assets or level documents do not contradict; two ticked
+      routing options that settle one asset do. A change target is resolved against its own product, the named one
+      or the default, so the same relative path in two products is two assets.
+    - Any other pair of ticked options contradicts.
+
+  Args:
+    options: The texts of the question's ticked options, past their checkboxes.
+    roots: Product key to the product's repo-relative spec path; `None` resolves no product.
+
+  Returns:
+    True when the ticks cannot all be applied, False otherwise.
+  """
+
+  # Contract:
+  # One ticked option, or none, never contradicts. Routing options ticked for different assets, each asset resolved
+  # against its own product, never contradict; two different options settling the same resolved asset always do.
+  # Any other pair of ticked options always contradicts.
+
+  # Domain(spec.lifecycle):
+  # # Contradicting ticks on a coordinator question apply nothing
+  # The options of a coordinator question exclude one another, so a question the operator ticked more than once
+  # carries no answer and none of its ticked options is applied. The one question whose options do not all exclude
+  # one another is the routing question, which offers an attach and a change for each existing asset the request
+  # touches: ticks on different assets are one answer per asset, while two ticks on the same asset contradict each
+  # other and settle nothing.
+
+  # one tick or none is an answer, or no answer yet
+  if len(options) < 2:
+    return False
+  assets = [ _routing_assets(option, roots or {}) for option in options ]
+
+  # a ticked option that is not a routing line makes every second tick a contradiction
+  if any(named is None for named in assets):
+    return True
+
+  # routing ticks contradict only when two different options settle one asset
+  seen: dict[str, int] = {}
+  for index, named in enumerate(assets):
+    for asset in set(named or ()):
+      if seen.setdefault(asset, index) != index:
+        return True
+  return False
+
+
+def clear_contradicting_questions(text: str, notice: str, roots: Mapping[str, str] | None = None) -> tuple[str, int]:
+  """
+  Clear the ticks of every coordinator question whose ticked options contradict each other, and say why.
+
+  Guarantees:
+    - Only `[!question]` callouts signed by a coordinator persona are touched; every one whose ticks contradict
+      comes back with all its options unticked and one `notice` line under its last option, never a second one.
+    - Every other byte of the note stays identical.
+
+  Args:
+    text: The note's full text.
+    notice: The line written under the options, in the note's language.
+    roots: Product key to the product's repo-relative spec path, the routing question's targets are resolved
+      against; `None` resolves no product.
+
+  Returns:
+    The note's text with the ticks cleared, and the number of questions cleared.
+  """
+
+  # Contract:
+  # Only questions signed by a coordinator whose ticked options contradict are touched. Each comes back with every
+  # option unticked and exactly one notice line under its last option, never a second one on a repeat call. Every
+  # other byte of the note stays identical.
+
+  lines = text.split("\n")
+  cleared = 0
+  index = 0
+  while index < len(lines):
+    # a line that opens no question starts no block worth reading
+    if not _QUESTION_HEAD_RE.match(lines[index].strip()):
+      index += 1
+      continue
+
+    # the block runs over the quoted lines after the head, up to the next callout or the first unquoted line
+    end = index + 1
+    while end < len(lines) and lines[end].startswith(">") and not _ANY_CALLOUT_HEAD_RE.match(lines[end].strip()):
+      end += 1
+    body = [ line.strip() for line in lines[index + 1:end] if line.strip() != ">" ]
+    options = [
+        ( row, match ) for row in range(index + 1, end) if (match := _OPTION_LINE_RE.match(lines[row].strip()))
+    ]
+    # waiver: the named groups of `_OPTION_LINE_RE`, spelled once in the pattern beside it
+    ticked = [ match["text"] for _row, match in options if match["tick"].strip().lower() == _TICK ]
+
+    # an unsigned question, or one whose ticks do not contradict, is left as it is
+    if not body or body[-1] not in QUESTION_SIGNATURES or not ticks_contradict(ticked, roots):
+      index = end
+      continue
+
+    # every option is unticked, and the notice goes under the last one unless it already stands there
+    for row, match in options:
+      # waiver: the named groups of `_OPTION_LINE_RE`, spelled once in the pattern beside it
+      lines[row] = f"{match['open']} {match['close']}{match['text']}"
+    if f"> {notice}" not in body:
+      lines.insert(options[-1][0] + 1, f"> {notice}")
+      end += 1
+    cleared += 1
+    index = end
+  return "\n".join(lines), cleared
+
+
+def main_clear_ticks(argv: list[str]) -> int:
+  """
+  Run `question-clear-ticks` from the command line.
+
+  Unticks the options of every coordinator question in the note whose ticks contradict each other and writes a
+  notice, in the note's language, under each. Nothing is committed. Routing targets are resolved against the
+  products registered in the note's vault.
+
+  Notes:
+    - Prints a JSON object with the number of questions cleared to standard output.
+    - The note is rewritten only when at least one question was cleared.
+
+  Args:
+    argv: Command-line arguments, excluding the program name and subcommand.
+
+  Returns:
+    Exit code: 0 on success, including when no question needed clearing; 2 when the note is missing.
+  """
+  # waiver: argparse CLI signature -- program name shown in --help / usage
+  parser = argparse.ArgumentParser(prog = "lazycortex-specs question-clear-ticks")
+  # waiver: argparse CLI signature -- positional argument name
+  parser.add_argument("note", type = Path)
+  note: Path = parser.parse_args(argv).note.resolve()
+
+  # guard: the note must exist
+  if not note.is_file():
+    sys.stderr.write(f"no note: {note}\n")
+    return 2
+
+  # the note is rewritten only when a question was cleared, so a repeat call is a no-op on disk
+  original = note.read_text(encoding = "utf-8")
+  vault = spec_paths.find_settings_root(note.parent)
+  text, cleared = clear_contradicting_questions(
+      original, Lockit.text(MULTI_TICKED_KEY, note_explainers.lang_for_note(note)),
+      product_roots(vault) if vault is not None else None)
+  if cleared:
+    note.write_text(text, encoding = "utf-8")
+  print(json.dumps({ "cleared": cleared }))
+  return 0
+
 
 def set_fm_scalar(fm_text: str, key: str, value: str) -> str:
   """
@@ -586,9 +865,10 @@ def _commit(asset_dir: Path, note: Path, key: str, value_str: str, *, containers
     containers: The container notes whose stats region the write moved, carried by the same commit.
 
   Raises:
-    subprocess.CalledProcessError: If the commit fails, or git fails inside a repository while the repository is
-      looked up; such a failure is never read as "no repository".
-    OSError: If git cannot be run inside a repository while the repository is looked up.
+    subprocess.CalledProcessError: If the commit fails, registering a new file with `git add -N` fails, or git
+      fails during the status query.
+    OSError: If git cannot name the top level while a `.git` entry is in sight, so a lookup failure is never read
+      as "no repository", or if git cannot be run for the status query or the commit.
   """
   repo = flip_gate.find_repo_top(asset_dir)
 
@@ -1201,7 +1481,7 @@ def main_history(argv: list[str]) -> int:
 
   # land the line and print the core verb's result as JSON on stdout
   try:
-    result = history_journal.append_to_file(asset_note, args.line, args.today, repo = Path.cwd())
+    result = history_journal.append_to_file(asset_note, args.line, args.today, repo = spec_locator.query_repo_root())
   # the core verb refused the line or could not be resolved — surface the reason, exit 1
   except RuntimeError as error:
     sys.stderr.write(f"{error}\n")

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Query a generated reference tree built from code's Domain(…) comments — one document, one section or one term at a time, never the whole tree.
-last_regen: 2026-11-18
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "How the domain tree stays current"
   request: "Flow diagram: code Domain(…)/Contract: comments feed domain-plan detection, which dispatches the domain-spec writer per changed group to write the group's folder note and the documents of its changed comments under docs/domains/<group folder>/, then orphan removal, anchor and link repair and the domains.md index rebuild; /lazy-wiki.domains reads that generated tree to answer group, document, section and term queries."
@@ -10,8 +10,8 @@ source_skills:
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
   - lazy-wiki.domain-spec-writer
-source_sha: bfc8927e864051859a3d283c691f8fb38ef46785
-surface_sha: 2fb2722063bbaf0ad704a1d3de3a86ada6a910a2c2ee5bd4fb936ffd53abefc0
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: 8ccba128ef9b6a67078583527b40f9f55070617ed05a725e3fe9e0f72097ba2b
 ---
 # Domain knowledge lookup
 
@@ -51,6 +51,8 @@ A document is the size of its comment. Under the title and a short caption it ca
 
 The explaining sections never mention file paths, class names or line numbers; only Contracts and Discrepancies carry anchors. Formulas are recorded in math notation. A document with discrepancies is tagged `domains/discrepancy`, and the `domains.md` index lists those documents under its own `Discrepancies` section, so you can see every known comment-versus-code disagreement in one place. Where the two disagree, the code is the truth.
 
+A group's folder note carries an overview of the group, its `Documents` list (every document of the group, in reading order) and, when the group genuinely relates to others, a `Related` list of their folder notes. A folder note never carries a `Discrepancies` section.
+
 The index also gets a note for any folder that sits above groups without being a group itself, listing the groups and sections directly inside it.
 
 ## Keeping the tree current
@@ -59,12 +61,16 @@ When your project runs the background daemon, a git-watch routine and a weekly f
 
 When you're not running the daemon, or you just changed a batch of markers and want the docs current right now, `/lazy-wiki.domain-sync [<group-key>]` does the same work synchronously. With a group key, only that group's folder is written and cleaned; the index is still rebuilt from the whole tree. A run goes through these steps:
 
+Before you run it, the plugin must be installed (`/lazy-wiki.install`) and the domain tree configured (`/lazy-wiki.configure domains`). Keep the working tree clean for the output paths: the run writes and commits the generated documents and `domains.md`.
+
 1. **Plan** — detects which groups changed since the last generation. If nothing changed, the run reports the tree as in sync and stops. The plan also reports groups used in code but missing from the dictionary (they are never generated) and comments that don't open with a `# # <title>` line (they have no document; each is named by file and line).
 2. **Write** — dispatches the domain-spec writer once per changed group. It writes the group's folder note plus a document for every comment whose knowledge changed. The skill checks that every returned file exists and is non-empty before landing any of a group's files; a group with a missing file is skipped whole and picked up on the next run, so you never get a folder note describing documents that weren't rewritten.
 3. **Remove orphans** — deletes documents whose comment was removed or retitled, whose group no longer has any comments, whose group left the dictionary, or that are a leftover of the earlier one-file-per-group layout. Docs deleted because their group left the dictionary are named in the report, so an unintended deletion is visible in the run that made it.
 4. **Repair** — fixes what needs no writer: contract anchors whose file moved, `Related` links whose target no longer exists, and `Contracts` bullets citing a guarantee no attributed contract accounts for.
 5. **Rebuild the index** — regenerates `domains.md` from the whole tree.
 6. **Commit** — one commit under your identity covering everything touched.
+
+If a file is refused when it is placed into the tree (for example, the writer returned it empty), the sync surfaces the reason, restores whatever it had already placed for that group, and moves on; the group is detected again on the next run. When nothing changed byte for byte, the run reports the commit as unchanged and creates no empty commit.
 
 The report ends with the unknown groups, the untitled comments, the unlisted-group deletions, and every discrepancy the writers found (comment claim, code behaviour, anchor).
 

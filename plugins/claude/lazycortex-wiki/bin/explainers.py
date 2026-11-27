@@ -134,7 +134,7 @@ def resolve_language(repo: Path) -> str:
   # core owns the chain; the wiki only names its own section
   proc = subprocess.run(
     [
-      sys.executable, str(_axes.resolve_core_cli()), _SUB_RESOLVE_LANGUAGE,
+      sys.executable, str(_axes.resolve_core_cli(repo)), _SUB_RESOLVE_LANGUAGE,
       _ARG_SECTION, _WIKI_SECTION, _ARG_CWD, str(repo),
     ],
     capture_output = True, check = False,

@@ -8,7 +8,7 @@ The finalizing commit:
 2. Drops the top banner block (whichever state it was in).
 3. Drops the approve-checkbox line.
 4. Drops every other system callout (`#review/<x>`) from the body
-   but keeps `# History`.
+   but keeps `# History`; for a report class it also drops the report's discussion block.
 5. Strips every transient `review_*` frontmatter key by prefix (everything except `review_result`).
 6. Stamps the terminal `review_result` outcome
    (`approved` | `approved-with-concerns`) when `review_approved` is affirmative — the discriminator
@@ -41,6 +41,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import atomic_io as _atomic_io  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -90,7 +93,14 @@ _APPROVE_LINE_RE = re.compile(
     r"|approve this and previous rounds"
     r"|approve and run to the end without stops"
     r"|approve without further validation)"
-    r"[^\n]*\n",
+    r"[^\n]*\n"
+    # a report box's label is matched whole, so an operator's task line that merely starts with it survives
+    r"|^>\s*-\s*\[[ x]\]\s*"
+    r"(?:accept as is, without fixes"
+    r"|fix by the remarks"
+    r"|принять как есть, без исправлений"
+    r"|поправить по замечаниям)"
+    r"[ \t]*\n",
     re.MULTILINE | re.IGNORECASE,
 )
 # frontmatter flag values that read as set, compared after lowercasing and trimming
@@ -153,42 +163,40 @@ def read_document_edit_marker_style(file_path: Path) -> str:
 
 def read_settings_edit_marker_style(file_path: Path) -> str:
   """
-  Return the configured edit-marker style for the repo containing `file_path`.
+  Return the configured edit-marker style for a document.
 
   Args:
-    file_path: The document whose containing repo's settings are consulted.
+    file_path: The document whose nearest settings are consulted.
 
   Returns:
-    The `review.edit_marker_style` value of the nearest repo carrying `.claude/lazy.settings.json`,
-    read with its local overlay merged on, or `"simple"` when no settings file is found, the
-    settings are unreadable, or the key is absent.
+    The `review.edit_marker_style` value of the nearest directory carrying `.claude/lazy.settings.json`, never
+    above the document's checkout, read with its local overlay merged on, or `"simple"` when no settings file is
+    found, the settings are unreadable, or the key is absent.
 
   Raises:
     RuntimeError: When a settings file is found but no core CLI is resolvable.
   """
-  cur = file_path.parent
-  # waiver: inline numeric literal, not a domain constant
-  for _ in range(10):
-    # the nearest repo carrying a settings file answers, its local overlay merged on as core reads it
-    if (cur / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE).exists():
-      try:
-        review = _core_settings.read_merged_sections(cur, JobKey.REVIEW)[JobKey.REVIEW]
-      except SettingsReadError:
-        return Style.SIMPLE
-      return review.get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
-    # filesystem root reached without a settings file — fall back to the default style
-    if cur.parent == cur:
-      break
-    cur = cur.parent
-  return Style.SIMPLE
+  # the nearest directory carrying a settings file, within the document's checkout, answers
+  root = _core_settings.query_settings_root_for(file_path)
+
+  # guard: no settings file on the way up — the default style
+  if not (root / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE).exists():
+    return Style.SIMPLE
+
+  # the settings are read with their local overlay merged on, as core reads them
+  try:
+    review = _core_settings.read_merged_sections(root, JobKey.REVIEW)[JobKey.REVIEW]
+  except SettingsReadError:
+    return Style.SIMPLE
+  return review.get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
 
 
-def _load_settings(repo: Path) -> dict:
+def _load_settings(settings_root: Path) -> dict:
   """
-  Read the `review` section of `repo`'s settings as core sees them, local overlay merged.
+  Read the `review` section of the nearest settings root as core sees it, local overlay merged.
 
   Args:
-    repo: Repository root whose settings are read.
+    settings_root: The nearest settings root of the document, possibly a nested project.
 
   Returns:
     Settings-shaped dict holding the merged `review` section, or `{}` when the settings are unreadable.
@@ -202,7 +210,7 @@ def _load_settings(repo: Path) -> dict:
 
   # an unreadable settings layer resolves no review class, exactly as an absent one does
   try:
-    return _core_settings.read_merged_sections(repo, JobKey.REVIEW)
+    return _core_settings.read_merged_sections(settings_root, JobKey.REVIEW)
   except SettingsReadError:
     return {}
 
@@ -289,6 +297,7 @@ def finalize_text(
     style: str,
     preserve_section_ids: set[str] | None = None,
     with_concerns: bool = False,
+    report: bool = False,
 ) -> str:
   """
   Apply the finalize transforms to `text` and return the result.
@@ -309,6 +318,8 @@ def finalize_text(
     with_concerns: Whether at least one validation section still carries a concern under the
       operator's skip-validation choice. When `True`, stamp the `approved-with-concerns` status
       callout and result instead of the clean `approved` ones.
+    report: Whether the document belongs to a report class. When `True`, the report's discussion block is
+      removed; otherwise a section carrying the same tag is kept like any other.
 
   Returns:
     Finalized document text with review-machinery markers, transient frontmatter
@@ -362,6 +373,10 @@ def finalize_text(
   body = _parser.sub_outside_fences(_BANNER_RE, "", body, count = 1)
   body = _parser.sub_outside_fences(_APPROVE_LINE_RE, "", body)
   body = _parser.sub_outside_fences(_SYSTEM_CALLOUT_RE, "", body)
+
+  # a report's discussion block answered the operator's remarks while the review ran; it ends with the review
+  if report:
+    body = _body.strip_discussion(body)
 
   # Drop section-writer artefacts (Routing, Final check, Implementation
   # risks, …) — every H1 with `#expert/<flat>/<section-id>` ownership
@@ -513,25 +528,19 @@ def _commit_final(repo: Path, file_path: Path) -> str:
   )
 
 
-def _repo_root_for(file_path: Path) -> Path:
+def query_repo_root_for(file_path: Path) -> Path:
   """
-  Return the root directory of the git repository containing `file_path`.
+  Return the root directory of the git checkout containing `file_path`.
+
+  Args:
+    file_path: The document whose checkout is resolved.
 
   Returns:
-    The nearest ancestor directory that contains a `.git` entry, or the
-    immediate parent of `file_path` when no `.git` directory is found within
-    twenty levels up.
+    The root of the checkout the document sits in, a linked worktree's own root inside one; the document's own
+    folder when it is not inside a git repository.
   """
-  cur = file_path.parent
-  # waiver: inline numeric literal, not a domain constant
-  for _ in range(20):
-    if (cur / Paths.GIT_DIR).exists():
-      return cur
-    # filesystem root reached without a `.git` entry — fall back to the file's parent
-    if cur.parent == cur:
-      break
-    cur = cur.parent
-  return file_path.parent
+  # the checkout git names for the document's folder, else the folder itself
+  return _review_locator.query_checkout_toplevel(file_path.parent)
 
 
 def main(argv: list[str]) -> int:
@@ -542,7 +551,7 @@ def main(argv: list[str]) -> int:
   further validation and at least one validation section of the document's review class still carries a
   concern; then only the validation sections that themselves carry a concern survive, and a clean
   validation section is dropped even when a sibling holds a concern. Every other approval is stamped
-  `approved` and keeps no validation section.
+  `approved` and keeps no validation section. A document of a report class also loses its discussion block.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -579,8 +588,10 @@ def main(argv: list[str]) -> int:
   # work on an LF copy and resolve the document's class from its repo's review settings
   lf_text, ending = _atomic_io.to_lf(original)
   meta, body_text = _fm.parse(lf_text)
-  repo = _repo_root_for(file_path)
-  class_cfg = _doc_class.class_for_file(_load_settings(repo), repo, file_path)
+  repo = query_repo_root_for(file_path)
+  settings_root = _core_settings.query_settings_root_for(file_path)
+  settings = _load_settings(settings_root)
+  class_cfg = _doc_class.class_for_file(settings, settings_root, file_path)
 
   # under the operator's skip-validation choice, each validation section that still carries a concern
   # survives on its own; with none of them raising one the skip is a plain approve
@@ -591,6 +602,7 @@ def main(argv: list[str]) -> int:
       lf_text, style = read_document_edit_marker_style(file_path),
       preserve_section_ids = _section_ids_for_finalize(class_cfg, concern_section_ids = concern_section_ids),
       with_concerns = bool(concern_section_ids),
+      report = _doc_class.is_report_class(settings, settings_root, file_path),
   )
   new_text = _atomic_io.restore_ending(new_text, ending)
 

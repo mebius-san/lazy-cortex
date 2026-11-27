@@ -27,9 +27,10 @@ _OP_REMOVE = "remove"
 _OP_PATH = "path"
 _OP_DESCRIPTION = "description"
 
-# One map entry: indentation, the bullet, the path, the separator, the description.
-_ENTRY = re.compile(r"^(?P<indent> *)- (?P<path>\S+) — (?P<description>.*)$")
+# One map entry: indentation, the bullet, the path with or without backticks, the separator, the description.
+_ENTRY = re.compile(r"^(?P<indent> *)- (?P<tick>`?)(?P<path>\S+?)(?P=tick) — (?P<description>.*)$")
 _G_INDENT = "indent"
+_G_TICK = "tick"
 _G_PATH = "path"
 _G_DESCRIPTION = "description"
 _INDENT_STEP = "  "
@@ -44,8 +45,9 @@ class StructureMap:
   Editor of the project-structure map's text.
 
   Turns a batch of enter, update and remove operations on described paths into the map's new text. Each entry is
-  a line `<indent>- <path> — <description>`; a directory's entries nest one level under it, and siblings follow
-  the order of their paths. The file on disk is never written — the caller receives the text and lands it.
+  a line `<indent>- <path> — <description>`, the path written plain or in backticks; a directory's entries nest
+  one level under it, and siblings follow the order of their paths. The file on disk is never written — the
+  caller receives the text and lands it.
 
   Guarantees:
     - A batch that is refused leaves no partial result: a `JobRefusedError` is raised and no text is returned.
@@ -82,6 +84,8 @@ class StructureMap:
 
     Guarantees:
       - The entry of a moved directory keeps its description under the new directory path.
+      - A path written in backticks and the same path written plain are one entry for every operation and move; an
+        edited line keeps its own spelling and a new line is written plain.
 
     Notes:
       - The map file is only read; writing the result is the caller's job.
@@ -103,6 +107,12 @@ class StructureMap:
     # The entry of a moved directory carries its description over unchanged
     # to the new directory path.
 
+    # Contract:
+    # A map line may write its path in backticks or plain; the two spellings are one entry for every
+    # operation and directory move, so an operation naming the plain path finds a backticked line.
+    # A line edited by an update, a re-entry or a directory move keeps its own spelling; a line that
+    # did not exist before is written plain.
+
     # Domain(wiki.structure):
     # # Where a map entry goes
     # A map entry sits under the nearest entry that describes one of its parent directories, one level of
@@ -115,6 +125,11 @@ class StructureMap:
     # When a directory is renamed, the version history reports only the files that moved, so the directory's
     # own entry would keep naming a path that no longer exists while the new directory went undescribed. The
     # entry of a vanished directory therefore follows the rename to its new name, description and all.
+    # A line may write its path in backticks or plain, and the two spellings are one and the same entry: every
+    # lookup — updating, removing, entering, finding a parent, moving a directory — reads the path without the
+    # backticks. Changing a line, whether its description, a re-entry or a directory move, keeps the spelling that
+    # line already has, so a map written by hand in either style is never restyled behind its author's back; a
+    # line that did not exist before is written plain. Maps are not converted: a line in backticks is simply found.
 
     # guard: a missing map is never recreated
     if not self._path.is_file():
@@ -138,7 +153,7 @@ class StructureMap:
         self._enter(lines, path, description)
       elif kind == _OP_UPDATE:
         index = self._index_of(lines, path)
-        lines[index] = self._render(self._indent(lines[index]), path, description)
+        lines[index] = self._rerender(lines[index], path, description)
       elif kind == _OP_REMOVE:
         del lines[self._index_of(lines, path)]
       else:
@@ -151,7 +166,7 @@ class StructureMap:
 
   def _move_dir(self, lines: list[str], old_dir: str, new_dir: str) -> None:
     """
-    Carry the entries of a renamed directory over to its new path, descriptions intact.
+    Carry the entries of a renamed directory over to its new path, descriptions and path spelling intact.
 
     Args:
       lines: Map lines, edited in place.
@@ -160,22 +175,22 @@ class StructureMap:
     """
     # every directory entry at or under the vanished directory, parents before children
     moved = [
-      (index, match.group(_G_PATH), match.group(_G_DESCRIPTION))
+      (index, match.group(_G_PATH), match.group(_G_DESCRIPTION), match.group(_G_TICK))
       for index, match in self._entries(lines)
       if match.group(_G_PATH).endswith(_DIR_SUFFIX) and match.group(_G_PATH).startswith(old_dir)
     ]
 
     # guard: nothing to move, or the new directory is already described
-    if not moved or any(self._count(lines, new_dir + path[len(old_dir):]) for _, path, _ in moved):
+    if not moved or any(self._count(lines, new_dir + path[len(old_dir):]) for _, path, _, _ in moved):
       return
 
-    # drop the old lines bottom-up, then enter each under its new name, parents first
-    for index, _, _ in sorted(moved, reverse = True):
+    # drop the old lines bottom-up, then enter each under its new name, parents first, in its own spelling
+    for index, _, _, _ in sorted(moved, reverse = True):
       del lines[index]
-    for _, path, description in sorted(moved, key = lambda item: len(item[1])):
-      self._enter(lines, new_dir + path[len(old_dir):], description)
+    for _, path, description, tick in sorted(moved, key = lambda item: len(item[1])):
+      self._enter(lines, new_dir + path[len(old_dir):], description, tick = tick)
 
-  def _enter(self, lines: list[str], path: str, description: str) -> None:
+  def _enter(self, lines: list[str], path: str, description: str, *, tick: str = "") -> None:
     """
     Describe a path in the map, at its place under the nearest described parent directory.
 
@@ -183,6 +198,7 @@ class StructureMap:
       lines: Map lines, edited in place.
       path: Path to describe.
       description: Description of the path.
+      tick: Backtick written around a new line's path, or empty for a plain path; an existing line keeps its own.
 
     Raises:
       JobRefusedError: With the technical category when an entry the new line anchors to occurs more than once.
@@ -190,7 +206,7 @@ class StructureMap:
     # a path already described exactly once is updated in place rather than described twice
     if self._count(lines, path) == 1:
       index = self._index_of(lines, path)
-      lines[index] = self._render(self._indent(lines[index]), path, description)
+      lines[index] = self._rerender(lines[index], path, description)
       return
 
     # the nearest described parent directory decides the depth and the sibling set
@@ -220,7 +236,7 @@ class StructureMap:
         break
     if parent is None and position == end:
       position = self._last_entry(lines) + 1
-    lines.insert(position, self._render(indent, path, description))
+    lines.insert(position, self._render(indent, path, description, tick = tick))
 
   def _parent(self, lines: list[str], path: str) -> int | None:
     """
@@ -360,17 +376,36 @@ class StructureMap:
     match = _ENTRY.match(line)
     return match.group(_G_INDENT) if match is not None else ""
 
+  @classmethod
+  def _rerender(cls, line: str, path: str, description: str) -> str:
+    """
+    Format a new description onto an existing entry line, keeping its indentation and path spelling.
+
+    Args:
+      line: The existing entry line.
+      path: Path the entry describes, without backticks.
+      description: New description of the path.
+
+    Returns:
+      The rewritten entry line.
+    """
+    # the line's own backticks, if any, wrap the path again
+    match = _ENTRY.match(line)
+    tick = match.group(_G_TICK) if match is not None else ""
+    return cls._render(cls._indent(line), path, description, tick = tick)
+
   @staticmethod
-  def _render(indent: str, path: str, description: str) -> str:
+  def _render(indent: str, path: str, description: str, *, tick: str = "") -> str:
     """
     Format one map entry line.
 
     Args:
       indent: Leading indentation of the entry.
-      path: Path the entry describes.
+      path: Path the entry describes, without backticks.
       description: Description of the path; surrounding whitespace is dropped.
+      tick: Backtick written around the path, or empty for a plain path.
 
     Returns:
       The entry line.
     """
-    return f"{indent}- {path}{_SEP}{description.strip()}"
+    return f"{indent}- {tick}{path}{tick}{_SEP}{description.strip()}"

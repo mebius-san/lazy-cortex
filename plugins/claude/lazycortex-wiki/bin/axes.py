@@ -9,7 +9,6 @@ overwriting an operator's own entries. Reads and writes go through core's settin
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +23,10 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import plugin_registry as _plugin_registry  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+import wiki_locator as _plugin_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+# The directory holding this plugin's own tree, where a development checkout keeps the neighbouring plugins.
+_SIBLING_BASE = Path(__file__).resolve().parents[2]
 
 
 class _K:
@@ -36,7 +38,6 @@ class _K:
     TAG_AXES: Section-level key holding the ordered list of classification axes.
     CORE_PLUGIN_NAME: Name of the `lazycortex-core` plugin/binary.
     BIN_SEGMENT: The `bin` path segment under a plugin root.
-    ENV_PLUGIN_DIRS: Env var the daemon exports naming candidate plugin roots.
     SUB_SETTINGS_GET: Core CLI subcommand name for a section read.
     SUB_SETTINGS_SET: Core CLI subcommand name for a section write.
     ARG_CWD: Core CLI flag naming the repository root.
@@ -58,8 +59,6 @@ class _K:
     INDEX_BADGES: Per-scope key listing the frontmatter keys the topic index shows as badges on node lines.
     ERROR: Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of
       the normal status-keyed result shape.
-    REGISTRY_STAGE: Name of the install-registry lookup stage, as the core-CLI resolution error
-      reports it.
     MSG_CORE_CLI_UNRESOLVABLE: Leading text of the error message raised when no lookup stage finds the core CLI.
   """
 
@@ -71,8 +70,6 @@ class _K:
   CORE_PLUGIN_NAME = "lazycortex-core"
   # The `bin` path segment under a plugin root.
   BIN_SEGMENT = "bin"
-  # Env var the daemon exports naming candidate plugin roots.
-  ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
   # Core CLI subcommand name for a section read.
   SUB_SETTINGS_GET = "settings-get"
   # Core CLI subcommand name for a section write.
@@ -114,8 +111,6 @@ class _K:
   # Top-level result key used only for the malformed-`wiki.tag_axes` guard, in place of the normal status-keyed
   # result shape.
   ERROR = "error"
-  # Name of the install-registry lookup stage, as the core-CLI resolution error reports it.
-  REGISTRY_STAGE = "Claude Code's plugin registry"
   # Opening of the error raised when no lookup stage finds the core CLI.
   MSG_CORE_CLI_UNRESOLVABLE = "lazycortex-core CLI not resolvable"
   # Settings section carrying the terms scopes.
@@ -140,60 +135,41 @@ _ENCODING: Final = "utf-8"
 _DECODE_LOSSY: Final = "replace"
 
 
-def resolve_core_cli() -> Path:
+def resolve_core_cli(start: Path) -> Path:
   """
   Locate the `lazycortex-core` CLI binary this module dispatches settings reads and writes to.
+
+  Args:
+    start: Any directory inside the repository the caller works in.
 
   Returns:
     Resolved binary usable as a subprocess argument.
 
   Raises:
-    RuntimeError: If the binary is found neither under the plugin directories named by the environment, nor in the
-      dev-vault sibling layout, nor in the plugin registry's recorded install of `lazycortex-core`.
+    RuntimeError: If no lookup stage finds `lazycortex-core`, the message naming every stage searched, or the
+      found plugin root carries no CLI binary.
   """
-  env_dirs = os.environ.get(_K.ENV_PLUGIN_DIRS, "").split(os.pathsep)
-  for dir_path in env_dirs:
-    # guard: skip an empty segment from a leading/trailing/double path separator
-    if not dir_path:
-      continue
-    cli = Path(dir_path) / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
-    if cli.is_file():
-      return cli
 
   # Domain(plugin.boundaries):
   # # Locating a neighbouring plugin's command line
   # A plugin never imports a neighbour's code and never knows the neighbour's layout on disk: it calls the
-  # command the neighbour publishes as a separate process, and the exchange goes in JSON. The address of that
-  # command is looked up across three sources in turn, from the most precise to the most general: the list of
-  # plugin roots the runtime daemon hands to every process it spawns; the layout of the developer's working
-  # vault, where plugins lie as neighbouring directories; the registry of installed plugins, which records
-  # where each enabled plugin was installed and which version. The store of downloaded copies is never
-  # searched: it keeps every version ever installed, so its newest copy need not be the one enabled. No single
-  # source is mandatory on its own, but when none of them worked, the work stops with an error listing
-  # everything that was searched: silently continuing without the neighbour is not allowed.
+  # command the neighbour publishes as a separate process, and the exchange goes in JSON. The neighbour is
+  # looked for the way every plugin looks for one. When no place has the neighbour, or the one found publishes
+  # no such command, the work stops with an error: silently continuing without the neighbour is not allowed.
 
-  # dev-vault fallback — this file sits at plugins/claude/lazycortex-wiki/bin/axes.py, so core's own
-  # bin/ is two levels up and back down into the sibling plugin tree
-  sibling = Path(__file__).resolve().parents[2] / _K.CORE_PLUGIN_NAME / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
-  if sibling.is_file():
-    return sibling
+  # the shared lookup names every stage it searched when none finds core
+  try:
+    root, _stage = _plugin_locator.plugin_root(_K.CORE_PLUGIN_NAME, start, sibling_base = _SIBLING_BASE)
+  except _plugin_locator.PluginNotFoundError as error:
+    raise RuntimeError(f"{_K.MSG_CORE_CLI_UNRESOLVABLE}: {error}") from error
 
-  # registry fallback — a real consumer install where neither the daemon env nor the dev-vault
-  # checkout applies; the install root Claude Code recorded for core's highest installed version
-  installed = _plugin_registry.installed_plugin_root(_K.CORE_PLUGIN_NAME)
-  if installed is not None:
-    cli = installed / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
-    if cli.is_file():
-      return cli
+  # the binary sits in the found root's bin directory
+  cli = root / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
 
-  # none of the three stages found a binary — name what was searched so a misconfigured runner
-  # is diagnosable
-  searched = [ dir_path for dir_path in env_dirs if dir_path ] or [ "<unset>" ]
-  raise RuntimeError(
-    f"{_K.MSG_CORE_CLI_UNRESOLVABLE}: no {_K.BIN_SEGMENT}/{_K.CORE_PLUGIN_NAME} under any "
-    f"directory named by ${_K.ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}), no dev-vault "
-    f"sibling at '{sibling}', and no {_K.CORE_PLUGIN_NAME} install recorded in {_K.REGISTRY_STAGE}."
-  )
+  # guard: a found plugin root without its CLI binary cannot be dispatched to
+  if not cli.is_file():
+    raise RuntimeError(f"{_K.MSG_CORE_CLI_UNRESOLVABLE}: {root} carries no {_K.BIN_SEGMENT}/{_K.CORE_PLUGIN_NAME}")
+  return cli
 
 
 def read_settings(repo: Path,
@@ -219,7 +195,7 @@ def read_settings(repo: Path,
   """
   proc = subprocess.run(
     [
-      sys.executable, str(resolve_core_cli()), _K.SUB_SETTINGS_GET, section,
+      sys.executable, str(resolve_core_cli(repo)), _K.SUB_SETTINGS_GET, section,
       _K.ARG_SCOPE, layer, _K.ARG_CWD, str(repo),
     ],
     capture_output = True, check = False,
@@ -366,7 +342,7 @@ def _save_settings(repo: Path, section: str, value: dict) -> None:
     RuntimeError: When the `lazycortex-core` CLI cannot be resolved or exits non-zero.
   """
   proc = subprocess.run(
-    [ sys.executable, str(resolve_core_cli()), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
+    [ sys.executable, str(resolve_core_cli(repo)), _K.SUB_SETTINGS_SET, section, _K.ARG_CWD, str(repo) ],
     input = json.dumps(value).encode(_ENCODING), capture_output = True, check = False,
   )
 

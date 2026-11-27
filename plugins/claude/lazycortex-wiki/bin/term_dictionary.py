@@ -111,6 +111,13 @@ _DOT = "."
 # Unicode normal form a term is brought to before its file name is derived: one spelling per letter.
 _NORMAL_FORM: Final = "NFC"
 
+# A run of non-whitespace: one token of a term, cased on its own.
+_TOKEN_RE: Final = re.compile(r"\S+")
+# The characters besides letters that a plain word may carry: hyphens and apostrophes.
+_WORD_JOINERS: Final = frozenset("-\u2010\u2011'\u2019")
+# The Unicode name prefix of a Cyrillic letter, which makes a term Russian.
+_CYRILLIC: Final = "CYRILLIC"
+
 
 
 # ----------------------------------------------------------------------------------------
@@ -173,6 +180,69 @@ def term_file_stem(term: str) -> str:
 
   # the device name moves off itself while the rest of the stem stays
   return f"{head}{_DEVICE_SUFFIX}{dot}{tail}"
+
+
+def compute_term_title(term: str) -> str:
+  """
+  Bring a term's title to the letter case of the term's language.
+
+  Guarantees:
+    - Applying the function to its own result returns that result unchanged.
+    - Only letter case changes, and only from lower to upper, so the term's file name stays the same when letter
+      case is ignored.
+
+  Args:
+    term: Term of a terms dictionary, as a title line would spell it.
+
+  Returns:
+    The term with the first letter of each word its language capitalises raised to upper case.
+  """
+
+  # Contract:
+  # Applying the function to its own result returns that result unchanged, so a title that is already cased is
+  # never recased again.
+
+  # Contract:
+  # The function only ever raises a letter to upper case, so a term and its cased title name the same file when
+  # letter case is ignored.
+
+  # Domain(wiki.terms):
+  # # How a term's title is cased
+  # A term's title, and the file name derived from it, follows the letter case of the term's language. A term holding
+  # a Cyrillic letter is Russian: only its first word starts with a capital, and every other word keeps the case it
+  # was written in, so a proper name inside it keeps its capital. Any other term is English: every word starts with a
+  # capital. A word is a token between whitespace made of letters, hyphens and apostrophes with no capital after its
+  # first letter; any other token, such as an identifier (`change_gate`, `lazy-diagram.fix`) or a brand spelling
+  # (`iOS`), keeps its spelling. A letter is never lowered, and only a token's first letter is raised, so a part after
+  # a hyphen keeps its case (`Back-channel`). A Russian term whose first word is not a plain word is left as written.
+
+  russian = any(unicodedata.name(char, "").startswith(_CYRILLIC) for char in term)
+
+  # each plain word the language capitalises gets its first letter raised; a Russian term capitalises its first
+  # token only, and every other token keeps its spelling
+  cased = term
+  for index, match in enumerate(_TOKEN_RE.finditer(term)):
+    token = match.group(0)
+    # a plain word the language capitalises takes its capital; a later token of a Russian term and a token that is
+    # no plain word keep their spelling
+    if not ( russian and index > 0 ) and _is_plain_word(token):
+      cased = cased[:match.start()] + token[0].upper() + cased[match.start() + 1:]
+  return cased
+
+
+def _is_plain_word(token: str) -> bool:
+  """
+  Tell whether a token of a term is a plain word that letter case may touch.
+
+  Args:
+    token: One whitespace-free token of a term.
+
+  Returns:
+    `True` when the token is made of letters, hyphens and apostrophes and has no capital after its first letter.
+  """
+  return all(char.isalpha() or char in _WORD_JOINERS for char in token) and not any(
+    char.isupper() for char in token[1:]
+  )
 
 
 def parse_target_stem(target: str, known: AbstractSet[str]) -> str:
@@ -573,16 +643,17 @@ class TermDictionary:
     # Domain(wiki.terms):
     # # Where a term lives in the dictionary
     # The dictionary is a directory with one file per term. The file is named after the term by the file-name rule,
-    # and it holds the term on its title line, then its definition. The title keeps the exact spelling the term was
-    # given; the file name is what links point at. A directory that is missing is an empty dictionary: git keeps no
+    # and it holds the term on its title line, then its definition. The title carries the spelling the term was given,
+    # with its first letters raised as the term's language asks and never lowered; the file name is what links point
+    # at. A directory that is missing is an empty dictionary: git keeps no
     # empty directory, so a scope with no terms yet has none in a fresh clone. The batch is worked out against no
     # terms, and the directory appears when the first term file is written.
     # Two terms whose names give one file name are one term. A new term, or a renamed one, that lands on a file name
     # already taken joins the term standing there: that term keeps its title, takes the definition just sent, and
     # the links that pointed at the renamed term follow it to the joined one. The join is reported, so the curator
     # sees that two names collapsed into one. Sending a term again with the same spelling and the same definition
-    # changes nothing, so it is not reported as a join. A rename that keeps the file name changes nothing but the
-    # spelling on the title line.
+    # changes nothing, so it is not reported as a join. A rename that keeps the file name
+    # rewrites the spelling on the title line and gives the term the definition the rename sent; no link moves.
     # A file name that a rename freed can be taken again later in the same batch. The links to it then stay with
     # the term now standing there, and are no longer moved to the renamed term. When it is taken again for a term
     # whose name gives the same file name in another letter case, the file keeps the spelling it has on disk and is
@@ -1008,21 +1079,22 @@ class _Batch:
     Raises:
       JobRefusedError: Technical category when the term has no file name.
     """
+    term = compute_term_title(term.strip())
     stem = _stem_of(term)
     taken = self._entries.get(stem.casefold())
 
     # a taken file name turns the addition into an extension of the term already there; only a different spelling
     # or a changed definition is a join worth reporting
     if taken is not None:
-      if taken.term != term.strip() or taken.definition.strip() != definition.strip():
+      if taken.term != term or taken.definition.strip() != definition.strip():
         self._merged.append(taken.stem)
       taken.definition = definition
       return
 
-    # a new term keeps its exact spelling on the title line, and links to its file stay where they point; a file
-    # name the batch freed keeps the spelling it has on disk, so its file is rewritten rather than doubled
+    # a new term takes its language-cased title, and links to its file stay where they point; a file name the batch
+    # freed keeps the spelling it has on disk, so its file is rewritten rather than doubled
     stem = self._disk_stems.get(stem.casefold(), stem)
-    self._entries[stem.casefold()] = _Entry(stem, term.strip(), definition)
+    self._entries[stem.casefold()] = _Entry(stem, term, definition)
     self._forget_retarget(stem)
 
   def _rename(self, term: str, source: str, definition: str) -> None:
@@ -1038,11 +1110,12 @@ class _Batch:
       JobRefusedError: Technical category when the renamed term is absent or a name has no file name.
     """
     old = self._require(source)
+    term = compute_term_title(term.strip())
     key = _stem_of(term).casefold()
 
-    # the same file name only corrects the spelling on the title line
+    # the same file name corrects the title spelling and takes the sent definition
     if key == old.stem.casefold():
-      old.term = term.strip()
+      old.term = term
       old.definition = definition
       return
 
@@ -1059,10 +1132,10 @@ class _Batch:
       self._retarget(old.stem, taken.stem)
       return
 
-    # a free file name takes the renamed term with its exact spelling; a file name the batch freed keeps the spelling
-    # it has on disk, so its file is rewritten rather than doubled
+    # a free file name takes the renamed term under its language-cased title; a file name the batch freed keeps the
+    # spelling it has on disk, so its file is rewritten rather than doubled
     stem = self._disk_stems.get(key, _stem_of(term))
-    self._entries[key] = _Entry(stem, term.strip(), definition)
+    self._entries[key] = _Entry(stem, term, definition)
     self._forget_retarget(stem)
     self._retarget(old.stem, stem)
 

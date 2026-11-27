@@ -22,6 +22,15 @@ if TYPE_CHECKING:
   pass
 
 
+# the module's own directory comes first on the import path, so its flat `bin/` siblings resolve by bare name
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from icon_keys import MapKey  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # The top-level array merged by entry id, and the entry key that identifies a matcher.
 _MATCHERS_KEY = "matchers"
 _ID_KEY = "id"
@@ -151,6 +160,10 @@ def _merge_value(authored: object, shipped: object, path: str, report: MergeReco
   Returns:
     The merged value.
   """
+  # the paint-roots list is the operator's: an authored value stays as it is and never conflicts
+  if path == MapKey.PAINT_ROOTS:
+    return copy.deepcopy(authored)
+
   # two objects merge key by key, and the matcher list merges entry by entry
   if isinstance(authored, dict) and isinstance(shipped, dict):
     return merge_objects(authored, shipped, path, report)
@@ -220,7 +233,10 @@ def merge_objects(authored: dict, shipped: dict, path: str, report: MergeRecord)
   # id, never by position: an authored matcher keeps its place and merges with the shipped matcher of the same id, and
   # shipped matchers the authored map lacks are appended after it. Where both sides carry the same key with different
   # values, that is a conflict, and any other list counts as one value, conflicting whole. Equal values never
-  # conflict. The operator answers each conflict per key path, keeping the authored value or taking the shipped one.
+  # conflict. The one exception is the top-level list naming which areas of the vault are open to painting: it belongs
+  # to the operator, so when the authored map carries it, it stays exactly as authored, never counts as a conflict and
+  # takes no keep-or-take answer; when the authored map lacks it, the template's list is added like any other missing
+  # key. The operator answers each conflict per key path, keeping the authored value or taking the shipped one.
   # An unanswered conflict leaves the authored value in place, and nothing is written until every conflict is answered.
 
   # every authored key keeps its place; a key both sides carry merges

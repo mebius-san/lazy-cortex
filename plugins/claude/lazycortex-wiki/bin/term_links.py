@@ -47,6 +47,7 @@ KEY_RETARGETED: Final = "retargeted"
 KEY_SKIP_UNMATCHED: Final = "skip_unmatched"
 KEY_SKIP_UNMATCHED_FRAGMENTS: Final = "skip_unmatched_fragments"
 KEY_TEXT: Final = "text"
+KEY_UNSETTLED: Final = "unsettled"
 
 # Keys of one dangling-link record.
 KEY_TARGET: Final = "target"
@@ -97,10 +98,14 @@ _ANCHOR_MARK = "#"
 # A markdown table row, where a link's pipe must be escaped.
 _TABLE_ROW_RE = re.compile(r"^\s*\|")
 
-# The old `## Terms` section, the heading that ends it, and one of its term lines.
+# The old `## Terms` section, the heading that ends it, and its term lines: after an optional list marker (`-`, `*`,
+# `+`, or a number with `.` or `)`), a bold word before a dash, or a plain word before a dash with spaces around
+# it; a word followed by a colon names no term line
 _LEGACY_HEADING_RE = re.compile(r"^##\s+Terms\s*$", re.IGNORECASE)
 _SECTION_END_RE = re.compile(r"^#{1,2}\s")
-_LEGACY_LINE_RE = re.compile(r"^(?:[-*]\s+)?\*\*(?P<word>.+?)\*\*\s*[\u2014\u2013-]\s*.*$")
+_LEGACY_MARKER = r"^(?:(?:[-*+]|\d+[.)])\s+)?"
+_LEGACY_BOLD_LINE_RE = re.compile(_LEGACY_MARKER + r"\*\*(?P<word>.+?)\*\*\s*[\u2014\u2013-]\s*.*$")
+_LEGACY_PLAIN_LINE_RE = re.compile(_LEGACY_MARKER + r"(?P<word>[^\s*|:\[\]][^*|:\[\]]*?)\s+[\u2014\u2013-]\s.*$")
 _GROUP_WORD = "word"
 
 # A pipe that no backslash escapes.
@@ -133,6 +138,8 @@ class _Git:
   # Flags printing a commit's changed paths with their status, NUL-separated, no rename pairing and no header
   NO_RENAMES    = "--no-renames"
   NAME_STATUS   = "--name-status"
+  # Flag printing changed paths relative to the directory git runs in, a nested project's root included
+  RELATIVE      = "--relative"
   NUL_FIELDS    = "-z"
   NUL           = "\0"
   NO_HEADER     = "--format="
@@ -333,10 +340,12 @@ def render_document(repo: Path,
     data: The document's bytes as the caller read them, rendered as given; read from disk when absent.
 
   Returns:
-    `{status, file, linked, retargeted, skip_unmatched, skip_unmatched_fragments}` on `applied` / `noop`, with the
-    document's new text under `text` on `applied` only, or `{status, file, reason}` on `refused`. `skip_unmatched`
-    lists the named words kept off the document because a fragment of theirs matched no place holding an occurrence
-    to link; `skip_unmatched_fragments` holds, by each such named word, those fragments in the order sent.
+    `{status, file, linked, retargeted, skip_unmatched, skip_unmatched_fragments, unsettled}` on `applied` / `noop`,
+    with the document's new text under `text` on `applied` only, or `{status, file, reason}` on `refused`.
+    `skip_unmatched` lists the named words kept off the document because a fragment of theirs matched no place
+    holding an occurrence to link; `skip_unmatched_fragments` holds, by each such named word, those fragments in the
+    order sent; `unsettled` holds the term lines of the old terms section left standing, as written, in document
+    order.
 
   Raises:
     UnicodeDecodeError: If the document is not valid UTF-8.
@@ -389,6 +398,7 @@ def render_document(repo: Path,
     KEY_LINKED: sorted(editor.linked), KEY_RETARGETED: sorted(editor.retargeted),
     KEY_SKIP_UNMATCHED: sorted(editor.skip_unmatched),
     KEY_SKIP_UNMATCHED_FRAGMENTS: dict(editor.skip_unmatched),
+    KEY_UNSETTLED: list(editor.unsettled),
   }
   if result[KEY_STATUS] == STATUS_APPLIED:
     result[KEY_TEXT] = head + edited
@@ -424,9 +434,8 @@ def find_all_legacy_terms(text: str) -> list[str]:
   """
   _, body = _terms.split_frontmatter(text)
   return [
-    match.group(_GROUP_WORD)
-    for line in _map_body(body) if line.legacy
-    for match in [ _LEGACY_LINE_RE.match(line.text) ] if match is not None
+    word for line in _map_body(body) if line.legacy
+    for word in [ _find_legacy_word(line) ] if word is not None
   ]
 
 
@@ -900,6 +909,28 @@ def _is_in_code(text: str, position: int) -> bool:
   return any(match.start() <= position < match.end() for match in _CODE_SPAN_RE.finditer(text))
 
 
+def _find_legacy_word(line: _Line) -> str | None:
+  """
+  Return the word a line of the old terms section names when the line is a term line.
+
+  A leading list marker is never part of the word, and a line holding nothing but an HTML comment is no term line.
+
+  Args:
+    line: The line of the old terms section.
+
+  Returns:
+    The word, bold marks and list marker removed; `None` when the line is no term line.
+  """
+  # guard: a line holding nothing but an HTML comment is an author's note, never a term line
+  if line.comment_only:
+    return None
+
+  # one reading for both shapes of a term line; the plain shape admits no `*` in its word, so the two never match
+  # the same line and their order is free
+  match = _LEGACY_BOLD_LINE_RE.match(line.text) or _LEGACY_PLAIN_LINE_RE.match(line.text)
+  return None if match is None else match.group(_GROUP_WORD)
+
+
 # ----------------------------------------------------------------------------------------
 class _DocumentEditor:
   """
@@ -910,6 +941,7 @@ class _DocumentEditor:
     retargeted: The link targets, as the plan names them, that were moved onto another term.
     skip_unmatched: For each named word kept off the whole document because a fragment of theirs matched no place
       holding an occurrence to link, the fragments that matched no such place, in the order sent.
+    unsettled: The term lines of the old terms section left standing, as written, in document order.
   """
 
   def __init__(self, *, plan: LinkPlan, path: str) -> None:
@@ -960,6 +992,7 @@ class _DocumentEditor:
     self.linked: set[str] = set()
     self.retargeted: set[str] = set()
     self.skip_unmatched: dict[str, list[str]] = {}
+    self.unsettled: list[str] = []
 
   def edit(self, body: str) -> str:
     """
@@ -1272,6 +1305,9 @@ class _DocumentEditor:
     """
     Remove the settled lines of the old terms section, or the whole section when the plan drops it.
 
+    Notes:
+      - Sets `unsettled` to the term lines left standing, empty when the plan drops the section.
+
     Args:
       body: Document body.
 
@@ -1282,15 +1318,20 @@ class _DocumentEditor:
     # Domain(wiki.terms):
     # # The old terms section
     # Documents written before the dictionary directory carry a `## Terms` section of their own. A line of that
-    # section is removed once the dictionary holds its term, once the term was rejected, or once the curator linked
-    # that word in the document: the dictionary now answers for it. A word named with places kept plain settles its
-    # line, by being linked, only once at least one occurrence was linked; a word kept off the document, or one whose
-    # every occurrence lay in a kept place, has its line settled by the dictionary or a rejection alone. A section
-    # left empty goes with its heading and its comment, and one blank line stays between its neighbours, also when
-    # the section follows the frontmatter. A section that keeps some lines closes the gaps the removed lines leave:
-    # no blank line is doubled, and none stays at the section's end beyond the one that separates it from what
-    # follows, the document ending in one line break. A line that none of these settles stays untouched until the
-    # curator decides it.
+    # section is classified by its shape alone. A term line reads `word — definition`: after an optional list marker
+    # (a hyphen, an asterisk, a plus, or a number followed by a full stop or a closing parenthesis, then whitespace;
+    # the marker is never part of the word) the word is bold or plain, and a dash (em dash, en dash or hyphen) joins
+    # it to its definition, with whitespace on both sides when the word is plain. The section holds term lines by
+    # definition, so any line of that shape counts, a line of prose with a spaced dash included. A line with a colon
+    # before its definition, a table row and a line holding nothing but an HTML comment are not term lines: they
+    # are neither removed nor reported. A term line is removed once the dictionary holds its word, once the word was rejected, once the batch
+    # renames a term away from that word or joins it into another, or once the curator names that word for a link in
+    # the document, whether or not any occurrence got a link: the dictionary now answers for it. A section left
+    # empty goes with its heading and its comment, and one blank line stays between its neighbours, also when the
+    # section follows the frontmatter. A section that keeps some lines closes the gaps the removed lines leave: no
+    # blank line is doubled, and none stays at the section's end beyond the one that separates it from what follows,
+    # the document ending in one line break. A term line that none of these settles stays untouched, and the pass
+    # reports it back to the curator as unsettled: the curator decides it.
     # A pass may take the section whole, whatever its lines say: a document that no curator reads as a term source
     # loses its old terms section, heading, comment and every line under it up to the next heading of level one or
     # two. It goes whatever terms its lines name, known to the dictionary or not, and also when the section holds
@@ -1298,6 +1339,13 @@ class _DocumentEditor:
 
     lines = body.split(_NL)
     mapped = _map_body(body)
+
+    # the term lines no settlement reaches stay, and the caller learns of each; a section the plan drops keeps none
+    self.unsettled = [
+      line.text for line in mapped
+      if not self._plan.drop_legacy and line.legacy and _find_legacy_word(line) is not None
+      and not self._is_settled(line)
+    ]
 
     # sections are cleaned from the last one up, so earlier indices stay valid
     for heading in reversed([ index for index, line in enumerate(mapped) if line.legacy_heading ]):
@@ -1311,7 +1359,7 @@ class _DocumentEditor:
         continue
 
       # otherwise only the settled lines go
-      kept = [ index for index in range(heading + 1, end) if not self._is_settled(mapped[index].text) ]
+      kept = [ index for index in range(heading + 1, end) if not self._is_settled(mapped[index]) ]
 
       # guard: a section none of whose lines is settled stays as it is
       if len(kept) == end - heading - 1:
@@ -1324,31 +1372,28 @@ class _DocumentEditor:
       lines = _drop_section(lines, heading, end)
     return _NL.join(lines)
 
-  def _is_settled(self, text: str) -> bool:
+  def _is_settled(self, line: _Line) -> bool:
     """
     Tell whether a line of the old terms section names a word the dictionary or the job settles.
 
     Args:
-      text: The line.
+      line: The line of the old terms section.
 
     Returns:
-      `True` for a term line whose word is a term, a rejected word or a word the job links. A word named with places
-      kept plain counts as linked only once an occurrence of it was linked.
+      `True` for a term line whose word the dictionary holds, whose word the job rejected, whose term a batch rename
+      or join took away, or whose word the job names for a link in the document, whether or not an occurrence was
+      linked. `False` for any other line, including one that is no term line.
     """
     # guard: only a term line can be settled
-    if (match := _LEGACY_LINE_RE.match(text)) is None:
+    if (word := _find_legacy_word(line)) is None:
       return False
 
-    # the word settles when the dictionary holds it, the job rejected it, or the job links it; a word named with
-    # places kept plain settles only once it linked an occurrence
-    word = match.group(_GROUP_WORD).strip()
-    stem = _term_dictionary.term_file_stem(word).casefold()
-    unsettled = {
-      named.strip().casefold() for named in self._words if self._skips.get(named) and named not in self.linked
-    }
+    # the word settles when the dictionary holds it, the job rejected it, a batch's rename took a term away from it,
+    # or the job names it for a link, whether or not an occurrence was linked
+    stem = _term_dictionary.term_file_stem(word.strip()).casefold()
     return (
-      stem in self._known or stem in self._rejected
-      or ( word.casefold() in self._words_cf and word.casefold() not in unsettled )
+      stem in self._known or stem in self._rejected or stem in self._retargets
+      or word.strip().casefold() in self._words_cf
     )
 
   def _link_word(self,
@@ -1762,7 +1807,8 @@ class _RenameHints:
     added: list[str] = []
     modified: list[str] = []
     listing = self._run_git(
-      _Git.SHOW, _Git.MERGES, _Git.FIRST_PARENT, _Git.NO_RENAMES, _Git.NAME_STATUS, _Git.NUL_FIELDS, _Git.NO_HEADER,
+      _Git.SHOW, _Git.MERGES, _Git.FIRST_PARENT, _Git.NO_RENAMES, _Git.RELATIVE, _Git.NAME_STATUS, _Git.NUL_FIELDS,
+      _Git.NO_HEADER,
       sha, _Git.PATHS, f"{_Git.LITERAL}{self._dir}",
     )
     fields = [ field for field in listing.split(_Git.NUL) if field ]

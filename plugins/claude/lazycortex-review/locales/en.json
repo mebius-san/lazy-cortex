@@ -6,8 +6,16 @@
   "autorun.stop-reason.question": "an expert asked a question",
   "banner.action-needed": "> [!caution] Action needed #review/action-needed\n> Answer the open question or the decision candidate below by ticking an option, then commit.\n",
   "banner.finalizing": "> [!hint] Waiting: finalize #review/finalizing\n",
-  "banner.in-process": "> [!hint] {title} #review/in-process\n{autorun}> To intervene, or to wake a document that looks stuck, write the instruction in a `[!todo] #review/command` callout.\n",
+  "banner.in-process": "> [!hint] {title} #review/in-process\n{waiting}{autorun}> To intervene, or to wake a document that looks stuck, write the instruction in a `[!todo] #review/command` callout.\n",
+  "banner.ready-report": "> [!success] Ready to decide #review/ready\n{autorun}> {same_commit}\n> {both_ticked}\n> - [{tick}] accept as is, without fixes\n> - [ ] fix by the remarks\n{verdict}",
   "banner.ready-single": "> [!success] Ready to approve #review/ready\n{autorun}> Tick the box below to approve the whole document.\n> To send it back for another writer round, edit the text and commit, or write the instruction in a `[!todo] #review/command` callout.\n> - [{tick}] approve the whole document\n",
   "banner.ready-triple": "> [!success] Ready to approve #review/ready\n{autorun}> Tick ONE box: approve and send to the validators, approve and let the loop run to the end, or approve and finalize without another validation round.\n> To send it back for another writer round, edit the text and commit, or write the instruction in a `[!todo] #review/command` callout.\n> - [{tick}] approve this and previous rounds\n> - [ ] approve and run to the end without stops\n> - [ ] approve without further validation\n",
-  "history.explainer": "A log of what changed in this document during review. Kept automatically — do not edit by hand."
+  "banner.report.both-ticked": "Both boxes were ticked, so neither fired. Tick one.",
+  "banner.report.fix-replan": "Starts a new plan and a new build.",
+  "banner.report.fix-rework": "Starts a rework of this build.",
+  "banner.report.same-commit": "A box ticked together with a new text edit does not fire: the implementer answers the edit first.",
+  "banner.report.waiting": "Waiting for the implementer's answer",
+  "candidate.both-ticked": "Both boxes were ticked, so neither fired. Tick one.",
+  "history.explainer": "A log of what changed in this document during review. Kept automatically — do not edit by hand.",
+  "question.multi-ticked": "Several options were ticked, so none was applied. Tick one."
 }

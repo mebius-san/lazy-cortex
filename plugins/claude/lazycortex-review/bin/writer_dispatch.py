@@ -26,44 +26,64 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import body as _body  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import collect_ops as _collect_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 import coordinator_dispatch as _coordinator_dispatch  # noqa: E402
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import decisions_context as _decisions_context  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import doc_class as _doc_class  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import edit_markup as _edit_markup  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import finalize as _finalize  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import frontmatter as _fm  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import git_ops as _git_ops  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import guidelines_context as _guidelines_context  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import job_markers as _job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import parser as _parser  # noqa: E402  # pylint: disable=wrong-import-position,deprecated-module,import-error
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import payload as _payload  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import structure_repair as _structure_repair  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from errors import (  # noqa: E402
     DispatchQueueError, DispatchRefusalError, JobConsumeError, ParseError, QueueAnswerError, SettingsReadError,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     Bucket, JobFile, JobKey, JobMarker, JobStatus, Kind, Outcome, Phase, ReviewKey, ReviewProtocol,
 )
@@ -73,6 +93,9 @@ from keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-po
 _SOURCE_INLINE = "source_inline"
 _CONTEXT_INLINE = "context_inline"
 
+# The bundle field that sets the commit right of one job, overriding the expert's default.
+_CAN_COMMIT_IN_REPO = "can_commit_in_repo"
+
 # The job-directory buckets a payload path starts with.
 _SOURCE_DIR = "source/"
 _CONTEXT_DIR = "context/"
@@ -81,6 +104,8 @@ _RESULT_DIR = "result/"
 # The request field naming the decisions registries by repo-relative path; the same name the spec plugin's
 # dispatches use, so one expert protocol reads both.
 _DECISIONS_KEY = "decisions"
+# The payload key naming the plugin canon guideline files the expert reads in place, by absolute path.
+_GUIDELINES_KEY = "guidelines"
 
 # The context file a repair job finds its structural defect report under.
 _DEFECTS_FILE = "structure-defects.json"
@@ -283,7 +308,7 @@ def _resolve_class(review: dict, repo: Path, file_path: Path, *, is_repair: bool
 
   Args:
     review: The merged `review` settings section.
-    repo: The repository root.
+    repo: The directory whose settings hold `review`, which the class globs are relative to.
     file_path: The review document.
     is_repair: Whether the dispatch is a structure repair, which goes on without a class.
 
@@ -509,7 +534,8 @@ def _resolve_frontmatter_value(repo: Path, content_root: Path | None, value: str
   return None
 
 
-def _collect_frontmatter_context(repo: Path, text: str, class_cfg: dict | None) -> tuple[list[str], list[str]]:
+def _collect_frontmatter_context(repo: Path, text: str, *, settings_root: Path,
+                                 class_cfg: dict | None) -> tuple[list[str], list[str]]:
   """
   Collect the context files that the document's frontmatter names under the keys its review class declares.
 
@@ -520,6 +546,8 @@ def _collect_frontmatter_context(repo: Path, text: str, class_cfg: dict | None) 
   Args:
     repo: The repository root.
     text: The full document text.
+    settings_root: The directory whose `.claude/lazy.settings.json` configures the document; the spec content
+      root is read from its settings and lies under it.
     class_cfg: The review class entry, or `None` when no class applies.
 
   Returns:
@@ -559,13 +587,13 @@ def _collect_frontmatter_context(repo: Path, text: str, class_cfg: dict | None) 
   warnings: list[str] = []
   if keys:
     try:
-      spec_cfg = _core_settings.read_merged_sections(repo, _SPEC_SECTION)[_SPEC_SECTION]
+      spec_cfg = _core_settings.read_merged_sections(settings_root, _SPEC_SECTION)[_SPEC_SECTION]
     except SettingsReadError:
       spec_cfg = None
 
     # a refused root leaves the repository root alone too, and is reported, never silently dropped
     try:
-      content_root = _core_settings.spec_content_root(repo, spec_cfg) if spec_cfg is not None else None
+      content_root = _core_settings.spec_content_root(settings_root, spec_cfg) if spec_cfg is not None else None
     except SettingsReadError as error:
       warnings.append(_FRONTMATTER_ROOT_REFUSED_TEMPLATE.format(error = error))
 
@@ -783,6 +811,15 @@ def _build_bundle(  # pylint: disable=too-many-locals
   A main-mode dispatch also carries the context its review class declares for the main writer. Context that cannot
   be found is reported as a warning, while a failing context source refuses the dispatch.
 
+  A writer dispatch also carries the guidelines its role reads: repository-relative guideline paths join the
+  context, while the absolute paths of the plugin canon are named in the request's `guidelines` field. A repair
+  carries neither.
+
+  A main-mode dispatch on a report class also tells the writer that its document is a report. Every dispatch on a
+  report class (main writer, section writer or repair) withholds the right to commit in the repository; a job on a
+  document of any other class, and a repair whose frontmatter is too broken to name a class, keeps the expert's
+  own commit right.
+
   Args:
     repo: The repository root.
     file_path: The review document.
@@ -794,7 +831,8 @@ def _build_bundle(  # pylint: disable=too-many-locals
     is_repair: Whether the job repairs the document's structure instead of writing as an expert.
 
   Returns:
-    The bundle and the warnings to report with the dispatch: the guideline warnings, one per frontmatter value that
+    The bundle, whose request names the plugin canon's absolute guideline paths in its `guidelines` field, and the
+    warnings to report with the dispatch: the guideline warnings, one per frontmatter value that
     names no file, one per context a refused spec content root narrowed, the stderr lines of the class verbs that
     answered, and a repair's unavailable defect report.
 
@@ -846,35 +884,42 @@ def _build_bundle(  # pylint: disable=too-many-locals
   # the document's review round, which a writer turn needs readable and a repair may lack
   round_ = _read_round(meta, is_repair = is_repair)
 
-  # the merged `review` section names the classes and the protocol defaults
+  # the merged `review` section of the document's nearest settings names the classes and the protocol defaults
+  settings_root = _core_settings.query_settings_root_for(file_path)
   try:
-    review = _core_settings.read_merged_sections(repo, JobKey.REVIEW)[JobKey.REVIEW]
+    review = _core_settings.read_merged_sections(settings_root, JobKey.REVIEW)[JobKey.REVIEW]
   except SettingsReadError as error:
     raise DispatchRefusalError(str(error)) from error
 
   # the review class the document falls under, none for a repair
-  class_cfg = _resolve_class(review, repo, file_path, is_repair = is_repair)
+  class_cfg = _resolve_class(review, settings_root, file_path, is_repair = is_repair)
 
   # the writer's structural mode and its config entry; a repair has neither class nor entry to consult
   mode, entry = ( Outcome.REPAIR, {} ) if is_repair else _resolve_writer(class_cfg or {}, meta, expert, section_id)
 
-  # file-backed context first: the product's guidelines, then what the coordinator named
+  # the writer's guidelines: the enabled plugins' canon for its role, then the product's declared guidelines
   guidelines = (
       { _guidelines_context.PATHS_KEY: [], _guidelines_context.WARNINGS_KEY: [] } if is_repair
       else _guidelines_context.collect(file_path, expert)
   )
   warnings = list(guidelines[_guidelines_context.WARNINGS_KEY])
 
+  # the guideline paths split by where the expert reads them: an absolute path into a plugin tree is read in place
+  # from the payload's `guidelines`, a repo path is copied into `context` ahead of what the coordinator named
+  canon_paths = [ path for path in guidelines[_guidelines_context.PATHS_KEY] if Path(path).is_absolute() ]
+  repo_guidelines = [ path for path in guidelines[_guidelines_context.PATHS_KEY] if not Path(path).is_absolute() ]
+
   # Decision: only the main writer reads the class's frontmatter keys — section writers judge the document, and a
   # repair mends it; neither works from the request the document came from
 
   # the files the class's frontmatter keys name, for the main writer alone
   frontmatter_paths, frontmatter_warnings = (
-      _collect_frontmatter_context(repo, text, class_cfg) if mode == Phase.MAIN else ( [], [] )
+      _collect_frontmatter_context(repo, text, settings_root = settings_root, class_cfg = class_cfg)
+      if mode == Phase.MAIN else ( [], [] )
   )
   warnings.extend(frontmatter_warnings)
   path_context = list(dict.fromkeys([
-      *guidelines[_guidelines_context.PATHS_KEY], *( _resolve_context_path(repo, raw) for raw in context_paths ),
+      *repo_guidelines, *( _resolve_context_path(repo, raw) for raw in context_paths ),
       *frontmatter_paths,
   ]))
 
@@ -923,6 +968,28 @@ def _build_bundle(  # pylint: disable=too-many-locals
     del request[JobKey.CONTEXT]
 
   # Domain(review.dispatch):
+  # # A report's writer is told it writes on a report
+  # A report is reviewed as a discussion, and its main writer owes a verdict on the whole report with every
+  # answer. The writer cannot tell a report from the document it reads: while a round runs, the report shows
+  # the same in-process banner as any other document. So the main writer's request of a report says so in a
+  # field of its own, and no other request carries that field. No job on a report changes anything in the
+  # repository beyond its answer: the main writer, every validator and terminal writer, and a structure repair
+  # are all dispatched without the right to commit, whatever the expert may do elsewhere. A job on any other
+  # document keeps the expert's own commit right, and so does a repair whose frontmatter is too broken to tell
+  # which class, and so whether a report, the document belongs to.
+
+  # only the main writer of a report class is told the document is a report; a repair whose frontmatter names no
+  # class has no report class to read
+  report_class = (class_cfg or {}).get(JobKey.REPORT) is True
+  is_report = mode == Phase.MAIN and report_class
+  if is_report:
+    request[JobKey.REPORT] = True
+
+  # the plugin canon is named by absolute path, in resolver order; a dispatch without one carries no field
+  if canon_paths:
+    request[_GUIDELINES_KEY] = canon_paths
+
+  # Domain(review.dispatch):
   # # Decisions registries are named, never copied
   # A writer reads what was already decided for the asset its document belongs to and for the
   # product that owns it. Both registries are living files that other work keeps adding to, and
@@ -959,6 +1026,10 @@ def _build_bundle(  # pylint: disable=too-many-locals
       JobKey.PROTOCOLS: _build_protocols(review, class_cfg),
       JobKey.RESULT: request[JobKey.RESULT],
   }
+
+  # every job on a report runs without the right to commit; a job on any other document keeps the expert's own
+  if report_class:
+    bundle[_CAN_COMMIT_IN_REPO] = False
 
   # Domain(review.dispatch):
   # # The source view follows the writer's job
@@ -1299,7 +1370,8 @@ def main(argv: list[str]) -> int:
   the marker was written, and every other failure, print `{"error": ...}` alone.
 
   Args:
-    argv: Command-line arguments: the document, the expert, then optional section, context, repair and repo flags.
+    argv: Command-line arguments: the document, the expert, then optional section, context, repair and repo flags;
+      `--repo` names a directory inside the repository (default: `$LAZY_REPO_ROOT`, then the working directory).
 
   Returns:
     Exit code: 0 when the job was queued, 1 when the queue call failed, core's answer to a queue call it reported as
@@ -1307,20 +1379,22 @@ def main(argv: list[str]) -> int:
     which), 2 when the request was refused, including a failure while
     preparing the dispatch and a late refusal that came after the job marker was written.
   """
-  # the verb's arguments: the document, the expert, and what only the coordinator knows
+  # the verb's arguments: the document and the expert
   parser = argparse.ArgumentParser(prog = _PROG)
   parser.add_argument(_ARG_FILE)
   parser.add_argument(_ARG_EXPERT)
+
+  # the section, context, repair and repo flags only the coordinator knows
   parser.add_argument(_ARG_SECTION_ID, default = None)
   parser.add_argument(_ARG_SECTION, default = None)
   parser.add_argument(_ARG_POSITION, default = None, choices = _POSITIONS)
   parser.add_argument(_ARG_CONTEXT, action = _APPEND, default = None)
   parser.add_argument(_ARG_REPAIR, action = _STORE_TRUE)
-  parser.add_argument(_ARG_REPO, default = ".")
+  parser.add_argument(_ARG_REPO, default = None)
   args = parser.parse_args(argv)
 
   # a relative file names a document inside the repository the dispatch acts in
-  repo = Path(args.repo).resolve()
+  repo = _review_locator.query_repo_root(args.repo)
   try:
     report = dispatch_writer(
         repo, (repo / args.file).resolve(), args.expert,

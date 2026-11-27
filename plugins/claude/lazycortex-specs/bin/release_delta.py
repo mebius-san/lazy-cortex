@@ -8,8 +8,9 @@ release start waits on: whether the owner's `architecture.md` is approved later 
 carries, and which notes carry an open coherence conflict. A product with no architecture document, or a run with
 `--no-architecture`, holds no design back.
 
-The `release-type-guidelines` verb answers, for one release note, which guideline paths the type of each included
-asset declares, so a caller reads the guidelines that apply to the release's assets without resolving types itself.
+The `release-type-guidelines` verb answers, for one release note, which guideline files the type of each included
+asset declares, each a repo-relative path or an absolute path into a plugin tree, so a caller reads the guidelines
+that apply to the release's assets without resolving types itself.
 """
 from __future__ import annotations
 
@@ -30,19 +31,29 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import asset_types  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import flip_gate  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import gate_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-import scaffold_asset  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_frontmatter  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-import-position
     RESEARCH_ASSET_TYPE, AssetTypeKey, ConflictKey, Gate, LevelDoc, ReleaseKey, SpecCascadeKey, SpecKey,
     SpecMomentKey, SpecValue, Stage, StageKey,
@@ -50,7 +61,6 @@ from spec_keys import (  # noqa: E402  # pylint: disable=import-error,wrong-impo
 
 
 _ENCODING = "utf-8"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _MD_SUFFIX = ".md"
 _SPEC_PATH_KEY = "spec_path"
 # The one shipped type whose delta entry waits for its cascade into the targets' designs
@@ -83,7 +93,6 @@ _GUIDELINES = "guidelines"
 _WARNINGS = "warnings"
 _ERROR = "error"
 _WARN_MEMBER_NOT_FOUND = "included asset not found: "
-_WARN_GUIDELINE_NOT_FOUND = "guideline not found: "
 
 # The wikilink delimiters a `spec_includes` member carries around its target, and what may follow the target inside
 WIKILINK_OPEN = "[["
@@ -529,15 +538,17 @@ def _find_all_include_targets(release_text: str) -> list[str]:
 
 def read_type_guidelines(repo: Path, release_note: Path) -> dict:
   """
-  List the guideline paths each type of a release's included assets declares.
+  List the guideline files each type of a release's included assets declares.
 
   Each member is answered from the type declarations of the product that owns it, so a nested product's own
   declarations apply to its assets. The declarations are read as the expert runtime dispatches from them, the local
-  overlay merged on.
+  overlay merged on. A declared entry is a repo-relative path or a `<plugin>:<name>` reference key.
 
   Guarantees:
-    - A declared guideline path with no file, and an included member that resolves to no note, are never dropped
-      silently: each is named in `warnings`, once.
+    - A declared guideline entry that does not resolve to a file, and an included member that resolves to no note,
+      are never dropped silently: each is named in `warnings`, once.
+    - A reference key comes back as an absolute path into the plugin tree, a path stays repo-relative as written,
+      and the enabled plugins' canon never joins a type's list.
     - Every member that is not cancelled is listed, even with an empty `guidelines` list, in the order the release
       lists its members.
     - `base_type` is the alias base the type's alias names, or the type itself when it declares none; a broken alias
@@ -550,8 +561,9 @@ def read_type_guidelines(repo: Path, release_note: Path) -> dict:
   Returns:
     `{"release", "assets", "warnings"}` — one `{"asset", "type", "base_type", "guidelines"}` entry per included
     asset that is not cancelled, in the order the release lists them. `base_type` follows the type's alias, and is
-    the type itself when it is no alias. A declared guideline path with no file is left out of `guidelines`. The
-    warnings name each member that resolves to no note and each declared guideline path with no file.
+    the type itself when it is no alias. `guidelines` holds each resolved file, repo-relative or an absolute path
+    into a plugin tree; a declared entry that does not resolve to a file is left out. The warnings name each member
+    that resolves to no note and each declared entry that does not resolve.
 
   Raises:
     ValueError: If a member's type names a broken alias base, or if the merged settings cannot be read; the latter
@@ -564,8 +576,12 @@ def read_type_guidelines(repo: Path, release_note: Path) -> dict:
   # is `content`, so a member left out or reordered would hide that stop.
 
   # Contract:
-  # A declared guideline path with no file, and an included member that resolves to no note, are never dropped
-  # silently: each is named in `warnings`, once.
+  # A declared guideline entry that does not resolve to a file, and an included member that resolves to no note, are
+  # never dropped silently: each is named in `warnings`, once.
+
+  # Contract:
+  # A reference key comes back as an absolute path into the plugin tree, a path stays repo-relative as written, and
+  # the enabled plugins' canon never joins a type's list.
 
   # Contract:
   # `base_type` is the alias base the type's alias names, or the type itself when it declares none. A broken
@@ -584,6 +600,9 @@ def read_type_guidelines(repo: Path, release_note: Path) -> dict:
   # the per-member answers and the gaps reported beside them, filled member by member below
   assets: list[dict] = []
   warnings: list[str] = []
+  # opt: one call's members share `resolved`, which lives only for this call, so an answer never outlives the files
+  # and plugin trees it was read from; members whose types declare the same entries cost one core call
+  resolved: dict[tuple[str, ...], tuple[list[str], list[str]]] = {}
 
   # the registry and the catalog-wide guidelines as the runtime sees them, the local overlay merged on, read once
   settings = resolve_product.read_runtime_settings(repo)
@@ -609,15 +628,15 @@ def read_type_guidelines(repo: Path, release_note: Path) -> dict:
                                                       catalog_guidelines = catalog)[1] or {}
     asset_type = asset_types.type_of(note)
 
-    # a declared path with no file is left out and reported, never silently dropped
-    paths: list[str] = []
-    for rel in asset_types.guidelines(asset_type, record):
-      if (repo / rel).is_file():
-        paths.append(rel)
-      else:
-        warnings.append(f"{_WARN_GUIDELINE_NOT_FOUND}{rel}")
+    # the type's own entries resolved by core without any plugin's canon, which belongs to a role and never to a
+    # type; an entry with no file is left out and reported, never silently dropped
+    entries = tuple(asset_types.guidelines(asset_type, record))
+    if entries and entries not in resolved:
+      resolved[entries] = gate_dispatch.resolve_guideline_entries(repo, list(entries))
+    paths, missing = resolved.get(entries, ( [], [] ))
+    warnings += missing
     assets.append({ _ASSET: note_rel, _TYPE: asset_type,
-                    _BASE_TYPE: asset_types.alias_base(asset_type, record) or asset_type, _GUIDELINES: paths })
+                    _BASE_TYPE: asset_types.alias_base(asset_type, record) or asset_type, _GUIDELINES: list(paths) })
   return { _RELEASE: release_note.relative_to(repo).as_posix(), _ASSETS: assets,
            _WARNINGS: list(dict.fromkeys(warnings)) }
 
@@ -626,8 +645,9 @@ def main(argv: list[str]) -> int:
   """
   Print the delta of a product's next release.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
-  directory.
+  The run works in the nearest directory, within its checkout, that holds `.claude/lazy.settings.json`, searched
+  upward from the directory the `LAZY_REPO_ROOT` environment variable names, else the process working directory;
+  the checkout's root when none holds it.
 
   Guarantees:
     - The JSON summary always carries `architecture`, with `doc`, `approved_at` and `behind`, and `conflicted`; a
@@ -674,7 +694,7 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + standard argparse action
   parser.add_argument("--no-architecture", action = "store_true")
   args = parser.parse_args(argv)
-  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  repo = spec_locator.query_settings_root()
 
   # the registry every lookup of this release reads, as the runtime dispatches from it; unreadable settings are an
   # error, never a product without an owner
@@ -715,10 +735,11 @@ def main(argv: list[str]) -> int:
 
 def main_type_guidelines(argv: list[str]) -> int:
   """
-  Print the guideline paths each type of a release's included assets declares.
+  Print the guideline files each type of a release's included assets declares.
 
-  The repository root comes from the `LAZY_REPO_ROOT` environment variable, falling back to the process working
-  directory.
+  The run works in the nearest directory, within its checkout, that holds `.claude/lazy.settings.json`, searched
+  upward from the directory the `LAZY_REPO_ROOT` environment variable names, else the process working directory;
+  the checkout's root when none holds it.
 
   Guarantees:
     - Stdout carries the answer as one JSON line without its warnings; each warning is one line on stderr.
@@ -747,7 +768,7 @@ def main_type_guidelines(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- positional argument name
   parser.add_argument("release_note")
   args = parser.parse_args(argv)
-  repo = scaffold_asset.repo_root(Path(os.environ.get(_ENV_REPO_ROOT) or Path.cwd()))
+  repo = spec_locator.query_settings_root()
   note = repo / args.release_note
 
   # guard: a release note that is no file has no members to answer for

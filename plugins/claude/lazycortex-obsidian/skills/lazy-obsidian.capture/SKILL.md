@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.capture
 description: "Run when the operator changed this vault's Obsidian configuration and wants it recorded — new plugin installed, settings tweaked, snippet added, theme or palette changed — or asks to snapshot / capture the vault config. The sibling `/lazy-obsidian.deploy` rebuilds `.obsidian/` from what this records."
-allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(git status*), Bash(git diff*), Bash(git add -N *), Bash(git commit *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
+allowed-tools: Read, Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(git rev-parse*), Bash(ls *), Bash(git status*), Bash(git diff*), Bash(git add -N *), Bash(git commit *), Bash(mkdir -p *), Bash(date *), Write, AskUserQuestion, Agent
 argument-hint: "[<repo-root>]"
 ---
 # Capture the vault config into its manifest
@@ -30,7 +30,7 @@ Optional positional argument: the vault repo root. Omitted means the current rep
 ## Step 1 — Locate the vault
 
 - `repo_root = git rev-parse --show-toplevel` (or the passed argument).
-- `test -d <repo_root>/.obsidian` — absent → **FAIL**: "No `.obsidian/` under `<repo_root>` — nothing to capture."
+- `Bash(ls -d <repo_root>/.obsidian)` — present when the command lists it; absent when it fails with "No such file or directory" → **FAIL**: "No `.obsidian/` under `<repo_root>` — nothing to capture."
 
 Outcome: `vault: <repo_root>`.
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
-last_regen: 2026-11-12
+last_regen: 2026-11-27
 diagram_spec:
   - anchor: "Install and enable metrics"
     request: "Sequence diagram: operator → lazy-core.install installs the runtime layer (.experts/, expert registry, routines), auto-registers any expert candidates found and seeds daemon.enabled=false silently, asking nothing about the daemon; operator then runs lazy-core.daemon-setup, which asks whether to enable the daemon (yes, writes daemon.enabled=true), asks whether this checkout drives it (yes, maps this host to this checkout in run_here), checks the inbox ownership guard, installs the launchd or systemd supervisor, then asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, and regenerates the scrape-targets file."
@@ -18,8 +18,8 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-observe.install
   - lazy-observe.audit
-source_sha: 902130049897392c176eceb5a8d7a8348db7a9bf
-surface_sha: 1eb36af7be11757d09b1c884370e2aeb8d6631955b38c35aa82a6fcff7f1e630
+source_sha: ebfb485e33c56f106f3f0952e6753075e46419f6
+surface_sha: 3731f333882e9a20d313a1c7c31701cae8c9c31e26eddf1289479d2193b6b56f
 ---
 # Ship your first runtime metric to a self-hosted Prometheus stack
 

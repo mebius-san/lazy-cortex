@@ -26,9 +26,14 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import coordinator_dispatch  # noqa: E402  # pylint: disable=import-error,wrong-import-position
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_job_markers  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -154,7 +159,8 @@ def main(argv: list[str]) -> int:
 
   Args:
     argv: Command-line arguments, excluding the program name; `--dry-run` reports without writing, `--repo` names
-      the repository root.
+      a directory inside the repository (default: `$LAZY_REPO_ROOT`, then the working directory); the run works in
+      the root of the checkout that directory sits in.
 
   Returns:
     Exit code: `1` when a sidecar failed, `0` otherwise.
@@ -164,11 +170,12 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--dry-run", action = "store_true")
   # waiver: argparse CLI signature, not a domain key
-  parser.add_argument("--repo", default = ".")
+  parser.add_argument("--repo", default = None)
   args = parser.parse_args(argv)
 
-  # the whole summary goes to stdout; a failed sidecar turns the exit code red
-  summary = sweep(Path(args.repo).resolve(), dry_run = args.dry_run)
+  # the whole summary goes to stdout; a failed sidecar turns the exit code red; the repo is the checkout `--repo`,
+  # else `$LAZY_REPO_ROOT`, else the cwd sits in
+  summary = sweep(spec_locator.query_repo_root(args.repo), dry_run = args.dry_run)
   print(json.dumps(summary))
   return 1 if any(_ERROR_KEY in entry for entry in summary[_SIDECARS_KEY].values()) else 0
 

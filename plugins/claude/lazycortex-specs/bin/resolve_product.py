@@ -41,6 +41,9 @@ if str(_BIN) not in sys.path:
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 # pylint: disable-next=import-error,wrong-import-position
 from spec_paths import (  # noqa: E402
     SettingsError, _vault_root_value, find_settings_root, read_merged_sections, read_settings, spec_content_root,
@@ -95,8 +98,9 @@ _ANSWER_ERROR = "error"
 _IMPLEMENTER_CHAIN_KEY = "implementer_chain"
 _ASSET_TYPES_KEY = "asset_types"
 _GUIDELINES_KEY = "guidelines"
-# The settings sections a release build is ordered from, read as the runtime dispatches from them
-_RUNTIME_SECTIONS = ( _PRODUCTS_SECTION, _EXPERTS_SECTION, _SPEC_SECTION )
+# The settings sections a release build is ordered from, read from the project's own settings; the expert registry
+# is a daemon section and is read from the checkout toplevel's settings instead
+_RUNTIME_SECTIONS = ( _PRODUCTS_SECTION, _SPEC_SECTION )
 
 # Keys a nested product never takes from an ancestor — a code binding, a dependency list and a
 # paint belong to one product; spec_path names the product itself
@@ -595,18 +599,38 @@ def read_runtime_settings(vault: Path) -> dict:
   """
   Read the settings a release build is ordered from, as the runtime dispatches from them.
 
+  Guarantees:
+    - The `experts` section comes from the settings of the checkout's toplevel, the one the daemon reads, never from
+      the vault's own settings.
+    - The `products` and `spec` sections come from the settings root passed as `vault`; the settings of the
+      checkout's toplevel contribute only the `experts` section.
+
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
 
   Returns:
-    The `products`, `experts` and `spec` sections, each with the local overlay merged on.
+    The `products` and `spec` sections of the vault's settings and the `experts` section of the settings of the
+    checkout the vault sits in, each with the local overlay merged on.
 
   Raises:
     ValueError: If the merged settings cannot be read; a `spec_paths.SettingsError` naming the settings file, also
       when no core CLI resolves.
   """
+
+  # Contract:
+  # The `experts` section is taken from the settings of the checkout's toplevel, the one the daemon reads, and
+  # never from the vault's own settings.
+
+  # Contract:
+  # The `products` and `spec` sections are taken from the settings root the caller passes as `vault`; the
+  # checkout's toplevel settings contribute only the `experts` section.
+
   # the expert runtime dispatches from the merged view, so an expert or product declared only in the overlay counts
-  return read_merged_sections(vault, *_RUNTIME_SECTIONS)
+  settings = read_merged_sections(vault, *_RUNTIME_SECTIONS)
+
+  # the expert registry is a daemon section, kept in the settings of the checkout's toplevel the daemon runs at
+  settings.update(read_merged_sections(spec_locator.query_repo_root(vault), _EXPERTS_SECTION))
+  return settings
 
 
 def read_runtime_products(vault: Path) -> dict:
@@ -1310,12 +1334,12 @@ def main(argv: list[str]) -> int:
         # waiver: argparse CLI signature -- option flag + vault-root default
         "--cwd", type = Path, default = None,
         # waiver: one-off human-facing message -- argparse help text
-        help = "vault root holding .claude/lazy.settings.json (default: cwd)",
+        help = "directory inside the vault holding .claude/lazy.settings.json (default: $LAZY_REPO_ROOT, then cwd)",
     )
 
   # the vault root anchors every settings lookup below
   args = parser.parse_args(argv)
-  vault: Path = (args.cwd or Path.cwd()).resolve()
+  vault: Path = spec_locator.query_settings_root(args.cwd)
 
   # the registry-wide verbs answer about the nesting of products rather than one record
   if args.mode == _MODE_OWN_SOURCE_CONFLICTS:

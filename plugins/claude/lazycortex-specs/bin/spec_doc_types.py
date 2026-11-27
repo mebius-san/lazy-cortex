@@ -43,6 +43,9 @@ import resolve_product  # noqa: E402  # pylint: disable=import-error,wrong-impor
 import spec_keys  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
 # sys.path
+import spec_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
 import spec_paths  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 
 
@@ -53,7 +56,6 @@ _VERB_LIST = "list"
 _VERB_BACKFILL = "backfill"
 _VERB_RENAME = "rename"
 _VERB_TEMPLATES = "templates"
-_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 _OUT_DOC_TYPE = "doc_type"
 _OUT_DECLARED = "declared"
 _OUT_TYPES = "types"
@@ -988,19 +990,6 @@ def verify_templates(repo: Path) -> dict:
            _OUT_UNKNOWN: unknown }
 
 
-def _repo_from_args(cwd: str | None) -> Path:
-  """
-  Resolve the repository root the same way every other lazycortex-specs subcommand does.
-
-  Args:
-    cwd: The explicit `--cwd` value, or None.
-
-  Returns:
-    Absolute repository root: the flag, then the daemon-exported env var, then the process cwd.
-  """
-  return Path(cwd or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
-
-
 def main(argv: list[str]) -> int:
   """
   Run the `doc-type` subcommand: read a document's type or a type's declaration, rename a type, or check templates.
@@ -1045,8 +1034,9 @@ def main(argv: list[str]) -> int:
     print(json.dumps({ _OUT_DOC_TYPE: doc_type_of(args.file.resolve()) }))
     return 0
 
-  # the remaining verbs all work against a repository root, resolved the same way
-  repo = _repo_from_args(args.cwd)
+  # the remaining verbs all work against the nearest settings root above `--cwd`, else `$LAZY_REPO_ROOT`, else the
+  # working directory, within its checkout
+  repo = spec_locator.query_settings_root(args.cwd)
   if args.verb == _VERB_BACKFILL:
     print(json.dumps(backfill(repo)))
     return 0

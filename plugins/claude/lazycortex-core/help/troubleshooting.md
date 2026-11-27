@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-11-23
+last_regen: 2026-11-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -42,8 +42,8 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: b785ead983e783438c9627a7cc18079ea8723947
-surface_sha: 69537c992b232f494551211bb83970672ce455d0f264f7d0218cf696f3af988f
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: 61a4bd842cb505ab4e2ce62498ded5f3b5bc34e4c351cfb9de2cd62ade545416
 ---
 # Troubleshooting
 
@@ -143,21 +143,25 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 `<repo-id>` below is the checkout's basename followed by a short hash of its absolute path — the unit name is unique per checkout, so two clones of one project never share a unit.
 
-**Symptom**: `/lazy-core.daemon-setup` stops with "run /lazy-core.install first", or fails at Step 5 with a message about a missing plist/service template file, or `launchctl bootstrap` / `systemctl --user enable --now` returns a non-zero exit code.
+**Symptom**: `/lazy-core.daemon-setup` stops with "run /lazy-core.install first", or Step 5 reports `supervisor-failed` with a reason — a unit that cannot be rendered, a unit that cannot be written, or a `launchctl bootstrap` / `systemctl` refusal.
 
 **Likely cause (no daemon section)**: The repo has no `daemon` section in `.claude/lazy.settings.json`, so the runtime layer was never installed here.
 
-**Likely cause (supervisor template missing)**: The plugin cache does not contain `templates/runtime/com.lazycortex.runtime.plist` (macOS) or `templates/runtime/lazy-core-runtime.service` (Linux) because the cache was only partially downloaded.
+**Likely cause (cannot render the unit)**: The plugin cache does not contain `templates/runtime/com.lazycortex.runtime.plist` (macOS) or `templates/runtime/lazy-core-runtime.service` (Linux) because the cache was only partially downloaded, or `.claude/settings.local.json` is not valid JSON.
 
-**Likely cause (launchctl/systemctl error)**: On macOS, the plist was written but `launchctl bootstrap` hit a substitution error or a permissions issue — the skill runs `launchctl bootout` first (harmless when nothing was loaded yet) so a re-render always reaches a clean `bootstrap`, instead of `launchctl load` silently keeping an already-loaded label's old definition in memory. On Linux, the unit was written but the systemd user instance rejected it.
+**Likely cause (cannot write the unit)**: `~/Library/LaunchAgents/` (macOS) or `~/.config/systemd/user/` (Linux) is not writable.
+
+**Likely cause (launchctl/systemctl refusal)**: The unit was written but the supervisor refused it — `launchctl bootstrap` on macOS, or the systemd user instance on Linux. The skill writes the unit only when its content differs and reloads the supervisor only when it wrote the unit or the unit is not loaded, so a running daemon whose unit did not change is never restarted; on a failure, a running daemon is left as it was.
 
 **Fix (no daemon section)**: Run `/lazy-core.install`, then re-run `/lazy-core.daemon-setup`.
 
-**Fix (template missing)**: Run `/plugin update lazycortex-core@lazycortex` to restore the full cache, then re-run `/lazy-core.daemon-setup`.
+**Fix (cannot render the unit)**: Run `/plugin update lazycortex-core@lazycortex` to restore the full cache, or fix the JSON in `.claude/settings.local.json`, then re-run `/lazy-core.daemon-setup`.
 
-**Fix (macOS launchctl)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-id>.plist` for literal `{REPO_ROOT}`, `{REPO_ID}` or `{PYTHON}` placeholders. If found, re-run `/lazy-core.daemon-setup` to regenerate. Otherwise run `launchctl bootout gui/$UID/com.lazycortex.runtime.<repo-id> 2>/dev/null; launchctl bootstrap gui/$UID <path>` manually from your terminal — the `bootout` is harmless when nothing was loaded yet, and running it first guarantees `bootstrap` picks up the freshly written plist.
+**Fix (cannot write the unit)**: Fix the permissions on the unit directory, then re-run `/lazy-core.daemon-setup`.
 
-**Fix (Linux systemd)**: Run `systemctl --user status lazy-core-runtime-<repo-id>.service` to read the error it names, correct that, then re-run `/lazy-core.daemon-setup` (or run `systemctl --user daemon-reload` and `systemctl --user enable --now lazy-core-runtime-<repo-id>.service` yourself).
+**Fix (macOS launchctl)**: Run `launchctl print gui/$UID/com.lazycortex.runtime.<repo-id>` to read the error launchd names, correct it, then re-run `/lazy-core.daemon-setup`.
+
+**Fix (Linux systemd)**: Run `systemctl --user status lazy-core-runtime-<repo-id>.service` to read the error it names, correct that, then re-run `/lazy-core.daemon-setup`.
 
 ---
 
@@ -439,13 +443,13 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix**: Run `/lazy-core.setup --dry-run` first to preview the full plan before committing to it. If a specific plugin should be skipped going forward, disable that plugin, then re-run `/lazy-core.setup` — every child is idempotent, so re-running after a partial or unwanted pass is safe.
 
-## `/lazy-core.setup` reports a plugin `skipped: plugin not installed on this machine`
+## `/lazy-core.setup` reports a plugin `skipped: plugin not installed for this repo or the user`
 
-**Symptom**: `/lazy-core.setup`'s discovery step lists one of your enabled plugins with `skipped: plugin not installed on this machine` instead of running its install.
+**Symptom**: `/lazy-core.setup`'s discovery step lists one of your enabled plugins with `skipped: plugin not installed for this repo or the user` instead of running its install. The same line appears in the report of a non-interactive rollout (`lazy-core.autosetup`) for a repo.
 
-**Likely cause**: `/lazy-core.setup` now derives the enabled-plugin set purely from the `enabledPlugins` maps in `.claude/settings.json` and `.claude/settings.local.json` — never from the machine-wide `~/.claude/plugins/installed_plugins.json` registry, which spans every project on the host and is no longer trusted as an enablement signal. A plugin can be enabled in this repo's tracked settings (synced from another machine, or another checkout) while this particular host's plugin cache has never actually downloaded it.
+**Likely cause**: `/lazy-core.setup` derives the enabled-plugin set purely from the `enabledPlugins` maps in `.claude/settings.json` and `.claude/settings.local.json`; the machine-wide `~/.claude/plugins/installed_plugins.json` registry, which spans every project on the host, is never an enablement signal. It only supplies where an install lives. A plugin is skipped when it is enabled in this repo's settings (synced from another machine, or another checkout) but has no sources in the repo and no install recorded for this repo or for the whole user. An install made only for some other project on this host does not count.
 
-**Fix**: Run `/plugin install <plugin>@lazycortex` (or `/plugin update`) on this host to populate the cache, then re-run `/lazy-core.setup` — the skipped plugin's install runs on the next pass. This is not a hard failure; every other enabled plugin's install still completes in the same run.
+**Fix**: Run `/plugin install <plugin>@lazycortex` (or `/plugin update`) for this repo or for your user account, then re-run `/lazy-core.setup` — the skipped plugin's install runs on the next pass. This is not a hard failure; every other enabled plugin's install still completes in the same run.
 
 ---
 
@@ -473,17 +477,17 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-core.scaffold-local` fails to resolve the registry or the core CLI
 
-`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the `plugins/claude/lazycortex-core/` copy in a checkout that authors the plugin, otherwise the `installPath` that `~/.claude/plugins/installed_plugins.json` records for `lazycortex-core@lazycortex`. The plugin cache folder is never searched for it: it keeps every version ever installed, so a search can land on an old copy the registry no longer names. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
+`<core-cli>` stands for the core plugin's `bin/lazycortex-core` file — the `plugins/claude/lazycortex-core/` copy in a checkout that authors the plugin, otherwise the `installPath` of the highest-version `lazycortex-core` record that `~/.claude/plugins/installed_plugins.json` holds for the whole user or for this repo's main checkout (a record made for another project is never used). The plugin cache folder is never searched for it: it keeps every version ever installed, so a search can land on an old copy the registry no longer names. Every verb runs through the interpreter, `"${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb>`: the file carries no exec bit and is not on `PATH`.
 
 **Symptom**: Running `/lazy-core.scaffold-local` fails immediately with "`registry not found at <path>`", "`cannot resolve core CLI — lazycortex-core not installed`", or "`core CLI not found at <path>`".
 
 **Likely cause (registry not found)**: `.claude/rules/lazy-core.scaffold.md` does not exist in this repo yet — the scaffold registry itself was never initialised.
 
-**Likely cause (core CLI unresolved)**: `installed_plugins.json` has no `lazycortex-core@lazycortex` entry, or the `installPath` it does record points at a path that no longer exists (a stale or partially refreshed plugin cache).
+**Likely cause (core CLI unresolved)**: `installed_plugins.json` has no `lazycortex-core` record for the whole user or for this repo's main checkout (an install made only for another project does not count, even at a higher version), or the `installPath` it does record points at a path that no longer exists (a stale or partially refreshed plugin cache).
 
 **Fix (registry not found)**: Run `/lazy-core.install` to initialise the scaffold registry, then re-run `/lazy-core.scaffold-local`.
 
-**Fix (core CLI unresolved)**: Install `lazycortex-core` if it is genuinely missing (`/lazy-core.install`), or refresh a stale cache with `/plugin update lazycortex-core@lazycortex`. Then re-run `/lazy-core.scaffold-local`.
+**Fix (core CLI unresolved)**: Install `lazycortex-core` for this repo or for your user account if it is genuinely missing (`/lazy-core.install`), or refresh a stale cache with `/plugin update lazycortex-core@lazycortex`. Then re-run `/lazy-core.scaffold-local`.
 
 ---
 
@@ -806,7 +810,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: Batches 2/3 of `/lazy-core.agent-models` repeatedly prompt for model tiers on agents belonging to a plugin you disabled or stripped from this repo's `enabledPlugins`, even though you skip that batch every time — the same agents come back on the next run.
 
-**Likely cause**: Agent discovery (Step 3) originally kept a plugin's agents in scope purely from `~/.claude/plugins/installed_plugins.json`'s install-scope record. That machine-wide registry records *where a plugin was ever installed*, not whether this repo still wants it — so a repo that removed the plugin from `enabledPlugins` (tracked or local overlay) kept the stale project-scope record, and every one of that plugin's agents was re-seeded into the missing list on every run.
+**Likely cause**: Agent discovery (Step 3) originally kept a plugin's agents in scope purely from `~/.claude/plugins/installed_plugins.json`'s install-scope record (a `user` install, or a `project` / `local` one for this repo's main checkout — a subdirectory or linked worktree maps to it). That machine-wide registry records *where a plugin was ever installed*, not whether this repo still wants it — so a repo that removed the plugin from `enabledPlugins` (tracked or local overlay) kept the stale project-scope record, and every one of that plugin's agents was re-seeded into the missing list on every run.
 
 **Fix**: Run `/plugin update lazycortex-core@lazycortex` to pick up the enablement filter — Step 3 now also drops any plugin whose merged `enabledPlugins["<plugin>@<marketplace>"]` isn't `true` for this repo, so a disabled plugin's agents stop being offered. Re-run `/lazy-core.agent-models` to confirm the batch no longer includes them. Re-enabling the plugin later makes its agents reappear normally on the next run.
 
@@ -888,7 +892,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: A `git add`, `git commit`, or equivalent staging call is refused with a message naming another Claude Code session as the current staging holder, even though you don't see another session obviously active.
 
-**Likely cause**: The per-repo staging lock at `.git/lazy-git.lock` is held by a session whose PID is dead, on a different host, or has sat idle past the staleness threshold — the hook's auto-break heuristics only release the lock once one of those conditions is confirmed, so a genuinely-recent hold on the same host is (correctly) treated as still in progress and blocks new staging. This applies only when the repo runs the staging-window mutex row of `lazy-core.git-guard`.
+**Likely cause**: The per-repo staging lock (`lazy-git.lock` in the repository's shared git directory, `<main checkout>/.git/lazy-git.lock` — the same file from a linked worktree) is held by a session whose PID is dead, on a different host, or has sat idle past the staleness threshold — the hook's auto-break heuristics only release the lock once one of those conditions is confirmed, so a genuinely-recent hold on the same host is (correctly) treated as still in progress and blocks new staging. This applies only when the repo runs the staging-window mutex row of `lazy-core.git-guard`.
 
 **Fix**: Run `/lazy-core.git-status` to see who holds the lock, how long it has been held, and whether the break-the-lock heuristics already consider it breakable. If the report shows it should already be breakable, retry the git operation — the hook re-evaluates on the next call. If the lock is genuinely stuck (the holder confirmed abandoned, heuristics not yet satisfied), run `/lazy-core.git-unlock`; it shows the same holder details and asks for confirmation before force-clearing the lock.
 
@@ -1224,7 +1228,9 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause (`routine_absent`)**: The `--routine` named does not exist yet in `.claude/lazy.settings.json` — it hasn't been registered (via `/lazy-routine.register`), or a daemon-disabled gate unregistered it since.
 
-**Fix (nothing offered)**: No action needed if the drop matches your expectation. If a protocol you expected is missing, pass a `--context` string that names what the routine actually does — the relevance judgment reads the protocol's own `description` against it.
+**Likely cause (an installed plugin's protocol is missing)**: Protocols from installed plugins come from the highest version recorded for the whole user or for this repo's main checkout; a plugin installed only for another project on this host offers nothing here.
+
+**Fix (nothing offered)**: No action needed if the drop matches your expectation. If a protocol from an installed plugin is missing, install that plugin for this repo or your user account (`/plugin install <plugin>@lazycortex`). If a protocol you expected is missing, pass a `--context` string that names what the routine actually does — the relevance judgment reads the protocol's own `description` against it.
 
 **Fix (`routine_absent`)**: Register the routine first with `/lazy-routine.register`, confirm it is still present (it survives any daemon-gate unregister), then re-run `/lazy-routine.offer-protocols`.
 
@@ -1244,11 +1250,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-core.doctor` reports "runtime daemon appears stale" even after running `/lazy-core.daemon-setup` and installing the supervisor. Re-running the doctor immediately after install still shows the same warning.
 
-**Likely cause 1**: On macOS, the launchd plist was written to `~/Library/LaunchAgents/` but has not been loaded yet. A `launchctl bootstrap` step is required before `launchctl kickstart` can start the daemon — `/lazy-core.daemon-setup` runs `launchctl bootout` (harmless when nothing was loaded yet) immediately before `bootstrap`, so a re-render always takes effect instead of `launchctl load` silently keeping an already-loaded label's old plist in memory.
+**Likely cause 1**: On macOS, the launchd plist was written to `~/Library/LaunchAgents/` but has not been loaded yet. A `launchctl bootstrap` step is required before `launchctl kickstart` can start the daemon — `/lazy-core.daemon-setup` reloads the supervisor whenever it rewrote the unit or the unit is not loaded, so a re-render always takes effect.
 
 **Likely cause 2**: The daemon started successfully but has not yet written a JSONL log line — this takes up to one polling interval (`polling_interval_sec`, default 5 seconds). The liveness check uses log recency as one of its signals.
 
-**Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, or just re-run `/lazy-core.daemon-setup` (it does the equivalent `bootout`-then-`bootstrap` pair for you), then confirm the supervisor is registered.
+**Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, or just re-run `/lazy-core.daemon-setup` (it loads the unit for you when it is not loaded), then confirm the supervisor is registered.
 
 **Fix for cause 2**: Wait one polling cycle (5 seconds by default), then re-run `/lazy-core.doctor` to confirm the daemon is now live.
 

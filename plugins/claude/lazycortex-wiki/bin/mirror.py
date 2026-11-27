@@ -111,11 +111,12 @@ _GIT_DIR = ".git"
 _NUL = "\0"
 
 
-def _run_remote_mirror(payload: dict) -> dict:
+def _run_remote_mirror(repo: Path, payload: dict) -> dict:
   """
   Invoke `lazycortex-core remote-mirror` with `payload` on stdin and parse its JSON response.
 
   Args:
+    repo: Repository root the mirror scope belongs to.
     payload: Request body per the `remote-mirror` contract (`url`, `branch`, `cache_dir`,
       `include`, `exclude`, `dest`, `mode`).
 
@@ -132,7 +133,7 @@ def _run_remote_mirror(payload: dict) -> dict:
   """
   # the CLI always prints a JSON body — {"error": ...} on failure, the response shape otherwise
   return json.loads(subprocess.run(
-    [ sys.executable, str(_axes.resolve_core_cli()), "remote-mirror" ],
+    [ sys.executable, str(_axes.resolve_core_cli(repo)), "remote-mirror" ],
     input = json.dumps(payload).encode(_ENCODING), capture_output = True, check = False,
   ).stdout)
 
@@ -262,7 +263,7 @@ class MirrorSync:
 
     # dispatch the request — every failure path leaves the mirror tree untouched (plan mode never writes)
     try:
-      result = _run_remote_mirror(payload)
+      result = _run_remote_mirror(self._repo, payload)
     # guard: the CLI couldn't be resolved, run, or crashed without emitting JSON — same string contract
     except (RuntimeError, OSError, ValueError) as error:
       return f"mirror fetch failed for scope '{self._scope_id}': {error}"

@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.install
 description: "Run when the operator asks to set up Obsidian for this repo or wire up a fresh vault, after a plugin update, or when tag pages render empty, the tag-page template is missing from `.claude/templates/`, icons are unpainted, or diagrams render unstyled. The plugin family's root entry point; it chains `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install`."
-allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(ls *), Bash(date *), Bash(diff *), Bash(printenv *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(ls *), Bash(date *), Bash(diff *), Bash(printenv *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-obsidian
 
@@ -47,7 +47,7 @@ Resolve it via the core CLI, which reads `enabledPlugins` from the project setti
 2. Interactive run with no `repo=`: `<repo-root>` = `git rev-parse --show-toplevel`.
 3. Not in a git repo: fall back to the current working directory — but warn the user.
 
-**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file. Try these stages in order and take the first file that exists (`Bash(test -f <path>)`): (1) `<dir>/bin/lazycortex-core` for each `:`-separated entry `<dir>` of `$LAZYCORTEX_PLUGIN_DIRS` (`Bash(printenv LAZYCORTEX_PLUGIN_DIRS)`; an empty or unset variable skips the stage); (2) the dev-vault sibling `"${CLAUDE_PLUGIN_ROOT}/../lazycortex-core/bin/lazycortex-core"`; (3) the repo's own `<repo-root>/plugins/claude/lazycortex-core/bin/lazycortex-core`; (4) last, `<installPath>/bin/lazycortex-core` from the highest-`version` `lazycortex-core@lazycortex` record a `Read` of `$HOME/.claude/plugins/installed_plugins.json` shows (never a walk of `~/.claude/plugins/cache/`). No stage matching means core is not installed: abort, naming every stage searched — `$LAZYCORTEX_PLUGIN_DIRS`, the dev-vault sibling, `<repo-root>/plugins/claude/lazycortex-core/`, `installed_plugins.json`. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
+**Resolve `<core-cli>` once, before the first call.** It is the core plugin's `bin/lazycortex-core` file. Ask this plugin's own locator for the core plugin's root: `Bash("${LAZYCORTEX_PYTHON:-python3}" "${CLAUDE_PLUGIN_ROOT}/bin/obsidian_locator.py" root lazycortex-core --start <repo-root> --sibling-base "${CLAUDE_PLUGIN_ROOT}/..")` prints it — the `$LAZYCORTEX_PLUGIN_DIRS` entry, the dev-vault sibling, the checkout's own `plugins/claude/lazycortex-core/`, or last the install recorded for this repo or for the whole user (never another project's, never a walk of `~/.claude/plugins/cache/`) — and `<core-cli>` is `<printed root>/bin/lazycortex-core`. A non-zero exit means core is not installed: abort with the `error: …` line it printed, which names every stage searched. Hold the absolute path and run every verb as `Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> <verb> …)` — never as a bare command: the file carries no exec bit and no plugin `bin/` is on `PATH`.
 
 ```
 Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> detect-scope lazycortex-obsidian@lazycortex --cwd <repo-root>)
@@ -255,7 +255,7 @@ Bash("${LAZYCORTEX_PYTHON:-python3}" <core-cli> agent-models-seed --prefix lazyc
 
 `--cwd <repo-root>` is passed at both scopes: it fixes the repository the verb resolves the core tier table from, and `--scope user` still writes `~/.claude/lazy.settings.json`.
 
-The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 7 report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
+The verb prints one JSON line: `outcome` is `seeded-N`, `unchanged`, or `no-entries` (exit 0), or a refusal — `sot-missing`, `missing-prefix`, `missing-scope`, `settings-unparseable` (exit 1, with a `message`); `entries` carries one `{dispatch, tier, state}` line per key, `state` being `added` / `unchanged` / `converted` / `refreshed` / `kept-local`. Fold the `entries` lines into the Step 7 report; on a refusal relay its `message` and write no seed lines. `no-entries` is reported plainly (a maintainer must extend `default-tiers.json`), not an abort.
 
 Step outcome: `seeded` (the verb answered `seeded-N`) or `unchanged` (it answered `unchanged` or `no-entries`); never report a seed the verb did not answer.
 

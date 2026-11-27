@@ -4,6 +4,20 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 12.1.0 — 2026-11-27 UTC
+
+- A language plugin can now declare the canon each role reads. Every expert job receives it, guidelines accept plugin keys, and Python overlays move to `docs/guidelines/python/`.
+- Every command finds its repo root and settings through one checkout lookup, so it works from any subdirectory, worktree or branch and never picks up another project's install.
+- A job works only in the environment it was given and never repairs it. A failed check now fails the build, and reports list newest first and keep no environment.
+- Install refreshes a stale virtual environment and names the cause. It also brings the daemon checkout on this host current: it seeds the expert permissions there and refreshes the supervisor unit only when the unit changed.
+- A job barred from committing that commits on the shared checkout now fails and halts the daemon. This also catches killed jobs and commits made while an orphaned spawn was still alive. The halt lists every offending job by full hash, publishing is held until you resume, and a later job is never blamed for a barred job's commits.
+- `dispatch-job` takes a per-job commit right from the bundle.
+- A job branch can start from a named branch. The start point must be a commit, a non-string or dash-led value fails the job, and a continuation ignores the start point.
+- A release build or test continuation that only re-runs checks may finish without a commit, and a re-approved release plan keeps its fresh approval stamp.
+- The audit's D19 check reports routine code that carries a failure past the error ledger, including code in plugins the repo authors.
+- Agent-model fixes: an entry that is an object without its seed fields is treated as your pin and never refreshed, and `agent-models-seed` converts a pre-provenance bare tier in a plugin group into a refreshable seed.
+- Setup verify judges only the install chain's write scope, which now covers every root install writes. Install skills check paths with `ls` instead of an unreported test exit code and describe the new verify and seed outcomes.
+
 ### 12.0.4 — 2026-11-23 UTC
 
 - The commit recorder now journals each commit in the repository that actually received it. It follows a `git -C` option, a preceding `cd`, or the repository an MCP commit call names, and that repository's own `hooks.disabled` decides whether it records. A commit whose repository can't be read leaves a one-line diagnostic instead of vanishing.
@@ -863,6 +877,23 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 16.0.0 — 2026-11-27 UTC
+
+- **Breaking:** Spec notes still carry launch rows the plugin no longer declares in their `# Gates` section (retired `Start implementation`, `Start testing`, `Start coding`, `Start data entry` and `Start documentation` rows, plus leftover per-tool plan, `Write architecture` and `Publish` rows on non-release assets), and research notes carry release-ladder keys they never use. The update removes those rows and keys, so a stale tick no longer raises an extra wake. Current rows keep their ticks. `/lazy-core.setup` applies it.
+- **Breaking:** The update adds the settings a `code-report` review class needs for build reports to be discussed and accepted, sent back or replanned. It adds `report`, the build-job protocol and the `build-branch.json` context entry to an existing class, in the shared settings and in the local overlay when one exists. It also deletes the retired per-test branches (`spec/*/releases/*/test-*`). A branch checked out in a worktree blocks the step until that worktree is moved. The build registry for a release that built earlier is created later, in the daemon's checkout. `/lazy-core.setup` applies it.
+- **Breaking:** Existing `code-report.md` and `test-report.md` files list build entries oldest first. The update reverses them so the newest entry stands first under the title, as new runs now write them. Reports whose order cannot be told are left as they are and named. `/lazy-core.setup` applies it.
+- Builds are now recorded in a per-release registry with each build's branch and start point. A new build starts from the previous unmerged build, a release that predates the registry is backfilled on first use, and a build that is not accepted is closed in its report and registry. A rejected build's branch is deleted only after its replacement is merged.
+- A build report is now a review: you discuss it with the implementer, then accept the build, send it back for rework or send it to a new plan. Each open problem in a report has its own checkbox for sending it back to be fixed.
+- Reports are tighter: the research report opens with its conclusion and carries no record of the walk. The testing stage writes only a report and nothing into the repository. Only the build report expert gets a workspace branch and merge.
+- A coordinator question or conflict callout with contradicting ticks now applies nothing, clears the ticks and says to tick one. Launch rows that contradict each other fire neither. Several non-contradicting ticked rows run top to bottom in note order. Ticks on two level documents, or on the same path in two products, no longer read as a contradiction.
+- Build and test continuations that only re-run checks can now finish without a commit. A re-approved release plan keeps its fresh approval stamp. A finished job's document lands under any outcome word other than `error` and `deferred`, so a successful build no longer halts its release over the word.
+- Every command now finds this repo's install, root and settings through one locator. It works from any subdirectory, worktree or branch and never picks up another project's install.
+- A job works only in the environment it was given and never repairs it, and a failed check fails the build. Install refreshes a stale virtualenv and names the cause.
+- A language plugin can declare the canon each role reads, and every expert job receives it. Guidelines accept plugin keys, and Python overlays move to `docs/guidelines/python/`.
+- Spec writers keep cases out of rules, ask on contradictions and mark product calls. Term files follow their language's case.
+- The audit no longer asks a level note for a doc-kind pin its template never carries. It no longer reports its own example decision tokens as code decisions.
+- A test plan whose tests depend on order now states each test's starting state and runs as written. Install skills check paths with `ls` instead of an unreported test exit code.
+
 ### 15.0.1 — 2026-11-23 UTC
 
 - A launch-row tick is no longer lost when it lands while a coordinator job woken for another reason (such as `release-start`) is queued or running. The coordinator now enacts every ticked row on each wake, and a job that ends with a ticked row still standing triggers another wake.
@@ -1372,6 +1403,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 7.0.3 — 2026-11-27 UTC
+
+- Icon sync, tag-page generation and vault-manifest commands now find this repo's install from any subdirectory, worktree or branch, and never pick up another project's install.
+- An authored `paint_roots` in the icon map now survives the merge with the shipped map and no longer raises a conflict.
+- Installing an Obsidian plugin and enabling a CSS snippet now refuse a git working-tree root passed as the Obsidian config directory, so they no longer write into the repository itself.
+
 ### 7.0.2 — 2026-11-22 UTC
 
 - The icon install now merges the shipped icon map into the vault's own through a new `icon-map-merge` verb. Your entries are kept, new shipped ones are added, and a conflicting value is asked about once per key. The routine registration goes through the core reconcile verb, so a background setup run can complete the install without an operator.
@@ -1663,6 +1700,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 2.1.2 — 2026-11-27 UTC
+
+- Drawing or fixing a diagram now checks that the colour scheme and the template exist by listing their paths. A missing one fails with a clear "not found" error instead of an unreported exit code. The install report also recognises the new `converted` state of a seeded agent model tier.
+
 ### 2.1.1 — 2026-11-22 UTC
 
 - `lazy-diagram.audit` now looks up the plugin root against the repository it is checking, so an audit started from another checkout judges the installed plugin instead of that checkout's sources.
@@ -1778,6 +1819,19 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.17.0 — 2026-11-27 UTC
+
+- Reports under review get a new flow. The writer discusses the report without touching the work. The report shows two decision boxes (accept, or send back), and the writer's verdict appears in the banner. Fix-by-remarks closes the review as sent back or sent to the plan, following that verdict.
+- Each open problem in a report can be sent back for fixing with its own checkbox.
+- A decision box counts only when nothing but the boxes changed since the writer's turn. A report shows no decision box until its writer has recorded a verdict. Submitting a report clears any earlier verdict, and a closed cycle never carries its verdict into the next one. Resuming a stopped report keeps the writer's verdict, and reconfiguring a report class keeps its report flag.
+- A report's writer job and every other job on a report run without the right to commit. The writer is told in its request that the document is a report, and a report's discussion block is removed when its review closes.
+- Ticking both decision boxes at once fires neither. A decision candidate ticked both ways, or a question ticked more than once, applies nothing: the ticks are cleared and a line asks you to tick one.
+- A banner's gesture kinds follow the document's class, not its text. The banner is left as it is when the class is unknown, and a banner edit never reads as approve.
+- Experts keep what the operator wrote or ordered, and the review coordinator sends any finding against it to the operator. A finished operator command is removed on its own, leaving every other line intact. A command inside a fence or a protected callout is not treated as a command.
+- Language plugins can declare the canon each role reads. Every expert job receives it, and guidelines accept plugin keys. Python overlays move to `docs/guidelines/python/`.
+- Every command finds its repo root and settings through one checkout lookup, from any subdirectory, worktree or branch, and never picks up another project's install. A job never repairs its environment, and install refreshes a stale venv and names the cause.
+- Collect-job reports an unreachable core instead of crashing. A report verdict is no longer dropped when the review settings cannot be read. A broken frontmatter now counts as an edit when deciding whether a decision box is valid.
 
 ### 6.16.1 — 2026-11-21 UTC
 
@@ -2078,6 +2132,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 2.2.8 — 2026-11-27 UTC
+
+- The installer now finds the core plugin and the repository root the same way from a subdirectory, a daemon job's worktree or any branch. It takes the install made for this repository or for the whole user, never another project's. When it finds nothing, it stops with an error that names every place it searched.
+
 ### 2.2.7 — 2026-11-12 UTC
 
 - The `lazy-observe.audit`, `lazy-observe.install` and `lazy-observe.uninstall` skill descriptions are shorter, so the plugin costs less session context. Each still names when to invoke it: audit when metrics stop arriving, install when you start shipping metrics (or integrate with an existing collector), uninstall when you stop shipping or switch observers.
@@ -2245,6 +2303,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 3.0.0 — 2026-11-27 UTC
+
+- **Breaking:** The tester no longer needs a job branch or commit rights, so updating strips `workspace` and `can_commit_in_repo` from every expert that uses the tester agent. This applies to the tracked `.claude/lazy.settings.json` and to the local overlay `.claude/lazy.settings.local.json`, if the overlay exists. Other keys, key order and experts pointed at another agent are left alone. `/lazy-core.setup` applies this.
+- The tester checks the deployed product and commits nothing. It returns only its report through `result/`, so it no longer fails the runtime's branch rule.
+- A test plan whose tests depend on order now states each test's starting state, and the tester runs it as written.
+- Commands find the repo root and settings through one shared checkout lookup. They behave the same from a subdirectory or a linked worktree.
+- Jobs work only in the environment they were given and never try to repair it. This applies to the developer, planner, tester, data-implementer and docs-writer agents.
+- The researcher's report opens with its conclusion and no longer carries a record of the research steps.
+- The designer and use-case-writer keep individual cases out of rules, ask when documents contradict each other, and mark product calls. Term files follow the case of their language.
+- Experts keep what the operator wrote or ordered. A review finding against that content goes to the operator.
+- The `lazy-experts.install` skill checks paths with `ls` instead of an unreported test exit code, and it describes the new verify and seed outcomes.
 
 ### 2.0.3 — 2026-11-23 UTC
 
@@ -2502,6 +2572,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 5.0.0 — 2026-11-27 UTC
+
+- **Breaking:** The Python guideline overlays move from `docs/guidelines/<topic>_guidelines.md` to `docs/guidelines/python/<topic>_guidelines.md` for `coding`, `documenting`, `testing` and `checking`. The rules, writer agents, `/lazy-python.audit` and the `chk-py review` overlay layer now read only the new folder, so an overlay left at the old path would go unseen. `/lazy-core.setup` moves each overlay for you. If both the old and new file exist, it leaves both in place and reports the pair for you to settle. `docs/guidelines/domain-groups.md` and other language-neutral guides stay where they are.
+- The plugin now declares which guideline canon each role reads, and every expert job receives it.
+- `chk`, `tst` and `cfg` and the mypy plugin shim now find this repo's installed plugin from any subdirectory, worktree or branch. They never pick up another project's install.
+- Commands find the repo root and settings through one checkout lookup. A job no longer tries to repair its own environment. `/lazy-python.install` refreshes a stale venv and names the cause.
+- `tst` runs tests at a lower priority and has a passthrough mode for a project's own test runner.
+- A method's own checks are now judged by its contract and the contracts of the members it calls, not by their current implementation. The reviewer drops dead-guard findings built on implementation details.
+- Test method names may now be up to 37 characters long.
+- A local variable may hold an expression that, inlined, would overrun the line-length limit.
 
 ### 4.17.0 — 2026-11-23 UTC
 
@@ -2822,6 +2903,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 5.0.0 — 2026-11-27 UTC
+
+- **Breaking:** Term file names and title lines now follow the letter case of the term's language. English terms capitalise every word, Russian terms only the first word, and a proper name inside a term keeps its capital. Dictionaries written under the old release mix both styles, so the update renames term files whose names differ from their title only in letter case. It raises the case of each title line and moves links in your documents onto the new names without changing the text readers see. Files whose names git on your checkout cannot rename (case-only changes on case-insensitive systems) keep their names, and files with no title line are left alone. `/lazy-core.setup` applies this.
+- Every command now finds its repo root and settings through one lookup that works from any subdirectory, linked worktree or branch. It uses only this repo's own install, never another project's. A job no longer repairs its environment. The install skills refresh a stale virtual environment and name the cause, and they report their verify and seed outcomes.
+- The project structure map now finds an entry whose path is written in backticks.
+- Legacy `Terms` lines now close on a plain dash or a renamed term, and a line left open is named.
 
 ### 4.1.0 — 2026-11-23 UTC
 

@@ -9,10 +9,10 @@ wiki_pinned_topics:
   - wiki/category/{{category}}
 ---
 # {{slug}} — test-report
-<!-- The working journal of one test run: the verdict against the plan's exit criteria, the defects found, what stayed open, and the log of every step. It is append-only and written during execution, never after the fact. What was to be tested lives in the sibling test-plan. -->
+<!-- The working journal of a release's test runs, one `#### build <k>` entry per run: the verdict against the plan's exit criteria, the defects found, what stayed open, and the log of every step, written for the operator during execution and never after the fact. A new run's entry goes first, right under this title, and earlier entries stay below it unchanged. What was to be tested lives in the sibling test-plan, and no plugin path, plugin version or environment variable belongs anywhere in this journal. -->
 
 ## Verdict
-<!-- The evaluation of the run against the plan's exit criteria. One line per criterion: met or not, with the evidence. The defects behind an unmet criterion live in Defects. -->
+<!-- The evaluation of the run against the plan's exit criteria, each shown by what the deployed product did. One line per criterion: met or not, with the evidence in plain words — what was checked and how it ended —, never a bare tool name, an internal step name or raw command output in place of a result. The defects behind an unmet criterion live in Defects. -->
 
 ## Defects
 <!-- The defects the run found. One bullet per defect: the occurrence, its nature, and its status. A problem of the run itself, not of the product, lives in Unresolved problems. -->
@@ -21,10 +21,10 @@ wiki_pinned_topics:
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The questions against the plan or the spec that only the operator can answer and that are still unanswered. One bullet per question, naming the test it blocks. A departure already made lives in Decisions taken alone. -->
 
 ## Unresolved problems
-<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. What obstructed the run and was not solved: an environment that could not be reached, a step nothing could execute, a case that stayed flaky without explanation. One bullet per problem: what obstructed, and what was tried. A defect of the product lives in Defects. -->
+<!-- Optional. When the document has nothing to say here, the section is removed together with its heading. What obstructed the run and was not solved, limited to checks the current plan owed the run: an environment that could not be reached, a step nothing could execute, a case that stayed flaky without explanation. One bullet per problem: what obstructed, and what was tried. A defect of the product lives in Defects, and a step the current plan no longer contains is not mentioned. -->
 
 ## Decisions taken alone
 <!-- Optional. When the document has nothing to say here, the section is removed together with its heading. The departures from the plan made without the operator: substituted data, a skipped step, a chosen environment. One bullet per departure, with the grounds. A question left for the operator lives in Open questions. -->
 
 ## Log
-<!-- The chronological record of the run. One entry per test executed, in order: what was run and what it returned. The evaluation of the whole lives in Verdict. -->
+<!-- The record of the run's tests and what each returned. One entry per test executed, in the order the tests ran, each stated in plain words as in Verdict. The evaluation of the whole lives in Verdict. -->

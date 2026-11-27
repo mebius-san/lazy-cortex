@@ -20,13 +20,114 @@ from constants import DaemonKey, GitConfigKey, SettingsFile, SettingsKey  # pyli
 # waiver: flat sibling import inside the plugin's bin/ dir — resolved at runtime via PYTHONPATH, not by pylint
 from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from permission_cli import render_like  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 import runtime_state  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from plugin_locator import read_eligible_records  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
 
 
+# waiver: external Claude Code filesystem location, not a reusable domain key
+_SETTINGS_JSON_REL = ".claude/settings.json"
+# waiver: the interpreter command every plugin call site falls back to when the override is unset
+_DEFAULT_PYTHON_COMMAND = "python3"
+# waiver: external env-var name every plugin call site expands, not an internal key
+_PYTHON_ENV_VAR = "LAZYCORTEX_PYTHON"
+# The attribute line that makes git store and check out every text file with LF.
+_GITATTRIBUTES_LF_RULE = "* text=auto eol=lf"
+# A hook command path under the retired `lazycortex-log` plugin, which the log-hook migration strips.
+_STALE_LOG_HOOK_PATTERN = re.compile(
+  r"\$\{CLAUDE_PLUGIN_ROOT\}/lazycortex-log/hooks/"
+)
+# waiver: external Claude Code filesystem location, not a reusable domain key
+SETTINGS_LOCAL_JSON_REL = ".claude/settings.local.json"
+# The external Claude Code settings field that holds the permission scope.
+_PERMISSIONS_KEY = "permissions"
+# The allow-rule list inside the permission scope.
+_ALLOW_KEY = "allow"
+# The extra-directory grant list, read inside the permission scope only.
+_ADDITIONAL_DIRECTORIES_KEY = "additionalDirectories"
+# The top-level sandbox block an earlier install left in the local settings.
+_SANDBOX_KEY = "sandbox"
+
+# The permission scope every expert spawn and the operator's interactive session need in a checkout's
+# `.claude/settings.local.json`: the tools a `dontAsk` spawn may use, the interpreter-run core CLI, and read
+# access to the marketplace's plugin cache root.
+EXPERT_PERMISSION_BLOCK: dict[str, dict[str, list[str]]] = {
+  _PERMISSIONS_KEY: {
+    _ADDITIONAL_DIRECTORIES_KEY: [ "~/.claude/plugins/cache/lazycortex" ],
+    _ALLOW_KEY: [
+      "Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "WebSearch", "WebFetch",
+      'Bash("${LAZYCORTEX_PYTHON:-python3}" *)',
+    ],
+  },
+}
+
+
+
+# ----------------------------------------------------------------------------------------
+class PermissionOutcome:
+  """
+  Outcome words of the permission-block phase.
+
+  Attributes:
+    CREATED: The file was missing or unparseable and now holds the permission block as shipped.
+    MERGED: Missing entries were added, a legacy key was moved or removed, or both.
+    UNCHANGED: Nothing was missing and no legacy key was present; the file was not written.
+    MIGRATED_SANDBOX: A legacy top-level sandbox key was removed.
+    NO_LEGACY_SANDBOX: No legacy top-level sandbox key was present.
+    FAILED: The settings file could not be read or written.
+  """
+
+  # The file was missing or unparseable and now holds the permission block as shipped.
+  CREATED = "perms-created"
+  # Missing entries were added, a legacy key was moved or removed, or both.
+  MERGED = "perms-merged"
+  # Nothing was missing and no legacy key was present; the file was not written.
+  UNCHANGED = "perms-unchanged"
+  # A legacy top-level sandbox key was removed.
+  MIGRATED_SANDBOX = "migrated-local-sandbox"
+  # No legacy top-level sandbox key was present.
+  NO_LEGACY_SANDBOX = "no-legacy-sandbox"
+  # The settings file could not be read or written.
+  FAILED = "perms-failed"
+
+
+
+# ----------------------------------------------------------------------------------------
+class PermissionReportKey:
+  """
+  Field names of the report the permission-block phase returns and the install skill parses.
+
+  Attributes:
+    OUTCOME: The outcome word.
+    MIGRATION: The sandbox-migration word.
+    ALLOW_ADDED: The allow entries the call added.
+    DIRECTORIES_ADDED: The additional directories the call added.
+    PATH: The settings file the call concerns.
+    MESSAGE: The reason a failed call gives.
+  """
+
+  # The outcome word.
+  OUTCOME = "outcome"
+  # The sandbox-migration word.
+  MIGRATION = "migration"
+  # The allow entries the call added.
+  ALLOW_ADDED = "allow_added"
+  # The additional directories the call added.
+  DIRECTORIES_ADDED = "directories_added"
+  # The settings file the call concerns.
+  PATH = "path"
+  # The reason a failed call gives.
+  MESSAGE = "message"
+
+
+
+# ----------------------------------------------------------------------------------------
 # ---------- .gitignore primitives ----------
 
 def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
@@ -147,10 +248,6 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   runtime_state.atomic_write_text(gi, body + (newline if body else ""))
   # waiver: install-phase outcome token, not a reusable domain key
   return "removed"
-
-
-# the attribute line that makes git store and check out every text file with LF
-_GITATTRIBUTES_LF_RULE = "* text=auto eol=lf"
 
 
 def ensure_gitattributes_lf(repo: Path | str) -> str:
@@ -350,11 +447,6 @@ def bootstrap_logs_dir(repo: Path | str) -> str:
   return "already-present"
 
 
-_STALE_LOG_HOOK_PATTERN = re.compile(
-  r"\$\{CLAUDE_PLUGIN_ROOT\}/lazycortex-log/hooks/"
-)
-
-
 def migrate_log_hooks(settings_path: Path | str) -> str:
   """
   Strip hook commands referencing the retired `lazycortex-log/hooks/` path from settings.
@@ -535,18 +627,6 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   return "seeded"
 
 
-# waiver: external Claude Code filesystem locations, not reusable domain keys
-_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
-# waiver: external Claude Code filesystem location, not a reusable domain key
-_SETTINGS_JSON_REL = ".claude/settings.json"
-# waiver: external Claude Code filesystem location, not a reusable domain key
-_SETTINGS_LOCAL_JSON_REL = ".claude/settings.local.json"
-# waiver: the interpreter command every plugin call site falls back to when the override is unset
-_DEFAULT_PYTHON_COMMAND = "python3"
-# waiver: external env-var name every plugin call site expands, not an internal key
-_PYTHON_ENV_VAR = "LAZYCORTEX_PYTHON"
-
-
 def record_python_env(repo: Path | str, command: str, executable: str) -> str:
   """
   Record the interpreter command an install probe resolved, for call sites to reuse later.
@@ -591,7 +671,7 @@ def record_python_env(repo: Path | str, command: str, executable: str) -> str:
   value = command if len(command.split()) == 1 else Path(executable).as_posix()
 
   # merge into the local settings' env block, creating the file when absent
-  path = Path(repo) / _SETTINGS_LOCAL_JSON_REL
+  path = Path(repo) / SETTINGS_LOCAL_JSON_REL
   # waiver: stdlib encoding idiom
   settings = json.loads(path.read_text(encoding = "utf-8")) if path.exists() else {}
   # waiver: external Claude Code settings field name, not an internal key
@@ -643,7 +723,7 @@ def resolve_unit_interpreter(repo: Path | str) -> str:
   # own packages would be lost with it.
 
   # the operator's deliberate pin, honoured only while it still names a file
-  path = Path(repo) / _SETTINGS_LOCAL_JSON_REL
+  path = Path(repo) / SETTINGS_LOCAL_JSON_REL
   # waiver: stdlib encoding idiom
   settings = json.loads(path.read_text(encoding = "utf-8")) if path.exists() else {}
   # waiver: external Claude Code settings field name, not an internal key
@@ -667,29 +747,179 @@ def resolve_unit_interpreter(repo: Path | str) -> str:
   return launcher
 
 
-def _installed_entries(installed_plugins: Path, plugin_key: str) -> list:
+def _read_settings_object(path: Path) -> tuple[str | None, dict | None]:
   """
-  Read the install-record entries for one plugin key from an `installed_plugins.json` manifest.
-
-  Gives install-phase callers the per-project install history recorded for a plugin key, so
-  they can determine where the plugin was previously installed.
+  Read a settings file as text and as a JSON object.
 
   Args:
-    installed_plugins: Path to the `installed_plugins.json` manifest.
-    plugin_key: The `<plugin>@<marketplace>` key to look up.
+    path: Settings file to read.
 
   Returns:
-    The install-record entries for `plugin_key`, or an empty list when the manifest is
-    absent or the key is unknown or empty.
+    The file's text and its parsed object; `(None, None)` when the file is absent or not UTF-8 text, and
+    the text with `None` when the text is not a JSON object.
+
+  Raises:
+    OSError: If the file exists but cannot be read.
   """
-  # guard: no manifest on disk — plugin was never installed on this machine
-  if not installed_plugins.exists():
-    return []
-  # waiver: stdlib encoding idiom
-  data = json.loads(installed_plugins.read_text(encoding = "utf-8"))
-  # waiver: external Claude Code manifest field name, not an internal key
-  plugins = data.get("plugins", data)
-  return plugins.get(plugin_key) or []
+  # guard: an absent file holds neither text nor an object
+  if not path.exists():
+    return None, None
+
+  # the text is kept for the layout of a rewrite
+  try:
+    # waiver: stdlib encoding idiom
+    original = path.read_text(encoding = "utf-8")
+  # guard: bytes that are not UTF-8 text carry no settings to keep
+  except UnicodeDecodeError:
+    return None, None
+
+  # only a JSON object counts as settings; the text comes back with it so a rewrite can keep its layout
+  try:
+    data = json.loads(original)
+  # guard: text that is not JSON carries no settings to keep
+  except json.JSONDecodeError:
+    return original, None
+  return original, data if isinstance(data, dict) else None
+
+
+def _add_missing(target: list, entries: list) -> list:
+  """
+  Append to a list each entry it does not hold yet.
+
+  Args:
+    target: List edited in place.
+    entries: Entries to add, in order.
+
+  Returns:
+    The entries that were appended.
+  """
+  # an entry already held stays where it is; only new ones join the end, in the order given
+  added = []
+  for entry in entries:
+    if entry not in target:
+      target.append(entry)
+      added.append(entry)
+  return added
+
+
+def ensure_expert_permissions(repo: Path | str) -> dict[str, str | list[str]]:
+  """
+  Bring the permission block of a checkout's `.claude/settings.local.json` up to the shipped one.
+
+  The file is reconciled with the shipped permission scope by union, and the answer reports what the call
+  changed.
+
+  Guarantees:
+    - The report is a dict with exactly the keys `outcome`, `migration`, `allow_added`, `directories_added`
+      and `path`. `outcome` is one of the `PermissionOutcome` words `perms-created`, `perms-merged` or
+      `perms-unchanged`; `migration` is `migrated-local-sandbox` or `no-legacy-sandbox`; `allow_added` and
+      `directories_added` list exactly the entries this call added; `path` is the settings file.
+    - An allow entry or additional directory already on record is never removed or reordered; missing
+      ones are appended after it.
+    - Every key the block does not concern survives the write.
+    - A file with nothing missing and no legacy key is left byte-identical; no write happens.
+    - A rewritten file keeps its own layout (indent unit, key order, spelling of non-ASCII text, trailing
+      newline).
+
+  Notes:
+    - Creates the `.claude/` directory of the checkout when it is missing.
+    - Writes `.claude/settings.local.json` on disk; a missing or unparseable file is replaced whole by the shipped
+      permission block, so nothing in an unparseable file survives.
+
+  Args:
+    repo: Path to the checkout's root.
+
+  Returns:
+    A report with the outcome word, the sandbox-migration word, the allow entries and additional
+    directories this call added, and the settings file path.
+
+  Raises:
+    OSError: If the settings file cannot be read, or it or its parent directory cannot be written.
+  """
+
+  # Domain(install.reconciliation):
+  # # The expert permission scope is unioned in, never imposed
+  # The permission file of a checkout is the operator's: it is loaded by every session there, and the
+  # operator may add or tighten entries by hand afterwards. The install therefore contributes only the
+  # entries the shipped scope names and the file lacks, leaves every entry on record where it stands, and
+  # rewrites the file only when something was actually missing. Two shapes left by earlier installs are
+  # corrected on the way: a directory grant recorded outside the permissions block, where it is not read,
+  # is moved inside it, and a sandbox block, which would confine the operator's own session, is removed.
+  # A file that cannot be read as a settings object at all — not text, not JSON, or JSON that is no object —
+  # carries no entries to keep, so it is replaced whole by the shipped scope.
+
+  # Contract:
+  # The returned report is a dict with exactly the keys `outcome`, `migration`, `allow_added`,
+  # `directories_added` and `path`. `outcome` is one of the `PermissionOutcome` words `perms-created`,
+  # `perms-merged` or `perms-unchanged`; `migration` is `migrated-local-sandbox` or `no-legacy-sandbox`;
+  # `allow_added` and `directories_added` are lists of exactly the entries this call added; `path` is the
+  # settings file. The install skill parses this report.
+
+  # the file is read once, as text for its layout and as the settings object the merge works on
+  path = Path(repo) / SETTINGS_LOCAL_JSON_REL
+  original, data = _read_settings_object(path)
+  shipped = EXPERT_PERMISSION_BLOCK[_PERMISSIONS_KEY]
+
+  # a missing or unparseable file has nothing to keep, so it takes the shipped block as is
+  if data is None:
+    path.parent.mkdir(parents = True, exist_ok = True)
+    runtime_state.atomic_write_text(path, json.dumps(EXPERT_PERMISSION_BLOCK, indent = 2) + "\n")
+    return {
+      PermissionReportKey.OUTCOME: PermissionOutcome.CREATED,
+      PermissionReportKey.MIGRATION: PermissionOutcome.NO_LEGACY_SANDBOX,
+      PermissionReportKey.ALLOW_ADDED: list(shipped[_ALLOW_KEY]),
+      PermissionReportKey.DIRECTORIES_ADDED: list(shipped[_ADDITIONAL_DIRECTORIES_KEY]),
+      PermissionReportKey.PATH: str(path),
+    }
+
+  # Contract:
+  # An allow entry or additional directory already on record is never removed or reordered; missing ones
+  # are appended after it. Every key the block does not concern survives the write.
+
+  # the permissions block and its two lists are taken as recorded; a malformed shape counts as empty
+  perms = data.get(_PERMISSIONS_KEY)
+  perms = perms if isinstance(perms, dict) else {}
+  allow = perms.get(_ALLOW_KEY)
+  allow = allow if isinstance(allow, list) else []
+  directories = perms.get(_ADDITIONAL_DIRECTORIES_KEY)
+  directories = directories if isinstance(directories, list) else []
+
+  # a legacy top-level directory list joins the permissions block, then the shipped entries fill the gaps
+  moved = _ADDITIONAL_DIRECTORIES_KEY in data
+  legacy = data.pop(_ADDITIONAL_DIRECTORIES_KEY, None)
+  legacy_entries = legacy if isinstance(legacy, list) else ([ legacy ] if isinstance(legacy, str) else [])
+  directories_added = _add_missing(directories, [ *legacy_entries, *shipped[_ADDITIONAL_DIRECTORIES_KEY] ])
+  allow_added = _add_missing(allow, shipped[_ALLOW_KEY])
+
+  # a legacy sandbox block would confine the operator's own session, so it leaves the file
+  sandbox_removed = _SANDBOX_KEY in data
+  data.pop(_SANDBOX_KEY, None)
+  migration = PermissionOutcome.MIGRATED_SANDBOX if sandbox_removed else PermissionOutcome.NO_LEGACY_SANDBOX
+
+  # Contract:
+  # A file with nothing missing and no legacy key is left byte-identical; no write happens.
+
+  # nothing missing and nothing legacy leaves the file untouched
+  if not (directories_added or allow_added or moved or sandbox_removed):
+    return {
+      PermissionReportKey.OUTCOME: PermissionOutcome.UNCHANGED, PermissionReportKey.MIGRATION: migration,
+      PermissionReportKey.ALLOW_ADDED: [], PermissionReportKey.DIRECTORIES_ADDED: [],
+      PermissionReportKey.PATH: str(path),
+    }
+
+  # Contract:
+  # A rewritten file keeps its own layout: indent unit, key order, spelling of non-ASCII text, trailing newline.
+
+  # the edited lists go back into the block, and the file is rewritten in its own layout
+  perms[_ADDITIONAL_DIRECTORIES_KEY] = directories
+  perms[_ALLOW_KEY] = allow
+  data[_PERMISSIONS_KEY] = perms
+  runtime_state.atomic_write_text(path, render_like(data, original))
+  return {
+    PermissionReportKey.OUTCOME: PermissionOutcome.MERGED, PermissionReportKey.MIGRATION: migration,
+    PermissionReportKey.ALLOW_ADDED: allow_added, PermissionReportKey.DIRECTORIES_ADDED: directories_added,
+    PermissionReportKey.PATH: str(path),
+  }
 
 
 def _is_plugin_enabled(plugin_key: str, *settings_paths: Path) -> bool:
@@ -736,12 +966,14 @@ def detect_install_scope(plugin_key: str, project_root: Path | str = ".") -> str
 
   Args:
     plugin_key: The `<plugin>@<marketplace>` key to detect.
-    project_root: Path whose `.claude/` holds the project settings and is the project scope.
+    project_root: Path whose `.claude/` holds the project settings and is the project scope; its main checkout is
+      the one install records are matched against.
 
   Returns:
     `"project"` when the plugin is enabled at the project scope, `"user"` when it is enabled
     only at the user scope or the install record's own scope resolves there, and
-    `"not-installed"` when the plugin has no install record at all, regardless of enablement.
+    `"not-installed"` when no install record is made for this repo's main checkout or for the
+    user, regardless of enablement.
   """
 
   # Domain(install.reconciliation):
@@ -757,8 +989,8 @@ def detect_install_scope(plugin_key: str, project_root: Path | str = ".") -> str
   home = Path.home()
   project_root = Path(project_root)
 
-  # the shared cache is the sole proof the plugin is installed on this machine
-  entries = _installed_entries(home / _INSTALLED_PLUGINS_REL, plugin_key)
+  # an install made for this repo or the user is the sole proof the plugin is installed here
+  entries = read_eligible_records(project_root).get(plugin_key.split("@", 1)[0], [])
 
   # guard: no install record aborts regardless of any enablement flag — there are no sources to sync
   if not entries:
@@ -770,7 +1002,7 @@ def detect_install_scope(plugin_key: str, project_root: Path | str = ".") -> str
   if _is_plugin_enabled(
       plugin_key,
       project_root / _SETTINGS_JSON_REL,
-      project_root / _SETTINGS_LOCAL_JSON_REL,
+      project_root / SETTINGS_LOCAL_JSON_REL,
   ):
     # waiver: external Claude Code install scope value
     return "project"
@@ -779,7 +1011,7 @@ def detect_install_scope(plugin_key: str, project_root: Path | str = ".") -> str
   if _is_plugin_enabled(
       plugin_key,
       home / _SETTINGS_JSON_REL,
-      home / _SETTINGS_LOCAL_JSON_REL,
+      home / SETTINGS_LOCAL_JSON_REL,
   ):
     # waiver: external Claude Code install scope value
     return "user"

@@ -33,6 +33,15 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import python_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
+
+
 # One finding as written by the reviewer agent: file, line, severity, rule, message
 Finding: TypeAlias = dict[str, object]
 
@@ -47,7 +56,7 @@ PENDING_EXIT = 2
 
 # Guideline layers as (directory, filename pattern), outermost (canon) first
 CANON_LAYER = ('references', 'lazy-python.*-guidelines.md')
-OVERLAY_LAYER = ('docs/guidelines', '*.md')
+OVERLAY_LAYER = ('docs/guidelines/python', '*.md')
 RULES_LAYER = ('.claude/rules', '*.md')
 
 # Project-wide note files read as the last overlay layer
@@ -124,7 +133,7 @@ def run_git(repo: Path, *args: str) -> list[str]:
   return [line for line in out.stdout.splitlines() if line]
 
 
-def resolve_scope(repo: Path, paths: list[str], base: str | None = None) -> list[str]:
+def resolve_scope(repo: Path, paths: list[str], base: str | None = None, *, start: Path | None = None) -> list[str]:
   """
   Resolve the set of Python files under review.
 
@@ -139,6 +148,7 @@ def resolve_scope(repo: Path, paths: list[str], base: str | None = None) -> list
     base: Git ref the diff is taken against; None means the last commit. A unit of
       work that landed intermediate commits names its starting ref here, so the
       review covers the whole unit rather than the tail after the last commit.
+    start: Directory a relative explicit path is taken from; None means the repository root.
 
   Returns:
     Sorted repo-relative paths of the Python files to review.
@@ -168,7 +178,7 @@ def resolve_scope(repo: Path, paths: list[str], base: str | None = None) -> list
   if explicit:
     found: list[str] = []
     for raw in explicit:
-      target = (repo / raw).resolve()
+      target = ((start or repo) / raw).resolve()
       if target.is_dir():
         found.extend(str(found_py.relative_to(repo)) for found_py in list_python_tree(target))
       elif target.suffix == '.py' and target.is_file():
@@ -562,7 +572,8 @@ def dispatch_headless(repo: Path, manifest_path: Path) -> int:
   return print_findings(load_findings(findings_path))
 
 
-def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None = None) -> int:
+def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None = None, *,
+               start: Path | None = None) -> int:
   """
   Build the manifest for the current scope and print the dispatch directive.
 
@@ -579,6 +590,7 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None
     plugin_root: Plugin root holding the canonical guidelines.
     paths: Explicit paths, or empty for the current diff.
     base: Git ref the diff is taken against, or None for the last commit.
+    start: Directory a relative explicit path is taken from; None means the repository root.
 
   Returns:
     Process exit code — PENDING_EXIT while the review is undecided, 1 on a FAIL finding,
@@ -596,7 +608,7 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None
     return 1
 
   # the scope decides everything downstream — the key, the manifest, and whether a cache hit applies
-  files = resolve_scope(repo, paths, base)
+  files = resolve_scope(repo, paths, base, start = start)
 
   # guard: nothing changed, the phase has no work
   if not files:
@@ -652,7 +664,11 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None
 
 def main() -> None:
   """
-  Parse arguments and run the requested review action.
+  Run the requested review action for the repository the caller works in.
+
+  Notes:
+    - The repository is the root of the checkout `$LAZY_REPO_ROOT` names, else the one the working directory sits
+      in, never the plugin's own tree; a relative path is taken from the working directory.
   """
   parser = argparse.ArgumentParser(description = 'guideline review phase')
   parser.add_argument('paths', nargs = '*', help = 'paths to review (default: current diff)')
@@ -665,15 +681,14 @@ def main() -> None:
                       help = 'plugin root holding the canonical guidelines')
   args = parser.parse_args()
 
-  # the review is always scoped to the repo the caller runs in, never to the plugin's own tree
-  repo = Path.cwd().resolve()
-
   # render mode only reads an existing document, it never builds a manifest
   if args.render:
     sys.exit(print_findings(load_findings(Path(args.render))))
 
   # default action — manifest the current scope and report whether the review is still pending
-  sys.exit(cmd_review(repo, Path(args.plugin_root).resolve(), args.paths, args.base))
+  code = cmd_review(python_locator.query_repo_root(), Path(args.plugin_root).resolve(), args.paths, args.base,
+                    start = Path.cwd())
+  sys.exit(code)
 
 
 # entry point when executed as a script rather than imported as a module

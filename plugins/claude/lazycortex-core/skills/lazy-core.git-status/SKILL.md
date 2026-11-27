@@ -6,7 +6,7 @@ allowed-tools: 'Bash(python3 *), Bash("${LAZYCORTEX_PYTHON:-python3}" *), Bash(g
 
 # /lazy-core.git-status
 
-Print the current state of `<repo>/.git/lazy-git.lock` — who holds it, how old, whether the holder is alive, and whether break-the-lock heuristics would let us break it.
+Print the current state of `lazy-git.lock` in the repository's shared git directory (`<main checkout>/.git/lazy-git.lock`) — who holds it, how old, whether the holder is alive, and whether break-the-lock heuristics would let us break it.
 
 This skill never mutates the lock. For manual breakage see `/lazy-core.git-unlock`.
 

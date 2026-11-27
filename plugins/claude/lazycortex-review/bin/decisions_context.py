@@ -37,6 +37,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via
+# sys.path
+import review_locator as _review_locator  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import core_settings as _core_settings  # noqa: E402  # pylint: disable=import-error,wrong-import-position
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -89,18 +92,17 @@ def resolve_asset_dir(doc_path: Path) -> Path | None:
 
 def find_settings_root(start: Path) -> Path | None:
   """
-  Walk up from `start` to the nearest dir holding `.claude/lazy.settings.json`.
+  Find the nearest directory from `start` upward that holds `.claude/lazy.settings.json`.
 
   Args:
     start: Directory to begin the upward search from.
 
   Returns:
-    The first ancestor (inclusive) carrying the settings file, or `None` when no ancestor does.
+    The nearest such directory, `start` included and never above the root of the checkout `start` sits in, or
+    `None` when none holds the file.
   """
-  for candidate in (start, *start.parents):
-    if (candidate / _SETTINGS_REL).is_file():
-      return candidate
-  return None
+  # the nearest settings root within the checkout
+  return _review_locator.find_nearest_dir(start, _SETTINGS_REL)
 
 
 def _owning_product_root(start_dir: Path) -> Path | None:

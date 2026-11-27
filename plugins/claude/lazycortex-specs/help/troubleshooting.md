@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-11-22
+last_regen: 2026-11-27
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -23,8 +23,8 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.audit
-source_sha: 3e281a42ebfbc961f6a1668c32a7bd65cc5d13a1
-surface_sha: d85e4c484ca1b17af04be2c05a52470ba130ee717259bdb71b20bfd2b8c2aa00
+source_sha: ce4f4eb40b71492e32a7ae93e9e378ba050211be
+surface_sha: ba4235720635d63ffe00948ed857099c810e510308707910f939321b58d108df
 ---
 # Troubleshooting
 
@@ -50,7 +50,7 @@ surface_sha: d85e4c484ca1b17af04be2c05a52470ba130ee717259bdb71b20bfd2b8c2aa00
 
 ## `/lazy-spec.install` reports `refreshed` for a routine you already registered
 
-**Symptom**: A repeat install run reports `refreshed` (rather than `unchanged`) for `lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.collect`, or `lazy-spec.upstream-tick`, even though you already ran install before.
+**Symptom**: A repeat install run reports `refreshed` (rather than `unchanged`) for one of the plugin's routines (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.coordinator-deletes`, `lazy-spec.collect`, `lazy-spec.runtime-gc`, `lazy-spec.request-open`, `lazy-spec.request-apply`, or `lazy-spec.upstream-tick`), even though you already ran install before.
 
 **Likely cause**: Re-running `/lazy-spec.install` no longer leaves an existing routine alone — every registration step calls the routine registrar in reconcile mode. Install-managed keys (the routine type, its path mask or `path_filter`, its frontmatter filter, its `command:` worker) are rewritten to the current shipped shape on every run; the keys that are genuinely yours — `interval_sec`, `timeout_sec`, `priority`, `cron`, `branch`, `hooks_enabled`, `ignore_halt`, and a hand-set `group` — are left exactly as they stand. `refreshed` means one of the managed keys had drifted from what the plugin currently ships (an older filter shape, a narrower glob, a stale worker) and reconcile corrected it; `unchanged` means nothing needed correcting. `lazy-spec.collect` is the postman routine that delivers a finished expert job's terminal marker back into the asset's status folder-note. `lazy-spec.upstream-tick` runs the unattended `upstream/` fetch/detect pass on a schedule — install only registers it once at least one source is configured under `spec.upstream`, skipping silently otherwise.
 
@@ -75,6 +75,16 @@ surface_sha: d85e4c484ca1b17af04be2c05a52470ba130ee717259bdb71b20bfd2b8c2aa00
 **Likely cause**: The installed `lazycortex-core` is older than `lazycortex-specs` and does not carry the verb the install step calls.
 
 **Fix**: Update core with `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-spec.install`.
+
+---
+
+## `/lazy-spec.install` reports `registered-without-change-gate` for `lazy-spec.gate-tick`
+
+**Symptom**: The install run finishes, but the `lazy-spec.gate-tick` routine is reported as `registered-without-change-gate` rather than `registered`, `refreshed`, or `unchanged`, and install tells you to update `lazycortex-core`.
+
+**Likely cause**: The installed `lazycortex-core` is older than `lazycortex-specs` and does not know the change-gate key the routine ships with, so it rejected the first registration attempt. Install retried without that key. Nothing is lost: without the gate the routine simply scans every live asset status note on every tick instead of skipping unchanged ones.
+
+**Fix**: Update core with `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-spec.install` so the change gate lands on the routine.
 
 ---
 

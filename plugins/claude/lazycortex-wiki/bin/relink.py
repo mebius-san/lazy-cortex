@@ -354,9 +354,9 @@ class RelinkPlanner:
     """
     Return the `(status, path)` pairs of the repository delta between an anchor commit and HEAD.
 
-    The delta covers the whole repository and is not narrowed to any scope; scope membership is decided
-    afterwards by the caller's own glob semantics. Paths are exactly as they are on disk, non-ASCII and
-    spaced paths included.
+    The delta covers everything below the planner's root, the whole checkout or a nested project inside it, and is
+    not narrowed to any scope; scope membership is decided afterwards by the caller's own glob semantics. Paths are
+    relative to the planner's root and exactly as they are on disk, non-ASCII and spaced paths included.
 
     A rename yields its old path as deleted and its new path as added; a copy yields only its new path as added.
 
@@ -375,7 +375,7 @@ class RelinkPlanner:
         having moved.
     """
     proc = subprocess.run(
-      [ "git", "-C", str(self._repo), "diff", "--name-status", "-z", f"{sha}..HEAD" ],
+      [ "git", "-C", str(self._repo), "diff", "--relative", "--name-status", "-z", f"{sha}..HEAD" ],
       capture_output = True, check = False,
     )
 
